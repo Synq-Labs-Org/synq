@@ -275,10 +275,12 @@ contract MandateRegistry {
         MandateTerms storage current = _terms[account][mandateId][state.currentVersion];
         uint256 spentToken = state.spentToken + request.tokenAmount;
         uint256 spentNative = state.spentNative + request.nativeAmount;
-        if (
-            spentToken > _min(terms.cumulativeTokenCap, current.cumulativeTokenCap)
-                || spentNative > _min(terms.cumulativeNativeCap, current.cumulativeNativeCap)
-        ) revert CumulativeCapExceeded();
+        if (request.tokenAmount != 0 && spentToken > _min(terms.cumulativeTokenCap, current.cumulativeTokenCap)) {
+            revert CumulativeCapExceeded();
+        }
+        if (request.nativeAmount != 0 && spentNative > _min(terms.cumulativeNativeCap, current.cumulativeNativeCap)) {
+            revert CumulativeCapExceeded();
+        }
         state.spentToken = spentToken;
         state.spentNative = spentNative;
         emit SpendRecorded(

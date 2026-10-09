@@ -697,6 +697,21 @@ contract ExecutionModuleTest is SynqTestBase {
         assertEq(spentToken(), 400e6);
     }
 
+    function test_supersession_tokenCapBelowSpendDoesNotBlockNativeDimension() public {
+        (ExecutionModule.ExecutionGrant memory spend, bytes memory spendData) = tokenGrant(1, 100e6);
+        execGrant(spend, spendData);
+        MandateRegistry.MandateConfig memory lowered = defaultConfig();
+        lowered.cumulativeTokenCap = 50e6;
+        supersede(2, lowered, true);
+        (ExecutionModule.ExecutionGrant memory native, bytes memory nativeData) = nativeGrant(2, 0.3 ether);
+        native.mandateVersion = 2;
+        execGrant(native, nativeData);
+        assertEq(spentNative(), 0.3 ether);
+        (ExecutionModule.ExecutionGrant memory more, bytes memory moreData) = tokenGrant(3, 1);
+        more.mandateVersion = 2;
+        execGrantExpectRevert(more, moreData, abi.encodeWithSelector(MandateRegistry.CumulativeCapExceeded.selector));
+    }
+
     function test_supersession_futureVersionGrantRejected() public {
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = tokenGrant(1, 10e6);
         grant.mandateVersion = 2;
