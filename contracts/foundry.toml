@@ -17,8 +17,8 @@ via_ir = true
 # vendored Safe sources with the legacy pipeline. Synq sources never import them (tests deploy Safe via artifacts).
 additional_compiler_profiles = [{ name = "safe-legacy", via_ir = false }]
 compilation_restrictions = [{ paths = "lib/safe-smart-account/**", via_ir = false }]
-no_match_path = "test/fork/**"
-fs_permissions = [{ access = "read", path = "./out" }]
+no_match_path = "**/test/fork/**"
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./deployments" }]
 
 [profile.default.fuzz]
 runs = 256
@@ -31,8 +31,8 @@ fail_on_revert = true
 # Fork suite against Monad testnet Safe v1.4.1 bytecode:
 #   FOUNDRY_PROFILE=fork forge test --root contracts --fork-url https://testnet-rpc.monad.xyz
 [profile.fork]
-match_path = "test/fork/**"
-no_match_path = ""
+match_path = "**/test/fork/**"
+no_match_path = "**/__no_exclusions__/**"
 
 [profile.fork.fuzz]
 runs = 16

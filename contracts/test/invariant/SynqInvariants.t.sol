@@ -132,9 +132,7 @@ contract SynqInvariantsTest is SynqTestBase {
             handler.calls("spendToken"),
             handler.successes("spendNative")
         );
-        console.log(
-            "  version=%s paused=%s revoked=%s", handler.currentVersion(), handler.paused(), handler.revoked()
-        );
+        console.log("  version=%s paused=%s revoked=%s", handler.currentVersion(), handler.paused(), handler.revoked());
         console.log(
             "  attempts: replay=%s unauthorized=%s disallowed=%s",
             handler.calls("replay"),

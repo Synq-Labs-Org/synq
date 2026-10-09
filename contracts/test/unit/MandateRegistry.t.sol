@@ -82,7 +82,9 @@ contract MandateRegistryTest is SynqTestBase {
         vm.expectRevert(abi.encodeWithSelector(MandateRegistry.MandateIsRevoked.selector, MANDATE));
         registry.revokeMandate(MANDATE);
         vm.stopPrank();
-        assertEq(uint8(registry.mandateState(address(safe), MANDATE).status), uint8(MandateRegistry.MandateStatus.Revoked));
+        assertEq(
+            uint8(registry.mandateState(address(safe), MANDATE).status), uint8(MandateRegistry.MandateStatus.Revoked)
+        );
     }
 
     function test_supersede_versionMustIncrementByOne() public {

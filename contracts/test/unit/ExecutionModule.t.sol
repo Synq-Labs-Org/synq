@@ -140,9 +140,7 @@ contract ExecutionModuleTest is SynqTestBase {
         address rogue = makeAddr("rogue");
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = tokenGrant(1, 10e6);
         grant.executor = rogue;
-        execGrantExpectRevert(
-            grant, data, abi.encodeWithSelector(ExecutionModule.UnauthorizedExecutor.selector, rogue)
-        );
+        execGrantExpectRevert(grant, data, abi.encodeWithSelector(ExecutionModule.UnauthorizedExecutor.selector, rogue));
     }
 
     function test_CON001_executorRemovedBySafeReverts() public {
@@ -444,7 +442,9 @@ contract ExecutionModuleTest is SynqTestBase {
         execGrantExpectRevert(
             tokenSink, toToken, abi.encodeWithSelector(MandateRegistry.RecipientNotAllowed.selector, address(token))
         );
-        assertEq(token.balanceOf(address(module)) + token.balanceOf(address(registry)) + token.balanceOf(address(token)), 0);
+        assertEq(
+            token.balanceOf(address(module)) + token.balanceOf(address(registry)) + token.balanceOf(address(token)), 0
+        );
     }
 
     function test_recipientFieldMustMatchCalldata() public {
@@ -715,9 +715,7 @@ contract ExecutionModuleTest is SynqTestBase {
     function test_supersession_futureVersionGrantRejected() public {
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = tokenGrant(1, 10e6);
         grant.mandateVersion = 2;
-        execGrantExpectRevert(
-            grant, data, abi.encodeWithSelector(MandateRegistry.MandateVersionNotValid.selector, 2)
-        );
+        execGrantExpectRevert(grant, data, abi.encodeWithSelector(MandateRegistry.MandateVersionNotValid.selector, 2));
     }
 
     // ------------------------------------------------------------------ spend accounting lives in the registry

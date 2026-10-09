@@ -86,7 +86,8 @@ contract SynqHandler is CommonBase, StdUtils {
         uint256 version = stale && currentVersion > 1 ? currentVersion - 1 : currentVersion;
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = _tokenGrant(amount, ctx.recipient);
         grant.mandateVersion = version;
-        bool overCap = amount > ctx.maxToken || ghostTokenSpent + amount > _min(tokenCapOf[version], tokenCapOf[currentVersion]);
+        bool overCap =
+            amount > ctx.maxToken || ghostTokenSpent + amount > _min(tokenCapOf[version], tokenCapOf[currentVersion]);
         bool staleInvalid = version < minValidVersion;
         bool expected = !paused && !revoked && !staleInvalid && !overCap && _inMandateWindow();
         if (_execute(grant, data)) {
@@ -175,9 +176,8 @@ contract SynqHandler is CommonBase, StdUtils {
     function nonAllowlistedRecipient(uint256 amount, uint8 choice, address arbitrary) external {
         calls["nonAllowlistedRecipient"]++;
         amount = bound(amount, 1, ctx.maxToken);
-        address[6] memory sinks = [
-            address(ctx.module), address(ctx.registry), address(ctx.token), ctx.factory, address(ctx.safe), arbitrary
-        ];
+        address[6] memory sinks =
+            [address(ctx.module), address(ctx.registry), address(ctx.token), ctx.factory, address(ctx.safe), arbitrary];
         address to = sinks[choice % 6];
         if (to == ctx.recipient) to = address(0xD00D);
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = _tokenGrant(amount, to);

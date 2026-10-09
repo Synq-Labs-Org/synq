@@ -11,9 +11,7 @@ contract SignaturesTest is SynqTestBase {
     uint256 internal constant SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
     uint256 internal constant NESTED_OWNER_KEY = 0xD00D;
 
-    function _exec(ExecutionModule.ExecutionGrant memory grant, bytes memory data, bytes memory signatures)
-        internal
-    {
+    function _exec(ExecutionModule.ExecutionGrant memory grant, bytes memory data, bytes memory signatures) internal {
         vm.prank(executor);
         module.execute(grant, data, signatures);
     }
@@ -111,9 +109,8 @@ contract SignaturesTest is SynqTestBase {
         uint256[] memory sorted = sortKeys(keys(KEY1, KEY2));
         (uint8 v0, bytes32 r0, bytes32 s0) = vm.sign(sorted[0], prefixed);
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(sorted[1], prefixed);
-        bytes memory signatures = abi.encodePacked(
-            r0, bytes32(SECP256K1_N - uint256(s0)), (v0 == 27 ? 28 : 27) + 4, r1, s1, v1 + 4
-        );
+        bytes memory signatures =
+            abi.encodePacked(r0, bytes32(SECP256K1_N - uint256(s0)), (v0 == 27 ? 28 : 27) + 4, r1, s1, v1 + 4);
         vm.prank(executor);
         vm.expectRevert(abi.encodeWithSelector(ExecutionModule.MalleableSignature.selector, 0));
         module.execute(grant, data, signatures);

@@ -3,17 +3,25 @@
     "type": "constructor",
     "inputs": [
       {
-        "name": "account_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "registry_",
         "type": "address",
-        "internalType": "address"
+        "internalType": "contract MandateRegistry"
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "DOMAIN_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -30,16 +38,55 @@
   },
   {
     "type": "function",
-    "name": "account",
+    "name": "NAME",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "address",
-        "internalType": "contract ISynqAccount"
+        "type": "string",
+        "internalType": "string"
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "TRANSFER_SELECTOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelNonce",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -59,14 +106,19 @@
     "name": "execute",
     "inputs": [
       {
-        "name": "g",
+        "name": "grant",
         "type": "tuple",
         "internalType": "struct ExecutionModule.ExecutionGrant",
         "components": [
           {
-            "name": "intentHash",
+            "name": "groupId",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
           },
           {
             "name": "mandateId",
@@ -84,6 +136,16 @@
             "internalType": "address"
           },
           {
+            "name": "pluginId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "target",
             "type": "address",
             "internalType": "address"
@@ -99,7 +161,7 @@
             "internalType": "bytes32"
           },
           {
-            "name": "inputToken",
+            "name": "token",
             "type": "address",
             "internalType": "address"
           },
@@ -109,9 +171,19 @@
             "internalType": "uint256"
           },
           {
-            "name": "value",
+            "name": "nativeValue",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "minOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
           },
           {
             "name": "validAfter",
@@ -129,19 +201,9 @@
             "internalType": "uint256"
           },
           {
-            "name": "pluginId",
+            "name": "intentHash",
             "type": "bytes32",
             "internalType": "bytes32"
-          },
-          {
-            "name": "minOutputAmount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "chainId",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       },
@@ -156,15 +218,271 @@
         "internalType": "bytes"
       }
     ],
-    "outputs": [],
+    "outputs": [
+      {
+        "name": "grantHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "executedIntents",
-    "inputs": [
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
       {
         "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "grantStructHash",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "tuple",
+        "internalType": "struct ExecutionModule.ExecutionGrant",
+        "components": [
+          {
+            "name": "groupId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "mandateId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "mandateVersion",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pluginId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "selector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "calldataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxInputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nativeValue",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "validUntil",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "intentHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "hashGrant",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "tuple",
+        "internalType": "struct ExecutionModule.ExecutionGrant",
+        "components": [
+          {
+            "name": "groupId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "mandateId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "mandateVersion",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pluginId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "selector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "calldataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxInputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nativeValue",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minOutputAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "validUntil",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "intentHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "intentUsed",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "intentHash",
         "type": "bytes32",
         "internalType": "bytes32"
       }
@@ -180,122 +498,69 @@
   },
   {
     "type": "function",
-    "name": "groupId",
-    "inputs": [],
+    "name": "isExecutor",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "executor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [
       {
         "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
   },
   {
     "type": "function",
-    "name": "hashGrant",
+    "name": "nonceUsed",
     "inputs": [
       {
-        "name": "grant",
-        "type": "tuple",
-        "internalType": "struct ExecutionModule.ExecutionGrant",
-        "components": [
-          {
-            "name": "intentHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "mandateId",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "mandateVersion",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "executor",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "selector",
-            "type": "bytes4",
-            "internalType": "bytes4"
-          },
-          {
-            "name": "calldataHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "inputToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "maxInputAmount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "validAfter",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "validUntil",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "nonce",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "pluginId",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "minOutputAmount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "chainId",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
       {
         "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "paused",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [
       {
         "name": "",
@@ -320,10 +585,15 @@
   },
   {
     "type": "function",
-    "name": "setPaused",
+    "name": "setExecutor",
     "inputs": [
       {
-        "name": "paused_",
+        "name": "executor",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
         "type": "bool",
         "internalType": "bool"
       }
@@ -333,41 +603,41 @@
   },
   {
     "type": "function",
-    "name": "spent",
-    "inputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
+    "name": "unpause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "usedNonces",
+    "type": "event",
+    "name": "ExecutorSet",
     "inputs": [
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
+        "name": "groupId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
       {
-        "name": "",
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "executor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
         "type": "bool",
+        "indexed": false,
         "internalType": "bool"
       }
     ],
-    "stateMutability": "view"
+    "anonymous": false
   },
   {
     "type": "event",
@@ -452,7 +722,7 @@
         "internalType": "bytes32"
       },
       {
-        "name": "inputToken",
+        "name": "token",
         "type": "address",
         "indexed": false,
         "internalType": "address"
@@ -464,13 +734,13 @@
         "internalType": "address"
       },
       {
-        "name": "inputAmount",
+        "name": "tokenAmount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
       },
       {
-        "name": "value",
+        "name": "nativeValue",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -486,7 +756,7 @@
   },
   {
     "type": "event",
-    "name": "PauseChanged",
+    "name": "NonceCancelled",
     "inputs": [
       {
         "name": "groupId",
@@ -501,12 +771,233 @@
         "internalType": "address"
       },
       {
-        "name": "paused",
-        "type": "bool",
-        "indexed": false,
-        "internalType": "bool"
+        "name": "nonce",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Paused",
+    "inputs": [
+      {
+        "name": "groupId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Unpaused",
+    "inputs": [
+      {
+        "name": "groupId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AccountNotRegistered",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AlreadyPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BalanceDeltaMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CalldataMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExecutionFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExecutionPaused",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "GrantExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GrantNotYetValid",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GroupMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientOutput",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "IntentAlreadyExecuted",
+    "inputs": [
+      {
+        "name": "intentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidActionShape",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidExecutor",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidIntent",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSignatures",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MalleableSignature",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ModuleNotAuthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ModuleNotEnabled",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NonceAlreadyUsed",
+    "inputs": [
+      {
+        "name": "nonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ProtectedAddress",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Reentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SelectorMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedExecutor",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedAction",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongChain",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ]

@@ -267,8 +267,10 @@ contract ExecutionModule {
         if (threshold == 0 || threshold > signatures.length / 65) revert InvalidSignatures();
         for (uint256 i; i < threshold; ++i) {
             uint256 offset = i * 65;
-            if (uint8(signatures[offset + 64]) > 1 && uint256(bytes32(signatures[offset + 32:offset + 64])) > SECP256K1_HALF_N)
-            {
+            if (
+                uint8(signatures[offset + 64]) > 1
+                    && uint256(bytes32(signatures[offset + 32:offset + 64])) > SECP256K1_HALF_N
+            ) {
                 revert MalleableSignature(i);
             }
         }

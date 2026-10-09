@@ -76,8 +76,9 @@ contract MandateRegistry {
 
     mapping(address account => mapping(bytes32 mandateId => MandateState)) private _state;
     mapping(address account => mapping(bytes32 mandateId => mapping(uint256 version => MandateTerms))) private _terms;
-    mapping(address account => mapping(bytes32 mandateId => mapping(uint256 version => mapping(bytes32 callKey => bool))))
-        private _callAllowed;
+    mapping(
+        address account => mapping(bytes32 mandateId => mapping(uint256 version => mapping(bytes32 callKey => bool)))
+    ) private _callAllowed;
     mapping(
         address account => mapping(bytes32 mandateId => mapping(uint256 version => mapping(address recipient => bool)))
     ) private _recipientAllowed;
@@ -215,10 +216,12 @@ contract MandateRegistry {
     /// @param newVersion Expected new version number.
     /// @param config New mandate envelope.
     /// @param securitySensitive Whether to invalidate grants for earlier versions.
-    function supersedeMandate(bytes32 mandateId, uint256 newVersion, MandateConfig calldata config, bool securitySensitive)
-        external
-        onlyGroupAccount
-    {
+    function supersedeMandate(
+        bytes32 mandateId,
+        uint256 newVersion,
+        MandateConfig calldata config,
+        bool securitySensitive
+    ) external onlyGroupAccount {
         MandateState storage state = _state[msg.sender][mandateId];
         if (state.status == MandateStatus.Revoked) revert MandateIsRevoked(mandateId);
         if (state.status == MandateStatus.None) revert MandateNotFound(mandateId);
@@ -355,7 +358,8 @@ contract MandateRegistry {
             validUntil: config.validUntil
         });
         for (uint256 i; i < config.callTargets.length; ++i) {
-            _callAllowed[msg.sender][mandateId][version][_callKey(config.callTargets[i], config.callSelectors[i])] = true;
+            _callAllowed[msg.sender][mandateId][version][_callKey(config.callTargets[i], config.callSelectors[i])] =
+                true;
         }
         for (uint256 i; i < config.recipients.length; ++i) {
             _recipientAllowed[msg.sender][mandateId][version][config.recipients[i]] = true;

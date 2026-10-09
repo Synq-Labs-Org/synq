@@ -175,9 +175,8 @@ contract GrantBindingFuzzTest is SynqTestBase {
         position = bound(position, 0, signatures.length - 1);
         signatures[position] = bytes1(uint8(signatures[position]) ^ delta);
         vm.prank(executor);
-        (bool ok, bytes memory err) = address(module).call(
-            abi.encodeCall(ExecutionModule.execute, (signedGrant, signedData, signatures))
-        );
+        (bool ok, bytes memory err) =
+            address(module).call(abi.encodeCall(ExecutionModule.execute, (signedGrant, signedData, signatures)));
         assertFalse(ok);
         bytes4 selector = bytes4(err);
         assertTrue(
@@ -217,8 +216,8 @@ contract GrantBindingFuzzTest is SynqTestBase {
         grant.target = target;
         grant.selector = selector;
         grant.calldataHash = keccak256(data);
-        bool expected = shape % 2 == 1 && target == address(token) && selector == bytes4(0xa9059cbb)
-            && to == recipient && amount > 0 && amount <= MAX_TOKEN;
+        bool expected = shape % 2 == 1 && target == address(token) && selector == bytes4(0xa9059cbb) && to == recipient
+            && amount > 0 && amount <= MAX_TOKEN;
         bytes memory signatures = signGrant(grant);
         uint256 safeBefore = token.balanceOf(address(safe));
         vm.prank(executor);
@@ -244,9 +243,8 @@ contract GrantBindingFuzzTest is SynqTestBase {
 
     function testFuzz_randomSignaturesNeverAuthorize(bytes calldata signatures) public {
         vm.prank(executor);
-        (bool ok, bytes memory err) = address(module).call(
-            abi.encodeCall(ExecutionModule.execute, (signedGrant, signedData, signatures))
-        );
+        (bool ok, bytes memory err) =
+            address(module).call(abi.encodeCall(ExecutionModule.execute, (signedGrant, signedData, signatures)));
         assertFalse(ok);
         bytes4 selector = bytes4(err);
         assertTrue(
