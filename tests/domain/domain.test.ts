@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { keccak256 } from 'viem';
+import { getAddress, keccak256 } from 'viem';
 import { describe, expect, it } from 'vitest';
 import { ExecutionJournal } from '@synq/execution-worker/journal';
 import { decisionStatus } from '@synq/kernel';
@@ -55,6 +55,11 @@ import {
   type TxState,
 } from '@synq/domain';
 import { z } from 'zod';
+import { officialAssets } from '@synq/chain-registry';
+
+const ausd = officialAssets.testnetAUSD.address;
+const badChecksum = (checksummed: string) =>
+  checksummed.replace(/[a-f]/, (c) => c.toUpperCase());
 import { asset, intent, mandate, network } from '../kernel/fixtures.js';
 
 const actor: PrincipalRef = {
@@ -107,7 +112,7 @@ const wireIntent = () =>
     pluginId: 'kuru',
     target: '0x1111111111111111111111111111111111111111',
     maxInputAmount: '25000000',
-    inputToken: '0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC',
+    inputToken: getAddress(officialAssets.testnetAUSD.address),
     validAfter: 0,
     validUntil: 9999999999,
     nonce: '1',
@@ -496,13 +501,10 @@ describe('Canonical domain boundaries', () => {
         maxGrantTtlSeconds: 60,
       }).success,
     ).toBe(false);
-    expect(
-      AddressSchema.safeParse('0xA9012a055bd4e0eDfF8Ce09f960291C09D5322dC')
-        .success,
-    ).toBe(false);
-    expect(
-      AddressSchema.parse('0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC'),
-    ).toBe('0xa9012a055bd4e0edff8ce09f960291c09d5322dc');
+    expect(AddressSchema.safeParse(badChecksum(getAddress(ausd))).success).toBe(
+      false,
+    );
+    expect(AddressSchema.parse(getAddress(ausd))).toBe(ausd);
   });
   it('DOM-005 generates unique branded identifiers and the journal rejects a duplicate grant id', () => {
     const values = Array.from({ length: 500 }, () => newId('intent'));

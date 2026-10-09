@@ -33,7 +33,8 @@
     "test:schema-compat": "vitest run tests/domain/schema-compat.test.ts",
     "test:plugins": "vitest run tests/plugins",
     "sources:resolve": "node scripts/resolve-sources.mjs",
-    "registry:probe": "node --import tsx scripts/testnet-probe.ts"
+    "registry:probe": "node --import tsx scripts/testnet-probe.ts",
+    "indexer:env": "node --import tsx scripts/envio-env.ts"
   },
   "dependencies": {
     "zod": "4.6.5",

@@ -98,10 +98,10 @@ describe('chain registry', () => {
         /0x[0-9a-fA-F]{40}/,
       );
     expect(contractAddress(10143, 'SAFE_PROXY_FACTORY')).toBe(
-      '0x4e1dcf7ad4e460cfd30791ccc4f9c8a4f820ec67',
+      chainRegistry.contracts.testnetSafeProxyFactory!.address,
     );
     expect(contractAddress(143, 'SAFE_L2')).toBe(
-      '0x29fcb43b46531bca003ddc8fcb67ffe91900c762',
+      chainRegistry.contracts.mainnetSafeL2!.address,
     );
   });
   it('profiles distinguish all five asset roles and four treasury buckets', () => {
@@ -142,7 +142,7 @@ describe('chain registry', () => {
       'ASSET_ROLE_UNCONFIGURED',
     );
     expect(monadTestnetProfile.faucetAddress).toBe(
-      '0xd236c18d274e54faccc3dd9dda4b27965a73ee6c',
+      chainRegistry.contracts.testnetAUSDFaucet!.address,
     );
   });
   it('mainnet is disabled by default and cannot be enabled by editing a flag alone', () => {

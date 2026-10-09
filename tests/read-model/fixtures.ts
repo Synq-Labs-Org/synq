@@ -1,3 +1,5 @@
+import { getAddress } from 'viem';
+import { officialAssets } from '@synq/chain-registry';
 import {
   type ChainEvent,
   type GroupBinding,
@@ -6,8 +8,7 @@ export const address = (n: number): `0x${string}` =>
   `0x${n.toString(16).padStart(40, '0')}`;
 export const hash = (n: number): `0x${string}` =>
   `0x${n.toString(16).padStart(64, '0')}`;
-export const treasuryToken =
-  '0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC' as const;
+export const treasuryToken = getAddress(officialAssets.testnetAUSD.address);
 export const binding: GroupBinding = {
   groupId: hash(1),
   account: address(10),
