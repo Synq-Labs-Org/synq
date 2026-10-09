@@ -4,7 +4,7 @@ import { PostgresProjectionStore } from '../../packages/read-model/src/storage.j
 
 export const databaseUrl =
   process.env.SYNQ_RM_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_rm_ws4';
+  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_test';
 export const redisUrl =
   process.env.SYNQ_RM_TEST_REDIS_URL ?? 'redis://127.0.0.1:56379/7';
 
