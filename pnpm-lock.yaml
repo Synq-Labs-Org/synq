@@ -127,6 +127,12 @@ importers:
 
   apps/demo:
     dependencies:
+      '@category-labs/mera':
+        specifier: 0.2.0
+        version: 0.2.0(viem@2.57.4(typescript@5.9.3)(zod@4.6.5))
+      '@synq/api':
+        specifier: workspace:*
+        version: link:../api
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
@@ -157,6 +163,9 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   apps/web:
     dependencies:

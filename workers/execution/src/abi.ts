@@ -66,8 +66,8 @@ export const safeAbi = parseAbi([
   'function isModuleEnabled(address module) view returns (bool)',
   'function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 nonce) view returns (bytes32)',
   'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)',
-  'event ExecutionSuccess(bytes32 txHash, uint256 payment)',
-  'event ExecutionFailure(bytes32 txHash, uint256 payment)',
+  'event ExecutionSuccess(bytes32 indexed txHash, uint256 payment)',
+  'event ExecutionFailure(bytes32 indexed txHash, uint256 payment)',
 ]);
 export const tokenAbi = parseAbi([
   'function mint(address to, uint256 amount)',

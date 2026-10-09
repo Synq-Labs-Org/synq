@@ -21,6 +21,7 @@ export interface IndexerSettingsInput {
   observedAccounts?: unknown[];
   rpcUrl?: string;
   maxReorgDepth?: number;
+  startBlock?: number;
 }
 export interface IndexerSettings {
   env: Record<string, string>;
@@ -60,6 +61,7 @@ export function indexerSettings(input: IndexerSettingsInput): IndexerSettings {
     reorgWindowBlocks: reorg,
     confirmationDepth: profile.confirmationDepth,
     observedAccounts: observed,
+    ...(input.startBlock === undefined ? {} : { startBlock: input.startBlock }),
   });
   return {
     projection,
@@ -67,7 +69,7 @@ export function indexerSettings(input: IndexerSettingsInput): IndexerSettings {
     rpcUrl,
     env: {
       SYNQ_CHAIN_ID: String(facts.chainId),
-      SYNQ_START_BLOCK: String(facts.deploymentBlock),
+      SYNQ_START_BLOCK: String(projection.startBlock),
       SYNQ_MAX_REORG_DEPTH: String(reorg),
       SYNQ_INDEXER_RPC_URL: rpcUrl,
       SYNQ_FACTORY_ADDRESS: facts.factory,

@@ -12,6 +12,7 @@ coverage/
 indexer/envio/generated/
 indexer/envio/persisted_state/
 artifacts/local/
+artifacts/testnet-e2e/
 .claude/
 test-results/
 playwright-report/

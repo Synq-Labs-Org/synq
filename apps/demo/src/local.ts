@@ -1,26 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  BaseError,
-  ContractFunctionRevertedError,
-  encodeFunctionData,
-  keccak256,
-  type Hex,
-} from 'viem';
-import {
-  AssetSchema,
-  BoundActionIntentSchema,
-  MandateSchema,
-  type BoundActionIntent,
-  type ExecutionGrant,
-  type RiskPacket,
-} from '@synq/schemas';
+import type { Hex, PublicClient } from 'viem';
+import { AssetSchema, MandateSchema, type ExecutionGrant } from '@synq/schemas';
 import {
   Kernel,
-  artifactHash,
-  economicIntentHash,
-  intentHash,
   onchainMandateId,
   toMandateConfig,
   type DirectVerifier,
@@ -41,19 +25,8 @@ import {
 } from '@synq/read-model/kernel';
 import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
 import { writeDurableJson } from '@synq/execution-worker/persistence';
-import {
-  ExecutionJournal,
-  JournaledBroadcaster,
-  chainGrant,
-  observeGrantExecution,
-  onchainGrantArgs,
-  packSafeSignatures,
-  prepareModuleCall,
-  signGrantBoundTransaction,
-  submitGrantTransaction,
-  synqDeployment,
-} from '@synq/execution-worker';
-import { moduleAbi, registryAbi, tokenAbi } from '@synq/execution-worker/abi';
+import { synqDeployment } from '@synq/execution-worker';
+import { tokenAbi } from '@synq/execution-worker/abi';
 import { formatDecimal, parseDecimal } from '@synq/domain';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import { localTransferPlugin } from './local-transfer-plugin.js';
@@ -61,6 +34,7 @@ import { startLocalIdentity } from './identity.js';
 import { startAnvil } from './anvil.js';
 import { deployLocalSynq, type LocalSynq } from './safe.js';
 import { indexedEvents } from './events.js';
+import { transferVertical } from './vertical.js';
 
 const DEFAULT_TRANSFER_BASE_UNITS = 60_000_000n;
 const FUNDING = 200_000_000n;
@@ -259,221 +233,29 @@ export async function startLocalVertical() {
       balanceBlock: String(await chain.client.getBlockNumber()),
     });
 
-    async function propose(amount: bigint, nonce: string, version = 1) {
-      const now = await sync();
-      const data = encodeFunctionData({
-        abi: tokenAbi,
-        functionName: 'transfer',
-        args: [chain.recipient, amount],
-      });
-      calldatas.set(keccak256(data), data);
-      const zero = `0x${'0'.repeat(64)}`;
-      const input = BoundActionIntentSchema.parse({
-        schemaVersion: 1,
-        intentId: `local_intent_${nonce}`,
-        groupId: GROUP_ID,
-        mandateId: MANDATE_ID,
-        mandateVersion: version,
-        action: 'TRANSFER',
-        chainId: 31337,
-        account: chain.account,
-        operator: chain.executor.address,
-        recipient: chain.recipient,
-        pluginId: 'local-transfer',
-        target: chain.token,
-        selector: '0xa9059cbb',
-        calldataHash: keccak256(data),
-        inputToken: chain.token,
-        maxInputAmount: String(amount),
-        minOutputAmount: '0',
-        nativeValue: '0',
-        validAfter: now - 10,
-        validUntil: Math.min(now + 600, mandate.validUntil),
-        nonce,
-        evidenceHash: zero,
-        riskPacketHash: zero,
-      });
-      const block = await chain.client.getBlock();
-      const risk: RiskPacket = {
-        schemaVersion: 1,
-        intentHash: economicIntentHash(input),
-        evaluatedAt: now,
-        quoteAt: now,
-        quoteExpiresAt: now + 300,
-        slippageBps: 0,
-        referenceDeviationBps: 0,
-        maxReferenceDeviationBps: 0,
-        blocked: false,
-        evidence: [
-          {
-            source: 'local-chain-transfer',
-            retrievedAt: now,
-            chainId: 31337,
-            artifactHash: artifactHash({
-              blockHash: block.hash,
-              token: chain.token,
-            }),
-            untrusted: false,
-          },
-        ],
-      };
-      const intent = BoundActionIntentSchema.parse({
-        ...input,
-        evidenceHash: artifactHash(risk.evidence),
-        riskPacketHash: artifactHash(risk),
-      });
-      const context = { network: localProfile.network, now };
-      if (!(await plugins.refreshHealth(intent.pluginId, context)))
-        throw new Error('PLUGIN_UNHEALTHY');
-      const simulation = await plugins
-        .getMutator(intent.pluginId, localProfile.network, now)
-        .simulate(context, [
-          {
-            chainId: 31337,
-            account: intent.account,
-            target: intent.target,
-            calldata: data,
-            value: intent.nativeValue,
-            intentHash: intentHash(intent),
-          },
-        ]);
-      kernel.attestEvidence({
-        riskPacketHashes: [artifactHash(risk)],
-        simulationHashes: [artifactHash(simulation)],
-      });
-      return { intent, risk, simulation, data };
-    }
-
-    async function authorize(amount: bigint, nonce: string, version = 1) {
-      const proposal = await propose(amount, nonce, version);
-      const request = {
-        intent: proposal.intent,
-        risk: proposal.risk,
-        simulation: proposal.simulation,
-      };
-      const pending = await kernel.authorize({ ...request, approvals: [] });
-      if (pending.status !== 'PENDING_APPROVAL' || !pending.draft)
-        return { ...proposal, decision: pending, onchainDigest: null };
-      const draft = pending.draft;
-      const onchainDigest = await chain.client.readContract({
-        address: chain.module,
-        abi: moduleAbi,
-        functionName: 'hashGrant',
-        args: [onchainGrantArgs(draft.grant)],
-      });
-      if (onchainDigest !== draft.digest)
-        throw new Error('EIP712_DIGEST_DIVERGES_FROM_MODULE');
-      const approvals = await identity.approve(draft, [0, 1]);
-      const decision = await kernel.authorize({ ...request, approvals });
-      return { ...proposal, decision, onchainDigest };
-    }
-
-    async function execute(
-      grant: ExecutionGrant,
-      intent: BoundActionIntent,
-      data: Hex,
-      journalDirectory: string,
-    ) {
-      await sync();
-      const claim = kernel.claimForExecution(grant, intent, WORKER_ID);
-      const call = prepareModuleCall(kernel, claim, data, [asset]);
-      await chain.client.call({
-        account: chain.executor.address,
-        to: call.to,
-        data: call.data,
-      });
-      const fees = await chain.client.estimateFeesPerGas();
-      const gas = await chain.client.estimateGas({
-        account: chain.executor.address,
-        to: call.to,
-        data: call.data,
-      });
-      const raw = await signGrantBoundTransaction(
-        grant,
-        {
-          type: 'eip1559',
-          chainId: 31337,
-          to: call.to,
-          data: call.data,
-          value: 0n,
-          nonce: await chain.client.getTransactionCount({
-            address: chain.executor.address,
-          }),
-          gas: gas * 2n,
-          maxFeePerGas: fees.maxFeePerGas,
-          maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
-        },
-        chain.executor,
-        clock.t,
-        [asset],
-      );
-      const transactionHash = keccak256(raw);
-      const broadcaster = new JournaledBroadcaster(
-        new ExecutionJournal(journalDirectory),
-        {
-          sendRawTransaction: (serialized) =>
-            chain.client.sendRawTransaction({
-              serializedTransaction: serialized,
-            }),
-          receipt: async (hash) => {
-            try {
-              const r = await chain.client.getTransactionReceipt({ hash });
-              return { status: r.status, blockNumber: r.blockNumber };
-            } catch {
-              return null;
-            }
-          },
-        },
-      );
-      const submitted = await submitGrantTransaction(
-        kernel,
-        claim,
-        broadcaster,
-        {
-          schemaVersion: 1,
-          grantId: grant.grantId,
-          transactionHash,
-          rawTransaction: raw,
-          state: 'SIGNED',
-          chainId: 31337,
-          blockNumber: null,
-        },
-      );
-      if (submitted.state === 'RECONCILIATION_REQUIRED')
-        throw new Error('SUBMISSION_AMBIGUOUS: reconcile journal before retry');
-      const receipt = await chain.client.waitForTransactionReceipt({
-        hash: transactionHash,
-      });
-      await broadcaster.reconcile(grant.grantId);
-      const observation = observeGrantExecution(receipt, chain.module, 31337);
-      kernel.reconcile(grant.grantId, observation);
-      return { transactionHash, receipt, observation };
-    }
-
-    async function onchainRevert(grant: ExecutionGrant, data: Hex) {
-      try {
-        await chain.client.simulateContract({
-          account: chain.executor.address,
-          address: chain.module,
-          abi: [...moduleAbi, ...registryAbi],
-          functionName: 'execute',
-          args: [
-            chainGrant(grant, [asset]),
-            data,
-            packSafeSignatures(grant.approvals, grant.draft),
-          ],
-        });
-        return null;
-      } catch (error) {
-        if (!(error instanceof BaseError)) throw error;
-        const reverted = error.walk(
-          (e) => e instanceof ContractFunctionRevertedError,
-        );
-        return reverted instanceof ContractFunctionRevertedError
-          ? (reverted.data?.errorName ?? 'UNKNOWN_REVERT')
-          : 'UNKNOWN_REVERT';
-      }
-    }
+    const vertical = transferVertical({
+      client: chain.client as unknown as PublicClient,
+      network: localProfile.network,
+      kernel,
+      plugins,
+      pluginId: plugin.manifest.id,
+      calldatas,
+      mandate: () => mandate,
+      module: chain.module,
+      token: chain.token,
+      account: chain.account,
+      recipient: chain.recipient,
+      executor: chain.executor,
+      workerId: WORKER_ID,
+      localAssets: [asset],
+      sync,
+      now: () => clock.t,
+      intentPrefix: 'local_intent',
+      evidenceSource: 'local-chain-transfer',
+      gasLimitPercent: 200n,
+      approve: identity.approve,
+    });
+    const { authorize, execute, onchainRevert } = vertical;
 
     return {
       node,

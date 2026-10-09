@@ -27,6 +27,10 @@ import {
   grantTypedData,
   previewsEqual,
 } from './grant.js';
+import {
+  safeTransactionTypedData,
+  type SafeGovernanceTransaction,
+} from './safe-transaction.js';
 
 export const MERA_DERIVATION = 'bip44-ethereum-0-v1' as const;
 export type MeraCredential = {
@@ -363,4 +367,16 @@ export async function approveGrantWithMera(
     );
     return { challenge, grantSignature, attestationSignature };
   });
+}
+
+/** Owner signature over a Safe governance transaction (SafeTx EIP-712), e.g. setExecutor or configureMandate. */
+export async function signMeraSafeTransaction(
+  record: MeraCredential,
+  transaction: SafeGovernanceTransaction,
+  options: MeraOptions = {},
+): Promise<Hex> {
+  const typed = safeTransactionTypedData(transaction);
+  return withRecordAccount(record, options, (account) =>
+    account.signTypedData(typed),
+  );
 }

@@ -59,11 +59,22 @@ export function projectionConfigFromDeployment(input: {
   reorgWindowBlocks: number;
   confirmationDepth: number;
   observedAccounts?: ProjectionConfig['observedAccounts'];
+  /** Later start for a projection that only needs groups created at or after this block. */
+  startBlock?: number;
 }): ProjectionConfig {
+  const startBlock = input.startBlock ?? input.facts.deploymentBlock;
+  if (
+    !Number.isSafeInteger(startBlock) ||
+    startBlock < input.facts.deploymentBlock
+  )
+    throw new ReadModelError(
+      'CONFIG_MISMATCH',
+      'start block before deployment',
+    );
   return projectionConfig({
     chainId: input.facts.chainId,
     profile: input.profile,
-    startBlock: input.facts.deploymentBlock,
+    startBlock,
     factory: input.facts.factory,
     registry: input.facts.registry,
     module: input.facts.module,

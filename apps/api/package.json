@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./v1": "./src/v1/app.ts",
+    "./v1-server": "./src/v1-server.ts",
+    "./read-model-routes": "./src/read-model-routes.ts"
+  },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
