@@ -319,7 +319,21 @@ export class FixtureDelegations implements DelegationEvaluator {
       : { allowed: false as const, reason: 'DENIED' };
   }
 }
+export class FixtureChain {
+  readonly usedNonces = new Set<string>();
+  readonly usedIntents = new Set<string>();
+  constructor(readonly clock: FixtureClock) {}
+  async status(q: { nonce: string; intentHash: string }) {
+    return {
+      nonceUsed: this.usedNonces.has(q.nonce),
+      intentUsed: this.usedIntents.has(q.intentHash),
+      blockNumber: 100,
+      blockTimestamp: this.clock.t,
+    };
+  }
+}
 export type Harness = {
+  chain: FixtureChain;
   kernel: Kernel;
   clock: FixtureClock;
   ledger: FixtureLedger;
@@ -336,7 +350,9 @@ export function harness(
   const ledger = new FixtureLedger();
   const probe = new FixtureProbe();
   const directory = new FixtureDirectory();
+  const chain = new FixtureChain(clock);
   const kernel = new Kernel({
+    nonceStatus: chain,
     membershipDirectory: directory,
     network,
     executionModule: MODULE,
@@ -359,7 +375,7 @@ export function harness(
     },
     ...extra,
   });
-  return { kernel, clock, ledger, probe, directory };
+  return { kernel, clock, ledger, probe, directory, chain };
 }
 export function trust(h: Harness, ...inputs: Prepared[]) {
   h.kernel.attestEvidence({

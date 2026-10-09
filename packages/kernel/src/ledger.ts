@@ -59,7 +59,14 @@ export type GrantRecord = {
   state: GrantState;
   claim: GrantClaim | null;
   preparedCallHash: Hash | null;
+  submissions: Hash[];
   execution: Execution | null;
+};
+export type NonceStatus = {
+  nonceUsed: boolean;
+  intentUsed: boolean;
+  blockNumber: number;
+  blockTimestamp: number;
 };
 
 export function nativeAssetFor(chainId: number): NativeAsset {
@@ -199,6 +206,7 @@ export class Ledger {
       state: 'RESERVED',
       claim: null,
       preparedCallHash: null,
+      submissions: [],
       execution: null,
     });
     this.nonces.add(nonceKey(grant));
@@ -258,9 +266,21 @@ export class Ledger {
     record.preparedCallHash = callHash;
     return structuredClone(record.grant);
   }
+  recordSubmission(claim: GrantClaim, transactionHash: Hash): void {
+    const record = this.record(claim.grantId);
+    requireRule(
+      record.claim !== null &&
+        canonicalJson(record.claim) === canonicalJson(claim) &&
+        record.state === 'PREPARED' &&
+        /^0x[0-9a-f]{64}$/.test(transactionHash),
+      'GRANT_CLAIM_INVALID',
+    );
+    if (!record.submissions.includes(transactionHash))
+      record.submissions.push(transactionHash);
+  }
   reconcile(grantId: string, raw: unknown): GrantRecord {
     const record = this.record(grantId);
-    requireRule(record.state === 'PREPARED', 'RECONCILIATION_INVALID');
+    requireRule(OUTSTANDING.includes(record.state), 'RECONCILIATION_INVALID');
     const observed: GrantExecutionObservation = parseAs(
       GrantExecutionObservationSchema,
       raw,
@@ -269,6 +289,11 @@ export class Ledger {
     const g = record.grant;
     requireRule(observed.chainId === g.chainId, 'RECONCILIATION_MISMATCH');
     if (observed.receiptStatus === 'reverted') {
+      requireRule(
+        record.state === 'PREPARED' &&
+          record.submissions.includes(observed.transactionHash),
+        'RECONCILIATION_MISMATCH',
+      );
       record.state = 'REVERTED';
       return structuredClone(record);
     }
@@ -321,33 +346,35 @@ export class Ledger {
     record.execution = execution;
     return structuredClone(record);
   }
-  releaseUnexecuted(
-    grantId: string,
-    proof: { nonceUsed: boolean; intentUsed: boolean; blockTimestamp: number },
-  ): void {
+  releasable(grantId: string, status: NonceStatus): boolean {
     const record = this.record(grantId);
-    requireRule(
-      ['CONSUMED', 'PREPARED', 'REVERTED'].includes(record.state) &&
-        !proof.nonceUsed &&
-        !proof.intentUsed &&
-        Number.isSafeInteger(proof.blockTimestamp) &&
-        proof.blockTimestamp >= record.grant.validUntil,
-      'RECONCILIATION_INVALID',
+    return (
+      OUTSTANDING.includes(record.state) &&
+      !status.nonceUsed &&
+      !status.intentUsed &&
+      Number.isSafeInteger(status.blockTimestamp) &&
+      status.blockTimestamp >= record.grant.validUntil
     );
+  }
+  release(grantId: string, status: NonceStatus): ExecutionGrant {
+    const record = this.record(grantId);
+    requireRule(this.releasable(grantId, status), 'RECONCILIATION_INVALID');
     this.unreserve(record, null);
     record.state = 'RELEASED';
+    return structuredClone(record.grant);
   }
-  releaseExpired(now: number): ExecutionGrant[] {
-    const released: ExecutionGrant[] = [];
-    for (const record of this.grants.values())
-      if (
-        (record.state === 'RESERVED' || record.state === 'REVERTED') &&
-        record.grant.validUntil <= now
-      ) {
-        this.unreserve(record, null);
-        record.state = 'RELEASED';
-        released.push(structuredClone(record.grant));
-      }
-    return released;
+  expiredOutstanding(now: number): ExecutionGrant[] {
+    return [...this.grants.values()]
+      .filter((r) => OUTSTANDING.includes(r.state) && r.grant.validUntil <= now)
+      .map((r) => structuredClone(r.grant));
+  }
+  clone(): Ledger {
+    const copy = new Ledger();
+    for (const [k, v] of this.budgets) copy.budgets.set(k, structuredClone(v));
+    for (const [k, v] of this.balances)
+      copy.balances.set(k, structuredClone(v));
+    for (const [k, v] of this.grants) copy.grants.set(k, structuredClone(v));
+    for (const n of this.nonces) copy.nonces.add(n);
+    return copy;
   }
 }

@@ -51,11 +51,15 @@ describe('grant consumption and preparation (S8)', () => {
       'GRANT_NOT_PREPARABLE',
     );
     h.clock.t = now + 500;
-    expect(h.kernel.releaseExpired()).toBe(0);
+    h.chain.usedNonces.add(grant.nonce);
+    expect(await h.kernel.releaseExpired()).toBe(0);
     expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe(
       '60',
     );
     expect(h.kernel.lifecycle(grant.intentId).at(-1)?.to).toBe('PREPARED');
+    h.chain.usedNonces.clear();
+    expect(await h.kernel.releaseExpired()).toBe(1);
+    expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe('0');
   });
   it('preparation fails after expiry and after revocation', async () => {
     const input = evidence(intent());
@@ -75,32 +79,25 @@ describe('grant consumption and preparation (S8)', () => {
     const h = harness(input);
     const { grant } = await grantFor(h, input);
     h.clock.t = grant.validUntil;
-    expect(h.kernel.releaseExpired()).toBe(1);
+    expect(await h.kernel.releaseExpired()).toBe(1);
     expect(h.kernel.lifecycle(grant.intentId).at(-1)?.to).toBe('EXPIRED');
     expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe('0');
     const g = harness(input);
     const issued = await grantFor(g, input);
     const claim = g.kernel.claimForExecution(issued.grant, input.intent, 'w');
     g.kernel.prepare(claim, callHash);
-    expect(() =>
-      g.kernel.releaseUnexecuted(issued.grant.grantId, {
-        nonceUsed: false,
-        intentUsed: false,
-        blockTimestamp: issued.grant.validUntil - 1,
-      }),
-    ).toThrow('RECONCILIATION_INVALID');
-    expect(() =>
-      g.kernel.releaseUnexecuted(issued.grant.grantId, {
-        nonceUsed: true,
-        intentUsed: true,
-        blockTimestamp: issued.grant.validUntil,
-      }),
-    ).toThrow('RECONCILIATION_INVALID');
-    g.kernel.releaseUnexecuted(issued.grant.grantId, {
-      nonceUsed: false,
-      intentUsed: false,
-      blockTimestamp: issued.grant.validUntil,
-    });
+    const id = issued.grant.grantId;
+    g.clock.t = issued.grant.validUntil - 1;
+    await expect(g.kernel.releaseUnexecuted(id)).rejects.toThrow(
+      'RECONCILIATION_INVALID',
+    );
+    g.clock.t = issued.grant.validUntil;
+    g.chain.usedNonces.add(issued.grant.nonce);
+    await expect(g.kernel.releaseUnexecuted(id)).rejects.toThrow(
+      'RECONCILIATION_INVALID',
+    );
+    g.chain.usedNonces.clear();
+    await g.kernel.releaseUnexecuted(id);
     expect(g.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe('0');
   });
 });
@@ -112,7 +109,7 @@ describe('§37 reconciliation binds to the decoded GrantExecuted event', () => {
     const { grant } = await grantFor(h, input);
     const claim = h.kernel.claimForExecution(grant, input.intent, 'w');
     h.kernel.prepare(claim, callHash);
-    return { h, grant, input };
+    return { h, grant, input, claim };
   }
   it('regression: caller-asserted spend is not accepted; the observed event fields must match', async () => {
     const { h, grant } = await prepared();
@@ -159,7 +156,8 @@ describe('§37 reconciliation binds to the decoded GrantExecuted event', () => {
     ).toThrow('RECONCILIATION_INVALID');
   });
   it('a reverted receipt keeps the reservation until the grant can no longer execute', async () => {
-    const { h, grant } = await prepared();
+    const { h, grant, claim } = await prepared();
+    h.kernel.recordSubmission(claim, hash(0xabc));
     h.kernel.reconcile(
       grant.grantId,
       executedObservation(
@@ -169,9 +167,9 @@ describe('§37 reconciliation binds to the decoded GrantExecuted event', () => {
       ),
     );
     expect(h.kernel.grantState(grant.grantId).state).toBe('REVERTED');
-    expect(h.kernel.releaseExpired()).toBe(0);
+    expect(await h.kernel.releaseExpired()).toBe(0);
     h.clock.t = grant.validUntil;
-    expect(h.kernel.releaseExpired()).toBe(1);
+    expect(await h.kernel.releaseExpired()).toBe(1);
     expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe('0');
   });
   it('S6: balance observations are monotonic and reconciliation never double-debits an observed balance', async () => {

@@ -63,30 +63,115 @@ export function toMandateConfig(raw: Mandate): MandateConfig {
   };
 }
 
-export function isPureWidening(previous: Mandate, next: Mandate): boolean {
-  const ge = (a: string, b: string) => BigInt(a) >= BigInt(b);
-  const tuples = new Set(
-    next.bindings.map((b) =>
-      canonicalJson([b.pluginId, b.action, b.target, b.selector]),
-    ),
-  );
-  const recipients = new Set(
-    next.recipients.map((r) => `${r.address}:${r.purpose}`),
+type Rule = (previous: Mandate, next: Mandate) => boolean;
+const ge = (a: string, b: string) => BigInt(a) >= BigInt(b);
+const same =
+  <K extends keyof Mandate>(key: K): Rule =>
+  (p, n) =>
+    canonicalJson(p[key]) === canonicalJson(n[key]);
+const keeps = <T>(
+  previous: readonly T[],
+  next: readonly T[],
+  key: (x: T) => string,
+) => {
+  const kept = new Set(next.map(key));
+  return previous.every((x) => kept.has(key(x)));
+};
+const TIER_RANK = { AUTO: 0, REVIEW: 1, CONSENSUS: 2, BLOCKED: 3 } as const;
+const WITHDRAWAL_RANK = { CONSENSUS: 0, UNANIMOUS: 1, BLOCKED: 2 } as const;
+const STRICT_RANK = { CONSENSUS: 0, BLOCKED: 1 } as const;
+
+function tierPolicyWidens(p: Mandate, n: Mandate): boolean {
+  const a = p.tierPolicy,
+    b = n.tierPolicy;
+  const floor = (m: Mandate['tierPolicy'], action: string) =>
+    TIER_RANK[m.actionFloors.find((f) => f.action === action)?.tier ?? 'AUTO'];
+  const actions = new Set(
+    [...a.actionFloors, ...b.actionFloors].map((f) => f.action),
   );
   return (
-    ge(next.perActionCap, previous.perActionCap) &&
-    ge(next.cumulativeBudget, previous.cumulativeBudget) &&
-    ge(next.maxNativeValue, previous.maxNativeValue) &&
-    ge(next.cumulativeNativeBudget, previous.cumulativeNativeBudget) &&
-    next.validAfter <= previous.validAfter &&
-    next.validUntil >= previous.validUntil &&
-    previous.bindings.every((b) =>
-      tuples.has(canonicalJson([b.pluginId, b.action, b.target, b.selector])),
-    ) &&
-    previous.recipients.every((r) =>
-      recipients.has(`${r.address}:${r.purpose}`),
-    )
+    ge(b.tokenSpend.autoMax, a.tokenSpend.autoMax) &&
+    ge(b.tokenSpend.reviewMax, a.tokenSpend.reviewMax) &&
+    ge(b.nativeSpend.autoMax, a.nativeSpend.autoMax) &&
+    ge(b.nativeSpend.reviewMax, a.nativeSpend.reviewMax) &&
+    [...actions].every((x) => floor(b, x) <= floor(a, x)) &&
+    STRICT_RANK[b.newOutputAsset] <= STRICT_RANK[a.newOutputAsset] &&
+    STRICT_RANK[b.leverage] <= STRICT_RANK[a.leverage] &&
+    WITHDRAWAL_RANK[b.withdrawal] <= WITHDRAWAL_RANK[a.withdrawal]
   );
+}
+
+export const WIDENING_RULES: { readonly [K in keyof Mandate]-?: Rule } = {
+  schemaVersion: same('schemaVersion'),
+  mandateId: same('mandateId'),
+  groupId: same('groupId'),
+  version: (p, n) => n.version === p.version + 1,
+  status: (_p, n) => n.status === 'ACTIVE',
+  network: same('network'),
+  account: same('account'),
+  chainGroupId: same('chainGroupId'),
+  operators: (p, n) => keeps(p.operators, n.operators, (x) => x),
+  bindings: (p, n) =>
+    keeps(p.bindings, n.bindings, (b) =>
+      canonicalJson([b.pluginId, b.action, b.target, b.selector]),
+    ),
+  recipients: (p, n) =>
+    keeps(p.recipients, n.recipients, (r) => `${r.address}:${r.purpose}`),
+  inputAsset: same('inputAsset'),
+  outputAssets: (p, n) =>
+    keeps(p.outputAssets, n.outputAssets, (a) => a.canonicalAssetId),
+  perActionCap: (p, n) => ge(n.perActionCap, p.perActionCap),
+  cumulativeBudget: (p, n) => ge(n.cumulativeBudget, p.cumulativeBudget),
+  maxNativeValue: (p, n) => ge(n.maxNativeValue, p.maxNativeValue),
+  cumulativeNativeBudget: (p, n) =>
+    ge(n.cumulativeNativeBudget, p.cumulativeNativeBudget),
+  maxSlippageBps: (p, n) => n.maxSlippageBps >= p.maxSlippageBps,
+  maxReferenceDeviationBps: (p, n) =>
+    n.maxReferenceDeviationBps >= p.maxReferenceDeviationBps,
+  maxLeverageBps: (p, n) => n.maxLeverageBps >= p.maxLeverageBps,
+  maxAllocationBps: (p, n) => n.maxAllocationBps >= p.maxAllocationBps,
+  tierPolicy: tierPolicyWidens,
+  approvalPolicy: (p, n) =>
+    n.approvalPolicy.quorum <= p.approvalPolicy.quorum &&
+    n.approvalPolicy.reviewApprovals <= p.approvalPolicy.reviewApprovals &&
+    n.approvalPolicy.accountThreshold === p.approvalPolicy.accountThreshold &&
+    keeps(
+      p.approvalPolicy.eligibleKinds,
+      n.approvalPolicy.eligibleKinds,
+      (k) => k,
+    ),
+  delegationScope: (p, n) => {
+    const a = p.delegationScope,
+      b = n.delegationScope;
+    if (a === null) return true;
+    return (
+      b !== null &&
+      keeps(a.actions, b.actions, (x) => x) &&
+      ge(b.maxInputPerAction, a.maxInputPerAction) &&
+      ge(b.maxNativePerAction, a.maxNativePerAction) &&
+      b.periodSeconds <= a.periodSeconds &&
+      b.maxUsesPerPeriod >= a.maxUsesPerPeriod
+    );
+  },
+  members: same('members'),
+  validAfter: (p, n) => n.validAfter <= p.validAfter,
+  validUntil: (p, n) => n.validUntil >= p.validUntil,
+  quoteTtlSeconds: (p, n) => n.quoteTtlSeconds >= p.quoteTtlSeconds,
+  evidenceTtlSeconds: (p, n) => n.evidenceTtlSeconds >= p.evidenceTtlSeconds,
+  simulationTtlSeconds: (p, n) =>
+    n.simulationTtlSeconds >= p.simulationTtlSeconds,
+  maxGrantTtlSeconds: (p, n) => n.maxGrantTtlSeconds >= p.maxGrantTtlSeconds,
+  minIntervalSeconds: (p, n) => n.minIntervalSeconds <= p.minIntervalSeconds,
+  maxExecutions: (p, n) => n.maxExecutions >= p.maxExecutions,
+};
+
+export function narrowedFields(previous: Mandate, next: Mandate): string[] {
+  return (Object.keys(WIDENING_RULES) as (keyof Mandate)[]).filter(
+    (k) => !WIDENING_RULES[k](previous, next),
+  );
+}
+export function isPureWidening(previous: Mandate, next: Mandate): boolean {
+  return narrowedFields(previous, next).length === 0;
 }
 
 export type MandateRecord = {
@@ -188,6 +273,9 @@ export class MandateResolver {
     return [...this.records.values()].map((r) =>
       structuredClone(r.versions.at(-1)!),
     );
+  }
+  clone(): MandateResolver {
+    return MandateResolver.fromRecords(this.exportRecords());
   }
   exportRecords(): MandateRecord[] {
     return structuredClone([...this.records.values()]);
