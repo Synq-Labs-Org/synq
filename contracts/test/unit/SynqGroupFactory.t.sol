@@ -8,7 +8,7 @@ import {MandateRegistry} from "../../src/MandateRegistry.sol";
 import {ISafeFull} from "../utils/ISafeFull.sol";
 
 contract SynqGroupFactoryTest is SynqTestBase {
-    bytes32 internal constant FALLBACK_HANDLER_SLOT = 0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5;
+    bytes32 internal constant FALLBACK_HANDLER_SLOT = keccak256("fallback_manager.handler.address");
 
     event GroupCreated(
         bytes32 indexed groupId,

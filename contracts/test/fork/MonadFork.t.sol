@@ -8,6 +8,7 @@ import {ExecutionModule} from "../../src/ExecutionModule.sol";
 import {SynqSafeModuleSetup} from "../../src/SynqSafeModuleSetup.sol";
 import {ISafe, ISafeProxyFactory} from "../../src/interfaces/ISafe.sol";
 import {ISafeFull} from "../utils/ISafeFull.sol";
+import {SynqChainRegistry} from "../../script/SynqChainRegistry.sol";
 
 interface IAgoraFaucet {
     function requestFunds(address recipient) external;
@@ -24,23 +25,12 @@ interface IERC20Meta {
     function symbol() external view returns (string memory);
 }
 
-/// @notice Fork tests against Monad testnet (chain 10143): canonical Safe v1.4.1 bytecode at registry addresses,
-///         official test AUSD and the Agora faucet. Run with:
+/// @notice Fork tests against Monad testnet (chain 10143): canonical Safe v1.4.1 bytecode at the registry addresses,
+///         official test AUSD and the Agora faucet, all read from sources/chain_registry.json. Run with:
 ///         FOUNDRY_PROFILE=fork forge test --root contracts --fork-url https://testnet-rpc.monad.xyz
 contract MonadForkTest is Test {
     uint256 internal constant MONAD_TESTNET = 10143;
-    address internal constant SAFE_L2_SINGLETON = 0x29fcB43b46531BcA003ddC8FCB67FFE91900C762;
-    address internal constant SAFE_PROXY_FACTORY = 0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67;
-    address internal constant COMPATIBILITY_FALLBACK_HANDLER = 0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99;
-    address internal constant AUSD = 0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC;
-    address internal constant AGORA_FAUCET = 0xd236c18D274E54FAccC3dd9DDA4b27965a73ee6C;
-    // codeHash values from safe-global/safe-deployments src/assets/v1.4.1/*.json (deployments.canonical).
-    bytes32 internal constant SAFE_L2_CODEHASH = 0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff;
-    bytes32 internal constant SAFE_PROXY_FACTORY_CODEHASH =
-        0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317;
-    bytes32 internal constant FALLBACK_HANDLER_CODEHASH =
-        0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9;
-    bytes32 internal constant FALLBACK_HANDLER_SLOT = 0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5;
+    bytes32 internal constant FALLBACK_HANDLER_SLOT = keccak256("fallback_manager.handler.address");
 
     uint256 internal constant KEY1 = 0xA11CE;
     uint256 internal constant KEY2 = 0xB0B;
@@ -50,6 +40,13 @@ contract MonadForkTest is Test {
     uint256 internal constant CUMULATIVE = 8e6;
     uint256 internal constant TRANSFER_AMOUNT = 1_500_000;
 
+    SynqChainRegistry.SafeInfrastructure internal infra;
+    SynqChainRegistry.RegistryAsset internal ausdAsset;
+    address internal safeL2;
+    address internal safeProxyFactory;
+    address internal fallbackHandler;
+    address internal ausd;
+    address internal faucet;
     SynqGroupFactory internal factory;
     MandateRegistry internal registry;
     ExecutionModule internal module;
@@ -67,7 +64,15 @@ contract MonadForkTest is Test {
 
     function setUp() public {
         if (block.chainid != MONAD_TESTNET) return;
-        factory = new SynqGroupFactory(SAFE_L2_SINGLETON, SAFE_PROXY_FACTORY, COMPATIBILITY_FALLBACK_HANDLER);
+        string memory json = SynqChainRegistry.load();
+        infra = SynqChainRegistry.safeInfrastructure(json, block.chainid);
+        ausdAsset = SynqChainRegistry.asset(json, "testnetAUSD", block.chainid);
+        safeL2 = infra.singleton.addr;
+        safeProxyFactory = infra.proxyFactory.addr;
+        fallbackHandler = infra.fallbackHandler.addr;
+        ausd = ausdAsset.addr;
+        faucet = SynqChainRegistry.contractEntry(json, "testnetAUSDFaucet", block.chainid).addr;
+        factory = new SynqGroupFactory(safeL2, safeProxyFactory, fallbackHandler);
         registry = factory.registry();
         module = factory.module();
         address[] memory owners = new address[](3);
@@ -82,13 +87,16 @@ contract MonadForkTest is Test {
     }
 
     function test_fork_canonicalSafeInfrastructure() public onlyMonadFork {
-        assertEq(ISafeFull(SAFE_L2_SINGLETON).VERSION(), "1.4.1");
-        assertEq(SAFE_L2_SINGLETON.codehash, SAFE_L2_CODEHASH);
-        assertEq(SAFE_PROXY_FACTORY.codehash, SAFE_PROXY_FACTORY_CODEHASH);
-        assertEq(COMPATIBILITY_FALLBACK_HANDLER.codehash, FALLBACK_HANDLER_CODEHASH);
-        assertEq(IERC20Meta(AUSD).decimals(), 6);
-        assertEq(IERC20Meta(AUSD).symbol(), "AUSD");
-        assertEq(IAgoraFaucet(AGORA_FAUCET).token(), AUSD);
+        assertEq(ISafeFull(safeL2).VERSION(), "1.4.1");
+        assertEq(infra.singleton.version, "1.4.1");
+        assertEq(infra.proxyFactory.version, "1.4.1");
+        assertEq(infra.fallbackHandler.version, "1.4.1");
+        assertEq(safeL2.codehash, infra.singleton.codeHash);
+        assertEq(safeProxyFactory.codehash, infra.proxyFactory.codeHash);
+        assertEq(fallbackHandler.codehash, infra.fallbackHandler.codeHash);
+        assertEq(IERC20Meta(ausd).decimals(), ausdAsset.decimals);
+        assertEq(IERC20Meta(ausd).symbol(), ausdAsset.symbol);
+        assertEq(IAgoraFaucet(faucet).token(), ausd);
         emit log_named_uint("fork block", block.number);
     }
 
@@ -97,9 +105,7 @@ contract MonadForkTest is Test {
         assertEq(safe.getThreshold(), 2);
         assertEq(safe.getOwners().length, 3);
         assertTrue(safe.isModuleEnabled(address(module)));
-        assertEq(
-            abi.decode(safe.getStorageAt(uint256(FALLBACK_HANDLER_SLOT), 1), (address)), COMPATIBILITY_FALLBACK_HANDLER
-        );
+        assertEq(abi.decode(safe.getStorageAt(uint256(FALLBACK_HANDLER_SLOT), 1), (address)), fallbackHandler);
         assertEq(registry.groupOf(address(safe)), groupId);
         assertEq(registry.moduleOf(address(safe)), address(module));
     }
@@ -116,7 +122,7 @@ contract MonadForkTest is Test {
                 2,
                 address(factory.moduleSetup()),
                 abi.encodeCall(SynqSafeModuleSetup.enableModule, (address(module))),
-                COMPATIBILITY_FALLBACK_HANDLER,
+                fallbackHandler,
                 address(0),
                 0,
                 payable(address(0))
@@ -125,7 +131,7 @@ contract MonadForkTest is Test {
         address predicted = factory.predictAccount(initializer, uint256(gid));
         vm.prank(makeAddr("fork-attacker"));
         vm.expectRevert();
-        ISafeProxyFactory(SAFE_PROXY_FACTORY).createProxyWithNonce(SAFE_L2_SINGLETON, initializer, uint256(gid));
+        ISafeProxyFactory(safeProxyFactory).createProxyWithNonce(safeL2, initializer, uint256(gid));
         assertEq(predicted.code.length, 0);
         vm.prank(victim);
         (, address account) = factory.createGroup(owners, 2, salt);
@@ -135,16 +141,16 @@ contract MonadForkTest is Test {
 
     function test_fork_twoOfThreeApprovedAusdTransferViaFaucetFunding() public onlyMonadFork {
         _fundFromFaucet();
-        uint256 safeBefore = IERC20Meta(AUSD).balanceOf(address(safe));
-        uint256 recipientBefore = IERC20Meta(AUSD).balanceOf(recipient);
+        uint256 safeBefore = IERC20Meta(ausd).balanceOf(address(safe));
+        uint256 recipientBefore = IERC20Meta(ausd).balanceOf(recipient);
 
         (ExecutionModule.ExecutionGrant memory grant, bytes memory data) = _grant(1, TRANSFER_AMOUNT);
         bytes memory signatures = _sign(module.hashGrant(grant), KEY1, KEY3);
         vm.prank(executor);
         bytes32 grantHash = module.execute(grant, data, signatures);
 
-        assertEq(IERC20Meta(AUSD).balanceOf(address(safe)), safeBefore - TRANSFER_AMOUNT);
-        assertEq(IERC20Meta(AUSD).balanceOf(recipient), recipientBefore + TRANSFER_AMOUNT);
+        assertEq(IERC20Meta(ausd).balanceOf(address(safe)), safeBefore - TRANSFER_AMOUNT);
+        assertEq(IERC20Meta(ausd).balanceOf(recipient), recipientBefore + TRANSFER_AMOUNT);
         assertEq(registry.mandateState(address(safe), MANDATE).spentToken, TRANSFER_AMOUNT);
         assertTrue(module.nonceUsed(address(safe), 1));
         emit log_named_address("group safe", address(safe));
@@ -190,30 +196,30 @@ contract MonadForkTest is Test {
         module.execute(g3, d3, s3);
 
         address vault = makeAddr("fork-recovery-vault");
-        uint256 remaining = IERC20Meta(AUSD).balanceOf(address(safe));
-        _safeCall(AUSD, abi.encodeWithSelector(bytes4(0xa9059cbb), vault, remaining));
-        assertEq(IERC20Meta(AUSD).balanceOf(vault), remaining);
-        assertEq(IERC20Meta(AUSD).balanceOf(address(safe)), 0);
+        uint256 remaining = IERC20Meta(ausd).balanceOf(address(safe));
+        _safeCall(ausd, abi.encodeWithSelector(bytes4(0xa9059cbb), vault, remaining));
+        assertEq(IERC20Meta(ausd).balanceOf(vault), remaining);
+        assertEq(IERC20Meta(ausd).balanceOf(address(safe)), 0);
     }
 
     function _fundFromFaucet() internal {
-        IAgoraFaucet faucet = IAgoraFaucet(AGORA_FAUCET);
-        vm.warp(_max(block.timestamp, faucet.lastDripTimestamp() + faucet.maxDripFrequency() + 1));
-        uint256 before = IERC20Meta(AUSD).balanceOf(address(safe));
-        faucet.requestFunds(address(safe));
-        assertEq(IERC20Meta(AUSD).balanceOf(address(safe)), before + faucet.faucetDripAmount());
+        IAgoraFaucet agora = IAgoraFaucet(faucet);
+        vm.warp(_max(block.timestamp, agora.lastDripTimestamp() + agora.maxDripFrequency() + 1));
+        uint256 before = IERC20Meta(ausd).balanceOf(address(safe));
+        agora.requestFunds(address(safe));
+        assertEq(IERC20Meta(ausd).balanceOf(address(safe)), before + agora.faucetDripAmount());
     }
 
     function _mandate() internal view returns (MandateRegistry.MandateConfig memory config) {
         address[] memory targets = new address[](1);
         bytes4[] memory selectors = new bytes4[](1);
-        targets[0] = AUSD;
+        targets[0] = ausd;
         selectors[0] = bytes4(0xa9059cbb);
         address[] memory recipients = new address[](1);
         recipients[0] = recipient;
         config = MandateRegistry.MandateConfig({
             mandateHash: keccak256("synq.fork.mandate.document"),
-            token: AUSD,
+            token: ausd,
             maxTokenPerAction: PER_ACTION,
             maxNativePerAction: 0,
             cumulativeTokenCap: CUMULATIVE,
@@ -240,10 +246,10 @@ contract MonadForkTest is Test {
             executor: executor,
             pluginId: keccak256("synq.plugin.transfer"),
             chainId: block.chainid,
-            target: AUSD,
+            target: ausd,
             selector: bytes4(0xa9059cbb),
             calldataHash: keccak256(data),
-            token: AUSD,
+            token: ausd,
             maxInputAmount: amount,
             nativeValue: 0,
             minOutputAmount: amount,

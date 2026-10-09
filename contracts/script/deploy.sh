@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
-# Runs script/Deploy.s.sol with the deployer key read from the file named by SYNQ_TESTNET_KEY_FILE.
+# Runs script/Deploy.s.sol on Monad testnet with the deployer key read from the file named by SYNQ_TESTNET_KEY_FILE.
+# Safe infrastructure addresses and codehashes come from sources/chain_registry.json inside Deploy.s.sol; the RPC URL
+# defaults to the registry's sandbox/monad-testnet profile (override with SYNQ_MONAD_TESTNET_RPC_URL).
 # The key is exported only into this process environment; it is never printed or passed on the command line.
 # Simulation by default; append --broadcast (and optionally --verify ...) to submit.
 #
-#   SYNQ_TESTNET_KEY_FILE=/secure/path/key \
-#   SYNQ_SAFE_L2_SINGLETON=0x... SYNQ_SAFE_PROXY_FACTORY=0x... SYNQ_SAFE_FALLBACK_HANDLER=0x... \
-#   contracts/script/deploy.sh [--broadcast]
+#   SYNQ_TESTNET_KEY_FILE=/secure/path/key contracts/script/deploy.sh [--broadcast]
 set -euo pipefail
 set +x
 
 : "${SYNQ_TESTNET_KEY_FILE:?set SYNQ_TESTNET_KEY_FILE to a file containing the test-only deployer key}"
-: "${SYNQ_SAFE_L2_SINGLETON:?set from the Safe deployments registry (v1.4.1 safe_l2)}"
-: "${SYNQ_SAFE_PROXY_FACTORY:?set from the Safe deployments registry (v1.4.1 safe_proxy_factory)}"
-: "${SYNQ_SAFE_FALLBACK_HANDLER:?set from the Safe deployments registry (v1.4.1 compatibility_fallback_handler)}"
 if [[ ! -r "$SYNQ_TESTNET_KEY_FILE" ]]; then
   echo "deploy.sh: key file is not readable" >&2
   exit 1
 fi
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+registry="$root/../sources/chain_registry.json"
+rpc="${SYNQ_MONAD_TESTNET_RPC_URL:-$(
+  node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const p = r.profiles["sandbox/monad-testnet"];
+if (!p || p.network.chainId !== 10143 || !p.defaultRpcUrl) process.exit(1);
+process.stdout.write(p.defaultRpcUrl);' "$registry"
+)}"
 
 key="$(tr -d '[:space:]' < "$SYNQ_TESTNET_KEY_FILE")"
 [[ "$key" == 0x* ]] || key="0x${key}"
@@ -27,6 +33,4 @@ fi
 export SYNQ_DEPLOYER_PRIVATE_KEY="$key"
 unset key
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-rpc="${SYNQ_MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}"
 exec "${FORGE:-forge}" script "$root/script/Deploy.s.sol:Deploy" --root "$root" --rpc-url "$rpc" "$@"
