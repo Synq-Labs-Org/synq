@@ -5,6 +5,8 @@ import {
   GrantApprovalGateway,
   MembershipService,
   PrincipalService,
+  StoreApprovalLedger,
+  StoreMembershipDirectory,
   grantPreview,
   identityChallengeTypedData,
   type IdentityConfig,
@@ -436,6 +438,65 @@ export function identityContract(label: string, harness: StoreHarness) {
         expect(
           (await s.approvals.pendingIntent(draft.grant.intentHash)).status,
         ).toBe('APPROVED');
+      });
+
+      it('counts one approval per member when the same member races two challenges', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const first = await approve(s, humans[0]!, 'member_0', draft);
+        const second = await approve(s, humans[0]!, 'member_0', draft);
+        const results = await Promise.allSettled(
+          [first, second].map((x) =>
+            s.approvals.submit({
+              challengeId: x.challenge.challengeId,
+              signature: x.signature,
+            }),
+          ),
+        );
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+        expect(
+          (
+            results.find(
+              (r) => r.status === 'rejected',
+            ) as PromiseRejectedResult
+          ).reason,
+        ).toMatchObject({ code: 'ALREADY_APPROVED' });
+        expect((await s.approvals.quorum(draft.digest)).counted).toHaveLength(
+          1,
+        );
+      });
+
+      it('exposes consumed approvals and current memberships to the Kernel through read-only ports', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const a = await approve(s, humans[0]!, 'member_0', draft);
+        const approval = await s.approvals.submit({
+          challengeId: a.challenge.challengeId,
+          signature: a.signature,
+        });
+        const ledger = new StoreApprovalLedger(store);
+        expect(await ledger.isConsumed(approval)).toBe(true);
+        expect(
+          await ledger.isConsumed({ ...approval, approvalId: 'forged' }),
+        ).toBe(false);
+        expect(
+          await ledger.isConsumed({ ...approval, membershipEpoch: 99 }),
+        ).toBe(false);
+        const directory = new StoreMembershipDirectory(store);
+        expect(await directory.activeMember(groupId, 'member_0')).toMatchObject(
+          {
+            principalKind: 'MERA_HUMAN',
+            role: 'APPROVER',
+            signer: humans[0]!.record.signer,
+            membershipEpoch: 3,
+            ownerOfAccount: true,
+          },
+        );
+        await s.membership.revoke({ groupId, memberId: 'member_0' });
+        expect(await directory.activeMember(groupId, 'member_0')).toBeNull();
+        expect(await directory.membershipEpoch(groupId)).toBe(4);
       });
 
       it('rejects challenge reuse, expiry and impersonation (SEC-008/SEC-020)', async () => {
