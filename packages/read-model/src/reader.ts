@@ -12,11 +12,13 @@ import type {
 import { Tables, stateHash, type Hex } from './tables.js';
 import {
   GroupSnapshotSchema,
+  CheckpointStampSchema,
   GroupStampSchema,
   ProgressSchema,
   groupState,
   groupStateHash,
   type BuildIdentity,
+  type CheckpointStamp,
   type GroupSnapshot,
   type GroupStamp,
   type Progress,
@@ -29,6 +31,7 @@ export interface SnapshotSource {
   progress(): Promise<Progress>;
   groupSnapshot(groupId: Hex): Promise<GroupSnapshot | null>;
   stamp(groupId: Hex): Promise<GroupStamp | null>;
+  checkpointStamp(): Promise<CheckpointStamp>;
 }
 
 export type CurrentMandateArtifact = {
@@ -87,6 +90,7 @@ export class ProjectionReader implements SnapshotSource {
         build: this.build(cp),
         indexedThroughBlock: cp.indexedThroughBlock,
         generation: cp.generation,
+        lineage: cp.lineage,
         frozenGroups: groups
           .filter((g) => g.accountingStatus === 'FROZEN')
           .map((g) => g.groupId),
@@ -112,6 +116,7 @@ export class ProjectionReader implements SnapshotSource {
         indexedThroughBlock: cp.indexedThroughBlock,
         generation: cp.generation,
         groupRevision: g.revision,
+        revisionLineage: await s.lineageAt(g.revision),
         stateHash: groupStateHash(state),
         group: state,
       });
@@ -128,7 +133,18 @@ export class ProjectionReader implements SnapshotSource {
         generation: cp.generation,
         indexedThroughBlock: cp.indexedThroughBlock,
         groupRevision: g.revision,
+        revisionLineage: await s.lineageAt(g.revision),
         accountingStatus: g.accounting_status,
+      });
+    });
+  }
+  async checkpointStamp(): Promise<CheckpointStamp> {
+    return this.store.read(async (s) => {
+      const cp = await this.checkpoint(s);
+      return CheckpointStampSchema.parse({
+        build: this.build(cp),
+        generation: cp.generation,
+        lineage: cp.lineage,
       });
     });
   }

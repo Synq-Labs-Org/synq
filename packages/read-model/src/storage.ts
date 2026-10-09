@@ -37,7 +37,11 @@ export interface SqlPool {
 }
 export type SqlTarget = { pool: SqlPool } | { client: SqlConnection };
 
-const MIGRATIONS = ['001-projection.sql', '002-build-identity.sql'] as const;
+const MIGRATIONS = [
+  '001-projection.sql',
+  '002-build-identity.sql',
+  '003-lineage.sql',
+] as const;
 const NULLABLE: { [T in TableName]?: readonly string[] } = {
   group: ['creator', 'salt', 'threshold', 'guard'],
   mandate_version: ['security_sensitive'],
@@ -204,7 +208,7 @@ export class PostgresProjectionStore implements ProjectionStore {
           `synq-rm:${this.schema}`,
           this.chainId,
         ]);
-        for (const t of [...TABLE_NAMES, 'event', 'checkpoint'])
+        for (const t of [...TABLE_NAMES, 'event', 'checkpoint', 'lineage'])
           await db.query(
             `DELETE FROM "${this.schema}".rm_${t} WHERE chain_id=$1`,
             [this.chainId],
@@ -259,7 +263,7 @@ class PgSession implements ProjectionSession {
   }
   async checkpoint(): Promise<Checkpoint | null> {
     const { rows } = await this.db.query(
-      `SELECT indexed_through_block, generation, config_hash, build_id FROM ${this.t('checkpoint')} WHERE chain_id=$1`,
+      `SELECT indexed_through_block, generation, config_hash, build_id, lineage FROM ${this.t('checkpoint')} WHERE chain_id=$1`,
       [this.chainId],
     );
     const row = rows[0];
@@ -272,26 +276,51 @@ class PgSession implements ProjectionSession {
       .string()
       .regex(/^0x[0-9a-f]{32}$/)
       .parse(row.build_id) as Hex;
+    const lineage = z
+      .string()
+      .regex(/^0x[0-9a-f]{64}$/)
+      .parse(row.lineage) as Hex;
     return {
       chainId: this.chainId,
       indexedThroughBlock: safeInt(row.indexed_through_block, 'checkpoint'),
       generation: safeInt(row.generation, 'generation'),
       configHash,
       buildId,
+      lineage,
     };
   }
   async saveCheckpoint(cp: Checkpoint): Promise<void> {
     await this.db.query(
-      `INSERT INTO ${this.t('checkpoint')}(chain_id,indexed_through_block,generation,config_hash,build_id,updated_at) VALUES ($1,$2,$3,$4,$5,now())
-       ON CONFLICT (chain_id) DO UPDATE SET indexed_through_block=EXCLUDED.indexed_through_block, generation=EXCLUDED.generation, config_hash=EXCLUDED.config_hash, build_id=EXCLUDED.build_id, updated_at=now()`,
+      `INSERT INTO ${this.t('checkpoint')}(chain_id,indexed_through_block,generation,config_hash,build_id,lineage,updated_at) VALUES ($1,$2,$3,$4,$5,$6,now())
+       ON CONFLICT (chain_id) DO UPDATE SET indexed_through_block=EXCLUDED.indexed_through_block, generation=EXCLUDED.generation, config_hash=EXCLUDED.config_hash, build_id=EXCLUDED.build_id, lineage=EXCLUDED.lineage, updated_at=now()`,
       [
         this.chainId,
         cp.indexedThroughBlock,
         cp.generation,
         cp.configHash,
         cp.buildId,
+        cp.lineage,
       ],
     );
+  }
+  async saveLineage(generation: number, lineage: Hex): Promise<void> {
+    await this.db.query(
+      `INSERT INTO ${this.t('lineage')}(chain_id,generation,lineage) VALUES ($1,$2,$3)
+       ON CONFLICT (chain_id,generation) DO UPDATE SET lineage=EXCLUDED.lineage`,
+      [this.chainId, generation, lineage],
+    );
+  }
+  async lineageAt(generation: number): Promise<Hex | null> {
+    const { rows } = await this.db.query(
+      `SELECT lineage FROM ${this.t('lineage')} WHERE chain_id=$1 AND generation=$2`,
+      [this.chainId, generation],
+    );
+    return rows[0]
+      ? (z
+          .string()
+          .regex(/^0x[0-9a-f]{64}$/)
+          .parse(rows[0].lineage) as Hex)
+      : null;
   }
   private decodeEvents(rows: Record<string, unknown>[]): StoredEvent[] {
     return rows.map((r) => {

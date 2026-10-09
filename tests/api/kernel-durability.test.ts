@@ -290,9 +290,9 @@ describe('production Kernel survives restart against chain truth', () => {
     expect(stateHash({ ...copy, audit: [] })).toBe(
       stateHash({ ...original, audit: [] }),
     );
-    expect((await restored.authorize({ ...data, approvals: [] })).code).toMatch(
-      /NONCE_REPLAY|INTENT_TERMINAL/,
-    );
+    expect(await restored.authorize({ ...data, approvals: [] })).toMatchObject({
+      code: expect.stringMatching(/NONCE_REPLAY|INTENT_TERMINAL/),
+    });
 
     const tampered = structuredClone(persisted);
     (tampered.state.budgets[0]![1] as { reservedToken: string }).reservedToken =

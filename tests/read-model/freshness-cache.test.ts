@@ -33,6 +33,9 @@ class CountingSource implements SnapshotSource {
   get scope() {
     return this.inner.scope;
   }
+  checkpointStamp() {
+    return this.inner.checkpointStamp();
+  }
   stamp(id: Hex) {
     this.stampCalls++;
     return this.inner.stamp(id);
@@ -174,7 +177,12 @@ describe('Redis read-through snapshot cache (R2)', () => {
     const after = await cache.groupSnapshot(groupId);
     expect(after!.groupRevision).toBeGreaterThan(before!.groupRevision);
     expect(after!.group.treasury[0]!.balance).toBe('750005');
-    const key = cache.groupKey(after!.build, groupId, after!.groupRevision);
+    const key = cache.groupKey(
+      after!.build,
+      groupId,
+      after!.groupRevision,
+      after!.revisionLineage!,
+    );
     redis.data.set(
       key,
       JSON.stringify({

@@ -93,13 +93,22 @@ describe('postgres projection storage', () => {
     const snapB = (await cacheB.groupSnapshot(groupId))!;
     expect(snapA.build.store).toBe(`pg:${a.schema}`);
     expect(snapA.build.id).not.toBe(snapB.build.id);
-    expect(cacheA.progressKey()).not.toBe(cacheB.progressKey());
+    expect(cacheA.progressKey(snapA.build)).not.toBe(
+      cacheB.progressKey(snapB.build),
+    );
     expect(cacheB.stats.groupHits).toBe(0);
     const restarted = new ProjectionReader(
       new PostgresProjectionStore({ pool }, chainId, a.schema),
       cfg,
     );
     expect((await restarted.progress()).build.id).toBe(snapA.build.id);
+    expect((await restarted.progress()).lineage).toBe(
+      (await new ProjectionReader(a, cfg).progress()).lineage,
+    );
+    expect((await restarted.stamp(groupId))!.revisionLineage).toBe(
+      snapA.revisionLineage,
+    );
+    expect(snapA.revisionLineage).toMatch(/^0x[0-9a-f]{64}$/);
 
     await a.resetProjection();
     await new Projector(a, cfg).applyWindow({
@@ -123,9 +132,11 @@ describe('postgres projection storage', () => {
       events: lifecycle(),
     });
     const t = `"${store.schema}".rm_checkpoint`;
+    await pool.query(`DROP TABLE "${store.schema}".rm_lineage`);
+    await pool.query(`ALTER TABLE ${t} DROP COLUMN lineage`);
     await pool.query(`ALTER TABLE ${t} DROP COLUMN build_id`);
     await pool.query(
-      `DELETE FROM "${store.schema}".rm_schema_migration WHERE version='002-build-identity.sql'`,
+      `DELETE FROM "${store.schema}".rm_schema_migration WHERE version IN ('002-build-identity.sql','003-lineage.sql')`,
     );
     await store.migrate();
     const { rows } = await pool.query(`SELECT build_id FROM ${t}`);

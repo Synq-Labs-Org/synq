@@ -95,6 +95,7 @@ export const GroupSnapshotSchema = z.strictObject({
   indexedThroughBlock: block,
   generation: block,
   groupRevision: block,
+  revisionLineage: bytes32.nullable(),
   stateHash: bytes32,
   group: GroupStateSchema,
 });
@@ -107,6 +108,7 @@ export const ProgressSchema = z.strictObject({
   build: BuildIdentitySchema,
   indexedThroughBlock: block,
   generation: block,
+  lineage: bytes32,
   frozenGroups: z.array(bytes32),
   groups: z.array(
     z.strictObject({
@@ -119,11 +121,19 @@ export const ProgressSchema = z.strictObject({
 });
 export type Progress = z.output<typeof ProgressSchema>;
 
+export const CheckpointStampSchema = z.strictObject({
+  build: BuildIdentitySchema,
+  generation: block,
+  lineage: bytes32,
+});
+export type CheckpointStamp = z.output<typeof CheckpointStampSchema>;
+
 export const GroupStampSchema = z.strictObject({
   build: BuildIdentitySchema,
   generation: block,
   indexedThroughBlock: block,
   groupRevision: block,
+  revisionLineage: bytes32.nullable(),
   accountingStatus: z.enum(['OPEN', 'FROZEN']),
 });
 export type GroupStamp = z.output<typeof GroupStampSchema>;

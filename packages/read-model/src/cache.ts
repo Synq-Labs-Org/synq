@@ -5,6 +5,7 @@ import {
   GroupSnapshotSchema,
   ProgressSchema,
   type BuildIdentity,
+  type CheckpointStamp,
   type GroupSnapshot,
   type GroupStamp,
   type Progress,
@@ -62,31 +63,43 @@ export class RedisSnapshotCache implements SnapshotSource {
   private prefix() {
     return `${this.options.namespace ?? 'synq:rm:v2'}:${this.chainId}:${this.scope}`;
   }
-  progressKey(): string {
-    return `${this.prefix()}:progress`;
+  progressKey(build: BuildIdentity): string {
+    return `${this.prefix()}:build:${build.id}:progress`;
   }
-  groupKey(build: BuildIdentity, groupId: string, revision: number): string {
-    return `${this.prefix()}:build:${build.id}:group:${groupId.toLowerCase()}:${revision}`;
+  groupKey(
+    build: BuildIdentity,
+    groupId: string,
+    revision: number,
+    revisionLineage: string,
+  ): string {
+    return `${this.prefix()}:build:${build.id}:group:${groupId.toLowerCase()}:${revision}:${revisionLineage}`;
   }
   stamp(groupId: Hex): Promise<GroupStamp | null> {
     return this.source.stamp(groupId);
   }
+  checkpointStamp(): Promise<CheckpointStamp> {
+    return this.source.checkpointStamp();
+  }
   async publishProgress(): Promise<Progress> {
     const progress = await this.source.progress();
-    await this.redis.set(this.progressKey(), JSON.stringify(progress), {
-      EX: this.options.progressTtlSeconds ?? 5,
-    });
+    await this.redis.set(
+      this.progressKey(progress.build),
+      JSON.stringify(progress),
+      { EX: this.options.progressTtlSeconds ?? 5 },
+    );
     return progress;
   }
   async progress(): Promise<Progress> {
-    const raw = await this.redis.get(this.progressKey());
+    const current = await this.source.checkpointStamp();
+    const raw = await this.redis.get(this.progressKey(current.build));
     if (raw !== null) {
       const parsed = ProgressSchema.safeParse(parseJson(raw));
       if (
         parsed.success &&
         parsed.data.sourceChainId === this.chainId &&
-        `${parsed.data.build.store}:${parsed.data.build.configHash}` ===
-          this.scope
+        sameBuild(parsed.data.build, current.build) &&
+        parsed.data.generation === current.generation &&
+        parsed.data.lineage === current.lineage
       ) {
         this.stats.progressHits++;
         return parsed.data;
@@ -100,8 +113,17 @@ export class RedisSnapshotCache implements SnapshotSource {
     const id = groupId.toLowerCase() as Hex;
     const stamp = await this.source.stamp(id);
     if (!stamp) return null;
+    if (stamp.revisionLineage === null) {
+      this.stats.groupMisses++;
+      return this.source.groupSnapshot(id);
+    }
     const raw = await this.redis.get(
-      this.groupKey(stamp.build, id, stamp.groupRevision),
+      this.groupKey(
+        stamp.build,
+        id,
+        stamp.groupRevision,
+        stamp.revisionLineage,
+      ),
     );
     if (raw !== null) {
       const parsed = GroupSnapshotSchema.safeParse(parseJson(raw));
@@ -111,6 +133,7 @@ export class RedisSnapshotCache implements SnapshotSource {
         parsed.data.group.groupId === id &&
         sameBuild(parsed.data.build, stamp.build) &&
         parsed.data.groupRevision === stamp.groupRevision &&
+        parsed.data.revisionLineage === stamp.revisionLineage &&
         parsed.data.generation >= parsed.data.groupRevision &&
         parsed.data.generation <= stamp.generation &&
         parsed.data.indexedThroughBlock <= stamp.indexedThroughBlock &&
@@ -123,9 +146,14 @@ export class RedisSnapshotCache implements SnapshotSource {
     }
     this.stats.groupMisses++;
     const fresh = await this.source.groupSnapshot(id);
-    if (!fresh) return null;
+    if (!fresh || fresh.revisionLineage === null) return fresh;
     await this.redis.set(
-      this.groupKey(fresh.build, id, fresh.groupRevision),
+      this.groupKey(
+        fresh.build,
+        id,
+        fresh.groupRevision,
+        fresh.revisionLineage,
+      ),
       JSON.stringify(fresh),
       { EX: this.options.snapshotTtlSeconds ?? 3600 },
     );

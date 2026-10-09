@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { keccak256, stringToHex } from 'viem';
 import { configHash, type ProjectionConfig } from './config.js';
 import { ReadModelError, fail } from './errors.js';
 import {
@@ -76,8 +77,49 @@ export function initialCheckpoint(config: ProjectionConfig): Checkpoint {
     indexedThroughBlock: config.startBlock - 1,
     generation: 0,
     configHash: configHash(config),
-    buildId: newBuildId(),
+    ...genesis(),
   };
+}
+
+function genesis(): { buildId: Hex; lineage: Hex } {
+  const buildId = newBuildId();
+  return {
+    buildId,
+    lineage: keccak256(stringToHex(`synq:rm:lineage:${buildId}`)),
+  };
+}
+
+export function nextLineage(
+  previous: Hex,
+  generation: number,
+  indexedThroughBlock: number,
+  digest: unknown,
+): Hex {
+  return keccak256(
+    stringToHex(
+      canonicalJson([previous, generation, indexedThroughBlock, digest]),
+    ),
+  );
+}
+
+async function advance(
+  s: ProjectionSession,
+  cp: Checkpoint,
+  next: { generation: number; indexedThroughBlock: number },
+  digest: unknown,
+): Promise<void> {
+  const lineage =
+    next.generation === cp.generation
+      ? cp.lineage
+      : nextLineage(
+          cp.lineage,
+          next.generation,
+          next.indexedThroughBlock,
+          digest,
+        );
+  if (next.generation !== cp.generation)
+    await s.saveLineage(next.generation, lineage);
+  await s.saveCheckpoint({ ...cp, ...next, lineage });
 }
 
 export function newBuildId(): Hex {
@@ -142,7 +184,12 @@ export class Projector {
       await s.loadGroups(signal.groupIds, tables);
       await this.refreeze(s, tables, signal.groupIds, generation);
       await s.write(tables.changes());
-      await s.saveCheckpoint({ ...cp, generation });
+      await advance(
+        s,
+        cp,
+        { generation, indexedThroughBlock: cp.indexedThroughBlock },
+        ['resolve', signal.id, resolution, evidence],
+      );
       return { ...resolved, seq: signal.seq };
     });
   }
@@ -352,11 +399,12 @@ export class Projector {
     for (const g of await this.refreeze(s, tables, freezeGroups, generation))
       changed.add(g);
     await s.write(tables.changes());
-    await s.saveCheckpoint({
-      ...cp,
-      indexedThroughBlock: newCheckpoint,
-      generation,
-    });
+    await advance(s, cp, { generation, indexedThroughBlock: newCheckpoint }, [
+      'window',
+      fork,
+      removed.map((x) => eventKey(x.event)),
+      toApply.map((e) => [eventKey(e), eventFingerprint(e)]),
+    ]);
     return {
       generation,
       indexedThroughBlock: newCheckpoint,

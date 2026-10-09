@@ -8,6 +8,7 @@ export interface Checkpoint {
   generation: number;
   configHash: Hex;
   buildId: Hex;
+  lineage: Hex;
 }
 export interface StoredEvent {
   event: ChainEvent;
@@ -47,6 +48,8 @@ export interface Scope2 {
 export interface ProjectionSession {
   checkpoint(): Promise<Checkpoint | null>;
   saveCheckpoint(checkpoint: Checkpoint): Promise<void>;
+  saveLineage(generation: number, lineage: Hex): Promise<void>;
+  lineageAt(generation: number): Promise<Hex | null>;
   journalRange(
     fromExclusive: number,
     toInclusive: number,
