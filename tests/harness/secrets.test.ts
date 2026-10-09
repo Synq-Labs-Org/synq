@@ -138,6 +138,7 @@ describe('P00-003 repository secret scan', () => {
           pauseTx: hash,
           configuredTx: hash,
           createdTransaction: hash,
+          revisionLineage: hash,
         },
         null,
         2,

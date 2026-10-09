@@ -59,6 +59,7 @@ const KEY_TOKENS = new Set([
 ]);
 const HASH_TOKENS = new Set([
   'hash',
+  'lineage',
   'tx',
   'txs',
   'transaction',
