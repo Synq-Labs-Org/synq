@@ -78,6 +78,9 @@ it('Postgres Kernel state store persists append-only audit records with the stat
       instance,
     ]),
   ).rejects.toThrow('append-only');
+  await expect(pool.query(`TRUNCATE synq_kernel.audit_record`)).rejects.toThrow(
+    'append-only',
+  );
 
   await pool.query(
     `UPDATE synq_kernel.state SET state = jsonb_set(state, '{claimSequence}', '99') WHERE instance=$1`,

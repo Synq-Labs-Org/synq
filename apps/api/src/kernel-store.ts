@@ -132,6 +132,9 @@ END $$;
 DROP TRIGGER IF EXISTS audit_append_only ON synq_kernel.audit_record;
 CREATE TRIGGER audit_append_only BEFORE UPDATE OR DELETE ON synq_kernel.audit_record
   FOR EACH ROW EXECUTE FUNCTION synq_kernel.audit_append_only();
+DROP TRIGGER IF EXISTS audit_no_truncate ON synq_kernel.audit_record;
+CREATE TRIGGER audit_no_truncate BEFORE TRUNCATE ON synq_kernel.audit_record
+  FOR EACH STATEMENT EXECUTE FUNCTION synq_kernel.audit_append_only();
 `;
 
 export class PostgresKernelStateStore implements KernelStateStore {
