@@ -30,12 +30,7 @@ import {
   type DelegationEvaluator,
   type MembershipDirectory,
 } from './delegation.js';
-import {
-  KernelError,
-  asKernelError,
-  parseAs,
-  requireRule,
-} from './errors.js';
+import { KernelError, asKernelError, parseAs, requireRule } from './errors.js';
 import { FreshnessGate, type FreshnessConfig } from './freshness.js';
 import { GrantIssuer, GrantVerifier } from './grants.js';
 import {
