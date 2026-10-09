@@ -38,27 +38,142 @@ const BARE_HASH_ALLOWED = [
   /^contracts\/(evidence|abi|out|lib)\//,
   /(^|\/)pnpm-lock\.yaml$/,
 ];
-export function sensitiveName(name) {
-  const snake = name
+const KEY_TOKENS = new Set([
+  'key',
+  'keys',
+  'pk',
+  'sk',
+  'privkey',
+  'secret',
+  'secrets',
+  'mnemonic',
+  'passphrase',
+  'wallet',
+  'signer',
+  'owner',
+  'deployer',
+  'account',
+  'operator',
+  'relayer',
+  'admin',
+]);
+const HASH_TOKENS = new Set([
+  'hash',
+  'hashes',
+  'typehash',
+  'codehash',
+  'id',
+  'ids',
+  'root',
+  'digest',
+  'salt',
+  'slot',
+  'storage',
+  'topic',
+  'topics',
+  'nonce',
+  'signature',
+  'sig',
+  'commitment',
+  'leaf',
+  'selector',
+]);
+function tokens(name) {
+  return name
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
-    .replace(/-/g, '_');
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+export function hashName(name) {
+  return tokens(name).some((t) => HASH_TOKENS.has(t));
+}
+export function sensitiveName(name) {
+  const parts = tokens(name);
+  const joined = parts.join('');
+  if (parts.some((t) => HASH_TOKENS.has(t))) return false;
   return (
-    /(private_?key|privkey|secret|mnemonic|seed|passphrase|signer_?key)/.test(
-      snake,
-    ) || /(^|[_.])(pk|sk|key)$/.test(snake)
+    parts.some((t) => KEY_TOKENS.has(t)) ||
+    /privatekey|seedphrase|recoveryphrase|signingkey/.test(joined)
   );
 }
+const NAME = String.raw`([A-Za-z_][A-Za-z0-9_.-]*)["'\x60]?\s*[:=]\s*`;
 function labelledHexKeys(text) {
   const found = [];
-  const pattern =
-    /([A-Za-z_][A-Za-z0-9_.-]*)["'`]?\s*[:=]\s*["'`]?(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])/g;
+  const pattern = new RegExp(
+    NAME + String.raw`["'\x60]?(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])`,
+    'g',
+  );
   for (const match of text.matchAll(pattern))
     if (sensitiveName(match[1])) found.push(match[1]);
   return found;
 }
-function hasBareHexLine(text) {
-  return /^[ \t]*["'`]?(?:0x)?[0-9a-fA-F]{64}["'`]?[,;]?[ \t]*$/m.test(text);
+function labelledEncodedKeys(text) {
+  const base64 = new RegExp(
+    NAME + String.raw`["'\x60]([A-Za-z0-9+/]{43}=?)["'\x60]`,
+    'g',
+  );
+  for (const match of text.matchAll(base64))
+    if (
+      sensitiveName(match[1]) &&
+      Buffer.from(match[2], 'base64').length === 32
+    )
+      return true;
+  const bytes = new RegExp(
+    NAME +
+      String.raw`(?:new\s+Uint8Array\(\s*|Buffer\.from\(\s*)?\[((?:\s*(?:0x[0-9a-fA-F]{1,2}|\d{1,3})\s*,){31}\s*(?:0x[0-9a-fA-F]{1,2}|\d{1,3})\s*,?\s*)\]`,
+    'g',
+  );
+  for (const match of text.matchAll(bytes))
+    if (sensitiveName(match[1])) return true;
+  return false;
+}
+function signingConstructorLiteral(text) {
+  return /\b(?:privateKeyToAccount|privateKeyToAddress|toAccount|Wallet|SigningKey|fromPrivateKey|fromSecretKey|getPublicKey)\s*\(\s*["'`](?:0x)?[0-9a-fA-F]{64}["'`]/.test(
+    text,
+  );
+}
+function unlabelledHexJson(text) {
+  for (const match of text.matchAll(
+    /"([^"\n]{1,80})"\s*:\s*"(?:0x)?[0-9a-fA-F]{64}"/g,
+  ))
+    if (!hashName(match[1])) return true;
+  return false;
+}
+function splitHexKey(text) {
+  return /["'`](?:0x)?[0-9a-fA-F]{32}["'`]\s*\+\s*["'`][0-9a-fA-F]{32}["'`]/.test(
+    text,
+  );
+}
+function keystoreJson(text) {
+  return (
+    /"crypto"\s*:/i.test(text) &&
+    /"ciphertext"\s*:/.test(text) &&
+    /"kdf"\s*:/.test(text)
+  );
+}
+function bareHexLines(text) {
+  const result = { bare: false, labelled: false };
+  const lines = text.split(/\r?\n/);
+  for (const [i, line] of lines.entries()) {
+    if (!/^[ \t]*["'`]?(?:0x)?[0-9a-fA-F]{64}["'`]?[,;)]?[ \t]*$/.test(line))
+      continue;
+    const previous = lines
+      .slice(0, i)
+      .reverse()
+      .find((l) => l.trim() !== '');
+    const declared = previous?.match(/([A-Za-z_][A-Za-z0-9_]*)\s*([:=])\s*$/);
+    if (declared && sensitiveName(declared[1])) {
+      result.labelled = true;
+      continue;
+    }
+    if (declared?.[2] === '=') continue;
+    if (previous && /\b(keccak256|sha256|hash\w*)\s*\(\s*$/i.test(previous))
+      continue;
+    result.bare = true;
+  }
+  return result;
 }
 export function findMnemonic(text) {
   const words = text.toLowerCase().split(/[^a-z]+/);
@@ -117,7 +232,17 @@ export function scanRepository(root) {
       if (pattern.test(text)) violations.push({ file, rule });
     if (labelledHexKeys(text).length)
       violations.push({ file, rule: 'labelled-hex-key' });
-    if (!BARE_HASH_ALLOWED.some((p) => p.test(file)) && hasBareHexLine(text))
+    if (labelledEncodedKeys(text))
+      violations.push({ file, rule: 'labelled-encoded-key' });
+    if (signingConstructorLiteral(text))
+      violations.push({ file, rule: 'key-literal-in-signer' });
+    if (unlabelledHexJson(text))
+      violations.push({ file, rule: 'unlabelled-hex-json' });
+    if (splitHexKey(text)) violations.push({ file, rule: 'split-hex-key' });
+    if (keystoreJson(text)) violations.push({ file, rule: 'keystore-json' });
+    const bare = bareHexLines(text);
+    if (bare.labelled) violations.push({ file, rule: 'labelled-hex-key' });
+    if (bare.bare && !BARE_HASH_ALLOWED.some((p) => p.test(file)))
       violations.push({ file, rule: 'bare-hex-secret' });
     if (labelledMnemonic(text) || findMnemonic(text))
       violations.push({ file, rule: 'bip39-mnemonic' });

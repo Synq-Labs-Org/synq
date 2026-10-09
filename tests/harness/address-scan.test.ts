@@ -15,6 +15,7 @@ const ALLOWED_PATHS = [
   /^reports\//,
   /^adrs\//,
   /^docs\//,
+  /(^|\/)README\.md$/,
   /(^|\/)pnpm-lock\.yaml$/,
 ];
 const SYNTHETIC = /^0x(?:0{30,}[0-9a-fA-F]*|([0-9a-fA-F])\1{39})$/;
