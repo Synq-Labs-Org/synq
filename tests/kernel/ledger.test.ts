@@ -24,11 +24,13 @@ import {
   mandate,
   now,
   type Harness,
+  AUDIT_KEY,
 } from './fixtures.js';
 
 function restore(h: Harness, snapshot: unknown) {
   return Kernel.restore(snapshot, {
     clock: h.clock,
+    auditKey: AUDIT_KEY,
     approvalLedger: h.ledger,
     membershipDirectory: h.directory,
     freshness: { probe: h.probe, maxLagBlocks: 0 },
@@ -283,10 +285,13 @@ describe('§52 audit decision artifacts and §11 lifecycle', () => {
       code: 'AMOUNT_CAP',
       policy: { rejection: { code: 'AMOUNT_CAP', rule: 'cap.token' } },
     });
-    expect(AuditRecorder.verify(log)).toHaveLength(3);
+    expect(AuditRecorder.verify(log, AUDIT_KEY)).toHaveLength(3);
+    expect(() => AuditRecorder.verify(log)).toThrow('AUDIT_CHAIN_BROKEN');
     const tampered = structuredClone(log);
     (tampered[1]!.payload as { status: string }).status = 'POLICY_REJECTED';
-    expect(() => AuditRecorder.verify(tampered)).toThrow('AUDIT_CHAIN_BROKEN');
+    expect(() => AuditRecorder.verify(tampered, AUDIT_KEY)).toThrow(
+      'AUDIT_CHAIN_BROKEN',
+    );
     const sink: unknown[] = [];
     const withSink = harness(input, [mandate()], {
       auditSink: { append: (r) => sink.push(r) },

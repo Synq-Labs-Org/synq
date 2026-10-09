@@ -5,6 +5,9 @@ import type {
   FreshnessObservation,
   FreshnessProbe,
   FreshnessQuery,
+  NonceStatusQuery,
+  NonceStatusReader,
+  NonceStatusReply,
 } from '@synq/kernel';
 import {
   GrantExecutionObservationSchema,
@@ -26,7 +29,14 @@ const registryAbi = parseAbi([
 ]);
 const moduleAbi = parseAbi([
   'function paused(address account) view returns (bool)',
+  'function nonceUsed(address account, uint256 nonce) view returns (bool)',
+  'function intentUsed(address account, bytes32 intentHash) view returns (bool)',
+  'function registry() view returns (address)',
+  'function factory() view returns (address)',
 ]);
+const UINT = /^(0|[1-9][0-9]{0,77})$/;
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const HASH = /^0x[0-9a-fA-F]{64}$/;
 
 export class ReadModelFreshnessProbe implements FreshnessProbe {
   constructor(
@@ -129,4 +139,87 @@ export function grantExecutionObservation(
     emitter: event.contract,
     event: event.payload,
   });
+}
+
+export type NonceStatusClient = Pick<
+  PublicClient,
+  'getChainId' | 'getBlockNumber' | 'getBlock' | 'readContract'
+>;
+
+export class RpcNonceStatusReader implements NonceStatusReader {
+  constructor(
+    private readonly client: NonceStatusClient,
+    private readonly config: Pick<
+      ProjectionConfig,
+      'chainId' | 'module' | 'registry' | 'factory' | 'confirmationDepth'
+    >,
+  ) {
+    if (
+      !Number.isSafeInteger(config.confirmationDepth) ||
+      config.confirmationDepth < 1
+    )
+      throw new ReadModelError('CONFIG_MISMATCH', 'confirmation depth');
+  }
+  async status(query: NonceStatusQuery): Promise<NonceStatusReply> {
+    const module = this.config.module.toLowerCase() as Hex;
+    if (
+      query.chainId !== this.config.chainId ||
+      !ADDRESS.test(query.module) ||
+      query.module.toLowerCase() !== module
+    )
+      throw new ReadModelError('CONFIG_MISMATCH', 'chain or module');
+    if (
+      !ADDRESS.test(query.account) ||
+      !UINT.test(query.nonce) ||
+      !HASH.test(query.intentHash)
+    )
+      throw new ReadModelError('CONFIG_MISMATCH', 'malformed query');
+    const chainId = await this.client.getChainId();
+    if (chainId !== this.config.chainId)
+      throw new ReadModelError('CONFIG_MISMATCH', `rpc chain ${chainId}`);
+    const head = await this.client.getBlockNumber({ cacheTime: 0 });
+    const depth = BigInt(this.config.confirmationDepth);
+    if (head + 1n < depth)
+      throw new ReadModelError('STALE_INDEX', 'chain shorter than depth');
+    const blockNumber = head + 1n - depth;
+    const block = await this.client.getBlock({ blockNumber });
+    if (block.number !== blockNumber)
+      throw new ReadModelError('INCONSISTENT_WITH_CHAIN', 'block number');
+    const account = query.account.toLowerCase() as Hex;
+    const at = { address: module, abi: moduleAbi, blockNumber } as const;
+    const [registry, factory, nonceUsed, intentUsed] = await Promise.all([
+      this.client.readContract({ ...at, functionName: 'registry' }),
+      this.client.readContract({ ...at, functionName: 'factory' }),
+      this.client.readContract({
+        ...at,
+        functionName: 'nonceUsed',
+        args: [account, BigInt(query.nonce)],
+      }),
+      this.client.readContract({
+        ...at,
+        functionName: 'intentUsed',
+        args: [account, query.intentHash],
+      }),
+    ]);
+    if (
+      registry.toLowerCase() !== this.config.registry.toLowerCase() ||
+      factory.toLowerCase() !== this.config.factory.toLowerCase()
+    )
+      throw new ReadModelError('CONFIG_MISMATCH', 'module deployment');
+    const number = Number(blockNumber);
+    const timestamp = Number(block.timestamp);
+    if (!Number.isSafeInteger(number) || !Number.isSafeInteger(timestamp))
+      throw new ReadModelError('INCONSISTENT_WITH_CHAIN', 'block bounds');
+    return {
+      chainId: this.config.chainId,
+      module,
+      account,
+      nonce: query.nonce,
+      intentHash: query.intentHash.toLowerCase() as Hex,
+      nonceUsed,
+      intentUsed,
+      blockNumber: number,
+      blockTimestamp: timestamp,
+    };
+  }
 }

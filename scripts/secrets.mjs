@@ -120,6 +120,19 @@ function labelledEncodedKeys(text) {
       Buffer.from(match[2], 'base64').length === 32
     )
       return true;
+  const bare = new RegExp(
+    String.raw`([A-Za-z_][A-Za-z0-9_.-]*)\s*[:=][ \t]*([A-Za-z0-9+/]{43}=?)(?![A-Za-z0-9+/=])`,
+    'g',
+  );
+  for (const match of text.matchAll(bare))
+    if (
+      sensitiveName(match[1]) &&
+      /[0-9+/]/.test(match[2]) &&
+      /[A-Z]/.test(match[2]) &&
+      /[a-z]/.test(match[2]) &&
+      Buffer.from(match[2], 'base64').length === 32
+    )
+      return true;
   const bytes = new RegExp(
     NAME +
       String.raw`(?:new\s+Uint8Array\(\s*|Buffer\.from\(\s*)?\[((?:\s*(?:0x[0-9a-fA-F]{1,2}|\d{1,3})\s*,){31}\s*(?:0x[0-9a-fA-F]{1,2}|\d{1,3})\s*,?\s*)\]`,
@@ -129,10 +142,24 @@ function labelledEncodedKeys(text) {
     if (sensitiveName(match[1])) return true;
   return false;
 }
+const SIGNER_CALL =
+  /\b(?:privateKeyToAccount|privateKeyToAddress|toAccount|Wallet|SigningKey|fromPrivateKey|fromSecretKey|getPublicKey)\s*\(/g;
+const QUOTED_KEY = /["'`](?:0x)?[0-9a-fA-F]{64}["'`]/;
+function callArguments(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length && i < open + 2000; i++) {
+    const c = text[i];
+    if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return text.slice(open + 1, i);
+  }
+  return text.slice(open + 1, open + 2000);
+}
 function signingConstructorLiteral(text) {
-  return /\b(?:privateKeyToAccount|privateKeyToAddress|toAccount|Wallet|SigningKey|fromPrivateKey|fromSecretKey|getPublicKey)\s*\(\s*["'`](?:0x)?[0-9a-fA-F]{64}["'`]/.test(
-    text,
-  );
+  for (const match of text.matchAll(SIGNER_CALL)) {
+    const args = callArguments(text, match.index + match[0].length - 1);
+    if (QUOTED_KEY.test(args) || hexPieces(args)) return true;
+  }
+  return false;
 }
 function unlabelledHexJson(text) {
   for (const match of text.matchAll(
@@ -141,10 +168,68 @@ function unlabelledHexJson(text) {
     if (!hashName(match[1])) return true;
   return false;
 }
-function splitHexKey(text) {
-  return /["'`](?:0x)?[0-9a-fA-F]{32}["'`]\s*\+\s*["'`][0-9a-fA-F]{32}["'`]/.test(
-    text,
+const PIECE = String.raw`["'\x60](?:0x)?[0-9a-fA-F]{8,56}["'\x60]`;
+function piecesTotal64(run) {
+  const hex = [...run.matchAll(/["'`](?:0x)?([0-9a-fA-F]+)["'`]/g)]
+    .map((m) => m[1])
+    .join('');
+  return hex.length === 64;
+}
+function hexPieces(text) {
+  const plus = new RegExp(String.raw`${PIECE}(?:\s*\+\s*${PIECE}){1,7}`, 'g');
+  for (const match of text.matchAll(plus))
+    if (piecesTotal64(match[0])) return true;
+  const array = new RegExp(
+    String.raw`\[\s*${PIECE}(?:\s*,\s*${PIECE}){1,7}\s*,?\s*\]\s*\.\s*join\s*\(`,
+    'g',
   );
+  for (const match of text.matchAll(array))
+    if (piecesTotal64(match[0])) return true;
+  for (const match of text.matchAll(/`([^`]{0,400})`/g)) {
+    if (!match[1].includes('${')) continue;
+    const inlined = match[1]
+      .replace(/\$\{\s*["'](?:0x)?([0-9a-fA-F]+)["']\s*\}/g, '$1')
+      .replace(/^0x/, '');
+    if (/(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])/.test(inlined))
+      return true;
+  }
+  return false;
+}
+function splitHexKey(text) {
+  return hexPieces(text);
+}
+const TABLE_KEY = /^`?(?:0x)?[0-9a-fA-F]{64}`?$/;
+function tableCellKeys(text) {
+  let header = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (!/^\s*\|.*\|\s*$/.test(line)) {
+      header = null;
+      continue;
+    }
+    const cells = line
+      .trim()
+      .slice(1, -1)
+      .split('|')
+      .map((c) => c.trim());
+    if (cells.every((c) => /^:?-{3,}:?$/.test(c))) continue;
+    if (!header) {
+      header = cells;
+      continue;
+    }
+    for (const [i, cell] of cells.entries()) {
+      const value = cell.replace(/^\*+|\*+$/g, '');
+      const bare = value.replace(/`/g, '');
+      const encoded =
+        /^[A-Za-z0-9+/]{43}=?$/.test(bare) &&
+        /[0-9+/]/.test(bare) &&
+        Buffer.from(bare, 'base64').length === 32;
+      if (!TABLE_KEY.test(value) && !encoded) continue;
+      const label = (cells[i - 1] ?? '').replace(/[`*]/g, '');
+      const column = (header[i] ?? '').replace(/[`*]/g, '');
+      if (sensitiveName(label) || sensitiveName(column)) return true;
+    }
+  }
+  return false;
 }
 function keystoreJson(text) {
   return (
@@ -239,6 +324,8 @@ export function scanRepository(root) {
     if (unlabelledHexJson(text))
       violations.push({ file, rule: 'unlabelled-hex-json' });
     if (splitHexKey(text)) violations.push({ file, rule: 'split-hex-key' });
+    if (tableCellKeys(text))
+      violations.push({ file, rule: 'markdown-table-key' });
     if (keystoreJson(text)) violations.push({ file, rule: 'keystore-json' });
     const bare = bareHexLines(text);
     if (bare.labelled) violations.push({ file, rule: 'labelled-hex-key' });

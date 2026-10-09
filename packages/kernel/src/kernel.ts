@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AddressSchema,
+  HashSchema,
   NetworkProfileSchema,
   PluginManifestSchema,
   RiskPacketSchema,
@@ -73,19 +74,26 @@ export type TrustedEvidence = {
   simulationHashes: readonly string[];
 };
 export const NonceStatusSchema = z.strictObject({
+  chainId: z.number().int().positive(),
+  module: AddressSchema,
+  account: AddressSchema,
+  nonce: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  intentHash: HashSchema,
   nonceUsed: z.boolean(),
   intentUsed: z.boolean(),
   blockNumber: z.number().int().nonnegative(),
   blockTimestamp: z.number().int().nonnegative(),
 });
+export type NonceStatusQuery = {
+  chainId: number;
+  module: `0x${string}`;
+  account: `0x${string}`;
+  nonce: string;
+  intentHash: `0x${string}`;
+};
+export type NonceStatusReply = NonceStatus & NonceStatusQuery;
 export interface NonceStatusReader {
-  status(query: {
-    chainId: number;
-    module: `0x${string}`;
-    account: `0x${string}`;
-    nonce: string;
-    intentHash: `0x${string}`;
-  }): Promise<NonceStatus>;
+  status(query: NonceStatusQuery): Promise<NonceStatusReply>;
 }
 export type KernelDependencies = {
   clock: Clock;
@@ -96,6 +104,7 @@ export type KernelDependencies = {
   freshness: FreshnessConfig;
   plugins: readonly unknown[];
   auditSink?: AuditSink;
+  auditKey?: Uint8Array;
 };
 export type KernelOptions = KernelDependencies & {
   network: NetworkProfile;
@@ -207,7 +216,11 @@ export class Kernel {
     this.delegationEvaluator = options.delegations ?? NO_DELEGATIONS;
     this.nonceStatus = options.nonceStatus;
     this.freshness = new FreshnessGate(options.freshness);
-    this.audit = new AuditRecorder(options.auditSink);
+    requireRule(
+      this.network.profile === 'local/anvil' || options.auditKey !== undefined,
+      'AUDIT_UNAVAILABLE',
+    );
+    this.audit = new AuditRecorder(options.auditSink, options.auditKey);
     for (const raw of options.plugins) {
       const manifest = parseAs(PluginManifestSchema, raw, 'INVALID_REQUEST');
       requireRule(!this.plugins.has(manifest.id), 'INVALID_REQUEST');
@@ -269,16 +282,30 @@ export class Kernel {
   }
   private async readNonce(grant: ExecutionGrant): Promise<NonceStatus | null> {
     if (!this.nonceStatus) return null;
+    const query: NonceStatusQuery = {
+      chainId: grant.chainId,
+      module: grant.draft.domain.verifyingContract,
+      account: grant.account,
+      nonce: grant.nonce,
+      intentHash: grant.intentHash,
+    };
     try {
-      return NonceStatusSchema.parse(
-        await this.nonceStatus.status({
-          chainId: grant.chainId,
-          module: grant.draft.domain.verifyingContract,
-          account: grant.account,
-          nonce: grant.nonce,
-          intentHash: grant.intentHash,
-        }),
+      const reply = NonceStatusSchema.parse(
+        await this.nonceStatus.status({ ...query }),
       );
+      const echoed =
+        reply.chainId === query.chainId &&
+        reply.module.toLowerCase() === query.module.toLowerCase() &&
+        reply.account.toLowerCase() === query.account.toLowerCase() &&
+        reply.nonce === query.nonce &&
+        reply.intentHash.toLowerCase() === query.intentHash.toLowerCase();
+      if (!echoed) return null;
+      return {
+        nonceUsed: reply.nonceUsed,
+        intentUsed: reply.intentUsed,
+        blockNumber: reply.blockNumber,
+        blockTimestamp: reply.blockTimestamp,
+      };
     } catch {
       return null;
     }
@@ -788,7 +815,11 @@ export class Kernel {
     kernel.ledger = state.ledger;
     kernel.delegationUsage = state.delegations;
     kernel.lifecycles = state.lifecycles;
-    kernel.audit = AuditRecorder.restore(state.audit, dependencies.auditSink);
+    kernel.audit = AuditRecorder.restore(
+      state.audit,
+      dependencies.auditSink,
+      dependencies.auditKey,
+    );
     kernel.lastNow = state.lastNow;
     kernel.claimSequence = state.claimSequence;
     return kernel;

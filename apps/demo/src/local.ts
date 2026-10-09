@@ -50,6 +50,7 @@ import {
   packSafeSignatures,
   prepareModuleCall,
   signGrantBoundTransaction,
+  submitGrantTransaction,
   synqDeployment,
 } from '@synq/execution-worker';
 import { moduleAbi, registryAbi, tokenAbi } from '@synq/execution-worker/abi';
@@ -424,15 +425,20 @@ export async function startLocalVertical() {
           },
         },
       );
-      const submitted = await broadcaster.submit({
-        schemaVersion: 1,
-        grantId: grant.grantId,
-        transactionHash,
-        rawTransaction: raw,
-        state: 'SIGNED',
-        chainId: 31337,
-        blockNumber: null,
-      });
+      const submitted = await submitGrantTransaction(
+        kernel,
+        claim,
+        broadcaster,
+        {
+          schemaVersion: 1,
+          grantId: grant.grantId,
+          transactionHash,
+          rawTransaction: raw,
+          state: 'SIGNED',
+          chainId: 31337,
+          blockNumber: null,
+        },
+      );
       if (submitted.state === 'RECONCILIATION_REQUIRED')
         throw new Error('SUBMISSION_AMBIGUOUS: reconcile journal before retry');
       const receipt = await chain.client.waitForTransactionReceipt({

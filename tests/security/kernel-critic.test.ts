@@ -35,6 +35,7 @@ import {
   now,
   owners,
   type Prepared,
+  AUDIT_KEY,
 } from '../kernel/fixtures.js';
 
 const callHash = hash(0xca11);
@@ -196,6 +197,7 @@ describe('independent kernel security critic', () => {
       JSON.parse(JSON.stringify(h.kernel.snapshot())),
       {
         clock: h.clock,
+        auditKey: AUDIT_KEY,
         approvalLedger: h.ledger,
         membershipDirectory: h.directory,
         freshness: { probe: h.probe, maxLagBlocks: 0 },
@@ -219,6 +221,7 @@ describe('independent kernel security critic', () => {
       JSON.parse(JSON.stringify(h.kernel.snapshot())),
       {
         clock: h.clock,
+        auditKey: AUDIT_KEY,
         approvalLedger: h.ledger,
         membershipDirectory: h.directory,
         freshness: { probe: h.probe, maxLagBlocks: 0 },

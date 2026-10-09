@@ -123,6 +123,7 @@ export function sandboxKernel(input: {
     freshness: { probe, maxLagBlocks: 0 },
     plugins: [sandboxManifest],
     mandates: [],
+    auditKey: new Uint8Array(32).fill(5),
   });
 }
 

@@ -240,6 +240,53 @@ describe('dependency boundary rules', () => {
       }),
     ).toEqual([]);
   });
+  it('dynamic crypto loading, element access, WebCrypto signing and code evaluation are flagged in restricted zones', () => {
+    const flagged = [
+      "export const f = async () => { const { sign } = await import('node:crypto'); return sign; };\n",
+      "export const f = async () => { const { sign: s } = await import('crypto'); return s; };\n",
+      "export const f = async () => { const c = await import('node:crypto'); return c.createSign('sha256'); };\n",
+      "export const f = async () => (await import('node:crypto')).generateKeyPairSync;\n",
+      "export const f = async () => (await import('node:crypto'))['sign'];\n",
+      "export const f = () => import('node:crypto').then((c) => c.sign);\n",
+      "export const f = async () => { const { ...all } = await import('node:crypto'); return all; };\n",
+      "import * as c from 'node:crypto';\nexport const f = () => c['sign'];\n",
+      "import * as c from 'node:crypto';\nconst k = 'si' + 'gn';\nexport const f = () => c[k];\n",
+      "const { sign } = require('node:crypto');\nexport const f = sign;\n",
+      "export const f = () => process.getBuiltinModule('node:crypto');\n",
+      "export const f = (k: CryptoKey, d: Uint8Array) => crypto.subtle.sign('ECDSA', k, d);\n",
+      "export const f = (k: CryptoKey, d: Uint8Array) => globalThis.crypto.subtle['sign']('ECDSA', k, d);\n",
+      "export const f = () => new Function('return 1');\n",
+      "export const f = () => new globalThis.Function('return 1');\n",
+      "export const f = () => eval('1');\n",
+      "export const f = () => globalThis.require('node:crypto');\n",
+      "export const f = () => module.require('node:crypto');\n",
+      "export const f = () => globalThis['require'];\n",
+    ];
+    for (const source of flagged)
+      for (const file of [
+        'packages/kernel/index.ts',
+        'packages/agent-runtime/index.ts',
+      ])
+        expect(workspace({ [file]: source }), `${file}: ${source}`).not.toEqual(
+          [],
+        );
+    for (const source of [
+      "export const f = async () => { const { createHash, randomUUID } = await import('node:crypto'); return [createHash, randomUUID]; };\n",
+      "export const f = async () => (await import('node:crypto')).createHmac;\n",
+      "import * as c from 'node:crypto';\nexport const f = () => c['createHash']('sha256');\n",
+      "export const f = (d: Uint8Array) => crypto.subtle.digest('SHA-256', d);\n",
+      "export const f = (o: { sign: number }) => o['sign'];\n",
+    ])
+      expect(workspace({ 'packages/kernel/index.ts': source }), source).toEqual(
+        [],
+      );
+    expect(
+      workspace({
+        'workers/execution/index.ts':
+          "export const f = async () => (await import('node:crypto')).sign;\n",
+      }),
+    ).toEqual([]);
+  });
   it('type-only references to signing modules are not runtime authority', () => {
     expect(
       workspace({

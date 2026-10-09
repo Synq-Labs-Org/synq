@@ -141,6 +141,72 @@ function analyze(file, text) {
     (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
       ? node.text
       : null;
+  const reference = (node) => {
+    while (ts.isParenthesizedExpression(node)) node = node.expression;
+    if (ts.isIdentifier(node)) return node.text;
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      ['globalThis', 'global', 'window', 'self'].includes(node.expression.text)
+    )
+      return node.name.text;
+    return null;
+  };
+  const memberName = (node) => {
+    if (ts.isPropertyAccessExpression(node)) return node.name.text;
+    if (ts.isElementAccessExpression(node))
+      return literal(node.argumentExpression);
+    return undefined;
+  };
+  const loadedCryptoUse = (call) => {
+    let node = call;
+    for (;;) {
+      const parent = node.parent;
+      if (
+        parent &&
+        (ts.isAwaitExpression(parent) ||
+          ts.isParenthesizedExpression(parent) ||
+          ts.isAsExpression(parent) ||
+          ts.isNonNullExpression(parent))
+      )
+        node = parent;
+      else break;
+    }
+    const parent = node.parent;
+    if (
+      parent &&
+      ts.isVariableDeclaration(parent) &&
+      parent.initializer === node
+    ) {
+      if (ts.isIdentifier(parent.name))
+        return { names: [], namespace: parent.name.text, opaque: false };
+      if (ts.isObjectBindingPattern(parent.name)) {
+        const names = [];
+        for (const el of parent.name.elements) {
+          const key = el.propertyName ?? el.name;
+          if (el.dotDotDotToken) return { names: [], opaque: true };
+          if (ts.isIdentifier(key) || ts.isStringLiteral(key))
+            names.push(key.text);
+          else return { names: [], opaque: true };
+        }
+        return { names, opaque: false };
+      }
+      return { names: [], opaque: true };
+    }
+    if (
+      parent &&
+      memberName(parent) !== undefined &&
+      parent.expression === node
+    ) {
+      const name = memberName(parent);
+      return name === null || ['then', 'catch', 'finally'].includes(name)
+        ? { names: [], opaque: true }
+        : { names: [name], opaque: false };
+    }
+    if (parent && ts.isExpressionStatement(parent))
+      return { names: [], opaque: false };
+    return { names: [], opaque: true };
+  };
   const visit = (node) => {
     if (ts.isTypeNode(node)) {
       visitType(node);
@@ -194,27 +260,69 @@ function analyze(file, text) {
     }
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
+      const getBuiltin =
+        ts.isPropertyAccessExpression(callee) &&
+        callee.name.text === 'getBuiltinModule';
       const loader =
+        getBuiltin ||
         callee.kind === ts.SyntaxKind.ImportKeyword ||
         (ts.isIdentifier(callee) && callee.text === 'require') ||
         (ts.isCallExpression(callee) &&
           ts.isIdentifier(callee.expression) &&
           callee.expression.text === 'createRequire');
+      if (getBuiltin) dynamic.push('process.getBuiltinModule');
       if (loader) {
         const specifier = literal(node.arguments[0]);
         if (specifier === null) dynamic.push(node.getText(source).slice(0, 60));
-        else imports.push({ specifier, names: ['*'] });
+        else if (CRYPTO_MODULES.test(specifier)) {
+          const use = loadedCryptoUse(node);
+          imports.push({ specifier, names: use.names });
+          if (use.namespace) cryptoNamespaces.add(use.namespace);
+          if (use.opaque) identifiers.add('crypto.<dynamic>');
+        } else imports.push({ specifier, names: ['*'] });
       }
+    }
+    if (ts.isNewExpression(node) && reference(node.expression) === 'Function')
+      dynamic.push('new Function');
+    if (ts.isCallExpression(node) && reference(node.expression) === 'eval')
+      dynamic.push('eval');
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === 'require' &&
+      ts.isIdentifier(node.expression) &&
+      ['globalThis', 'global', 'module', 'window', 'self'].includes(
+        node.expression.text,
+      )
+    )
+      dynamic.push(`${node.expression.text}.require`);
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      ['globalThis', 'global', 'module', 'window', 'self'].includes(
+        node.expression.text,
+      ) &&
+      ['require', 'eval', 'Function', null].includes(
+        literal(node.argumentExpression),
+      )
+    )
+      dynamic.push(`${node.expression.text}[...]`);
+    const member = memberName(node);
+    if (member !== undefined) {
+      const base = node.expression;
+      if (
+        ts.isIdentifier(base) &&
+        cryptoNamespaces.has(base.text) &&
+        (member === null || CRYPTO_SIGNING.has(member))
+      )
+        identifiers.add(`crypto.${member ?? '<computed>'}`);
+      if (
+        (member === null || member === 'sign' || member === 'generateKey') &&
+        memberName(base) === 'subtle'
+      )
+        identifiers.add(`crypto.subtle.${member ?? '<computed>'}`);
     }
     if (ts.isIdentifier(node) && node.text === 'createRequire')
       dynamic.push('createRequire');
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      cryptoNamespaces.has(node.expression.text) &&
-      CRYPTO_SIGNING.has(node.name.text)
-    )
-      identifiers.add(`crypto.${node.name.text}`);
     if (ts.isIdentifier(node) && isSigningName(node.text))
       identifiers.add(node.text);
     ts.forEachChild(node, visit);
