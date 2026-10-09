@@ -33,8 +33,12 @@ import { localTransferPlugin } from './local-transfer-plugin.js';
 import { startAnvil } from './anvil.js';
 import { sandbox } from './sandbox.js';
 import { indexedEvents } from './events.js';
-const TRANSFER_AMOUNT = '60';
-export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
+const DEFAULT_TRANSFER_BASE_UNITS = 60_000_000n;
+export async function runLocalDemo(
+  outputDirectory: string,
+  keepAlive = false,
+  requestedAmount?: string,
+) {
   const node = await startAnvil();
   let completed = false;
   try {
@@ -49,7 +53,10 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       abi: tokenAbi,
       functionName: 'decimals',
     });
-    const amount = parseDecimal(TRANSFER_AMOUNT, decimals);
+    const amount =
+      requestedAmount === undefined
+        ? DEFAULT_TRANSFER_BASE_UNITS
+        : parseDecimal(requestedAmount, decimals);
     const asset = AssetSchema.parse({
       canonicalAssetId: `eip155:31337/erc20:${chain.token.toLowerCase()}`,
       chainId: 31337,
@@ -414,6 +421,7 @@ if (
   const result = await runLocalDemo(
     resolve('artifacts/local'),
     process.env.SYNQ_KEEP_LOCAL_CHAIN === '1',
+    process.env.SYNQ_DEMO_AMOUNT,
   );
   console.log(
     JSON.stringify(
