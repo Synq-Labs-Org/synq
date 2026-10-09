@@ -79,6 +79,98 @@ describe('dependency boundary rules', () => {
       }),
     ).toEqual([]);
   });
+  it.each([
+    ['ethers Wallet', "import { Wallet } from 'ethers';\n"],
+    ['ethers namespace', "import * as ethers from 'ethers';\n"],
+    ['ethers HD wallet', "import { HDNodeWallet } from 'ethers';\n"],
+    [
+      'viem/actions signMessage',
+      "import { signMessage } from 'viem/actions';\n",
+    ],
+    [
+      'viem/actions signTypedData',
+      "import { signTypedData } from 'viem/actions';\n",
+    ],
+    [
+      'viem/actions writeContract',
+      "import { writeContract } from 'viem/actions';\n",
+    ],
+    [
+      'viem/actions sendTransaction',
+      "import { sendTransaction } from 'viem/actions';\n",
+    ],
+    [
+      'noble secp256k1',
+      "import { secp256k1 } from '@noble/curves/secp256k1';\n",
+    ],
+    ['noble secp256k1 package', "import * as secp from '@noble/secp256k1';\n"],
+    ['scure bip32 HDKey', "import { HDKey } from '@scure/bip32';\n"],
+    [
+      'dynamic viem accounts',
+      "export const load = () => import('viem/accounts');\n",
+    ],
+  ])(
+    'signing primitive %s is forbidden in UI, planner, plugin and Kernel zones',
+    (_name, source) => {
+      for (const zone of [
+        'apps/web/page.ts',
+        'packages/agent-runtime/index.ts',
+        'plugins/kuru/index.ts',
+        'packages/kernel/index.ts',
+      ])
+        expect(
+          workspace({ [zone]: source }).some(
+            (e) =>
+              e.includes('signing authority') ||
+              e.includes('deterministic authority imports forbidden'),
+          ),
+          zone,
+        ).toBe(true);
+    },
+  );
+  it('verification-only APIs stay available to the Kernel and UI', () => {
+    expect(
+      workspace({
+        'packages/kernel/index.ts':
+          "import { recoverTypedDataAddress, verifyTypedData, hashTypedData, keccak256 } from 'viem';\nimport { verifyTypedData as verify, TypedDataEncoder } from 'ethers';\nexport const v = [recoverTypedDataAddress, verifyTypedData, hashTypedData, keccak256, verify, TypedDataEncoder];\n",
+        'apps/web/page.ts':
+          "import { createPublicClient, http, readContract } from 'viem';\nexport const c = [createPublicClient, http, readContract];\n",
+      }),
+    ).toEqual([]);
+  });
+  it('UI may reach the human-signing identity boundary; planners, plugins and the Kernel may not', () => {
+    const base = {
+      'packages/identity/package.json': pkg('@synq/identity'),
+      'packages/identity/index.ts':
+        "import { HDKey } from '@scure/bip32';\nexport const derive = HDKey;\n",
+    };
+    expect(
+      workspace({
+        ...base,
+        'apps/web/package.json': pkg('@synq/web'),
+        'apps/web/page.ts': "import { derive } from '@synq/identity';\n",
+      }),
+    ).toEqual([]);
+    expect(
+      workspace({
+        ...base,
+        'plugins/kuru/package.json': pkg('@synq/plugin-kuru'),
+        'plugins/kuru/index.ts': "import { derive } from '@synq/identity';\n",
+      }),
+    ).toContain(
+      'planner transitive signing authority: plugins/kuru -> packages/identity',
+    );
+    expect(
+      workspace({
+        ...base,
+        'packages/kernel/package.json': pkg('@synq/kernel'),
+        'packages/kernel/index.ts':
+          "import { derive } from '@synq/identity';\n",
+      }),
+    ).toContain(
+      'deterministic authority transitive signing authority: packages/kernel -> packages/identity',
+    );
+  });
   it('detects @synq/* cycles and deterministic-authority model or signer imports', () => {
     const cycle = workspace({
       'packages/a/package.json': pkg('@synq/a'),

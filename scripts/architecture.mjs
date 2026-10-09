@@ -5,22 +5,66 @@ import ts from 'typescript';
 
 const PACKAGE_ROOTS = ['packages', 'apps', 'workers', 'plugins'];
 const SKIPPED = new Set(['node_modules', 'dist', 'generated', '.git', 'out']);
+const UI = /^apps\/web$/;
 const PLANNER =
-  /^(apps\/web|packages\/(agent-runtime|brain|world-model|strategy-engine)|plugins\/[^/]+)$/;
+  /^(packages\/(agent-runtime|brain|world-model|strategy-engine)|plugins\/[^/]+)$/;
 const DETERMINISTIC = /^packages\/(domain|schemas|kernel)$/;
 const SIGNER_PACKAGES = /^(workers\/execution|packages\/wallet-core)$/;
-const SIGNING_IDENTIFIERS = new Set([
+const HUMAN_SIGNING_BOUNDARY = /^packages\/identity$/;
+const SIGNING_PRIMITIVE_MODULES =
+  /^(viem\/accounts|ethers\/wallet|@noble\/(curves|secp256k1|ed25519)(\/.*)?|@scure\/bip(32|39)(\/.*)?|@synq\/(execution-worker|wallet-core)(\/.*)?)$/;
+const VIEM_MODULES = /^viem(\/actions|\/wallet)?$/;
+const ETHERS_MODULES = /^ethers(\/.*)?$/;
+const ETHERS_VERIFICATION_API = new Set([
+  'verifyMessage',
+  'verifyTypedData',
+  'recoverAddress',
+  'hashMessage',
+  'TypedDataEncoder',
+  'getAddress',
+  'isAddress',
+  'keccak256',
+  'id',
+  'solidityPackedKeccak256',
+  'AbiCoder',
+  'Interface',
+  'getBytes',
+  'hexlify',
+  'toUtf8Bytes',
+  'ZeroAddress',
+]);
+const SIGNING_NAMES = new Set([
   'privateKeyToAccount',
   'mnemonicToAccount',
   'hdKeyToAccount',
   'generatePrivateKey',
+  'generateMnemonic',
   'createWalletClient',
-  'signTransaction',
-  'sendTransaction',
-  'sendRawTransaction',
+  'walletActions',
+  'toAccount',
+  'writeContract',
+  'deployContract',
+  'Wallet',
+  'HDNodeWallet',
+  'SigningKey',
+  'HDKey',
 ]);
-const SIGNING_MODULES =
-  /^(viem\/accounts|@synq\/(execution-worker|wallet-core)(\/.*)?)$/;
+export function isSigningName(name) {
+  return (
+    SIGNING_NAMES.has(name) ||
+    /^(sign|send)(Transaction|RawTransaction|Message|TypedData|Authorization|Calls|UserOperation)$/.test(
+      name,
+    )
+  );
+}
+export function signingImport(specifier, names) {
+  if (SIGNING_PRIMITIVE_MODULES.test(specifier)) return true;
+  if (VIEM_MODULES.test(specifier))
+    return names.some((n) => n === '*' || isSigningName(n));
+  if (ETHERS_MODULES.test(specifier))
+    return names.some((n) => !ETHERS_VERIFICATION_API.has(n));
+  return false;
+}
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 
@@ -73,9 +117,13 @@ function analyze(file, text) {
     ) {
       const names = [];
       const clause = ts.isImportDeclaration(node) ? node.importClause : null;
+      if (clause?.name) names.push('default');
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings))
+        names.push('*');
       if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings))
         for (const el of clause.namedBindings.elements)
           names.push((el.propertyName ?? el.name).text);
+      if (ts.isExportDeclaration(node) && !node.exportClause) names.push('*');
       if (
         ts.isExportDeclaration(node) &&
         node.exportClause &&
@@ -92,14 +140,14 @@ function analyze(file, text) {
         (ts.isIdentifier(node.expression) &&
           node.expression.text === 'require'))
     )
-      imports.push({ specifier: node.arguments[0].text, names: [] });
+      imports.push({ specifier: node.arguments[0].text, names: ['*'] });
     else if (
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&
       ts.isStringLiteral(node.argument.literal)
     )
       imports.push({ specifier: node.argument.literal.text, names: [] });
-    else if (ts.isIdentifier(node) && SIGNING_IDENTIFIERS.has(node.text))
+    else if (ts.isIdentifier(node) && isSigningName(node.text))
       identifiers.add(node.text);
     else if (node.kind === ts.SyntaxKind.AnyKeyword) anyCount++;
     ts.forEachChild(node, visit);
@@ -132,7 +180,8 @@ export function checkArchitecture(root) {
         name,
         readFileSync(file, 'utf8'),
       );
-      const planner = PLANNER.test(pkg.dir);
+      const ui = UI.test(pkg.dir);
+      const planner = PLANNER.test(pkg.dir) || ui;
       const deterministic = DETERMINISTIC.test(pkg.dir);
       if (identifiers.size && !SIGNER_PACKAGES.test(pkg.dir)) {
         if (planner)
@@ -159,18 +208,16 @@ export function checkArchitecture(root) {
             errors.push(`${name}: unknown workspace package ${specifier}`);
         }
         if (target && target !== pkg.dir) graph.get(pkg.dir).add(target);
-        const signingImport =
-          SIGNING_MODULES.test(specifier) ||
-          (specifier === 'viem' &&
-            names.some((n) => SIGNING_IDENTIFIERS.has(n))) ||
+        const signs =
+          signingImport(specifier, names) ||
           (target !== null && SIGNER_PACKAGES.test(target));
-        if (planner && signingImport)
+        if (planner && signs)
           errors.push(
             `${name}: planner imports signing authority ${specifier}`,
           );
         if (
           deterministic &&
-          (signingImport ||
+          (signs ||
             MODEL_SDKS.test(specifier) ||
             /^plugins\//.test(target ?? ''))
         )
@@ -178,34 +225,39 @@ export function checkArchitecture(root) {
             `${name}: deterministic authority imports forbidden dependency ${specifier}`,
           );
         if (
-          specifier === 'viem/accounts' ||
-          (specifier === 'viem' &&
-            names.some((n) => SIGNING_IDENTIFIERS.has(n)))
+          signingImport(specifier, names) &&
+          !specifier.startsWith('@synq/') &&
+          !SIGNER_PACKAGES.test(pkg.dir) &&
+          !pkg.dir.startsWith('apps/demo')
         )
-          if (
-            !SIGNER_PACKAGES.test(pkg.dir) &&
-            !pkg.dir.startsWith('apps/demo')
-          )
-            signers.add(pkg.dir);
+          signers.add(pkg.dir);
       }
     }
-  function signerPath(node, path = []) {
+  function signerPath(node, permitted, path = []) {
     if (path.includes(node)) return null;
-    if (signers.has(node)) return [...path, node];
+    if (path.length && signers.has(node) && !permitted(node))
+      return [...path, node];
     for (const dependency of graph.get(node) ?? []) {
-      const found = signerPath(dependency, [...path, node]);
+      const found = signerPath(dependency, permitted, [...path, node]);
       if (found) return found;
     }
     return null;
   }
-  for (const node of graph.keys())
-    if (PLANNER.test(node)) {
-      const path = signerPath(node);
-      if (path)
-        errors.push(
-          `planner transitive signing authority: ${path.join(' -> ')}`,
-        );
-    }
+  for (const node of graph.keys()) {
+    const zone = UI.test(node)
+      ? 'planner'
+      : PLANNER.test(node)
+        ? 'planner'
+        : DETERMINISTIC.test(node)
+          ? 'deterministic authority'
+          : null;
+    if (!zone) continue;
+    const path = signerPath(node, (dep) =>
+      UI.test(node) ? HUMAN_SIGNING_BOUNDARY.test(dep) : false,
+    );
+    if (path)
+      errors.push(`${zone} transitive signing authority: ${path.join(' -> ')}`);
+  }
   const reported = new Set();
   function visit(node, path) {
     const at = path.indexOf(node);
