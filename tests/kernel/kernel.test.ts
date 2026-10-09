@@ -26,6 +26,7 @@ import {
   trust,
   type Harness,
   type Prepared,
+  AUDIT_KEY,
 } from './fixtures.js';
 
 async function decide(
@@ -321,6 +322,7 @@ describe('Kernel authorization (KER-001…022)', () => {
       JSON.parse(JSON.stringify(h.kernel.snapshot())),
       {
         clock: h.clock,
+        auditKey: AUDIT_KEY,
         approvalLedger: h.ledger,
         membershipDirectory: h.directory,
         freshness: { probe: h.probe, maxLagBlocks: 0 },

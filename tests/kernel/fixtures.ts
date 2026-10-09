@@ -25,6 +25,7 @@ import {
   type FreshnessObservation,
   type KernelOptions,
   type MembershipDirectory,
+  type NonceStatusQuery,
 } from '../../packages/kernel/src/index.js';
 
 export const now = 1000;
@@ -43,6 +44,7 @@ export const OPERATOR = address(30);
 export const MODULE = address(40);
 export const RECIPIENT = address(50);
 export const CHAIN_GROUP = hash(77);
+export const AUDIT_KEY = new Uint8Array(32).fill(7);
 export const network = {
   profile: 'local/anvil',
   chainId: 31337,
@@ -323,8 +325,9 @@ export class FixtureChain {
   readonly usedNonces = new Set<string>();
   readonly usedIntents = new Set<string>();
   constructor(readonly clock: FixtureClock) {}
-  async status(q: { nonce: string; intentHash: string }) {
+  async status(q: NonceStatusQuery) {
     return {
+      ...q,
       nonceUsed: this.usedNonces.has(q.nonce),
       intentUsed: this.usedIntents.has(q.intentHash),
       blockNumber: 100,
@@ -352,6 +355,7 @@ export function harness(
   const directory = new FixtureDirectory();
   const chain = new FixtureChain(clock);
   const kernel = new Kernel({
+    auditKey: AUDIT_KEY,
     nonceStatus: chain,
     membershipDirectory: directory,
     network,

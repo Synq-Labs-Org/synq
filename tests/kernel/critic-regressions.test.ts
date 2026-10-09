@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import {
   Kernel,
+  type NonceStatusReply,
   WIDENING_RULES,
   isPureWidening,
   minimumOutput,
@@ -32,11 +33,13 @@ import {
   transferBinding,
   trust,
   type Harness,
+  AUDIT_KEY,
 } from './fixtures.js';
 
 const callHash = hash(0x55);
 const deps = (h: Harness) => ({
   clock: h.clock,
+  auditKey: AUDIT_KEY,
   approvalLedger: h.ledger,
   membershipDirectory: h.directory,
   nonceStatus: h.chain,
@@ -120,12 +123,7 @@ describe('F1/F4 release and revert require chain truth', () => {
       ...deps(h),
       nonceStatus: {
         status: async () =>
-          ({ nonceUsed: 'no' }) as unknown as {
-            nonceUsed: boolean;
-            intentUsed: boolean;
-            blockNumber: number;
-            blockTimestamp: number;
-          },
+          ({ nonceUsed: 'no' }) as unknown as NonceStatusReply,
       },
     });
     expect(await lying.releaseExpired()).toBe(0);

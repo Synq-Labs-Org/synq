@@ -42,6 +42,7 @@ import {
   intent,
   mandate,
   type Harness,
+  AUDIT_KEY,
 } from '../kernel/fixtures.js';
 import {
   chainId,
@@ -151,6 +152,7 @@ describe('independent foundation release review', () => {
       expect(() =>
         Kernel.restore(snapshot, {
           clock: h.clock,
+          auditKey: AUDIT_KEY,
           approvalLedger: h.ledger,
           membershipDirectory: h.directory,
           freshness: { probe: h.probe, maxLagBlocks: 0 },
