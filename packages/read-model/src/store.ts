@@ -74,6 +74,7 @@ export interface ProjectionSession {
   saveSignal(signal: Omit<ReconciliationReopened, 'seq'>): Promise<void>;
   saveArtifact(artifact: MandateArtifact): Promise<void>;
   artifactHashes(): Promise<Set<string>>;
+  artifacts(): Promise<MandateArtifact[]>;
   allTables(): Promise<Tables>;
 }
 

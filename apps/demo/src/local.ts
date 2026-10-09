@@ -3,13 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Hex, PublicClient } from 'viem';
 import { AssetSchema, MandateSchema, type ExecutionGrant } from '@synq/schemas';
-import {
-  Kernel,
-  onchainMandateId,
-  toMandateConfig,
-  type DirectVerifier,
-  type FreshnessProbe,
-} from '@synq/kernel';
+import { onchainMandateId, toMandateConfig } from '@synq/kernel';
 import {
   ChainHeadObserver,
   MemoryProjectionStore,
@@ -19,10 +13,7 @@ import {
   projectionConfig,
   type ProjectionConfig,
 } from '@synq/read-model';
-import {
-  ReadModelFreshnessProbe,
-  RpcKernelDirectVerifier,
-} from '@synq/read-model/kernel';
+import { createIntentKernel } from '@synq/api/kernel-runtime';
 import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
 import { writeDurableJson } from '@synq/execution-worker/persistence';
 import { synqDeployment } from '@synq/execution-worker';
@@ -199,38 +190,28 @@ export async function startLocalVertical() {
       return { indexed, reader: new ProjectionReader(store, rmConfig) };
     };
     const head = new ChainHeadObserver(chain.client, 31337, { ttlMs: 0 });
-    const probe: FreshnessProbe = {
-      async observe(query) {
-        const { reader } = await project();
-        return new ReadModelFreshnessProbe(reader, head).observe(query);
-      },
-    };
-    const verifier: DirectVerifier = new RpcKernelDirectVerifier(
-      chain.client,
-      rmConfig,
-    );
-    const kernel = new Kernel({
+    const kernel = createIntentKernel({
       network: localProfile.network,
       executionModule: deployment.module,
       clock,
-      approvalLedger: identity.approvalLedger,
-      membershipDirectory: identity.membershipDirectory,
-      delegations: identity.delegations,
-      freshness: {
-        probe,
-        verifier,
-        maxLagBlocks: Number(localProfile.maxIndexLagBlocks),
-      },
+      identity,
+      client: chain.client,
+      projection: rmConfig,
+      snapshots: async () => (await project()).reader,
+      head,
+      maxLagBlocks: Number(localProfile.maxIndexLagBlocks),
       plugins: [plugin.manifest],
-      mandates: [mandate],
-      balances: [
-        {
-          account: chain.account,
-          asset,
-          balance: String(await balanceOf(chain.account)),
-        },
-      ],
-      balanceBlock: String(await chain.client.getBlockNumber()),
+      state: {
+        mandates: [mandate],
+        balances: [
+          {
+            account: chain.account,
+            asset,
+            balance: String(await balanceOf(chain.account)),
+          },
+        ],
+        balanceBlock: String(await chain.client.getBlockNumber()),
+      },
     });
 
     const vertical = transferVertical({

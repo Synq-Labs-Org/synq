@@ -100,9 +100,15 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/execution-worker':
+        specifier: workspace:*
+        version: link:../../workers/execution
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model

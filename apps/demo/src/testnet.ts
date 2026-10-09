@@ -19,11 +19,11 @@ import {
   type VerifiedApproval,
 } from '@synq/schemas';
 import {
-  Kernel,
+  artifactHash,
   onchainMandateId,
   toMandateConfig,
   type AuthorizationDecision,
-  type FreshnessProbe,
+  type Kernel,
 } from '@synq/kernel';
 import {
   ChainHeadObserver,
@@ -32,14 +32,10 @@ import {
   ProjectionReconciliationSignals,
   Projector,
   RpcDirectVerifier,
+  registerMandateArtifacts,
   syncToTarget,
 } from '@synq/read-model';
 import { PostgresProjectionStore } from '@synq/read-model/storage';
-import {
-  ReadModelFreshnessProbe,
-  RpcKernelDirectVerifier,
-  RpcNonceStatusReader,
-} from '@synq/read-model/kernel';
 import { monadTestnetProfile } from '@synq/chain-registry';
 import {
   ReorgReconciler,
@@ -49,12 +45,7 @@ import {
 } from '@synq/execution-worker';
 import { registryAbi } from '@synq/execution-worker/abi';
 import { formatDecimal } from '@synq/domain';
-import {
-  PostgresIdentityStore,
-  StoreApprovalLedger,
-  StoreDelegationEvaluator,
-  StoreMembershipDirectory,
-} from '@synq/identity';
+import { PostgresIdentityStore } from '@synq/identity';
 import { grantPreview } from '@synq/identity/grant';
 import {
   approveGrantWithMera,
@@ -66,6 +57,11 @@ import {
 import { PluginRegistry } from '@synq/plugin-sdk';
 import { createV1Api } from '@synq/api/v1';
 import { mandateReader } from '@synq/api/v1-server';
+import {
+  createIntentKernel,
+  identityPorts,
+  kernelStateFromReadModel,
+} from '@synq/api/kernel-runtime';
 import { readModelRoutes } from '@synq/api/read-model-routes';
 import { registryDeploymentSettings } from '../../../scripts/envio-env.js';
 import { EnvioProcess } from '../../../scripts/envio-process.js';
@@ -544,12 +540,6 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
       clock.t = Math.max(clock.t, Number(block.timestamp));
       return clock.t;
     };
-    const probe: FreshnessProbe = {
-      async observe(query) {
-        await catchUp();
-        return new ReadModelFreshnessProbe(reader, head).observe(query);
-      },
-    };
     const calldatas = new Map<Hex, Hex>();
     const plugin = erc20TransferPlugin({
       id: PLUGIN_ID,
@@ -560,33 +550,25 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
     });
     const plugins = new PluginRegistry();
     plugins.register(plugin);
-    const kernel = new Kernel({
+    await registerMandateArtifacts(projectionStore, [
+      { mandateHash: artifactHash(mandate), artifact: mandate },
+    ]);
+    const kernel = createIntentKernel({
       network: PROFILE.network,
       executionModule: deployment.module,
       clock,
-      approvalLedger: new StoreApprovalLedger(store),
-      membershipDirectory: new StoreMembershipDirectory(store),
-      delegations: new StoreDelegationEvaluator(store),
-      freshness: {
-        probe,
-        verifier: new RpcKernelDirectVerifier(client, settings.projection),
-        maxLagBlocks: settings.maxLagBlocks,
+      identity: identityPorts(store),
+      client,
+      projection: settings.projection,
+      snapshots: async () => {
+        await catchUp();
+        return reader;
       },
-      nonceStatus: new RpcNonceStatusReader(client, settings.projection),
+      head,
+      maxLagBlocks: settings.maxLagBlocks,
       auditKey: auditKey.bytes,
       plugins: [plugin.manifest],
-      mandates: [mandate],
-      balances: [
-        {
-          account: group.account,
-          asset: ausd,
-          balance:
-            initial.group.treasury.find(
-              (t) => t.asset === ausd.address.toLowerCase(),
-            )?.balance ?? '0',
-        },
-      ],
-      balanceBlock: String(initial.indexedThroughBlock),
+      state: await kernelStateFromReadModel(reader),
     });
     late.kernel = kernel;
 

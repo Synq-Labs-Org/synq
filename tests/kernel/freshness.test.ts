@@ -184,17 +184,12 @@ describe('indexed mode refuses on chain account state exactly as direct mode', (
     };
     return { h, data };
   };
-  const directMode = (patch: AccountPatch) =>
+  const directMode = ({ mandate: m, ...rest }: AccountPatch) =>
     lagging(
       direct({
-        ...patch,
-        ...(patch.mandate
-          ? {
-              mandate: {
-                mandateId: onchainMandateId(mandate()),
-                ...patch.mandate,
-              },
-            }
+        ...rest,
+        ...(m
+          ? { mandate: { mandateId: onchainMandateId(mandate()), ...m } }
           : {}),
       }),
     );

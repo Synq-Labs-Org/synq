@@ -237,6 +237,9 @@ class MemorySession implements ProjectionSession {
   async artifactHashes() {
     return new Set(this.s.artifacts.keys());
   }
+  async artifacts() {
+    return structuredClone([...this.s.artifacts.values()]);
+  }
   async groupIndex(groupIds?: readonly Hex[]) {
     const rows = this.s.tables.rows('group');
     return structuredClone(

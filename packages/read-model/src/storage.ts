@@ -539,6 +539,19 @@ class PgSession implements ProjectionSession {
     );
     return new Set(rows.map((r) => z.string().parse(r.mandate_hash)));
   }
+  async artifacts(): Promise<MandateArtifact[]> {
+    const { rows } = await this.db.query(
+      `SELECT mandate_hash, artifact FROM ${this.t('mandate_artifact')} WHERE chain_id=$1 ORDER BY mandate_hash`,
+      [this.chainId],
+    );
+    return rows.map((r) => ({
+      mandateHash: z
+        .string()
+        .regex(/^0x[0-9a-f]{64}$/)
+        .parse(r.mandate_hash) as Hex,
+      artifact: r.artifact,
+    }));
+  }
   async allTables(): Promise<Tables> {
     const t = new Tables();
     for (const name of TABLE_NAMES) await this.select(name, 'true', [], t);
