@@ -1,0 +1,17 @@
+{
+  "chainId": 10143,
+  "profile": "sandbox/monad-testnet",
+  "deployCommit": "7b6b416fbd481a2a7b32a3a4637c353636c41c90",
+  "transactions": [
+    {
+      "hash": "0xf964a92cc64d56d55e8c06178d678494cdd509e8eea1520733bc34f699720e3d",
+      "blockNumber": 69512775,
+      "status": 1,
+      "gasUsed": 6408747,
+      "from": "0x6bd6db75b56ace65019aa08fcad4778808da08bd",
+      "to": null
+    }
+  ],
+  "explorer": "https://testnet.monadvision.com/tx/0xf964a92cc64d56d55e8c06178d678494cdd509e8eea1520733bc34f699720e3d",
+  "sourceVerification": "sourcify-api-monad.blockvision.org: SynqGroupFactory, MandateRegistry, ExecutionModule, SynqSafeModuleSetup verified 2026-10-09 (contracts/evidence/sourcify-verify-10143.txt)"
+}

@@ -1,0 +1,16 @@
+{
+  "ExecutionModule": "0xB4ac825763CFB448E127aE99BBe7Cb0B1cEBAa10",
+  "MandateRegistry": "0xB46436e9912aBd103bc16b6f79A8307A51970a35",
+  "SynqGroupFactory": "0x70E810827D681dc56D218706DEb6115eBbc06dc4",
+  "SynqSafeModuleSetup": "0xb09B951e3570F47635D545facbC3d55721F6253e",
+  "chainId": 10143,
+  "compatibilityFallbackHandler": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+  "deployer": "0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD",
+  "eip712Name": "SynqExecutionModule",
+  "eip712Version": "1",
+  "grantTypehash": "0x72b95b6e76bd875ea6656d39af4002bc3a77dba2f6035e9f158300f472961b0f",
+  "safeL2Singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+  "safeProxyFactory": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+  "safeVersion": "1.4.1",
+  "simulatedAtBlock": 69512745
+}
