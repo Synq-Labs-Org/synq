@@ -37,6 +37,7 @@ import {
   Ledger,
   nativeAssetFor,
   type Budget,
+  type ChainUsageObservation,
   type GrantClaim,
 } from './ledger.js';
 import { ActionLifecycles, plannedPath } from './lifecycle.js';
@@ -230,6 +231,10 @@ export class Kernel {
       requireRule(
         this.lifecycles.isOpen(canonical.intentId),
         'INTENT_TERMINAL',
+      );
+      requireRule(
+        !this.ledger.intentUsedOnChain(canonical.intentHash),
+        'NONCE_REPLAY',
       );
       const mandate = this.mandates.current(intent.groupId, intent.mandateId);
       const fingerprint = this.mandates.fingerprint(
@@ -582,6 +587,21 @@ export class Kernel {
     this.ledger.observeBalance(parsed, blockNumber);
   }
 
+  observeChainUsage(usage: ChainUsageObservation): void {
+    const now = this.tick();
+    requireRule(
+      Number.isSafeInteger(usage.executed) &&
+        usage.executed >= 0 &&
+        /^(0|[1-9][0-9]*)$/.test(usage.spentToken) &&
+        /^(0|[1-9][0-9]*)$/.test(usage.spentNative) &&
+        usage.nonces.every((n) => /^(0|[1-9][0-9]*)$/.test(n)) &&
+        usage.intentHashes.every((h) => /^0x[0-9a-fA-F]{64}$/.test(h)),
+      'INVALID_REQUEST',
+    );
+    this.mandates.current(usage.groupId, usage.mandateId);
+    this.ledger.observeChainUsage(usage, now);
+  }
+
   configureMandate(mandate: unknown): Mandate {
     const now = this.tick();
     return this.commit('GOVERNANCE', now, () => {
@@ -615,6 +635,9 @@ export class Kernel {
       result: this.mandates.revoke(groupId, mandateId),
       payload: { action: 'REVOKE', groupId, mandateId },
     })).result;
+  }
+  listMandates(): Mandate[] {
+    return this.mandates.values();
   }
   mandate(groupId: string, mandateId: string): Mandate {
     return this.mandates.current(groupId, mandateId);

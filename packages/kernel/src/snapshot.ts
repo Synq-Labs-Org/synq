@@ -101,6 +101,23 @@ export const KernelSnapshotSchema = z.strictObject({
   lifecycles: z.array(
     z.tuple([z.string(), z.array(transitionRecordSchema(ACTION_MACHINE))]),
   ),
+  chain: z
+    .strictObject({
+      usage: z.array(
+        z.tuple([
+          z.string(),
+          z.strictObject({
+            spentToken: AmountSchema,
+            spentNative: AmountSchema,
+            executed: Int,
+            lastExecutedAt: Int.nullable(),
+          }),
+        ]),
+      ),
+      nonces: z.array(z.string()),
+      intents: z.array(HashSchema),
+    })
+    .default({ usage: [], nonces: [], intents: [] }),
   audit: z.array(AuditRecordSchema),
 });
 export type KernelSnapshot = z.input<typeof KernelSnapshotSchema>;
@@ -131,6 +148,11 @@ export function snapshotState(state: {
     trustedEvidence: state.trustedEvidence,
     delegations: state.delegations,
     lifecycles: state.lifecycles,
+    chain: {
+      usage: [...state.ledger.chainUsage],
+      nonces: [...state.ledger.chainNonces],
+      intents: [...state.ledger.chainIntents],
+    },
     audit: state.audit,
   }) as KernelSnapshot;
 }
@@ -261,6 +283,15 @@ export function restoreState(raw: unknown) {
     'SNAPSHOT_INVALID',
   );
   for (const n of parsed.nonces) ledger.nonces.add(n);
+  for (const [key, usage] of parsed.chain.usage) {
+    requireRule(
+      keys.has(key) && !ledger.chainUsage.has(key),
+      'SNAPSHOT_INVALID',
+    );
+    ledger.chainUsage.set(key, structuredClone(usage));
+  }
+  for (const n of parsed.chain.nonces) ledger.chainNonces.add(n);
+  for (const h of parsed.chain.intents) ledger.chainIntents.add(h);
   const budgetKeys = new Set(parsed.budgets.map(([k]) => k));
   requireRule(budgetKeys.size === parsed.budgets.length, 'SNAPSHOT_INVALID');
   for (const [key, total] of totals)

@@ -30,7 +30,9 @@ import {
   createIntentKernel,
   identityPorts,
   kernelStateFromReadModel,
+  openDurableKernel,
 } from './kernel-runtime.js';
+import { PostgresKernelStateStore, type SqlPool } from './kernel-store.js';
 
 const LOCAL_PROFILE = 'local/anvil';
 const KERNEL_ENV = [
@@ -92,6 +94,7 @@ export async function intentKernelFromEnvironment(input: {
   identity: PostgresIdentityStore;
   readModel: ReadModelRuntime;
   executionModule: `0x${string}`;
+  kernelStore: SqlPool;
 }) {
   const { config, env } = input;
   if (!config.SYNQ_KERNEL_PLUGINS_FILE) return null;
@@ -103,7 +106,7 @@ export async function intentKernelFromEnvironment(input: {
         SYNQ_NETWORK: config.SYNQ_PROFILE,
       }).bytes
     : undefined;
-  return createIntentKernel({
+  const kernelConfig = {
     network: profileConfiguration(config.SYNQ_PROFILE).network,
     executionModule: input.executionModule,
     identity: identityPorts(input.identity),
@@ -115,7 +118,14 @@ export async function intentKernelFromEnvironment(input: {
     ...(auditKey ? { auditKey } : {}),
     plugins: pluginManifests(config.SYNQ_KERNEL_PLUGINS_FILE),
     state: await kernelStateFromReadModel(input.readModel.reader),
-  });
+  };
+  if (!auditKey) return createIntentKernel(kernelConfig);
+  const store = new PostgresKernelStateStore(
+    input.kernelStore,
+    `${config.SYNQ_PROFILE}:${input.executionModule.toLowerCase()}`,
+  );
+  await store.migrate();
+  return openDurableKernel({ ...kernelConfig, auditKey }, store);
 }
 
 export function mandateReader(snapshots: {
@@ -190,6 +200,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
         identity: store,
         readModel,
         executionModule: AddressSchema.parse(executionModules[chainId]),
+        kernelStore: pool,
       })
     : null;
   const app = createV1Api({
