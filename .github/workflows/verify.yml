@@ -52,6 +52,30 @@ jobs:
           name: test-results
           path: reports/tests
           if-no-files-found: warn
+  sast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: CodeQL init (JavaScript/TypeScript, security-extended)
+        # github/codeql-action v4.38.3
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+          build-mode: none
+      - name: CodeQL analyze
+        # github/codeql-action v4.38.3
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d
+        with:
+          category: /language:javascript-typescript
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
