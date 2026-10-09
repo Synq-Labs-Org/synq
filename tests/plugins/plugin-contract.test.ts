@@ -184,6 +184,23 @@ describe('plugin contract', () => {
       await malformed.refreshHealth('reader', { network: testnet, now: 5 }),
     ).toBe(false);
   });
+  it('mutation entry points are only handed out for healthy financial plugins', async () => {
+    const registry = new PluginRegistry();
+    registry.register(plugin(readOnly));
+    registry.register(fullMutator(financial));
+    const context = { network: testnet, now: 50 };
+    expect(() => registry.getMutator('mutator', testnet, 50)).toThrow(
+      'PLUGIN_UNHEALTHY',
+    );
+    await registry.refreshHealth('mutator', context);
+    await registry.refreshHealth('reader', context);
+    expect(typeof registry.getMutator('mutator', testnet, 50).simulate).toBe(
+      'function',
+    );
+    expect(() => registry.getMutator('reader', testnet, 50)).toThrow(
+      'PLUGIN_MUTATOR_INCOMPLETE',
+    );
+  });
   it('PLG-006 plugins are unavailable outside declared chains and environments', async () => {
     const registry = new PluginRegistry();
     registry.register(plugin(readOnly));

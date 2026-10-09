@@ -124,6 +124,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model

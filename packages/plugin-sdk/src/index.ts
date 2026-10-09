@@ -62,6 +62,8 @@ export interface SynqPlugin {
 export type RegisteredPlugin = Readonly<
   Omit<SynqPlugin, 'manifest'> & { manifest: Readonly<PluginManifest> }
 >;
+export type MutatorPlugin = RegisteredPlugin &
+  Required<Pick<SynqPlugin, 'prepare' | 'simulate' | 'execute' | 'reconcile'>>;
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value)) deepFreeze(child);
@@ -124,6 +126,19 @@ export class PluginRegistry {
     )
       throw new PluginError('PLUGIN_UNHEALTHY', id);
     return plugin;
+  }
+  getMutator(id: string, network: NetworkProfile, now: number): MutatorPlugin {
+    const plugin = this.get(id, network, now);
+    const { prepare, simulate, execute, reconcile } = plugin;
+    if (
+      plugin.manifest.riskClass !== 'FINANCIAL_EXECUTION' ||
+      !prepare ||
+      !simulate ||
+      !execute ||
+      !reconcile
+    )
+      throw new PluginError('PLUGIN_MUTATOR_INCOMPLETE', id);
+    return { ...plugin, prepare, simulate, execute, reconcile };
   }
   private supported(id: string, network: NetworkProfile): RegisteredPlugin {
     const plugin = this.plugins.get(id);

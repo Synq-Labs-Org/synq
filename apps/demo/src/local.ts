@@ -27,6 +27,8 @@ import {
   JournaledBroadcaster,
 } from '@synq/execution-worker';
 import { registryAbi, moduleAbi, tokenAbi } from '@synq/execution-worker/abi';
+import { PluginRegistry } from '@synq/plugin-sdk';
+import { localTransferPlugin } from './local-transfer-plugin.js';
 import { startAnvil } from './anvil.js';
 import { sandbox } from './sandbox.js';
 import { indexedEvents } from './events.js';
@@ -168,25 +170,26 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       evidenceHash: artifactHash(risk.evidence),
       riskPacketHash: artifactHash(risk),
     });
-    const simulated = await chain.client.call({
-      account: chain.account,
-      to: chain.token,
-      data,
-    });
-    const simulation: Simulation = {
-      intentHash: intentHash(intent),
-      calldataHash: keccak256(data),
-      chainId: 31337,
-      account: intent.account,
-      target: intent.target,
-      succeeded: true,
-      simulatedAt: now,
-      blockNumber: String(block.number),
-      artifactHash: artifactHash({
-        blockHash: block.hash,
-        result: simulated.data,
-      }),
-    };
+    const plugins = new PluginRegistry();
+    plugins.register(localTransferPlugin(chain.client, data));
+    const pluginContext = { network: localProfile.network, now };
+    if (!(await plugins.refreshHealth(intent.pluginId, pluginContext)))
+      throw new Error('PLUGIN_UNHEALTHY');
+    const transfer = plugins.getMutator(
+      intent.pluginId,
+      localProfile.network,
+      now,
+    );
+    const simulation: Simulation = await transfer.simulate(pluginContext, [
+      {
+        chainId: intent.chainId,
+        account: intent.account,
+        target: intent.target,
+        calldata: data,
+        value: intent.nativeValue,
+        intentHash: intentHash(intent),
+      },
+    ]);
     const balance = await chain.client.readContract({
       address: chain.token,
       abi: tokenAbi,

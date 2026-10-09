@@ -11,6 +11,7 @@
     "@synq/execution-worker": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
     "viem": "2.57.4"
