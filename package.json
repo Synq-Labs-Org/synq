@@ -28,7 +28,12 @@
     "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
     "indexer:local": "node --import tsx scripts/indexer-local.ts start",
     "indexer:migrate-local": "node --import tsx scripts/indexer-local.ts migrate",
-    "testnet:probe": "node --import tsx scripts/testnet-probe.ts"
+    "testnet:probe": "node --import tsx scripts/testnet-probe.ts",
+    "test:report": "node scripts/test-report.mjs",
+    "test:schema-compat": "vitest run tests/domain/schema-compat.test.ts",
+    "test:plugins": "vitest run tests/plugins",
+    "sources:resolve": "node scripts/resolve-sources.mjs",
+    "registry:probe": "node --import tsx scripts/testnet-probe.ts"
   },
   "dependencies": {
     "zod": "4.6.5",

@@ -1,30 +1,98 @@
-name: foundation
-on: [push, pull_request]
+name: verify
+on:
+  push:
+  pull_request:
 permissions:
   contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  SYNQ_NETWORK: local/anvil
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  typescript:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.23.1
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
-      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Format
+        run: corepack pnpm format:check
+      - name: Lint
+        run: corepack pnpm exec eslint packages apps workers scripts tests --no-warn-ignored
+      - name: Strict typecheck
+        run: corepack pnpm typecheck
+      - name: Dependency boundaries
+        run: corepack pnpm architecture
+      - name: Secret scan (whole tracked tree)
+        run: corepack pnpm secrets
+      - name: Schema compatibility (reference pack examples)
+        run: corepack pnpm test:schema-compat
+      - name: Plugin contract tests
+        run: corepack pnpm test:plugins
+      - name: Unit tests with machine-readable results
+        run: corepack pnpm test:report P01
+      - name: Build
+        run: corepack pnpm build
+      - name: Indexer codegen and typecheck
+        run: corepack pnpm indexer:codegen && corepack pnpm indexer:typecheck
+      - if: always()
+        name: Keep test evidence
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: test-results
+          path: reports/tests
+          if-no-files-found: warn
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          submodules: recursive
+      # foundry-rs/foundry-toolchain v1.9.1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09
         with:
           version: v1.2.3
-      - run: corepack pnpm indexer:codegen
-      - run: corepack pnpm indexer:typecheck
+      - name: Contract format
+        run: forge fmt --root contracts --check
+      - name: Contract build
+        run: forge build --root contracts
+      - name: Contract tests
+        run: forge test --root contracts
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [typescript, contracts]
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          submodules: recursive
+      # actions/setup-node v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.1
+      # foundry-rs/foundry-toolchain v1.9.1
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09
+        with:
+          version: v1.2.3
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm preflight
-      - run: corepack pnpm typecheck
-      - run: corepack pnpm lint
-      - run: corepack pnpm format:check
-      - run: corepack pnpm build
-      - run: corepack pnpm test
-      - run: forge fmt --root contracts --check
       - run: forge build --root contracts
-      - run: corepack pnpm test:contracts
       - run: corepack pnpm infra:up
-      - run: corepack pnpm test:integration
+      - name: Anvil, Postgres and Redis integration
+        run: corepack pnpm test:integration
