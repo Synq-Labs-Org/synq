@@ -5,6 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./grant": "./src/grant.ts",
+    "./challenge": "./src/challenge.ts",
     "./mera-browser": "./src/mera-browser.ts"
   },
   "scripts": {
@@ -14,6 +17,7 @@
     "@category-labs/mera": "0.2.0",
     "@scure/bip32": "2.4.0",
     "@scure/bip39": "2.4.0",
+    "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",

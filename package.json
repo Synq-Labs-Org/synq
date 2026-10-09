@@ -9,13 +9,13 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
     "lint": "eslint packages apps workers scripts tests --no-warn-ignored && node scripts/architecture.mjs",
-    "format": "prettier --write 'packages/**/*.ts' 'apps/**/*.ts' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
-    "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.ts' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "format": "prettier --write 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
     "test": "vitest run --exclude '**/*.integration.test.ts'",
     "test:contracts": "forge build --root contracts --offline && forge test --root contracts --offline",
-    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts",
+    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts tests/identity/services.integration.test.ts tests/api/v1.integration.test.ts",
     "demo": "node --import tsx apps/demo/src/local.ts",
     "architecture": "node scripts/architecture.mjs",
     "preflight": "node --import tsx scripts/preflight.ts",
@@ -34,7 +34,8 @@
     "test:plugins": "vitest run tests/plugins",
     "sources:resolve": "node scripts/resolve-sources.mjs",
     "registry:probe": "node --import tsx scripts/testnet-probe.ts",
-    "indexer:env": "node --import tsx scripts/envio-env.ts"
+    "indexer:env": "node --import tsx scripts/envio-env.ts",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
@@ -47,6 +48,7 @@
     "redis": "5.11.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",

@@ -13,3 +13,5 @@ indexer/envio/generated/
 indexer/envio/persisted_state/
 artifacts/local/
 .claude/
+test-results/
+playwright-report/

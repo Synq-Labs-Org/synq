@@ -13,6 +13,10 @@ mkdirSync('dist/packages/read-model/sql', { recursive: true });
 cpSync('packages/read-model/sql', 'dist/packages/read-model/sql', {
   recursive: true,
 });
+mkdirSync('dist/packages/identity/sql', { recursive: true });
+cpSync('packages/identity/sql', 'dist/packages/identity/sql', {
+  recursive: true,
+});
 const toJs = (target) => target.replace(/\.ts$/, '.js');
 for (const group of ['packages', 'workers', 'apps']) {
   for (const entry of readdirSync(group, { withFileTypes: true })) {
