@@ -27,6 +27,7 @@ export * from './intent.js';
 export * from './plugin.js';
 export * from './events.js';
 export * from './lifecycle.js';
+export * from './approval.js';
 
 export const MemberSchema = z.strictObject({
   memberId: MemberIdSchema,
