@@ -1,8 +1,8 @@
 type ChainEvent {
   id: ID!
-  blockNumber: Int!
+  blockNumber: Int! @index
   blockHash: String!
-  transactionHash: String!
+  transactionHash: String! @index
   transactionIndex: Int!
   logIndex: Int!
   contract: String!

@@ -106,39 +106,18 @@ importers:
       fastify:
         specifier: 5.12.5
         version: 5.12.5
-      zod:
-        specifier: 4.6.5
-        version: 4.6.5
-
-  apps/demo:
-    dependencies:
-      '@synq/chain-registry':
-        specifier: workspace:*
-        version: link:../../packages/chain-registry
-      '@synq/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
-      '@synq/execution-worker':
-        specifier: workspace:*
-        version: link:../../workers/execution
-      '@synq/identity':
-        specifier: workspace:*
-        version: link:../../packages/identity
-      '@synq/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      '@synq/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
-      '@synq/read-model':
-        specifier: workspace:*
-        version: link:../../packages/read-model
-      '@synq/schemas':
-        specifier: workspace:*
-        version: link:../../packages/schemas
+      pg:
+        specifier: 8.18.0
+        version: 8.18.0
+      redis:
+        specifier: 5.11.0
+        version: 5.11.0
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   indexer/envio:
     dependencies:

@@ -6,7 +6,10 @@ import {
   monadTestnetProfile,
   officialAssets,
 } from '@synq/chain-registry';
-import { envioEnvironment } from '../../scripts/envio-env.js';
+import {
+  indexerSettings,
+  registryDeploymentSettings,
+} from '../../scripts/envio-env.js';
 import { trackedFiles } from '../../scripts/secrets.mjs';
 
 const ALLOWED_PATHS = [
@@ -59,27 +62,38 @@ it('P00-004 no real address is hard-coded outside the chain registry and evidenc
   ]);
 });
 
-it('Envio environment takes its addresses from the chain registry or a recorded deployment', () => {
-  expect(envioEnvironment('sandbox/monad-testnet')).toMatchObject({
+it('Envio environment takes its addresses from the chain registry and the recorded deployment', () => {
+  const settings = registryDeploymentSettings('sandbox/monad-testnet');
+  const deployment = JSON.parse(
+    readFileSync('contracts/deployments/10143.json', 'utf8'),
+  );
+  const receipts = JSON.parse(
+    readFileSync('contracts/deployments/10143.receipts.json', 'utf8'),
+  );
+  expect(settings.env).toMatchObject({
     SYNQ_CHAIN_ID: '10143',
-    SYNQ_TREASURY_TOKEN: assetForRole(monadTestnetProfile, 'treasuryAsset')
-      .address,
+    SYNQ_START_BLOCK: String(receipts.transactions[0].blockNumber),
+    SYNQ_TREASURY_ASSETS: assetForRole(
+      monadTestnetProfile,
+      'treasuryAsset',
+    ).address.toLowerCase(),
+    SYNQ_FACTORY_ADDRESS: deployment.SynqGroupFactory.toLowerCase(),
+    SYNQ_REGISTRY_ADDRESS: deployment.MandateRegistry.toLowerCase(),
+    SYNQ_MODULE_ADDRESS: deployment.ExecutionModule.toLowerCase(),
+    SYNQ_OBSERVED_ACCOUNTS: '[]',
   });
-  const recorded = JSON.parse(
-    readFileSync('reports/evidence/local-deployment.json', 'utf8'),
-  );
-  expect(envioEnvironment('local/anvil', recorded)).toMatchObject({
-    SYNQ_CHAIN_ID: '31337',
-    SYNQ_TREASURY_TOKEN: recorded.localTestToken.toLowerCase(),
-    SYNQ_MODULE_ADDRESS: recorded.manifest.executionModule.toLowerCase(),
-  });
-  expect(() => envioEnvironment('local/anvil')).toThrow(
-    'ASSET_ROLE_UNCONFIGURED',
-  );
-  expect(() => envioEnvironment('sandbox/monad-testnet', recorded)).toThrow(
-    'REGISTRY_INVALID',
-  );
+  expect(() =>
+    indexerSettings({ profileName: 'local/anvil', deployment, receipts }),
+  ).toThrow('REGISTRY_INVALID');
+  expect(() =>
+    indexerSettings({
+      profileName: 'sandbox/monad-testnet',
+      deployment,
+      receipts,
+      localTreasuryAsset: deployment.ExecutionModule,
+    }),
+  ).toThrow('ASSET_REGISTRY_MISMATCH');
   expect(readFileSync('indexer/envio/.env.example', 'utf8')).toMatch(
-    /^SYNQ_TREASURY_TOKEN=$/m,
+    /^SYNQ_TREASURY_ASSETS=$/m,
   );
 });
