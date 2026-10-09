@@ -171,6 +171,99 @@ describe('dependency boundary rules', () => {
       'deterministic authority transitive signing authority: packages/kernel -> packages/identity',
     );
   });
+  it.each([
+    [
+      'plugins/kuru/index.ts',
+      'export const load = (m: string) => import(m);\n',
+    ],
+    [
+      'packages/kernel/index.ts',
+      'declare const require: (m: string) => unknown;\nexport const load = (m: string) => require(m);\n',
+    ],
+    [
+      'apps/web/page.ts',
+      "import { createRequire } from 'node:module';\nconst req = createRequire(import.meta.url);\nexport const v = req('viem' + '/accounts');\n",
+    ],
+    [
+      'packages/agent-runtime/index.ts',
+      'export const load = (m: string) => import(`viem/${m}`);\n',
+    ],
+  ])('computed module loading fails closed in %s', (file, source) => {
+    expect(
+      workspace({ [file]: source }).some((e) =>
+        e.includes('unresolvable dynamic module loading'),
+      ),
+    ).toBe(true);
+  });
+  it('literal dynamic imports resolve normally and stay unflagged when harmless', () => {
+    expect(
+      workspace({
+        'plugins/kuru/index.ts':
+          "export const load = () => import('zod');\nexport const tpl = () => import(`zod`);\n",
+      }),
+    ).toEqual([]);
+  });
+  it('plugins and planners may not reach the demo controller, which holds keys', () => {
+    expect(
+      workspace({
+        'apps/demo/package.json': pkg('@synq/demo'),
+        'apps/demo/index.ts':
+          "import { privateKeyToAccount } from 'viem/accounts';\nexport const keys = privateKeyToAccount;\n",
+        'plugins/kuru/package.json': pkg('@synq/plugin-kuru'),
+        'plugins/kuru/index.ts': "import { keys } from '@synq/demo';\n",
+      }),
+    ).toContain(
+      'planner transitive signing authority: plugins/kuru -> apps/demo',
+    );
+  });
+  it('node:crypto signing primitives are forbidden in Kernel and planner zones', () => {
+    for (const [file, source] of [
+      ['packages/kernel/index.ts', "import { sign } from 'node:crypto';\n"],
+      [
+        'packages/kernel/index.ts',
+        "import { generateKeyPairSync } from 'crypto';\n",
+      ],
+      [
+        'packages/agent-runtime/index.ts',
+        "import * as crypto from 'node:crypto';\nexport const s = () => crypto.createSign('sha256');\n",
+      ],
+      [
+        'plugins/kuru/index.ts',
+        "import nodeCrypto from 'node:crypto';\nexport const k = () => nodeCrypto.generateKeyPair;\n",
+      ],
+    ] as const)
+      expect(workspace({ [file]: source }), source).not.toEqual([]);
+    expect(
+      workspace({
+        'packages/kernel/index.ts':
+          "import { randomUUID, createHash } from 'node:crypto';\nexport const v = [randomUUID, createHash];\n",
+      }),
+    ).toEqual([]);
+  });
+  it('type-only references to signing modules are not runtime authority', () => {
+    expect(
+      workspace({
+        'apps/web/page.ts': [
+          "import type { PrivateKeyAccount } from 'viem/accounts';",
+          "import { type LocalAccount } from 'viem/accounts';",
+          "import type { privateKeyToAccount } from 'viem/accounts';",
+          "export type A = import('viem/accounts').PrivateKeyAccount;",
+          'export type B = PrivateKeyAccount | LocalAccount;',
+          'export type C = typeof privateKeyToAccount;',
+          "export type { HDKey } from '@scure/bip32';",
+          '',
+        ].join('\n'),
+        'packages/kernel/index.ts':
+          "import type { Wallet } from 'ethers';\nexport type W = Wallet;\n",
+      }),
+    ).toEqual([]);
+    expect(
+      workspace({
+        'apps/web/page.ts':
+          "import { type LocalAccount, privateKeyToAccount } from 'viem/accounts';\nexport type L = LocalAccount;\nexport const p = privateKeyToAccount;\n",
+      }).some((e) => e.includes('signing authority')),
+    ).toBe(true);
+  });
   it('detects @synq/* cycles and deterministic-authority model or signer imports', () => {
     const cycle = workspace({
       'packages/a/package.json': pkg('@synq/a'),
