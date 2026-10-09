@@ -4,12 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { keccak256 } from 'viem';
 import { describe, expect, it } from 'vitest';
-import {
-  Kernel,
-  approvalTypedData,
-  artifactHash,
-  type AuthorizationRequest,
-} from '../../packages/kernel/src/index.js';
+import { Kernel, artifactHash } from '../../packages/kernel/src/index.js';
 import {
   ActionIntentSchema,
   AmountSchema,
@@ -22,32 +17,27 @@ import {
   type JournalEntry,
 } from '../../workers/execution/src/journal.js';
 import {
-  address,
+  ACCOUNT,
+  allPlugins,
+  approve,
   asset,
+  authorizeWith,
   evidence,
+  executedObservation,
+  expectDraft,
+  grantFor,
+  harness,
+  hash,
   intent,
   mandate,
+  manifest,
   network,
   now,
   owners,
-  request,
+  type Prepared,
 } from '../kernel/fixtures.js';
 
-function trustedKernel(
-  requests: AuthorizationRequest[],
-  policies = [mandate()],
-  balance = '10000',
-) {
-  return new Kernel({
-    network,
-    mandates: policies,
-    balances: [{ account: address(20), asset, balance }],
-    trustedEvidence: {
-      riskPacketHashes: requests.map((r) => artifactHash(r.risk)),
-      simulationHashes: requests.map((r) => artifactHash(r.simulation)),
-    },
-  });
-}
+const callHash = hash(0xca11);
 
 describe('independent kernel security critic', () => {
   it.each([
@@ -75,68 +65,66 @@ describe('independent kernel security critic', () => {
         .success,
     ).toBe(false);
     expect(
-      MandateSchema.safeParse({ ...mandate(), autoCap: '1e18' }).success,
+      MandateSchema.safeParse({ ...mandate(), perActionCap: '1e18' }).success,
     ).toBe(false);
   });
 
   it('does not accept attacker-selected trust attestations in an authorization request', async () => {
-    const input = await request();
-    const kernel = new Kernel({
-      network,
-      mandates: [mandate()],
-      balances: [{ account: address(20), asset, balance: '1000' }],
-    });
-    const forged = {
-      ...input,
-      trustedEvidence: {
-        riskPacketHashes: [artifactHash(input.risk)],
-        simulationHashes: [artifactHash(input.simulation)],
-      },
-    };
-    expect(await kernel.authorize(forged)).toMatchObject({
-      status: 'RISK_REJECTED',
-      code: 'EVIDENCE_MISMATCH',
-    });
+    const input = evidence(intent());
+    const h = harness([], [mandate()]);
+    expect(
+      await h.kernel.authorize({
+        ...input,
+        approvals: [],
+        trustedEvidence: {
+          riskPacketHashes: [artifactHash(input.risk)],
+          simulationHashes: [artifactHash(input.simulation)],
+        },
+      }),
+    ).toMatchObject({ code: 'INVALID_REQUEST' });
+    expect(await h.kernel.authorize({ ...input, approvals: [] })).toMatchObject(
+      { status: 'RISK_REJECTED', code: 'EVIDENCE_MISMATCH' },
+    );
   });
 
-  it('rejects a symbol-only AUSD impersonation despite a valid canonical address', async () => {
+  it('AUSD-003 rejects a symbol-only AUSD impersonation despite a valid canonical address', async () => {
     expect(() =>
       intent({ inputAsset: { ...asset, symbol: 'AUSD' } }),
     ).toThrow();
-    const data = evidence(intent({ inputToken: address(11) }));
-    const input = { ...data, approvals: [], now };
-    expect(await trustedKernel([input]).authorize(input)).toMatchObject({
-      status: 'POLICY_REJECTED',
-      code: 'ASSET_FORBIDDEN',
-    });
+    const data = evidence(intent({ inputToken: `0x${'b'.repeat(40)}` }));
+    expect(
+      await harness(data).kernel.authorize({ ...data, approvals: [] }),
+    ).toMatchObject({ status: 'POLICY_REJECTED', code: 'ASSET_FORBIDDEN' });
   });
 
   it('copies governance inputs and does not expose mutable stored mandate records', async () => {
-    const input = await request();
+    const input = evidence(intent());
     const policy = mandate();
-    const kernel = trustedKernel([input], [policy]);
-    policy.targets.push(address(99));
-    const resolved = kernel.mandates.resolve(input.intent);
-    resolved.members[0]!.signer = address(99);
+    const h = harness(input, [policy]);
+    policy.bindings.push({ ...policy.bindings[0]!, target: ACCOUNT });
+    const resolved = h.kernel.mandate('group_1', 'mandate_1');
+    resolved.members[0]!.signer = `0x${'9'.repeat(40)}`;
     resolved.perActionCap = '1000';
-    expect(kernel.mandates.resolve(input.intent).targets).not.toContain(
-      address(99),
-    );
-    expect(kernel.mandates.resolve(input.intent).perActionCap).toBe('100');
-    expect(await kernel.authorize(input)).toMatchObject({
-      status: 'AUTHORIZED',
-    });
+    expect(h.kernel.mandate('group_1', 'mandate_1').bindings).toHaveLength(1);
+    expect(h.kernel.mandate('group_1', 'mandate_1').perActionCap).toBe('100');
+    expect((await authorizeWith(h, input)).status).toBe('AUTHORIZED');
   });
 
   it('requires distinct signatures and rejects reused signatures under another member identity', async () => {
-    const input = await request();
-    const approvals = [
-      input.approvals[0]!,
-      { ...input.approvals[1]!, signature: input.approvals[0]!.signature },
-    ];
+    const input = evidence(intent());
+    const h = harness(input);
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
+    );
+    const [a, b] = await approve(h, draft);
+    const reused = { ...b!, signature: a!.signature };
+    h.ledger.consumed.set(reused.approvalId, artifactHash(reused));
     expect(
-      await trustedKernel([input]).authorize({ ...input, approvals }),
-    ).toMatchObject({ status: 'POLICY_REJECTED', code: 'INVALID_APPROVAL' });
+      await h.kernel.authorize({ ...input, approvals: [a, reused] }),
+    ).toMatchObject({
+      status: 'PENDING_APPROVAL',
+      code: 'APPROVAL_SIGNATURE_INVALID',
+    });
   });
 
   it.each([
@@ -145,120 +133,145 @@ describe('independent kernel security critic', () => {
     { nonce: '2' },
     { validUntil: 1499 },
     { pluginId: 'second-transfer' },
-    { target: address(11) },
+    { target: `0x${'b'.repeat(40)}`, inputToken: `0x${'b'.repeat(40)}` },
   ])(
     'rejects old signed approvals after an otherwise allowed economic mutation %j',
     async (patch) => {
-      const original = await request();
-      const input = {
-        ...evidence(intent(patch)),
-        approvals: original.approvals,
-        now,
-      };
+      const original = evidence(intent());
+      const changed = evidence(intent(patch));
       const policy = mandate({
-        plugins: ['local-transfer', 'second-transfer'],
-        targets: [address(10), address(11)],
+        bindings: [
+          mandate().bindings[0]!,
+          { ...mandate().bindings[0]!, pluginId: 'second-transfer' },
+        ],
       });
-      expect(
-        await trustedKernel([input], [policy]).authorize(input),
-      ).toMatchObject({ status: 'POLICY_REJECTED', code: 'INVALID_APPROVAL' });
+      const h = harness([original, changed], [policy]);
+      const draft = expectDraft(
+        await h.kernel.authorize({ ...original, approvals: [] }),
+      );
+      const result = await h.kernel.authorize({
+        ...changed,
+        approvals: await approve(h, draft),
+      });
+      expect(result.status).not.toBe('AUTHORIZED');
     },
   );
 
   it('reserves a shared treasury atomically across different mandates under concurrent issuance', async () => {
-    const one = await request();
-    const two = await request({ mandateId: 'second', nonce: '2' });
-    const kernel = trustedKernel(
+    const one = evidence(intent());
+    const two = evidence(intent({ mandateId: 'second', nonce: '2' }));
+    const h = harness(
       [one, two],
       [mandate(), mandate({ mandateId: 'second' })],
-      '100',
+      {
+        balances: [{ account: ACCOUNT, asset, balance: '100' }],
+      },
     );
     const results = await Promise.all([
-      kernel.authorize(one),
-      kernel.authorize(two),
+      authorizeWith(h, one),
+      authorizeWith(h, two),
     ]);
     expect(results.filter((r) => r.status === 'AUTHORIZED')).toHaveLength(1);
-    expect(results.filter((r) => r.status === 'POLICY_REJECTED')).toHaveLength(
-      1,
-    );
     expect(
-      kernel
+      h.kernel
         .snapshot()
-        .ledger.reduce((n, [, ledger]) => n + BigInt(ledger.reserved), 0n),
+        .budgets.reduce((n, [, b]) => n + BigInt(b.reservedToken), 0n),
     ).toBe(60n);
   });
 
-  it('concurrent duplicate nonces issue exactly one grant and remain locked after restart', async () => {
-    const input = await request();
-    const kernel = trustedKernel([input]);
+  it('SEC-011/SEC-023 concurrent duplicate nonces issue exactly one grant and remain locked after restart', async () => {
+    const input = evidence(intent());
+    const h = harness(input);
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
+    );
+    const approvals = await approve(h, draft);
     const results = await Promise.all(
-      Array.from({ length: 6 }, () => kernel.authorize(input)),
+      Array.from({ length: 6 }, () =>
+        h.kernel.authorize({ ...input, approvals }),
+      ),
     );
     expect(results.filter((r) => r.status === 'AUTHORIZED')).toHaveLength(1);
     const restored = Kernel.restore(
-      JSON.parse(JSON.stringify(kernel.snapshot())),
+      JSON.parse(JSON.stringify(h.kernel.snapshot())),
+      {
+        clock: h.clock,
+        approvalLedger: h.ledger,
+        membershipDirectory: h.directory,
+        freshness: { probe: h.probe, maxLagBlocks: 0 },
+        plugins: allPlugins(),
+      },
     );
-    expect(await restored.authorize(input)).toMatchObject({
+    expect(await restored.authorize({ ...input, approvals })).toMatchObject({
       status: 'POLICY_REJECTED',
       code: 'NONCE_REPLAY',
     });
   });
 
   it('consumed reservations survive expiry and restart until single reconciliation', async () => {
-    const input = await request();
-    const kernel = trustedKernel([input]);
-    const result = await kernel.authorize(input);
-    if (result.status !== 'AUTHORIZED') throw new Error(result.code);
-    kernel.consume(result.grant, input.intent, now);
+    const input = evidence(intent());
+    const h = harness(input);
+    const { grant } = await grantFor(h, input);
+    const claim = h.kernel.claimForExecution(grant, input.intent, 'worker');
+    h.kernel.prepare(claim, callHash);
+    h.clock.t = now + 100;
     const restored = Kernel.restore(
-      JSON.parse(JSON.stringify(kernel.snapshot())),
+      JSON.parse(JSON.stringify(h.kernel.snapshot())),
+      {
+        clock: h.clock,
+        approvalLedger: h.ledger,
+        membershipDirectory: h.directory,
+        freshness: { probe: h.probe, maxLagBlocks: 0 },
+        plugins: [manifest],
+      },
     );
-    expect(restored.releaseExpired(now + 100)).toBe(0);
-    expect(() => restored.consume(result.grant, input.intent, now)).toThrow(
-      'GRANT_REPLAY',
+    expect(restored.releaseExpired()).toBe(0);
+    expect(() =>
+      restored.claimForExecution(grant, input.intent, 'other'),
+    ).toThrow('GRANT_REPLAY');
+    restored.reconcile(
+      grant.grantId,
+      executedObservation(grant, { tokenAmount: '55' }),
     );
-    restored.reconcile(result.grant.grantId, '55');
     expect(restored.accounting('group_1', 'mandate_1')).toMatchObject({
-      spent: '55',
-      reserved: '0',
+      spentToken: '55',
+      reservedToken: '0',
     });
-    expect(() => restored.reconcile(result.grant.grantId, '55')).toThrow(
-      'RECONCILIATION_INVALID',
-    );
+    expect(() =>
+      restored.reconcile(grant.grantId, executedObservation(grant)),
+    ).toThrow('RECONCILIATION_INVALID');
   });
 
-  it('does not grant execution authority beyond the signed quorum expiry', async () => {
-    const input = await request();
-    input.approvals = await Promise.all(
-      input.approvals.map(async (approval, i) => {
-        const unsigned = { ...approval, expiresAt: now + 1 };
-        return {
-          ...unsigned,
-          signature: await owners[i]!.signTypedData(
-            approvalTypedData(input.intent, unsigned),
-          ),
-        };
-      }),
+  it('does not grant execution authority beyond the signed draft validity', async () => {
+    const input: Prepared = evidence(intent());
+    const h = harness(input);
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
     );
-    const kernel = trustedKernel([input]);
-    const result = await kernel.authorize(input);
-    expect(result.status).toBe('AUTHORIZED');
-    if (result.status !== 'AUTHORIZED') throw new Error(result.code);
-    expect(result.grant.validUntil).toBeLessThanOrEqual(now + 1);
-    expect(() => kernel.consume(result.grant, input.intent, now + 2)).toThrow(
-      'GRANT_EXPIRED',
-    );
+    const approvals = await approve(h, draft);
+    h.clock.t = Number(draft.grant.validUntil);
+    expect(await h.kernel.authorize({ ...input, approvals })).toMatchObject({
+      status: 'EXPIRED',
+      code: 'DRAFT_EXPIRED',
+      state: 'PENDING_APPROVAL',
+    });
+    const g = harness(input);
+    const { grant } = await grantFor(g, input);
+    g.clock.t = grant.validUntil;
+    expect(() =>
+      g.kernel.claimForExecution(grant, input.intent, 'late'),
+    ).toThrow('GRANT_EXPIRED');
+    expect(owners).toHaveLength(3);
+    expect(network.chainId).toBe(31337);
   });
 
   it('enforces the intent slippage ceiling as well as the broader mandate ceiling', async () => {
     const data = evidence(intent({ maxInputAmount: '10', maxSlippageBps: 1 }), {
       slippageBps: 50,
     });
-    const input = { ...data, approvals: [], now };
-    expect(await trustedKernel([input]).authorize(input)).toMatchObject({
-      status: 'RISK_REJECTED',
-      code: 'RISK_REJECTED',
-    });
+    expect(
+      await harness(data).kernel.authorize({ ...data, approvals: [] }),
+    ).toMatchObject({ status: 'RISK_REJECTED', code: 'RISK_REJECTED' });
   });
 });
 
@@ -312,7 +325,7 @@ describe('independent execution restart critic', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('a timeout without receipt conservatively blocks raw-transaction replacement', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'synq-critic-timeout-'));

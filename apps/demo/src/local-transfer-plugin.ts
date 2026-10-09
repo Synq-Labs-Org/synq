@@ -6,11 +6,11 @@ import {
   PluginError,
   SimulationSchema,
 } from '@synq/domain';
-import type { SandboxContext } from './sandbox.js';
+import type { LocalSynq } from './safe.js';
 
 export function localTransferPlugin(
-  client: SandboxContext['client'],
-  calldata: Hex,
+  client: LocalSynq['client'],
+  calldataFor: (hash: Hex) => Hex | undefined,
 ): SynqPlugin {
   return {
     manifest: {
@@ -37,7 +37,8 @@ export function localTransferPlugin(
       };
     },
     async prepare(_context, grant) {
-      if (keccak256(calldata) !== grant.calldataHash)
+      const calldata = calldataFor(grant.calldataHash);
+      if (!calldata || keccak256(calldata) !== grant.calldataHash)
         throw new PluginError('PREPARED_CALL_MISMATCH');
       return [
         {

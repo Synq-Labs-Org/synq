@@ -1,35 +1,59 @@
-# Deterministic authorization boundary
+# Synq Kernel
 
-Only trusted orchestration constructs `Kernel`. Constructor mandates originate from verified governance, balances from reconciled chain state, and `trustedEvidence` hashes from independent risk collection and transaction simulation. An absent balance or evidence attestation fails closed. Planner/plugin requests cannot update any of these trusted inputs. `kernel.mandates.update()` is a trusted governance interface; it is never a planner tool. Existing reservations and cumulative spending survive mandate version updates. Changing the input asset requires a distinct mandate identity.
+Deterministic authorization. Agents propose; only this policy authorizes. The Kernel has no model and no signer dependency. Its clock is injected and must never move backwards.
 
-All wire amounts are canonical uint256 decimal strings. `ActionIntentSchema` is strict, normalizes hexadecimal identity, and includes account, operator, plugin, target, selector, prepared calldata hash, asset identity, amount/output/native caps, slippage, leverage, time, nonce, and evidence bindings. `intentHash()` commits every parsed field. `economicIntentHash()` omits only evidenceHash and riskPacketHash to avoid circular risk-packet hashing. RiskPacket binds that economic hash; final approvals and simulation bind the full intent hash. Artifact hashing uses recursively sorted keys and Keccak-256.
+| Module | Responsibility |
+|---|---|
+| `canonical.ts` | `IntentCanonicalizer`: the stable `intentId`, `intentHash` and economic hash (§36.2) |
+| `mandates.ts` | `MandateResolver`: tuple keys, versions, widening or security-sensitive supersession, terminal revocation, on-chain mapping |
+| `policy.ts` | `PolicyEngine`: the typed `PolicyResult` and AUTO/REVIEW/CONSENSUS/BLOCKED tiers |
+| `freshness.ts` | `FreshnessGate` with the `FreshnessProbe` and `DirectVerifier` ports (§20, SEC-006) |
+| `risk.ts` | `RiskGate` (quotes, evidence, minimum output, allocation) and `SimulationGate` |
+| `approvals.ts` | `ApprovalCalculator` (ADR-0011) over the `ApprovalLedger`, `MembershipDirectory` and `DelegationEvaluator` ports |
+| `grants.ts` | `GrantIssuer` (`GrantDraft`, then `ExecutionGrant`) and `GrantVerifier` |
+| `ledger.ts` | Budgets, treasury reservations, nonces, claim, prepare, reconciliation and release |
+| `audit.ts` | `AuditRecorder`: an append-only, hash-linked decision log with an optional sink |
+| `lifecycle.ts` | §11 `ACTION_MACHINE` transitions via `recordTransition` |
+| `snapshot.ts` | Snapshot and verified restore |
+| `kernel.ts` | Orchestration. Authorizations run one at a time, and the mandate and ledger are rechecked after every await. |
 
-```ts
-const kernel = new Kernel({
-  network,
-  mandates: [verifiedMandate],
-  balances: [{ account, asset, balance: chainBalance.toString() }],
-  trustedEvidence: {
-    riskPacketHashes: [artifactHash(independentRisk)],
-    simulationHashes: [artifactHash(actualSimulation)],
-  },
-});
-const decision = await kernel.authorize({
-  intent,
-  risk: independentRisk,
-  simulation: actualSimulation,
-  approvals,
-  now,
-});
-if (decision.status === 'AUTHORIZED') {
-  kernel.consume(decision.grant, intent, now);
-}
-```
+## Flow
+1. Call `authorize({intent, risk, simulation, approvals: []})`. It returns `PENDING_APPROVAL` with a deterministic `draft`.
+2. Members sign `executionGrantTypedData(draft.domain, draft.grant)` (from `@synq/schemas`) through identity challenges, which produce `VerifiedApproval`s.
+3. Call `authorize({..., approvals})`. It returns `AUTHORIZED` with a grant whose `grantId` is the EIP-712 digest that `ExecutionModule.hashGrant` returns.
+4. The worker calls `claimForExecution(grant, intent, workerId)`, then `prepareModuleCall(kernel, claim, data)` once, then `signGrantBoundTransaction`.
+5. Call `reconcile(grantId, observeGrantExecution(receipt, module, chainId))`.
 
-`approvalTypedData(intent, unsignedApproval)` provides EIP-712 membership/intent-bound signing data. Kernel independently recovers each signer, requires an active member, rejects duplicate members/signers, and derives AUTO/REVIEW/CONSENSUS from policy. These intent approvals are distinct from the onchain execution module's grant signatures: the bounded signer must bridge only an actually issued, verified grant into that ABI.
+## Mapping a mandate to the on-chain MandateRegistry
+`toMandateConfig(mandate)` builds the on-chain `MandateConfig` as follows.
 
-Issuance reserves both the mandate budget and the shared account/asset treasury balance synchronously after approval verification, preventing async authorization races. Nonces are permanently locked at issuance, including expired grants. `consume(grant,intent,now)` marks authority used before broadcast. Persist `snapshot()` atomically with the execution journal before any signing/broadcast; recover using `Kernel.restore()`. Restoration validates types, duplicate entries, nonce linkage, and reservation/spending totals. Snapshots must be stored under trusted access control and integrity protection; schema validation cannot authenticate an attacker-replaced snapshot.
+| Kernel mandate | On-chain `MandateConfig` |
+|---|---|
+| `artifactHash(mandate)` | `mandateHash` |
+| `inputAsset.address` | `token` |
+| `perActionCap`, `maxNativeValue` | `maxTokenPerAction`, `maxNativePerAction` |
+| `cumulativeBudget`, `cumulativeNativeBudget` | `cumulativeTokenCap`, `cumulativeNativeCap` |
+| `validAfter`, `validUntil` | `validAfter`, `validUntil` |
+| (target, selector) pairs from `bindings`, deduplicated | `callTargets`, `callSelectors` |
+| `recipients[].address` | `recipients` |
 
-`releaseExpired(now)` releases only unconsumed grants. Consumed grants remain reserved until receipt-driven `reconcile(grantId,actualSpent)` validates a uint256 actual spend bounded by the grant. Reconciliation reduces the reservation and treasury balance and increments cumulative spend once. This module does not broadcast, fetch provider APIs, authenticate a production treasury snapshot, or judge chain finality. Those responsibilities remain with trusted execution/reconciliation services.
+Fields that only the Kernel enforces:
+- plugin and action in `bindings`
+- tiers
+- approval policy
+- slippage
+- allocation
+- leverage
+- TTLs
+- frequency
+- execution count
 
-Local synthetic asset fixtures use `OTHER`, never official AUSD branding. Registry authority remains separate from schema validity: the configured mandate and balance asset must be independently resolved from the current chain registry.
+Identifiers:
+- `mandateId` on chain is `keccak256(abi.encode(groupId, mandateId))` (`onchainMandateId`).
+- `pluginId` on chain is `keccak256(pluginId)`.
+- `chainGroupId` is the group id that `SynqGroupFactory` assigns.
+- `operators` are passed to `module.setExecutor`.
+- `members` are the Safe owners.
+- `approvalPolicy.accountThreshold` is the Safe threshold.
+
+Supersession follows the contract's rules. A non-sensitive supersession must only widen the mandate. A narrowing must be security-sensitive, which invalidates earlier grants.

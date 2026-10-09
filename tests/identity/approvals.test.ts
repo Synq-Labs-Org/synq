@@ -1,242 +1,134 @@
 import { describe, it, expect } from 'vitest';
+import { PrincipalRegistry } from '../../packages/identity/src/index.js';
+import { executionGrantTypedData } from '../../packages/schemas/src/index.js';
+import { LocalApprovalDesk } from '../../apps/demo/src/approval-desk.js';
 import {
-  ApprovalService,
-  MemoryChallengeStore,
-} from '../../packages/identity/src/index.js';
-import {
-  ApprovalCalculator,
-  approvalTypedData,
-} from '../../packages/kernel/src/index.js';
-import { intent, mandate, owners, now } from '../kernel/fixtures.js';
+  evidence,
+  expectDraft,
+  harness,
+  intent,
+  now,
+  owners,
+} from '../kernel/fixtures.js';
 
-function service() {
-  const s = new ApprovalService(new MemoryChallengeStore(), 'local/anvil');
+function registry() {
+  const r = new PrincipalRegistry('local/anvil', () =>
+    owners.map((o) => o.address),
+  );
   owners.forEach((owner, i) => {
-    s.register({
-      principalId: `fixture_${i}`,
+    r.register({
+      principalId: `principal_${i}`,
       kind: 'HUMAN',
       provider: 'fixture',
       signer: owner.address,
     });
-    s.bindMembership('group_1', `member_${i}`, `fixture_${i}`);
+    r.bindMembership('group_1', `member_${i}`, `principal_${i}`);
   });
-  return s;
+  return r;
 }
-describe('cryptographic approval attribution (fixture wallets, not real Mera humans)', () => {
-  it('invalidates an outstanding challenge across membership revocation and rejoin', async () => {
-    const s = service(),
-      input = intent(),
-      policy = mandate();
-    const c = await s.issue(input, policy, 'member_0', now);
-    const signed = {
-      ...c.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(input, c.approval),
-      ),
-    };
-    s.revokeMembership(input.groupId, 'member_0');
-    s.bindMembership(input.groupId, 'member_0', 'fixture_0');
-    await expect(
-      s.submit(c.challengeId, signed, input, policy, now),
-    ).rejects.toThrow('Membership binding');
-  });
-  it('rejects revocation during asynchronous consumption and a fresh binding after service restart', async () => {
-    class RevokingStore extends MemoryChallengeStore {
-      revoke = () => {};
-      override async consume(id: string): Promise<boolean> {
-        this.revoke();
-        return super.consume(id);
-      }
-    }
-    const store = new RevokingStore(),
-      s = new ApprovalService(store, 'local/anvil');
-    s.register({
-      principalId: 'fixture_0',
-      kind: 'HUMAN',
-      provider: 'fixture',
-      signer: owners[0]!.address,
+
+describe('principal registry as the Kernel membership directory (fixture wallets, not real Mera humans)', () => {
+  it('reports principal kind, owner status and a membership epoch that changes on revocation', async () => {
+    const r = registry();
+    const member = await r.activeMember('group_1', 'member_0');
+    expect(member).toMatchObject({
+      principalKind: 'LOCAL_FIXTURE',
+      role: 'APPROVER',
+      ownerOfAccount: true,
+      signer: owners[0]!.address.toLowerCase(),
     });
-    s.bindMembership('group_1', 'member_0', 'fixture_0');
-    const c = await s.issue(intent(), mandate(), 'member_0', now);
-    const signed = {
-      ...c.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(intent(), c.approval),
-      ),
-    };
-    const restarted = new ApprovalService(store, 'local/anvil');
-    restarted.register({
-      principalId: 'fixture_0',
-      kind: 'HUMAN',
-      provider: 'fixture',
-      signer: owners[0]!.address,
-    });
-    restarted.bindMembership('group_1', 'member_0', 'fixture_0');
-    await expect(
-      restarted.submit(c.challengeId, signed, intent(), mandate(), now),
-    ).rejects.toThrow('Membership binding');
-    store.revoke = () => s.revokeMembership('group_1', 'member_0');
-    await expect(
-      s.submit(c.challengeId, signed, intent(), mandate(), now),
-    ).rejects.toThrow('Membership binding');
+    const epoch = member!.membershipEpoch;
+    r.revokeMembership('group_1', 'member_2');
+    expect(
+      (await r.activeMember('group_1', 'member_0'))!.membershipEpoch,
+    ).not.toBe(epoch);
+    expect(await r.activeMember('group_1', 'member_2')).toBeNull();
   });
-  it('collects independently signed 2-of-3 and a repeated signer cannot satisfy quorum', async () => {
-    const s = service(),
-      input = intent(),
-      policy = mandate();
-    const approvals = await Promise.all(
-      [0, 1].map(async (i) => {
-        const c = await s.issue(input, policy, `member_${i}`, now);
-        return s.submit(
-          c.challengeId,
-          {
-            ...c.approval,
-            signature: await owners[i]!.signTypedData(
-              approvalTypedData(input, c.approval),
-            ),
-          },
-          input,
-          policy,
-          now,
-        );
-      }),
+
+  it('end to end: desk approvals count in the Kernel and are invalidated by a later membership change', async () => {
+    const input = evidence(intent());
+    const r = registry();
+    const desk = new LocalApprovalDesk(r);
+    const h = harness(input, undefined, {
+      approvalLedger: desk,
+      membershipDirectory: r,
+    });
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
+    );
+    const approve = async (i: number) => {
+      const c = await desk.issue(draft, `member_${i}`, now);
+      return desk.submit(
+        c.challengeId,
+        await owners[i]!.signTypedData(
+          executionGrantTypedData(draft.domain, draft.grant),
+        ),
+        now,
+      );
+    };
+    const approvals = [
+      await approve(0),
+      { ...(await approve(1)), approvalId: 'approval_unconsumed' },
+    ];
+    expect(await h.kernel.authorize({ ...input, approvals })).toMatchObject({
+      code: 'APPROVAL_NOT_CONSUMED',
+    });
+    const fresh = [approvals[0]!, await approve(1)];
+    r.revokeMembership('group_1', 'member_2');
+    expect(
+      await h.kernel.authorize({ ...input, approvals: fresh }),
+    ).toMatchObject({
+      code: 'APPROVAL_EPOCH_STALE',
+    });
+    const again = [await approve(0), await approve(1)];
+    expect(
+      (await h.kernel.authorize({ ...input, approvals: again })).status,
+    ).toBe('AUTHORIZED');
+  });
+
+  it('rejects wrong wallets and replayed challenges', async () => {
+    const input = evidence(intent());
+    const desk = new LocalApprovalDesk(registry());
+    const draft = expectDraft(
+      await harness(input).kernel.authorize({ ...input, approvals: [] }),
+    );
+    const c = await desk.issue(draft, 'member_0', now);
+    const typed = executionGrantTypedData(draft.domain, draft.grant);
+    await expect(
+      desk.submit(c.challengeId, await owners[1]!.signTypedData(typed), now),
+    ).rejects.toThrow('LOCAL_DESK_SIGNATURE_INVALID');
+    await desk.submit(
+      c.challengeId,
+      await owners[0]!.signTypedData(typed),
+      now,
     );
     await expect(
-      new ApprovalCalculator().verify(
-        input,
-        policy,
-        approvals,
-        'CONSENSUS',
-        now,
-      ),
-    ).resolves.toBe(2);
-    await expect(
-      new ApprovalCalculator().verify(
-        input,
-        policy,
-        [approvals[0]!, approvals[0]!],
-        'CONSENSUS',
-        now,
-      ),
-    ).rejects.toThrow();
-    await expect(
-      new ApprovalCalculator().verify(
-        input,
-        mandate({ quorum: 3 }),
-        approvals,
-        'CONSENSUS',
-        now,
-      ),
-    ).rejects.toThrow();
-    const revoked = mandate({
-      members: policy.members.map((member, i) => ({
-        ...member,
-        active: i !== 0,
-      })),
-    });
-    await expect(
-      new ApprovalCalculator().verify(
-        input,
-        revoked,
-        approvals,
-        'CONSENSUS',
-        now,
-      ),
-    ).rejects.toThrow();
+      desk.submit(c.challengeId, await owners[0]!.signTypedData(typed), now),
+    ).rejects.toThrow('LOCAL_DESK_CHALLENGE_INVALID');
   });
-  it('rejects expired, wrong wallet, wrong group, mutated amount and revoked member', async () => {
-    const s = service(),
-      input = intent(),
-      policy = mandate(),
-      c = await s.issue(input, policy, 'member_0', now, 10);
-    const signed = {
-      ...c.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(input, c.approval),
-      ),
-    };
-    await expect(
-      s.submit(c.challengeId, signed, input, policy, now + 10),
-    ).rejects.toThrow('Expired');
-    await expect(
-      s.submit(
-        c.challengeId,
-        {
-          ...signed,
-          signature: await owners[1]!.signTypedData(
-            approvalTypedData(input, c.approval),
-          ),
-        },
-        input,
-        policy,
-        now,
-      ),
-    ).rejects.toThrow('Signature');
-    await expect(
-      s.submit(
-        c.challengeId,
-        signed,
-        intent({ groupId: 'group_wrong' }),
-        policy,
-        now,
-      ),
-    ).rejects.toThrow('Wrong');
-    await expect(
-      s.submit(
-        c.challengeId,
-        signed,
-        intent({ maxInputAmount: '61' }),
-        policy,
-        now,
-      ),
-    ).rejects.toThrow('binding');
-    s.revokeMembership(input.groupId, 'member_0');
-    await expect(
-      s.submit(c.challengeId, signed, input, policy, now),
-    ).rejects.toThrow('membership');
-  });
-  it('consumes a challenge atomically including concurrent submits and rejects replay after success', async () => {
-    const s = service(),
-      input = intent(),
-      policy = mandate(),
-      c = await s.issue(input, policy, 'member_0', now);
-    const signed = {
-      ...c.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(input, c.approval),
-      ),
-    };
-    const results = await Promise.allSettled([
-      s.submit(c.challengeId, signed, input, policy, now),
-      s.submit(c.challengeId, signed, input, policy, now),
-    ]);
-    expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
-    await expect(
-      s.submit(c.challengeId, signed, input, policy, now),
-    ).rejects.toThrow('consumed');
-  });
+
   it('prevents duplicate signers/memberships, provider impersonation and operator owner privileges', () => {
-    const s = service();
+    const r = registry();
     expect(() =>
-      s.register({
+      r.register({
         principalId: 'another',
         kind: 'HUMAN',
         provider: 'fixture',
         signer: owners[0]!.address,
       }),
     ).toThrow('Duplicate');
-    expect(() => s.bindMembership('group_1', 'alias', 'fixture_0')).toThrow(
+    expect(() => r.bindMembership('group_1', 'alias', 'principal_0')).toThrow(
       'Duplicate',
     );
     expect(() =>
-      new ApprovalService(new MemoryChallengeStore()).register({
+      new PrincipalRegistry('sandbox/monad-testnet').register({
         principalId: 'test',
         kind: 'HUMAN',
         provider: 'fixture',
         signer: owners[0]!.address,
       }),
     ).toThrow('Fixture');
-    s.register({
+    r.register({
       principalId: 'operator',
       kind: 'AGENT',
       provider: 'dynamic',
@@ -244,7 +136,7 @@ describe('cryptographic approval attribution (fixture wallets, not real Mera hum
       environmentId: 'test',
     });
     expect(() =>
-      s.bindMembership('group_1', 'operator_member', 'operator'),
+      r.bindMembership('group_1', 'operator_member', 'operator'),
     ).toThrow('human');
   });
 });

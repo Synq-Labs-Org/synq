@@ -1,23 +1,7 @@
-import { randomBytes } from 'node:crypto';
-import { recoverTypedDataAddress, type Address, type Hex } from 'viem';
+import { randomInt } from 'node:crypto';
+import { type Address } from 'viem';
 import { z } from 'zod';
-import {
-  ApprovalSchema,
-  BoundActionIntentSchema,
-  MandateSchema,
-  MemberIdSchema,
-  networkProfileForChain,
-  type ProfileName,
-  type BoundActionIntent,
-  type Approval,
-  type Mandate,
-} from '@synq/schemas';
-import {
-  approvalTypedData,
-  approvalDigest,
-  intentHash,
-  type UnsignedApproval,
-} from '@synq/kernel';
+import type { IdentityPrincipalKind, ProfileName } from '@synq/schemas';
 
 export type IdentityPrincipal =
   | {
@@ -73,55 +57,40 @@ const PrincipalSchema = z.discriminatedUnion('provider', [
     environmentId: z.string().min(1),
   }),
 ]);
-export type ApprovalChallenge = {
-  challengeId: string;
+const KIND_BY_PROVIDER: Record<
+  IdentityPrincipal['provider'],
+  IdentityPrincipalKind
+> = {
+  mera: 'MERA_HUMAN',
+  fixture: 'LOCAL_FIXTURE',
+  privy: 'PRIVY_DELEGATE',
+  dynamic: 'DYNAMIC_OPERATOR',
+};
+export type DirectoryMember = {
+  groupId: string;
+  memberId: string;
   principalId: string;
-  membershipBinding: string;
-  approval: UnsignedApproval;
-  intent: BoundActionIntent;
-  digest: Hex;
-  used: boolean;
+  principalKind: IdentityPrincipalKind;
+  role: 'APPROVER' | 'OPERATOR';
+  signer: Address;
+  membershipEpoch: number;
+  ownerOfAccount: boolean;
 };
 
-export interface ChallengeStore {
-  put(challenge: ApprovalChallenge): Promise<void>;
-  get(id: string): Promise<ApprovalChallenge | null>;
-  consume(id: string): Promise<boolean>;
-}
-export class MemoryChallengeStore implements ChallengeStore {
-  private records = new Map<string, ApprovalChallenge>();
-  async put(challenge: ApprovalChallenge): Promise<void> {
-    if (this.records.has(challenge.challengeId))
-      throw new Error('Challenge collision');
-    this.records.set(challenge.challengeId, structuredClone(challenge));
-  }
-  async get(id: string): Promise<ApprovalChallenge | null> {
-    const value = this.records.get(id);
-    return value ? structuredClone(value) : null;
-  }
-  async consume(id: string): Promise<boolean> {
-    const value = this.records.get(id);
-    if (!value || value.used) return false;
-    value.used = true;
-    return true;
-  }
-}
-
-export class ApprovalService {
+export class PrincipalRegistry {
   private principals = new Map<string, IdentityPrincipal>();
   private signers = new Set<string>();
   private memberships = new Map<string, Map<string, string>>();
-  private membershipBindings = new Map<string, string>();
+  private epochs = new Map<string, number>();
+  private readonly epochBase = randomInt(1, 2 ** 40);
   constructor(
-    readonly store: ChallengeStore,
-    readonly profile: ProfileName = 'sandbox/monad-testnet',
+    readonly profile: ProfileName,
+    private readonly owners: (groupId: string) => readonly string[] = () => [],
   ) {}
   register(principal: IdentityPrincipal): void {
     PrincipalSchema.parse(principal);
     if (principal.provider === 'fixture' && this.profile !== 'local/anvil')
       throw new Error('Fixture principal forbidden outside local profile');
-    if (!/^0x[0-9a-fA-F]{40}$/.test(principal.signer) || !principal.principalId)
-      throw new Error('Invalid principal');
     if (
       principal.provider === 'mera' &&
       (!principal.credentialId || !principal.rpId)
@@ -144,147 +113,37 @@ export class ApprovalService {
       throw new Error('Duplicate membership');
     members.set(memberId, principalId);
     this.memberships.set(groupId, members);
-    this.membershipBindings.set(
-      JSON.stringify([groupId, memberId]),
-      randomBytes(32).toString('hex'),
-    );
+    this.bump(groupId);
   }
   revokeMembership(groupId: string, memberId: string): void {
     this.memberships.get(groupId)?.delete(memberId);
-    this.membershipBindings.delete(JSON.stringify([groupId, memberId]));
+    this.bump(groupId);
   }
-  async issue(
-    rawIntent: BoundActionIntent,
-    rawMandate: Mandate,
-    memberId: string,
-    now: number,
-    ttlSeconds = 120,
-  ): Promise<ApprovalChallenge> {
-    const intent = BoundActionIntentSchema.parse(rawIntent),
-      mandate = MandateSchema.parse(rawMandate);
-    if (
-      !Number.isSafeInteger(now) ||
-      now < 0 ||
-      !Number.isSafeInteger(ttlSeconds) ||
-      ttlSeconds < 1 ||
-      ttlSeconds > 300
-    )
-      throw new Error('Invalid challenge lifetime');
-    this.validateScope(intent, mandate);
-    const principal = this.member(intent.groupId, memberId, mandate);
-    const expiresAt = Math.min(
-      now + ttlSeconds,
-      intent.validUntil,
-      mandate.validUntil,
-    );
-    if (expiresAt <= now) throw new Error('Expired intent/mandate');
-    const approval: UnsignedApproval = {
-      schemaVersion: 1,
-      groupId: intent.groupId,
-      mandateId: intent.mandateId,
-      mandateVersion: intent.mandateVersion,
-      intentHash: intentHash(intent),
-      memberId: MemberIdSchema.parse(memberId),
-      signer: principal.signer.toLowerCase() as Address,
-      expiresAt,
-      nonce: BigInt(`0x${randomBytes(32).toString('hex')}`).toString(),
-    };
-    const challenge: ApprovalChallenge = {
-      challengeId: randomBytes(32).toString('hex'),
-      principalId: principal.principalId,
-      membershipBinding: this.membershipBindings.get(
-        JSON.stringify([intent.groupId, memberId]),
-      )!,
-      approval,
-      intent,
-      digest: approvalDigest(intent, approval),
-      used: false,
-    };
-    await this.store.put(challenge);
-    return structuredClone(challenge);
+  private bump(groupId: string): void {
+    this.epochs.set(groupId, (this.epochs.get(groupId) ?? this.epochBase) + 1);
   }
-  async submit(
-    challengeId: string,
-    raw: Approval,
-    rawIntent: BoundActionIntent,
-    rawMandate: Mandate,
-    now: number,
-  ): Promise<Approval> {
-    const intent = BoundActionIntentSchema.parse(rawIntent),
-      mandate = MandateSchema.parse(rawMandate),
-      approval = ApprovalSchema.parse(raw);
-    const challenge = await this.store.get(challengeId);
-    if (!challenge || challenge.used)
-      throw new Error('Unknown/consumed challenge');
-    this.validateScope(intent, mandate);
-    if (!Number.isSafeInteger(now) || now < 0 || approval.expiresAt <= now)
-      throw new Error('Expired challenge');
-    const principal = this.member(intent.groupId, approval.memberId, mandate);
-    this.validateMembershipBinding(challenge, mandate);
-    if (
-      principal.principalId !== challenge.principalId ||
-      intentHash(intent) !== intentHash(challenge.intent) ||
-      approvalDigest(intent, approval) !== challenge.digest
-    )
-      throw new Error('Challenge binding mismatch');
-    const recovered = await recoverTypedDataAddress({
-      ...approvalTypedData(intent, approval),
-      signature: approval.signature,
-    });
-    if (recovered.toLowerCase() !== principal.signer.toLowerCase())
-      throw new Error('Signature/principal mismatch');
-    this.validateMembershipBinding(challenge, mandate);
-    if (!(await this.store.consume(challengeId)))
-      throw new Error('Challenge replay');
-    this.validateMembershipBinding(challenge, mandate);
-    return approval;
+  async membershipEpoch(groupId: string): Promise<number | null> {
+    return this.epochs.get(groupId) ?? null;
   }
-  private validateMembershipBinding(
-    challenge: ApprovalChallenge,
-    mandate: Mandate,
-  ): void {
-    const { groupId, memberId } = challenge.approval;
-    const binding = this.membershipBindings.get(
-      JSON.stringify([groupId, memberId]),
-    );
-    if (
-      !binding ||
-      binding !== challenge.membershipBinding ||
-      this.member(groupId, memberId, mandate).principalId !==
-        challenge.principalId
-    )
-      throw new Error('Membership binding changed/revoked');
-  }
-  private validateScope(intent: BoundActionIntent, mandate: Mandate): void {
-    if (networkProfileForChain(intent.chainId).profile !== this.profile)
-      throw new Error('Identity profile mismatch');
-    if (
-      intent.groupId !== mandate.groupId ||
-      intent.mandateId !== mandate.mandateId ||
-      intent.mandateVersion !== mandate.version ||
-      intent.account !== mandate.account ||
-      intent.chainId !== mandate.network.chainId ||
-      mandate.status !== 'ACTIVE'
-    )
-      throw new Error('Wrong group/mandate/version/account/chain');
-  }
-  private member(
+  async activeMember(
     groupId: string,
     memberId: string,
-    mandate: Mandate,
-  ): IdentityPrincipal {
-    const id = this.memberships.get(groupId)?.get(memberId),
-      principal = id ? this.principals.get(id) : undefined;
-    const member = mandate.members.find(
-      (x) => x.memberId === memberId && x.active,
-    );
-    if (
-      !principal ||
-      principal.kind !== 'HUMAN' ||
-      !member ||
-      principal.signer.toLowerCase() !== member.signer.toLowerCase()
-    )
-      throw new Error('Inactive/unbound membership');
-    return principal;
+  ): Promise<DirectoryMember | null> {
+    const id = this.memberships.get(groupId)?.get(memberId);
+    const principal = id ? this.principals.get(id) : undefined;
+    if (!principal) return null;
+    const signer = principal.signer.toLowerCase() as Address;
+    return {
+      groupId,
+      memberId,
+      principalId: principal.principalId,
+      principalKind: KIND_BY_PROVIDER[principal.provider],
+      role: 'APPROVER',
+      signer,
+      membershipEpoch: this.epochs.get(groupId)!,
+      ownerOfAccount: this.owners(groupId).some(
+        (o) => o.toLowerCase() === signer,
+      ),
+    };
   }
 }

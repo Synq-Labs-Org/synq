@@ -18,6 +18,7 @@ import { CapabilityError, MoneyError, parseOrThrow } from './errors.js';
 
 export * from '@synq/schemas';
 export * from './errors.js';
+export * from './kernel-errors.js';
 export * from './lifecycle.js';
 
 export type BrandedId<K extends IdKind> = IdOf<K>;
