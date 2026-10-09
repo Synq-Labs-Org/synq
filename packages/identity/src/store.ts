@@ -55,9 +55,7 @@ export type DelegationUsage = {
 
 export interface IdentityTx {
   insertChallenge(challenge: IdentityChallenge): Promise<void>;
-  getChallenge(
-    id: string,
-  ): Promise<{
+  getChallenge(id: string): Promise<{
     challenge: IdentityChallenge;
     consumedAt: number | null;
   } | null>;
@@ -80,9 +78,7 @@ export interface IdentityTx {
   getDraft(digest: string): Promise<DraftRecord | null>;
   getDraftByIntent(intentHash: string): Promise<DraftRecord | null>;
   insertGrantChallenge(challenge: GrantApprovalChallenge): Promise<void>;
-  getGrantChallenge(
-    id: string,
-  ): Promise<{
+  getGrantChallenge(id: string): Promise<{
     challenge: GrantApprovalChallenge;
     consumedAt: number | null;
   } | null>;

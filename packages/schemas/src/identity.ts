@@ -203,3 +203,49 @@ export const ApiErrorSchema = z.strictObject({
   error: z.string(),
   message: z.string(),
 });
+
+export const EnrollmentChallengeRequestSchema = z.strictObject({
+  kind: z.enum(['MERA_HUMAN', 'LOCAL_FIXTURE']),
+  signer: AddressSchema,
+  credential: PasskeyCredentialSchema.optional(),
+  rpId: RpIdSchema,
+  origin: OriginSchema,
+});
+export const RecoveryChallengeRequestSchema = z.strictObject({
+  signer: AddressSchema,
+  credentialId: CredentialIdSchema,
+  rpId: RpIdSchema,
+  origin: OriginSchema,
+});
+export const RecoveryResultSchema = z.strictObject({
+  principal: PrincipalViewSchema,
+  memberships: z.array(MembershipViewSchema),
+});
+export const MembershipRequestSchema = z.strictObject({
+  memberId: MemberIdSchema,
+  principalId: PrincipalIdSchema,
+});
+export const RegisterDraftRequestSchema = z.strictObject({
+  draft: GrantDraftSchema,
+  asset: AssetSchema,
+});
+export const ApprovalChallengeRequestSchema = z.strictObject({
+  draftDigest: HashSchema,
+  memberId: MemberIdSchema,
+});
+export const MandateViewSchema = z.strictObject({
+  groupId: HashSchema,
+  mandateId: HashSchema,
+  version: AmountSchema,
+  active: z.boolean(),
+  terms: z.record(z.string(), z.string()),
+  source: z.literal('indexed-read-model'),
+  currentHeadVerified: z.boolean(),
+});
+export const ProviderStatusViewSchema = z.array(
+  z.strictObject({
+    provider: z.enum(['privy', 'dynamic']),
+    status: z.enum(['CONFIGURED', 'BLOCKED']),
+    missing: z.array(z.string()),
+  }),
+);

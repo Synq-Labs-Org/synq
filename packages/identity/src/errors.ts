@@ -18,6 +18,8 @@ export type IdentityErrorCode =
   | 'MEMBERSHIP_NOT_FOUND'
   | 'MEMBERSHIP_CHANGED'
   | 'DRAFT_EXISTS'
+  | 'MANDATE_NOT_FOUND'
+  | 'READ_MODEL_UNAVAILABLE'
   | 'DRAFT_NOT_FOUND'
   | 'DRAFT_INVALID'
   | 'ALREADY_APPROVED'
@@ -47,6 +49,8 @@ const SAFE_MESSAGES: Record<IdentityErrorCode, string> = {
   MEMBERSHIP_NOT_FOUND: 'Active membership not found',
   MEMBERSHIP_CHANGED: 'Membership changed since the challenge was issued',
   DRAFT_EXISTS: 'Grant draft already registered',
+  MANDATE_NOT_FOUND: 'Mandate not found',
+  READ_MODEL_UNAVAILABLE: 'Read model unavailable',
   DRAFT_NOT_FOUND: 'Grant draft not found',
   DRAFT_INVALID: 'Grant draft is inconsistent',
   ALREADY_APPROVED: 'Member already approved this draft',

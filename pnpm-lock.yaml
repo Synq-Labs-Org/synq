@@ -97,6 +97,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model
@@ -106,6 +109,9 @@ importers:
       fastify:
         specifier: 5.12.5
         version: 5.12.5
+      pg:
+        specifier: 8.18.0
+        version: 8.18.0
       zod:
         specifier: 4.6.5
         version: 4.6.5
