@@ -3,18 +3,21 @@ import { recoverTypedDataAddress, type Address, type Hex } from 'viem';
 import { z } from 'zod';
 import {
   ApprovalSchema,
-  ActionIntentSchema,
+  BoundActionIntentSchema,
   MandateSchema,
-  type ActionIntent,
+  MemberIdSchema,
+  networkProfileForChain,
+  type ProfileName,
+  type BoundActionIntent,
   type Approval,
   type Mandate,
-} from '../../schemas/src/index.js';
+} from '@synq/schemas';
 import {
   approvalTypedData,
   approvalDigest,
   intentHash,
   type UnsignedApproval,
-} from '../../kernel/src/index.js';
+} from '@synq/kernel';
 
 export type IdentityPrincipal =
   | {
@@ -75,7 +78,7 @@ export type ApprovalChallenge = {
   principalId: string;
   membershipBinding: string;
   approval: UnsignedApproval;
-  intent: ActionIntent;
+  intent: BoundActionIntent;
   digest: Hex;
   used: boolean;
 };
@@ -111,11 +114,11 @@ export class ApprovalService {
   private membershipBindings = new Map<string, string>();
   constructor(
     readonly store: ChallengeStore,
-    readonly profile: 'local' | 'testnet' = 'testnet',
+    readonly profile: ProfileName = 'sandbox/monad-testnet',
   ) {}
   register(principal: IdentityPrincipal): void {
     PrincipalSchema.parse(principal);
-    if (principal.provider === 'fixture' && this.profile !== 'local')
+    if (principal.provider === 'fixture' && this.profile !== 'local/anvil')
       throw new Error('Fixture principal forbidden outside local profile');
     if (!/^0x[0-9a-fA-F]{40}$/.test(principal.signer) || !principal.principalId)
       throw new Error('Invalid principal');
@@ -151,13 +154,13 @@ export class ApprovalService {
     this.membershipBindings.delete(JSON.stringify([groupId, memberId]));
   }
   async issue(
-    rawIntent: ActionIntent,
+    rawIntent: BoundActionIntent,
     rawMandate: Mandate,
     memberId: string,
     now: number,
     ttlSeconds = 120,
   ): Promise<ApprovalChallenge> {
-    const intent = ActionIntentSchema.parse(rawIntent),
+    const intent = BoundActionIntentSchema.parse(rawIntent),
       mandate = MandateSchema.parse(rawMandate);
     if (
       !Number.isSafeInteger(now) ||
@@ -181,7 +184,7 @@ export class ApprovalService {
       mandateId: intent.mandateId,
       mandateVersion: intent.mandateVersion,
       intentHash: intentHash(intent),
-      memberId,
+      memberId: MemberIdSchema.parse(memberId),
       signer: principal.signer.toLowerCase() as Address,
       expiresAt,
       nonce: BigInt(`0x${randomBytes(32).toString('hex')}`).toString(),
@@ -203,11 +206,11 @@ export class ApprovalService {
   async submit(
     challengeId: string,
     raw: Approval,
-    rawIntent: ActionIntent,
+    rawIntent: BoundActionIntent,
     rawMandate: Mandate,
     now: number,
   ): Promise<Approval> {
-    const intent = ActionIntentSchema.parse(rawIntent),
+    const intent = BoundActionIntentSchema.parse(rawIntent),
       mandate = MandateSchema.parse(rawMandate),
       approval = ApprovalSchema.parse(raw);
     const challenge = await this.store.get(challengeId);
@@ -252,8 +255,8 @@ export class ApprovalService {
     )
       throw new Error('Membership binding changed/revoked');
   }
-  private validateScope(intent: ActionIntent, mandate: Mandate): void {
-    if (intent.network.profile !== this.profile)
+  private validateScope(intent: BoundActionIntent, mandate: Mandate): void {
+    if (networkProfileForChain(intent.chainId).profile !== this.profile)
       throw new Error('Identity profile mismatch');
     if (
       intent.groupId !== mandate.groupId ||

@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { HashSchema } from '../../../packages/schemas/src/index.js';
+import { HashSchema } from '@synq/schemas';
 import { ProofQueryService } from './service.js';
 export function createApi(service: ProofQueryService) {
   const api = Fastify({ logger: false, bodyLimit: 64 * 1024 });

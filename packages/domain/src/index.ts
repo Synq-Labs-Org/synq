@@ -1,20 +1,36 @@
 import { randomUUID } from 'node:crypto';
 import {
   AmountSchema,
+  CorrelationIdSchema,
+  DOMAIN_EVENT_SCHEMA_VERSION,
+  ID_SCHEMAS,
   UINT256_MAX,
+  domainEventSchema,
+  isNonDelegable,
   type Capability,
-} from '../../schemas/src/index.js';
+  type DomainEventOf,
+  type IdKind,
+  type IdOf,
+  type PrincipalRef,
+} from '@synq/schemas';
+import type { z } from 'zod';
+import { CapabilityError, MoneyError, parseOrThrow } from './errors.js';
 
-export * from '../../schemas/src/index.js';
-export type BrandedId<T extends string> = string & { readonly __kind: T };
-export function newId<T extends string>(kind: T): BrandedId<T> {
-  return `${kind}_${randomUUID()}` as BrandedId<T>;
+export * from '@synq/schemas';
+export * from './errors.js';
+export * from './lifecycle.js';
+
+export type BrandedId<K extends IdKind> = IdOf<K>;
+export function newId<K extends IdKind>(kind: K): IdOf<K> {
+  const schemas: { [P in IdKind]: z.core.$ZodType<IdOf<P>, string> } =
+    ID_SCHEMAS;
+  return parseOrThrow(schemas[kind], `${kind}_${randomUUID()}`);
 }
 export function toAmount(value: bigint): string {
-  return AmountSchema.parse(value.toString());
+  return parseOrThrow(AmountSchema, value);
 }
 export function fromAmount(value: unknown): bigint {
-  return BigInt(AmountSchema.parse(value));
+  return BigInt(parseOrThrow(AmountSchema, value));
 }
 export function parseDecimal(value: string, decimals: number): bigint {
   if (
@@ -23,111 +39,57 @@ export function parseDecimal(value: string, decimals: number): bigint {
     decimals > 36 ||
     !/^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value)
   )
-    throw new Error('INVALID_DECIMAL');
+    throw new MoneyError('INVALID_DECIMAL');
   const [whole = '', fraction = ''] = value.split('.');
-  if (fraction.length > decimals) throw new Error('DECIMAL_PRECISION');
+  if (fraction.length > decimals) throw new MoneyError('DECIMAL_PRECISION');
   const result = BigInt(whole + fraction.padEnd(decimals, '0'));
-  if (result > UINT256_MAX) throw new Error('AMOUNT_OVERFLOW');
+  if (result > UINT256_MAX) throw new MoneyError('AMOUNT_OVERFLOW');
   return result;
 }
 export function formatDecimal(value: bigint, decimals: number): string {
   toAmount(value);
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36)
-    throw new Error('INVALID_DECIMALS');
+    throw new MoneyError('INVALID_DECIMALS');
   if (decimals === 0) return value.toString();
   const digits = value.toString().padStart(decimals + 1, '0');
   return `${digits.slice(0, -decimals)}.${digits.slice(-decimals)}`;
 }
-export const ACTION_STATES = [
-  'RECEIVED',
-  'NORMALIZED',
-  'RESEARCHING',
-  'PROPOSED',
-  'RISKED',
-  'SIMULATED',
-  'PENDING_APPROVAL',
-  'AUTHORIZED',
-  'PREPARED',
-  'SIGNED',
-  'SUBMITTED',
-  'CONFIRMED',
-  'INDEXED',
-  'RECONCILED',
-  'EXPLAINED',
-  'POLICY_REJECTED',
-  'RISK_REJECTED',
-  'EXPIRED',
-  'CANCELLED',
-  'PREPARE_FAILED',
-  'SUBMIT_FAILED',
-  'RECONCILIATION_REQUIRED',
-  'MANUAL_REVIEW',
-] as const;
-export type ActionState = (typeof ACTION_STATES)[number];
-const successors: Partial<Record<ActionState, readonly ActionState[]>> = {
-  RECEIVED: ['NORMALIZED', 'CANCELLED'],
-  NORMALIZED: ['RESEARCHING', 'PROPOSED', 'POLICY_REJECTED', 'CANCELLED'],
-  RESEARCHING: ['PROPOSED', 'CANCELLED', 'EXPIRED'],
-  PROPOSED: ['RISKED', 'POLICY_REJECTED', 'CANCELLED', 'EXPIRED'],
-  RISKED: [
-    'SIMULATED',
-    'RISK_REJECTED',
-    'MANUAL_REVIEW',
-    'CANCELLED',
-    'EXPIRED',
-  ],
-  SIMULATED: [
-    'PENDING_APPROVAL',
-    'AUTHORIZED',
-    'RISK_REJECTED',
-    'CANCELLED',
-    'EXPIRED',
-  ],
-  PENDING_APPROVAL: ['AUTHORIZED', 'CANCELLED', 'EXPIRED', 'POLICY_REJECTED'],
-  AUTHORIZED: ['PREPARED', 'CANCELLED', 'EXPIRED', 'PREPARE_FAILED'],
-  PREPARED: ['SIGNED', 'PREPARE_FAILED', 'CANCELLED', 'EXPIRED'],
-  SIGNED: ['SUBMITTED', 'SUBMIT_FAILED', 'RECONCILIATION_REQUIRED'],
-  SUBMITTED: ['CONFIRMED', 'RECONCILIATION_REQUIRED'],
-  CONFIRMED: ['INDEXED', 'RECONCILIATION_REQUIRED'],
-  INDEXED: ['RECONCILED', 'RECONCILIATION_REQUIRED'],
-  RECONCILED: ['EXPLAINED'],
-  RECONCILIATION_REQUIRED: [
-    'CONFIRMED',
-    'INDEXED',
-    'RECONCILED',
-    'MANUAL_REVIEW',
-  ],
-  MANUAL_REVIEW: ['CANCELLED'],
-};
-export function transition(from: ActionState, to: ActionState): ActionState {
-  if (!successors[from]?.includes(to))
-    throw new Error(`INVALID_TRANSITION:${from}:${to}`);
-  return to;
-}
-const nonDelegable = new Set<Capability>([
-  'SIGN',
-  'WITHDRAW',
-  'CHANGE_OWNER',
-  'CHANGE_THRESHOLD',
-  'INSTALL_MODULE',
-  'CHANGE_POLICY',
-  'ISSUE_GRANT',
-]);
 export function delegateCapabilities(
   parent: readonly Capability[],
   child: readonly Capability[],
 ): Capability[] {
   if (
     new Set(child).size !== child.length ||
-    child.some((cap) => nonDelegable.has(cap) || !parent.includes(cap))
+    child.some((cap) => isNonDelegable(cap) || !parent.includes(cap))
   )
-    throw new Error('CAPABILITY_ESCALATION');
+    throw new CapabilityError('CAPABILITY_ESCALATION');
   return [...child];
 }
-export class UniqueIds {
-  private readonly ids = new Set<string>();
-  claim(id: string): void {
-    if (this.ids.has(id)) throw new Error('DUPLICATE_ID');
-    this.ids.add(id);
-  }
+export function createDomainEvent<P extends z.ZodType>(
+  payloadSchema: P,
+  input: {
+    type: string;
+    actor: PrincipalRef;
+    correlationId: string;
+    payload: z.input<P>;
+    occurredAt?: Date;
+    groupId?: string;
+    intentId?: string;
+    causationId?: string;
+  },
+): DomainEventOf<P> {
+  return parseOrThrow(domainEventSchema(payloadSchema), {
+    eventId: newId('event'),
+    type: input.type,
+    schemaVersion: DOMAIN_EVENT_SCHEMA_VERSION,
+    ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
+    ...(input.intentId === undefined ? {} : { intentId: input.intentId }),
+    ...(input.causationId === undefined
+      ? {}
+      : { causationId: input.causationId }),
+    correlationId: parseOrThrow(CorrelationIdSchema, input.correlationId),
+    occurredAt: (input.occurredAt ?? new Date()).toISOString(),
+    actor: input.actor,
+    payload: input.payload,
+  });
 }

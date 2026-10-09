@@ -8,6 +8,7 @@
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@synq/domain": "workspace:*",
     "@synq/schemas": "workspace:*"
   }
 }

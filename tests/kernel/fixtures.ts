@@ -1,8 +1,9 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import {
-  ActionIntentSchema,
+  BoundActionIntentSchema,
   MandateSchema,
-  type ActionIntent,
+  MemberIdSchema,
+  type BoundActionIntent,
   type Approval,
   type RiskPacket,
   type Simulation,
@@ -22,7 +23,7 @@ export const address = (n: number): `0x${string}` =>
 export const hash = (n: number): `0x${string}` =>
   `0x${n.toString(16).padStart(64, '0')}`;
 export const network = {
-  profile: 'local',
+  profile: 'local/anvil',
   chainId: 31337,
   providerEnvironment: 'local',
 } as const;
@@ -75,15 +76,16 @@ export function mandate(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
 }
-export function intent(overrides: Record<string, unknown> = {}): ActionIntent {
-  return ActionIntentSchema.parse({
+export function intent(
+  overrides: Record<string, unknown> = {},
+): BoundActionIntent {
+  return BoundActionIntentSchema.parse({
     schemaVersion: 1,
     intentId: 'intent_1',
     groupId: 'group_1',
     mandateId: 'mandate_1',
     mandateVersion: 1,
     action: 'TRANSFER',
-    network,
     chainId: 31337,
     account: address(20),
     operator: address(30),
@@ -91,9 +93,8 @@ export function intent(overrides: Record<string, unknown> = {}): ActionIntent {
     target: address(10),
     selector: '0xa9059cbb',
     calldataHash: hash(1),
-    inputAsset: asset,
+    inputToken: asset.address,
     maxInputAmount: '60',
-    outputAsset: null,
     minOutputAmount: '0',
     nativeValue: '0',
     maxSlippageBps: 25,
@@ -107,7 +108,7 @@ export function intent(overrides: Record<string, unknown> = {}): ActionIntent {
   });
 }
 export function evidence(
-  input: ActionIntent,
+  input: BoundActionIntent,
   overrides: Partial<RiskPacket> = {},
 ) {
   const entries = [
@@ -132,7 +133,7 @@ export function evidence(
     evidence: entries,
     ...overrides,
   };
-  const prepared = ActionIntentSchema.parse({
+  const prepared = BoundActionIntentSchema.parse({
     ...input,
     evidenceHash: artifactHash(risk.evidence),
     riskPacketHash: artifactHash(risk),
@@ -151,7 +152,7 @@ export function evidence(
   return { intent: prepared, risk, simulation };
 }
 export async function approvals(
-  input: ActionIntent,
+  input: BoundActionIntent,
   indexes = [0, 1],
 ): Promise<Approval[]> {
   return Promise.all(
@@ -163,7 +164,7 @@ export async function approvals(
         mandateId: input.mandateId,
         mandateVersion: input.mandateVersion,
         intentHash: intentHash(input),
-        memberId: `member_${i}`,
+        memberId: MemberIdSchema.parse(`member_${i}`),
         signer: owner.address.toLowerCase() as `0x${string}`,
         expiresAt: 1100,
         nonce: String(i),

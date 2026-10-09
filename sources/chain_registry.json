@@ -1,84 +1,115 @@
 {
-  "schemaVersion": 1,
-  "sources": {
-    "network": "https://docs.monad.xyz/developer-essentials/testnet",
-    "ausd": "https://docs.agora.finance/developer/contract-deployments",
-    "usdc": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
-    "verifiedAt": "2026-10-09T07:03:37Z"
-  },
-  "local": {
-    "network": {
-      "profile": "local",
-      "chainId": 31337,
-      "providerEnvironment": "local"
-    },
-    "rpcEnvironment": "SYNQ_LOCAL_RPC_URL",
-    "defaultRpcUrl": "http://127.0.0.1:8545",
-    "explorerUrl": null,
-    "confirmationDepth": 1,
-    "maxIndexLagBlocks": "0",
-    "treasuryAsset": null,
-    "edgeSettlementAsset": null,
-    "faucetAddress": null,
-    "mutationEnabled": true
-  },
-  "testnet": {
-    "network": {
-      "profile": "testnet",
-      "chainId": 10143,
-      "providerEnvironment": "sandbox"
-    },
-    "rpcEnvironment": "SYNQ_MONAD_TESTNET_RPC_URL",
-    "defaultRpcUrl": "https://testnet-rpc.monad.xyz",
-    "explorerUrl": "https://testnet.monadexplorer.com",
-    "confirmationDepth": 2,
-    "maxIndexLagBlocks": "5",
-    "treasuryAsset": {
-      "canonicalAssetId": "eip155:10143/erc20:0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
-      "chainId": 10143,
-      "address": "0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
-      "symbol": "AUSD",
-      "decimals": 6
-    },
-    "edgeSettlementAsset": {
-      "canonicalAssetId": "eip155:10143/erc20:0x534b2f3a21130d7a60830c2df862319e593943a3",
-      "chainId": 10143,
-      "address": "0x534b2f3a21130d7a60830c2df862319e593943a3",
-      "symbol": "USDC",
-      "decimals": 6
-    },
-    "faucetAddress": "0xd236c18d274e54faccc3dd9dda4b27965a73ee6c",
-    "mutationEnabled": true
-  },
+  "schemaVersion": 2,
+  "verifiedAt": "2026-10-09T09:00:00Z",
+  "chains": [
+    { "chainId": 31337, "name": "Anvil local", "role": "LOCAL", "source": "SYNQ-006" },
+    { "chainId": 10143, "name": "Monad Testnet", "role": "MONAD", "source": "S002" },
+    { "chainId": 143, "name": "Monad Mainnet", "role": "MONAD", "source": "S054" },
+    { "chainId": 1, "name": "Ethereum", "role": "OFT_SOURCE", "source": "SYNQ-007" },
+    { "chainId": 8453, "name": "Base", "role": "OFT_SOURCE", "source": "SYNQ-007" },
+    { "chainId": 43114, "name": "Avalanche C-Chain", "role": "OFT_SOURCE", "source": "SYNQ-007" }
+  ],
   "assets": {
-    "testnetAUSD": {
-      "canonicalAssetId": "eip155:10143/erc20:0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
-      "chainId": 10143,
-      "address": "0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
-      "symbol": "AUSD",
-      "decimals": 6
-    },
-    "testnetUSDC": {
-      "canonicalAssetId": "eip155:10143/erc20:0x534b2f3a21130d7a60830c2df862319e593943a3",
-      "chainId": 10143,
-      "address": "0x534b2f3a21130d7a60830c2df862319e593943a3",
-      "symbol": "USDC",
-      "decimals": 6
-    },
-    "mainnetAUSD": {
-      "canonicalAssetId": "eip155:143/erc20:0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
-      "chainId": 143,
-      "address": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
-      "symbol": "AUSD",
-      "decimals": 6
-    },
-    "mainnetUSDC": {
-      "canonicalAssetId": "eip155:143/erc20:0x754704bc059f8c67012fed69bc8a327a5aafb603",
-      "chainId": 143,
-      "address": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
-      "symbol": "USDC",
-      "decimals": 6
-    }
+    "testnetAUSD": { "network": "eip155:10143", "chainId": 10143, "address": "0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC", "symbol": "AUSD", "decimals": 6, "source": "S093", "verifiedAt": "2026-10-09T08:55:54Z" },
+    "testnetUSDC": { "network": "eip155:10143", "chainId": 10143, "address": "0x534b2f3A21130d7a60830c2Df862319e593943A3", "symbol": "USDC", "decimals": 6, "source": "SYNQ-001", "verifiedAt": "2026-10-09T08:56:03Z" },
+    "testnetWMON": { "network": "eip155:10143", "chainId": 10143, "address": "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541", "symbol": "WMON", "decimals": 18, "source": "S002", "verifiedAt": "2026-10-09T08:56:30Z" },
+    "testnetPerplUSD": { "network": "eip155:10143", "chainId": 10143, "address": "0xdf5b718d8fcc173335185a2a1513ee8151e3c027", "symbol": "PERPL_TEST_USD", "decimals": 6, "source": "S101", "verifiedAt": "2026-10-09T08:58:27Z" },
+    "mainnetAUSD": { "network": "eip155:143", "chainId": 143, "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", "symbol": "AUSD", "decimals": 6, "source": "S093", "verifiedAt": "2026-10-09T08:55:54Z" },
+    "mainnetUSDC": { "network": "eip155:143", "chainId": 143, "address": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603", "symbol": "USDC", "decimals": 6, "source": "SYNQ-001", "verifiedAt": "2026-10-09T08:56:03Z" },
+    "mainnetWMON": { "network": "eip155:143", "chainId": 143, "address": "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A", "symbol": "WMON", "decimals": 18, "source": "S054", "verifiedAt": "2026-10-09T08:56:30Z" },
+    "ethereumAUSD": { "network": "eip155:1", "chainId": 1, "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", "symbol": "AUSD", "decimals": 6, "source": "S093", "verifiedAt": "2026-10-09T08:59:59Z" },
+    "baseAUSD": { "network": "eip155:8453", "chainId": 8453, "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", "symbol": "AUSD", "decimals": 6, "source": "S093", "verifiedAt": "2026-10-09T08:59:59Z" },
+    "avalancheAUSD": { "network": "eip155:43114", "chainId": 43114, "address": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a", "symbol": "AUSD", "decimals": 6, "source": "S093", "verifiedAt": "2026-10-09T08:59:59Z" }
   },
-  "mainnetMutationEnabled": false
+  "nativeAssets": {
+    "testnetMON": { "network": "eip155:10143", "chainId": 10143, "symbol": "MON", "decimals": 18, "source": "S002" },
+    "mainnetMON": { "network": "eip155:143", "chainId": 143, "symbol": "MON", "decimals": 18, "source": "S054" }
+  },
+  "contracts": {
+    "testnetAUSDFaucet": { "network": "eip155:10143", "chainId": 10143, "address": "0xd236c18D274E54FAccC3dd9DDA4b27965a73ee6C", "kind": "AUSD_FAUCET", "source": "S093", "verifiedAt": "2026-10-09T08:55:54Z" },
+    "testnetSafeL2": { "network": "eip155:10143", "chainId": 10143, "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762", "kind": "SAFE_L2", "version": "1.4.1", "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "testnetSafe": { "network": "eip155:10143", "chainId": 10143, "address": "0x41675C099F32341bf84BFc5382aF534df5C7461a", "kind": "SAFE", "version": "1.4.1", "codeHash": "0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "testnetSafeProxyFactory": { "network": "eip155:10143", "chainId": 10143, "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67", "kind": "SAFE_PROXY_FACTORY", "version": "1.4.1", "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "testnetSafeFallbackHandler": { "network": "eip155:10143", "chainId": 10143, "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99", "kind": "SAFE_COMPATIBILITY_FALLBACK_HANDLER", "version": "1.4.1", "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "testnetSafeMultiSendCallOnly": { "network": "eip155:10143", "chainId": 10143, "address": "0x9641d764fc13c8B624c04430C7356C1C7C8102e2", "kind": "SAFE_MULTI_SEND_CALL_ONLY", "version": "1.4.1", "codeHash": "0xecd5bd14a08c5d2122379900b2f272bdf107a7e92423c10dd5fe3254386c9939", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "mainnetSafeL2": { "network": "eip155:143", "chainId": 143, "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762", "kind": "SAFE_L2", "version": "1.4.1", "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "mainnetSafe": { "network": "eip155:143", "chainId": 143, "address": "0x41675C099F32341bf84BFc5382aF534df5C7461a", "kind": "SAFE", "version": "1.4.1", "codeHash": "0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "mainnetSafeProxyFactory": { "network": "eip155:143", "chainId": 143, "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67", "kind": "SAFE_PROXY_FACTORY", "version": "1.4.1", "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "mainnetSafeFallbackHandler": { "network": "eip155:143", "chainId": 143, "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99", "kind": "SAFE_COMPATIBILITY_FALLBACK_HANDLER", "version": "1.4.1", "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" },
+    "mainnetSafeMultiSendCallOnly": { "network": "eip155:143", "chainId": 143, "address": "0x9641d764fc13c8B624c04430C7356C1C7C8102e2", "kind": "SAFE_MULTI_SEND_CALL_ONLY", "version": "1.4.1", "codeHash": "0xecd5bd14a08c5d2122379900b2f272bdf107a7e92423c10dd5fe3254386c9939", "source": "SYNQ-002", "verifiedAt": "2026-10-09T08:55:08Z" }
+  },
+  "profiles": {
+    "local/anvil": {
+      "network": { "profile": "local/anvil", "chainId": 31337, "providerEnvironment": "local" },
+      "rpcEnvironment": "SYNQ_LOCAL_RPC_URL",
+      "defaultRpcUrl": "http://127.0.0.1:8545",
+      "explorerUrl": null,
+      "confirmationDepth": 1,
+      "maxIndexLagBlocks": "0",
+      "mutationEnabled": true,
+      "nativeAsset": null,
+      "faucet": null,
+      "assetRoles": {
+        "treasuryAsset": { "status": "UNCONFIGURED", "reason": "Local Anvil has no official AUSD; the demo deploys a LocalTestToken recorded in its deployment manifest." },
+        "web2SettlementAsset": { "status": "UNCONFIGURED", "reason": "No Web2 settlement rail exists on local Anvil." },
+        "perplCollateralAsset": { "status": "UNCONFIGURED", "reason": "Perpl is not deployed on local Anvil." },
+        "x402Asset": { "status": "UNCONFIGURED", "reason": "x402 facilitators do not serve local Anvil." },
+        "cardFundingAsset": { "status": "UNCONFIGURED", "reason": "Card issuing is not available on local Anvil." }
+      },
+      "treasuryBuckets": {
+        "CORE_TREASURY": { "kind": "ROLE", "role": "treasuryAsset" },
+        "WEB2_SETTLEMENT_BUFFER": { "kind": "ROLE", "role": "web2SettlementAsset" },
+        "GAS_BUFFER": { "kind": "UNCONFIGURED", "reason": "Anvil gas is pre-funded test ETH, not MON." },
+        "STRATEGY_POSITIONS": { "kind": "MANDATE_DEFINED" }
+      }
+    },
+    "sandbox/monad-testnet": {
+      "network": { "profile": "sandbox/monad-testnet", "chainId": 10143, "providerEnvironment": "sandbox" },
+      "rpcEnvironment": "SYNQ_MONAD_TESTNET_RPC_URL",
+      "defaultRpcUrl": "https://testnet-rpc.monad.xyz",
+      "explorerUrl": "https://testnet.monadexplorer.com",
+      "confirmationDepth": 2,
+      "maxIndexLagBlocks": "5",
+      "mutationEnabled": true,
+      "nativeAsset": "testnetMON",
+      "faucet": "testnetAUSDFaucet",
+      "assetRoles": {
+        "treasuryAsset": { "status": "CONFIGURED", "asset": "testnetAUSD", "source": "S093" },
+        "web2SettlementAsset": { "status": "CONFIGURED", "asset": "testnetUSDC", "source": "SYNQ-001" },
+        "perplCollateralAsset": { "status": "CONFIGURED", "asset": "testnetPerplUSD", "source": "S101" },
+        "x402Asset": { "status": "CONFIGURED", "asset": "testnetUSDC", "source": "SYNQ-003" },
+        "cardFundingAsset": { "status": "CONFIGURED", "asset": "testnetUSDC", "source": "SYNQ-004" }
+      },
+      "treasuryBuckets": {
+        "CORE_TREASURY": { "kind": "ROLE", "role": "treasuryAsset" },
+        "WEB2_SETTLEMENT_BUFFER": { "kind": "ROLE", "role": "web2SettlementAsset" },
+        "GAS_BUFFER": { "kind": "NATIVE", "asset": "testnetMON" },
+        "STRATEGY_POSITIONS": { "kind": "MANDATE_DEFINED" }
+      }
+    },
+    "proof/monad-mainnet": {
+      "network": { "profile": "proof/monad-mainnet", "chainId": 143, "providerEnvironment": "production" },
+      "rpcEnvironment": "SYNQ_MONAD_MAINNET_RPC_URL",
+      "defaultRpcUrl": "https://rpc.monad.xyz",
+      "explorerUrl": null,
+      "confirmationDepth": 2,
+      "maxIndexLagBlocks": "5",
+      "mutationEnabled": false,
+      "nativeAsset": "mainnetMON",
+      "faucet": null,
+      "assetRoles": {
+        "treasuryAsset": { "status": "CONFIGURED", "asset": "mainnetAUSD", "source": "S093" },
+        "web2SettlementAsset": { "status": "CONFIGURED", "asset": "mainnetUSDC", "source": "SYNQ-001" },
+        "perplCollateralAsset": { "status": "CONFIGURED", "asset": "mainnetAUSD", "source": "S101" },
+        "x402Asset": { "status": "CONFIGURED", "asset": "mainnetUSDC", "source": "SYNQ-003" },
+        "cardFundingAsset": { "status": "CONFIGURED", "asset": "mainnetUSDC", "source": "SYNQ-004" }
+      },
+      "treasuryBuckets": {
+        "CORE_TREASURY": { "kind": "ROLE", "role": "treasuryAsset" },
+        "WEB2_SETTLEMENT_BUFFER": { "kind": "ROLE", "role": "web2SettlementAsset" },
+        "GAS_BUFFER": { "kind": "NATIVE", "asset": "mainnetMON" },
+        "STRATEGY_POSITIONS": { "kind": "MANDATE_DEFINED" }
+      }
+    }
+  }
 }

@@ -102,7 +102,7 @@ describe('independent foundation release review', () => {
     const pending = kernel.authorize(input);
     input.intent.maxInputAmount = '100';
     input.intent.target = address(99);
-    input.intent.inputAsset.decimals = 18;
+    input.intent.inputToken = address(98);
     input.risk.slippageBps = 10000;
     input.simulation.succeeded = false;
     input.approvals[1]!.signature = input.approvals[0]!.signature;
@@ -125,7 +125,7 @@ describe('independent foundation release review', () => {
     const pending = kernel.authorize(input);
     kernel.mandates.update(mandate({ status: 'REVOKED' }));
     expect(await pending).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code: 'MANDATE_VERSION',
     });
     expect(kernel.accounting('group_1', 'mandate_1').reserved).toBe('0');
@@ -187,6 +187,7 @@ describe('independent foundation release review', () => {
         data,
         '0x',
         now,
+        [asset],
       ).chainId,
     ).toBe(31337);
     expect(() => chainGrant({ ...result.grant, chainId: 143 })).toThrow(
@@ -205,7 +206,7 @@ describe('independent foundation release review', () => {
       }
     }
     const store = new DelayedStore();
-    const service = new ApprovalService(store, 'local');
+    const service = new ApprovalService(store, 'local/anvil');
     service.register({
       principalId: 'owner',
       kind: 'HUMAN',

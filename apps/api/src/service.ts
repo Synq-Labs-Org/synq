@@ -5,12 +5,9 @@ import {
   HashSchema,
   IdSchema,
   TimestampSchema,
-} from '../../../packages/schemas/src/index.js';
-import { DeploymentManifestSchema } from '../../../packages/chain-registry/src/index.js';
-import {
-  ChainEventSchema,
-  DeterministicReadModel,
-} from '../../../packages/read-model/src/index.js';
+} from '@synq/schemas';
+import { DeploymentManifestSchema } from '@synq/chain-registry';
+import { ChainEventSchema, DeterministicReadModel } from '@synq/read-model';
 const ProofSchema = z.object({
   manifest: DeploymentManifestSchema,
   localTestToken: AddressSchema,

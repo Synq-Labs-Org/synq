@@ -1,128 +1,54 @@
 import { z } from 'zod';
+import { AssetSchema, ChainIdSchema, NetworkProfileSchema } from './network.js';
+import { ActionIntentSchema, ActionKindSchema } from './intent.js';
+import { PrincipalKindSchema } from './events.js';
+import { ActionStateSchema, TxStateSchema } from './lifecycle.js';
+import {
+  AddressSchema,
+  AmountSchema,
+  BpsSchema,
+  GroupIdSchema,
+  HashSchema,
+  IdSchema,
+  MandateIdSchema,
+  MemberIdSchema,
+  PluginIdSchema,
+  PrincipalIdSchema,
+  ProposalIdSchema,
+  SelectorSchema,
+  SignatureSchema,
+  TimestampSchema,
+  canonicalBigInt,
+} from './primitives.js';
 
-export const UINT256_MAX = (1n << 256n) - 1n;
-export const AmountSchema = z
-  .string()
-  .max(78)
-  .regex(/^(0|[1-9][0-9]*)$/)
-  .pipe(z.string().refine((v) => BigInt(v) <= UINT256_MAX, 'uint256 overflow'));
-export const AddressSchema = z
-  .string()
-  .regex(/^0x[0-9a-fA-F]{40}$/)
-  .transform((v) => v.toLowerCase() as `0x${string}`);
-export const HashSchema = z
-  .string()
-  .regex(/^0x[0-9a-fA-F]{64}$/)
-  .transform((v) => v.toLowerCase() as `0x${string}`);
-export const SelectorSchema = z
-  .string()
-  .regex(/^0x[0-9a-fA-F]{8}$/)
-  .transform((v) => v.toLowerCase() as `0x${string}`);
-export const IdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/);
-export const TimestampSchema = z
-  .number()
-  .int()
-  .nonnegative()
-  .max(Number.MAX_SAFE_INTEGER);
-export const ChainIdSchema = z.union([
-  z.literal(31337),
-  z.literal(10143),
-  z.literal(143),
-]);
-export const ProfileSchema = z.enum(['local', 'testnet', 'mainnet']);
-export const NetworkProfileSchema = z
-  .strictObject({
-    profile: ProfileSchema,
-    chainId: ChainIdSchema,
-    providerEnvironment: z.enum(['local', 'sandbox', 'production']),
-  })
-  .refine(
-    (v) =>
-      ({ local: 31337, testnet: 10143, mainnet: 143 })[v.profile] ===
-        v.chainId &&
-      { local: 'local', testnet: 'sandbox', mainnet: 'production' }[
-        v.profile
-      ] === v.providerEnvironment,
-    'network/profile mismatch',
-  );
-export const AssetSchema = z
-  .strictObject({
-    canonicalAssetId: z.string(),
-    chainId: ChainIdSchema,
-    address: AddressSchema,
-    symbol: z.enum(['AUSD', 'USDC', 'MON', 'WMON', 'PERPL_TEST_USD', 'OTHER']),
-    decimals: z.number().int().min(0).max(36),
-  })
-  .refine(
-    (v) => v.canonicalAssetId === `eip155:${v.chainId}/erc20:${v.address}`,
-    'canonical asset mismatch',
-  );
-export const ActionKindSchema = z.enum([
-  'TRANSFER',
-  'SPOT_TRADE',
-  'PERP_HEDGE',
-  'CARD_PAYMENT',
-  'X402_PAYMENT',
-  'CROSS_CHAIN_FUND',
-  'SUBSCRIPTION',
-  'CONVERSION',
-]);
-export const ActionIntentSchema = z
-  .strictObject({
-    schemaVersion: z.literal(1),
-    intentId: IdSchema,
-    groupId: IdSchema,
-    mandateId: IdSchema,
-    mandateVersion: z.number().int().positive(),
-    action: ActionKindSchema,
-    network: NetworkProfileSchema,
-    chainId: ChainIdSchema,
-    account: AddressSchema,
-    operator: AddressSchema,
-    pluginId: IdSchema,
-    target: AddressSchema,
-    selector: SelectorSchema,
-    calldataHash: HashSchema,
-    inputAsset: AssetSchema,
-    maxInputAmount: AmountSchema.refine((v) => BigInt(v) > 0n),
-    outputAsset: AssetSchema.nullable(),
-    minOutputAmount: AmountSchema,
-    nativeValue: AmountSchema,
-    maxSlippageBps: z.number().int().min(0).max(10000),
-    leverageBps: z.number().int().min(0).max(1000000),
-    validAfter: TimestampSchema,
-    validUntil: TimestampSchema,
-    nonce: AmountSchema,
-    evidenceHash: HashSchema,
-    riskPacketHash: HashSchema,
-  })
-  .refine(
-    (v) =>
-      v.validUntil > v.validAfter &&
-      v.network.chainId === v.chainId &&
-      v.inputAsset.chainId === v.chainId &&
-      (v.outputAsset === null ||
-        v.action === 'CROSS_CHAIN_FUND' ||
-        v.outputAsset.chainId === v.chainId) &&
-      (v.outputAsset !== null || v.minOutputAmount === '0'),
-    'invalid time/asset/network envelope',
-  );
+export * from './primitives.js';
+export * from './network.js';
+export * from './intent.js';
+export * from './plugin.js';
+export * from './events.js';
+export * from './lifecycle.js';
+
 export const MemberSchema = z.strictObject({
-  memberId: IdSchema,
+  memberId: MemberIdSchema,
   signer: AddressSchema,
   active: z.boolean(),
 });
+const amountOrder = (a: string, b: string) => {
+  const x = canonicalBigInt(a),
+    y = canonicalBigInt(b);
+  return x !== null && y !== null && x <= y;
+};
 export const MandateSchema = z
   .strictObject({
     schemaVersion: z.literal(1),
-    mandateId: IdSchema,
-    groupId: IdSchema,
+    mandateId: MandateIdSchema,
+    groupId: GroupIdSchema,
     version: z.number().int().positive(),
     status: z.enum(['ACTIVE', 'REVOKED']),
     network: NetworkProfileSchema,
     account: AddressSchema,
     operators: z.array(AddressSchema).min(1),
-    plugins: z.array(IdSchema).min(1),
+    plugins: z.array(PluginIdSchema).min(1),
     actions: z.array(ActionKindSchema).min(1),
     targets: z.array(AddressSchema).min(1),
     selectors: z.array(SelectorSchema).min(1),
@@ -132,9 +58,9 @@ export const MandateSchema = z
     perActionCap: AmountSchema,
     cumulativeBudget: AmountSchema,
     maxNativeValue: AmountSchema,
-    maxSlippageBps: z.number().int().min(0).max(10000),
-    maxReferenceDeviationBps: z.number().int().min(0).max(10000),
-    maxLeverageBps: z.number().int().min(0).max(1000000),
+    maxSlippageBps: BpsSchema,
+    maxReferenceDeviationBps: BpsSchema,
+    maxLeverageBps: z.number().int().min(0).max(1_000_000),
     autoCap: AmountSchema,
     reviewCap: AmountSchema,
     quorum: z.number().int().positive(),
@@ -152,13 +78,9 @@ export const MandateSchema = z
     (v) =>
       v.validUntil > v.validAfter &&
       v.inputAsset.chainId === v.network.chainId &&
-      /^(0|[1-9][0-9]*)$/.test(v.autoCap) &&
-      /^(0|[1-9][0-9]*)$/.test(v.reviewCap) &&
-      /^(0|[1-9][0-9]*)$/.test(v.perActionCap) &&
-      /^(0|[1-9][0-9]*)$/.test(v.cumulativeBudget) &&
-      BigInt(v.autoCap) <= BigInt(v.reviewCap) &&
-      BigInt(v.reviewCap) <= BigInt(v.perActionCap) &&
-      BigInt(v.perActionCap) <= BigInt(v.cumulativeBudget) &&
+      amountOrder(v.autoCap, v.reviewCap) &&
+      amountOrder(v.reviewCap, v.perActionCap) &&
+      amountOrder(v.perActionCap, v.cumulativeBudget) &&
       v.quorum <= v.members.filter((m) => m.active).length &&
       new Set(v.members.map((m) => m.memberId)).size === v.members.length &&
       new Set(v.members.map((m) => m.signer)).size === v.members.length,
@@ -166,18 +88,15 @@ export const MandateSchema = z
   );
 export const ApprovalSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  groupId: IdSchema,
-  mandateId: IdSchema,
+  groupId: GroupIdSchema,
+  mandateId: MandateIdSchema,
   mandateVersion: z.number().int().positive(),
   intentHash: HashSchema,
-  memberId: IdSchema,
+  memberId: MemberIdSchema,
   signer: AddressSchema,
   expiresAt: TimestampSchema,
   nonce: AmountSchema,
-  signature: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{130}$/)
-    .transform((v) => v as `0x${string}`),
+  signature: SignatureSchema,
 });
 export const EvidenceSchema = z.strictObject({
   source: IdSchema,
@@ -192,9 +111,9 @@ export const RiskPacketSchema = z.strictObject({
   evaluatedAt: TimestampSchema,
   quoteAt: TimestampSchema,
   quoteExpiresAt: TimestampSchema,
-  slippageBps: z.number().int().min(0).max(10000),
-  referenceDeviationBps: z.number().int().min(0).max(10000),
-  maxReferenceDeviationBps: z.number().int().min(0).max(10000),
+  slippageBps: BpsSchema,
+  referenceDeviationBps: BpsSchema,
+  maxReferenceDeviationBps: BpsSchema,
   blocked: z.boolean(),
   evidence: z.array(EvidenceSchema).min(1),
 });
@@ -214,11 +133,11 @@ export const ExecutionGrantSchema = z
     schemaVersion: z.literal(1),
     grantId: HashSchema,
     intentHash: HashSchema,
-    groupId: IdSchema,
-    mandateId: IdSchema,
+    groupId: GroupIdSchema,
+    mandateId: MandateIdSchema,
     mandateVersion: z.number().int().positive(),
     operator: AddressSchema,
-    pluginId: IdSchema,
+    pluginId: PluginIdSchema,
     chainId: ChainIdSchema,
     account: AddressSchema,
     target: AddressSchema,
@@ -226,7 +145,7 @@ export const ExecutionGrantSchema = z
     calldataHash: HashSchema,
     inputAsset: AssetSchema,
     maxInputAmount: AmountSchema,
-    outputAsset: AssetSchema.nullable(),
+    outputToken: AddressSchema.nullable(),
     minOutputAmount: AmountSchema,
     nativeValue: AmountSchema,
     validAfter: TimestampSchema,
@@ -245,13 +164,21 @@ export const ExecutionReceiptSchema = z.strictObject({
   chainId: ChainIdSchema,
   actualInputAmount: AmountSchema,
   actualOutputAmount: AmountSchema,
-  status: z.enum(['SUBMITTED', 'CONFIRMED', 'REVERTED', 'RECONCILED']),
+  state: TxStateSchema.extract([
+    'SUBMITTED',
+    'INCLUDED',
+    'CONFIRMED',
+    'INDEXED',
+    'RECONCILED',
+    'SETTLED',
+  ]),
+  outcome: z.enum(['SUCCESS', 'REVERTED']).nullable(),
   blockNumber: AmountSchema.nullable(),
 });
 export const ReservationSchema = z.strictObject({
   grantId: HashSchema,
-  mandateId: IdSchema,
-  groupId: IdSchema,
+  mandateId: MandateIdSchema,
+  groupId: GroupIdSchema,
   asset: AssetSchema,
   amount: AmountSchema,
   expiresAt: TimestampSchema,
@@ -263,30 +190,30 @@ export const TreasuryBalanceSchema = z.strictObject({
   balance: AmountSchema,
 });
 export const PrincipalSchema = z.strictObject({
-  principalId: IdSchema,
-  kind: z.enum(['HUMAN', 'AGENT', 'SERVICE', 'SMART_ACCOUNT']),
+  principalId: PrincipalIdSchema,
+  kind: PrincipalKindSchema,
   address: AddressSchema.nullable(),
 });
 export const GroupSchema = z.strictObject({
-  groupId: IdSchema,
+  groupId: GroupIdSchema,
   account: AddressSchema,
   network: NetworkProfileSchema,
   coreTreasuryAsset: z.literal('AUSD'),
 });
 export const ProposalSchema = z.strictObject({
-  proposalId: IdSchema,
+  proposalId: ProposalIdSchema,
   intent: ActionIntentSchema,
-  status: z.enum(['PROPOSED', 'PENDING_APPROVAL', 'AUTHORIZED', 'REJECTED']),
-});
-export const DomainEventSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  eventId: IdSchema,
-  aggregateId: IdSchema,
-  sequence: z.number().int().positive(),
-  type: IdSchema,
-  occurredAt: TimestampSchema,
-  actorId: IdSchema,
-  evidenceHash: HashSchema,
+  status: ActionStateSchema.extract([
+    'PROPOSED',
+    'RISKED',
+    'SIMULATED',
+    'PENDING_APPROVAL',
+    'AUTHORIZED',
+    'POLICY_REJECTED',
+    'RISK_REJECTED',
+    'EXPIRED',
+    'CANCELLED',
+  ]),
 });
 export const WorldSnapshotSchema = z.strictObject({
   group: GroupSchema,
@@ -300,70 +227,15 @@ export const WorldSnapshotSchema = z.strictObject({
   chainHead: AmountSchema,
   indexedHead: AmountSchema,
 });
-export const CapabilitySchema = z.enum([
-  'READ_MARKET',
-  'QUOTE',
-  'PROPOSE_ACTION',
-  'TRANSFER',
-  'SPOT_TRADE',
-  'PERP_HEDGE',
-  'CARD_PAYMENT',
-  'X402_PAYMENT',
-  'CROSS_CHAIN_FUND',
-  'SUBSCRIPTION',
-  'CONVERSION',
-  'SIGN',
-  'WITHDRAW',
-  'CHANGE_OWNER',
-  'CHANGE_THRESHOLD',
-  'INSTALL_MODULE',
-  'CHANGE_POLICY',
-  'ISSUE_GRANT',
-]);
-export const PluginManifestSchema = z
-  .strictObject({
-    id: IdSchema,
-    version: z.string().regex(/^\d+\.\d+\.\d+$/),
-    capabilities: z.array(CapabilitySchema).min(1),
-    chains: z.array(ChainIdSchema).min(1),
-    environments: z.array(ProfileSchema).min(1),
-    riskClass: z.enum(['READ_ONLY', 'FINANCIAL_EXECUTION']),
-    requiresSimulation: z.boolean(),
-    maxGrantTtlSeconds: z.number().int().positive(),
-    sourceDocs: z.array(z.url()).min(1),
-  })
-  .refine(
-    (v) =>
-      new Set(v.capabilities).size === v.capabilities.length &&
-      !v.capabilities.some((c) =>
-        [
-          'SIGN',
-          'WITHDRAW',
-          'CHANGE_OWNER',
-          'CHANGE_THRESHOLD',
-          'INSTALL_MODULE',
-          'CHANGE_POLICY',
-          'ISSUE_GRANT',
-        ].includes(c),
-      ) &&
-      (v.riskClass !== 'FINANCIAL_EXECUTION' || v.requiresSimulation),
-    'unsafe plugin manifest',
-  );
-export type ActionIntent = z.infer<typeof ActionIntentSchema>;
-export type Mandate = z.infer<typeof MandateSchema>;
-export type ExecutionGrant = z.infer<typeof ExecutionGrantSchema>;
-export type Approval = z.infer<typeof ApprovalSchema>;
-export type Asset = z.infer<typeof AssetSchema>;
-export type RiskPacket = z.infer<typeof RiskPacketSchema>;
-export type Simulation = z.infer<typeof SimulationSchema>;
-export type ExecutionReceipt = z.infer<typeof ExecutionReceiptSchema>;
-export type Reservation = z.infer<typeof ReservationSchema>;
-export type NetworkProfile = z.infer<typeof NetworkProfileSchema>;
-export type PluginManifest = z.infer<typeof PluginManifestSchema>;
-export type DomainEvent = z.infer<typeof DomainEventSchema>;
-export type WorldSnapshot = z.infer<typeof WorldSnapshotSchema>;
-export type Member = z.infer<typeof MemberSchema>;
-export type Principal = z.infer<typeof PrincipalSchema>;
-export type Group = z.infer<typeof GroupSchema>;
-export type Proposal = z.infer<typeof ProposalSchema>;
-export type Capability = z.infer<typeof CapabilitySchema>;
+export type Mandate = z.output<typeof MandateSchema>;
+export type ExecutionGrant = z.output<typeof ExecutionGrantSchema>;
+export type Approval = z.output<typeof ApprovalSchema>;
+export type RiskPacket = z.output<typeof RiskPacketSchema>;
+export type Simulation = z.output<typeof SimulationSchema>;
+export type ExecutionReceipt = z.output<typeof ExecutionReceiptSchema>;
+export type Reservation = z.output<typeof ReservationSchema>;
+export type WorldSnapshot = z.output<typeof WorldSnapshotSchema>;
+export type Member = z.output<typeof MemberSchema>;
+export type Principal = z.output<typeof PrincipalSchema>;
+export type Group = z.output<typeof GroupSchema>;
+export type Proposal = z.output<typeof ProposalSchema>;

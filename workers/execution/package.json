@@ -1,1 +1,23 @@
-{"name":"@synq/execution-worker","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","scripts":{"build":"tsc --noEmit -p ../../tsconfig.json"}}
+{
+  "name": "@synq/execution-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./abi": "./src/abi.ts",
+    "./persistence": "./src/persistence.ts",
+    "./journal": "./src/journal.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
+  }
+}

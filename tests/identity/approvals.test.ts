@@ -10,7 +10,7 @@ import {
 import { intent, mandate, owners, now } from '../kernel/fixtures.js';
 
 function service() {
-  const s = new ApprovalService(new MemoryChallengeStore(), 'local');
+  const s = new ApprovalService(new MemoryChallengeStore(), 'local/anvil');
   owners.forEach((owner, i) => {
     s.register({
       principalId: `fixture_${i}`,
@@ -49,7 +49,7 @@ describe('cryptographic approval attribution (fixture wallets, not real Mera hum
       }
     }
     const store = new RevokingStore(),
-      s = new ApprovalService(store, 'local');
+      s = new ApprovalService(store, 'local/anvil');
     s.register({
       principalId: 'fixture_0',
       kind: 'HUMAN',
@@ -64,7 +64,7 @@ describe('cryptographic approval attribution (fixture wallets, not real Mera hum
         approvalTypedData(intent(), c.approval),
       ),
     };
-    const restarted = new ApprovalService(store, 'local');
+    const restarted = new ApprovalService(store, 'local/anvil');
     restarted.register({
       principalId: 'fixture_0',
       kind: 'HUMAN',

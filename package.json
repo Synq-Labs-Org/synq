@@ -28,7 +28,13 @@
     "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
     "indexer:local": "node --import tsx scripts/indexer-local.ts start",
     "indexer:migrate-local": "node --import tsx scripts/indexer-local.ts migrate",
-    "testnet:probe": "node --import tsx scripts/testnet-probe.ts"
+    "testnet:probe": "node --import tsx scripts/testnet-probe.ts",
+    "test:report": "node scripts/test-report.mjs",
+    "test:schema-compat": "vitest run tests/domain/schema-compat.test.ts",
+    "test:plugins": "vitest run tests/plugins",
+    "sources:resolve": "node scripts/resolve-sources.mjs",
+    "registry:probe": "node --import tsx scripts/testnet-probe.ts",
+    "indexer:env": "node --import tsx scripts/envio-env.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
@@ -41,15 +47,23 @@
     "redis": "5.11.0"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "tsx": "4.23.15",
-    "vitest": "4.1.11",
-    "fast-check": "4.5.3",
-    "turbo": "2.11.7",
-    "eslint": "10.12.0",
-    "typescript-eslint": "8.71.1",
-    "prettier": "3.8.1",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/execution-worker": "workspace:*",
+    "@synq/identity": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/plugin-sdk": "workspace:*",
+    "@synq/read-model": "workspace:*",
+    "@synq/schemas": "workspace:*",
     "@types/node": "22.19.7",
-    "@types/pg": "8.16.0"
+    "@types/pg": "8.16.0",
+    "eslint": "10.12.0",
+    "fast-check": "4.5.3",
+    "prettier": "3.8.1",
+    "tsx": "4.23.15",
+    "turbo": "2.11.7",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
+    "vitest": "4.1.11"
   }
 }

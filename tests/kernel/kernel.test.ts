@@ -67,11 +67,7 @@ describe('Deterministic authorization', () => {
   it.each([
     ['KER-001 amount cap', { maxInputAmount: '101' }, 'AMOUNT_CAP'],
     ['KER-002 wrong venue', { pluginId: 'wrong' }, 'PLUGIN_FORBIDDEN'],
-    [
-      'KER-003 wrong asset',
-      { inputAsset: { ...asset, symbol: 'USDC' } },
-      'ASSET_FORBIDDEN',
-    ],
+    ['KER-003 wrong asset', { inputToken: address(11) }, 'ASSET_FORBIDDEN'],
     ['KER-006 blocked leverage', { leverageBps: 100 }, 'LEVERAGE_CAP'],
     ['KER-007 target mismatch', { target: address(11) }, 'TARGET_FORBIDDEN'],
     ['wrong selector', { selector: '0x12345678' }, 'SELECTOR_FORBIDDEN'],
@@ -86,7 +82,7 @@ describe('Deterministic authorization', () => {
   ])('%s rejects before issuing authority', async (_name, patch, code) => {
     const input = await economicRequest(patch);
     expect(await kernelFor(input).authorize(input)).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code,
     });
   });
@@ -112,13 +108,8 @@ describe('Deterministic authorization', () => {
       canonicalAssetId: `eip155:10143/erc20:${asset.address}`,
     };
     const input = await economicRequest({
-      network: {
-        profile: 'testnet',
-        chainId: 10143,
-        providerEnvironment: 'sandbox',
-      },
       chainId: 10143,
-      inputAsset: testAsset,
+      inputToken: testAsset.address,
     });
     expect(await kernelFor(input).authorize(input)).toMatchObject({
       code: 'NETWORK_MISMATCH',
@@ -173,12 +164,7 @@ describe('Deterministic authorization', () => {
   it('new output token demands consensus even inside AUTO amount cap', async () => {
     const input = await economicRequest({
       maxInputAmount: '1',
-      outputAsset: {
-        ...asset,
-        address: address(12),
-        canonicalAssetId: `eip155:31337/erc20:${address(12)}`,
-        symbol: 'OTHER',
-      },
+      outputToken: address(12),
       minOutputAmount: '1',
     });
     expect(
@@ -282,7 +268,7 @@ describe('Deterministic authorization', () => {
     for (const patch of [
       { target: address(99) },
       { maxInputAmount: '61' },
-      { minOutputAmount: '1', outputAsset: asset },
+      { minOutputAmount: '1', outputToken: asset.address },
       { pluginId: 'other' },
       { operator: address(99) },
       { calldataHash: hash(99) },

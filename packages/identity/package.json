@@ -7,9 +7,17 @@
     ".": "./src/index.ts",
     "./mera-browser": "./src/mera-browser.ts"
   },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
   "dependencies": {
     "@category-labs/mera": "0.2.0",
     "@scure/bip32": "2.4.0",
-    "@scure/bip39": "2.4.0"
+    "@scure/bip39": "2.4.0",
+    "@synq/kernel": "workspace:*",
+    "@synq/read-model": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
   }
 }

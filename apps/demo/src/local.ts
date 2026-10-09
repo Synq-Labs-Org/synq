@@ -3,47 +3,42 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encodeFunctionData, keccak256, stringToHex } from 'viem';
 import {
-  ActionIntentSchema,
+  BoundActionIntentSchema,
   MandateSchema,
   AssetSchema,
   type RiskPacket,
   type Simulation,
-} from '../../../packages/schemas/src/index.js';
+} from '@synq/schemas';
 import {
   Kernel,
   artifactHash,
   economicIntentHash,
   intentHash,
   approvalTypedData,
-} from '../../../packages/kernel/src/index.js';
-import {
-  ApprovalService,
-  MemoryChallengeStore,
-} from '../../../packages/identity/src/index.js';
-import {
-  DeterministicReadModel,
-  verifyFresh,
-} from '../../../packages/read-model/src/index.js';
-import {
-  localProfile,
-  DeploymentManifestSchema,
-} from '../../../packages/chain-registry/src/index.js';
-import { writeDurableJson } from '../../../workers/execution/src/persistence.js';
+} from '@synq/kernel';
+import { ApprovalService, MemoryChallengeStore } from '@synq/identity';
+import { DeterministicReadModel, verifyFresh } from '@synq/read-model';
+import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
+import { writeDurableJson } from '@synq/execution-worker/persistence';
 import {
   chainGrant,
   prepareModuleCall,
   ExecutionJournal,
   JournaledBroadcaster,
-} from '../../../workers/execution/src/index.js';
-import {
-  registryAbi,
-  moduleAbi,
-  tokenAbi,
-} from '../../../workers/execution/src/abi.js';
+} from '@synq/execution-worker';
+import { registryAbi, moduleAbi, tokenAbi } from '@synq/execution-worker/abi';
+import { formatDecimal, parseDecimal } from '@synq/domain';
+import { PluginRegistry } from '@synq/plugin-sdk';
+import { localTransferPlugin } from './local-transfer-plugin.js';
 import { startAnvil } from './anvil.js';
 import { sandbox } from './sandbox.js';
 import { indexedEvents } from './events.js';
-export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
+const DEFAULT_TRANSFER_BASE_UNITS = 60_000_000n;
+export async function runLocalDemo(
+  outputDirectory: string,
+  keepAlive = false,
+  requestedAmount?: string,
+) {
   const node = await startAnvil();
   let completed = false;
   try {
@@ -53,12 +48,15 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     const chain = await sandbox(node.url, groupHash);
     const block = await chain.client.getBlock();
     const now = Number(block.timestamp);
-    const amount = 60_000_000n;
     const decimals = await chain.client.readContract({
       address: chain.token,
       abi: tokenAbi,
       functionName: 'decimals',
     });
+    const amount =
+      requestedAmount === undefined
+        ? DEFAULT_TRANSFER_BASE_UNITS
+        : parseDecimal(requestedAmount, decimals);
     const asset = AssetSchema.parse({
       canonicalAssetId: `eip155:31337/erc20:${chain.token.toLowerCase()}`,
       chainId: 31337,
@@ -131,14 +129,13 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       args: [chain.recipient, amount],
     });
     const zeroHash = `0x${'0'.repeat(64)}`;
-    const input = ActionIntentSchema.parse({
+    const input = BoundActionIntentSchema.parse({
       schemaVersion: 1,
       intentId: 'local_intent',
       groupId,
       mandateId,
       mandateVersion: 1,
       action: 'TRANSFER',
-      network: localProfile.network,
       chainId: 31337,
       account: chain.account,
       operator: chain.operator.address,
@@ -146,9 +143,8 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       target: chain.token,
       selector: '0xa9059cbb',
       calldataHash: keccak256(data),
-      inputAsset: asset,
+      inputToken: asset.address,
       maxInputAmount: String(amount),
-      outputAsset: null,
       minOutputAmount: '0',
       nativeValue: '0',
       maxSlippageBps: 0,
@@ -178,30 +174,31 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       blocked: false,
       evidence: [reference],
     };
-    const intent = ActionIntentSchema.parse({
+    const intent = BoundActionIntentSchema.parse({
       ...input,
       evidenceHash: artifactHash(risk.evidence),
       riskPacketHash: artifactHash(risk),
     });
-    const simulated = await chain.client.call({
-      account: chain.account,
-      to: chain.token,
-      data,
-    });
-    const simulation: Simulation = {
-      intentHash: intentHash(intent),
-      calldataHash: keccak256(data),
-      chainId: 31337,
-      account: intent.account,
-      target: intent.target,
-      succeeded: true,
-      simulatedAt: now,
-      blockNumber: String(block.number),
-      artifactHash: artifactHash({
-        blockHash: block.hash,
-        result: simulated.data,
-      }),
-    };
+    const plugins = new PluginRegistry();
+    plugins.register(localTransferPlugin(chain.client, data));
+    const pluginContext = { network: localProfile.network, now };
+    if (!(await plugins.refreshHealth(intent.pluginId, pluginContext)))
+      throw new Error('PLUGIN_UNHEALTHY');
+    const transfer = plugins.getMutator(
+      intent.pluginId,
+      localProfile.network,
+      now,
+    );
+    const simulation: Simulation = await transfer.simulate(pluginContext, [
+      {
+        chainId: intent.chainId,
+        account: intent.account,
+        target: intent.target,
+        calldata: data,
+        value: intent.nativeValue,
+        intentHash: intentHash(intent),
+      },
+    ]);
     const balance = await chain.client.readContract({
       address: chain.token,
       abi: tokenAbi,
@@ -219,7 +216,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     });
     const approvalService = new ApprovalService(
       new MemoryChallengeStore(),
-      'local',
+      'local/anvil',
     );
     chain.owners.forEach((owner, index) => {
       approvalService.register({
@@ -267,7 +264,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     if (decision.status !== 'AUTHORIZED')
       throw new Error(`KERNEL_REJECTED:${decision.code}`);
     const grant = decision.grant;
-    const onchainGrant = chainGrant(grant);
+    const onchainGrant = chainGrant(grant, [asset]);
     const digest = await chain.client.readContract({
       address: chain.module,
       abi: moduleAbi,
@@ -283,6 +280,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       data,
       signatures,
       now,
+      [asset],
     );
     await chain.client.call({ account: chain.operator.address, ...prepared });
     mkdirSync(outputDirectory, { recursive: true });
@@ -386,6 +384,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       manifest,
       localTestToken: chain.token,
       localTokenSymbol: 'LOCAL_TEST',
+      transferAmount: formatDecimal(amount, decimals),
       transactionHash,
       grantId: grant.grantId,
       intentHash: intentHash(intent),
@@ -422,11 +421,13 @@ if (
   const result = await runLocalDemo(
     resolve('artifacts/local'),
     process.env.SYNQ_KEEP_LOCAL_CHAIN === '1',
+    process.env.SYNQ_DEMO_AMOUNT,
   );
   console.log(
     JSON.stringify(
       {
         transactionHash: result.transactionHash,
+        transferAmount: result.transferAmount,
         accountBalance: result.accountBalance,
         recipientBalance: result.recipientBalance,
         readState: result.snapshot,

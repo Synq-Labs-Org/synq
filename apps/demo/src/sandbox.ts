@@ -24,7 +24,7 @@ import {
   registryAbi,
   moduleAbi,
   tokenAbi,
-} from '../../../workers/execution/src/abi.js';
+} from '@synq/execution-worker/abi';
 const artifactSchema = z.object({
   bytecode: z.object({
     object: z
