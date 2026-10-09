@@ -76,6 +76,7 @@ function principalRow(r: Row): PrincipalRecord {
 function groupRow(r: Row): GroupRecord {
   return {
     groupId: String(r.group_id),
+    chainGroupId: String(r.chain_group_id) as `0x${string}`,
     chainId: Number(r.chain_id),
     account: String(r.account) as `0x${string}`,
     owners: (r.owners as string[]).map((o) => o as `0x${string}`),
@@ -102,7 +103,11 @@ function membershipRow(r: Row): MembershipView {
   };
 }
 
-const MIGRATIONS = ['001-identity', '002-approval-binding'] as const;
+const MIGRATIONS = [
+  '001-identity',
+  '002-approval-binding',
+  '003-chain-group-id',
+] as const;
 
 export class PostgresIdentityStore implements IdentityStore {
   constructor(readonly pool: PgPoolLike) {}
@@ -228,7 +233,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
     },
     async insertGroup(g) {
       await q(
-        'INSERT INTO identity_group(group_id,chain_id,account,owners,threshold,membership_epoch,created_at,executors) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+        'INSERT INTO identity_group(group_id,chain_id,account,owners,threshold,membership_epoch,created_at,executors,chain_group_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
         [
           g.groupId,
           g.chainId,
@@ -238,6 +243,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
           g.membershipEpoch,
           g.createdAt,
           g.executors,
+          g.chainGroupId,
         ],
       );
     },
@@ -463,6 +469,19 @@ function postgresTx(db: PgClientLike): IdentityTx {
         amount: String(r.amount),
         at: Number(r.at),
       }));
+    },
+    async listDelegationPolicies(groupId, delegatePrincipalId) {
+      return (
+        await q(
+          'SELECT policy_json,revoked_at FROM identity_delegation_policy WHERE group_id=$1 AND delegate_principal_id=$2 ORDER BY policy_id',
+          [groupId, delegatePrincipalId],
+        )
+      ).map((r) =>
+        DelegationPolicySchema.parse({
+          ...(r.policy_json as object),
+          revokedAt: num(r.revoked_at),
+        }),
+      );
     },
     async getDelegationUsage(usageId) {
       const [r] = await q(

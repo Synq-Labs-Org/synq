@@ -92,12 +92,9 @@ export const MembershipViewSchema = z.strictObject({
 });
 export type MembershipView = z.output<typeof MembershipViewSchema>;
 
-const OnchainGroupIdSchema = z
-  .string()
-  .regex(/^0x[0-9a-f]{64}$/, 'on-chain bytes32 group id (lowercase hex)')
-  .pipe(GroupIdSchema);
 export const GroupBindingInputSchema = z.strictObject({
-  groupId: OnchainGroupIdSchema,
+  groupId: GroupIdSchema,
+  chainGroupId: HashSchema,
   chainId: ChainIdSchema,
   account: AddressSchema,
   owners: z.array(AddressSchema).min(1).max(32),
@@ -106,6 +103,7 @@ export const GroupBindingInputSchema = z.strictObject({
 });
 export const GroupViewSchema = z.strictObject({
   groupId: GroupIdSchema,
+  chainGroupId: HashSchema,
   chainId: ChainIdSchema,
   account: AddressSchema,
   owners: z.array(AddressSchema),
@@ -248,10 +246,18 @@ export const MembershipRequestSchema = z.strictObject({
   memberId: MemberIdSchema,
   principalId: PrincipalIdSchema,
 });
-export const RegisterDraftRequestSchema = z.strictObject({
-  draft: GrantDraftSchema,
-  asset: AssetSchema,
+export const IntentProposalSchema = z.strictObject({
+  intent: z.unknown(),
+  risk: z.unknown(),
+  simulation: z.unknown(),
 });
+export const IntentProposalResultSchema = z.strictObject({
+  status: z.enum(['PENDING_APPROVAL', 'AUTHORIZED']),
+  code: z.string().nullable(),
+  intentId: z.string().nullable(),
+  pending: PendingIntentViewSchema.nullable(),
+});
+export type IntentProposalResult = z.output<typeof IntentProposalResultSchema>;
 export const ApprovalChallengeRequestSchema = z.strictObject({
   draftDigest: HashSchema,
   memberId: MemberIdSchema,

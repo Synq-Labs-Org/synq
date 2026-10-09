@@ -24,6 +24,8 @@ export type IdentityErrorCode =
   | 'DRAFT_INVALID'
   | 'DRAFT_INVALIDATED'
   | 'RATE_LIMITED'
+  | 'INTENT_REJECTED'
+  | 'KERNEL_UNAVAILABLE'
   | 'ALREADY_APPROVED'
   | 'DELEGATION_DENIED'
   | 'PROVIDER_BLOCKED'
@@ -58,6 +60,8 @@ const SAFE_MESSAGES: Record<IdentityErrorCode, string> = {
   DRAFT_INVALIDATED:
     'Grant draft was invalidated by a membership change; a new draft is required',
   RATE_LIMITED: 'Too many requests',
+  INTENT_REJECTED: 'Intent rejected by the Kernel',
+  KERNEL_UNAVAILABLE: 'Kernel authorization is not configured for this API',
   ALREADY_APPROVED: 'Member already approved this draft',
   DELEGATION_DENIED: 'Delegation policy denies this action',
   PROVIDER_BLOCKED: 'Provider credentials are not configured',

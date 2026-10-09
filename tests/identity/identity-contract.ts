@@ -120,6 +120,7 @@ export function identityContract(label: string, harness: StoreHarness) {
       ];
       await s.membership.createGroup({
         groupId,
+        chainGroupId: groupId,
         chainId: 10143,
         account,
         owners: humans.map((h) => h.record.signer),
@@ -355,6 +356,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         ];
         await s.membership.createGroup({
           groupId,
+          chainGroupId: groupId,
           chainId: 10143,
           account,
           owners: [a.record.signer, b.record.signer, addr(0x77)],
@@ -714,6 +716,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         const humans = [await enrollMera('x1', s), await enrollMera('x2', s)];
         await s.membership.createGroup({
           groupId,
+          chainGroupId: groupId,
           chainId: 10143,
           account,
           owners: humans.map((h) => h.record.signer),
@@ -885,6 +888,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         const op = await operatorPrincipal(s, 1);
         await s.membership.createGroup({
           groupId,
+          chainGroupId: groupId,
           chainId: 10143,
           account,
           owners: [op.signer, addr(0x71)],

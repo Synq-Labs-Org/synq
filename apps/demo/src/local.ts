@@ -28,7 +28,6 @@ import {
   type DirectVerifier,
   type FreshnessProbe,
 } from '@synq/kernel';
-import { PrincipalRegistry } from '@synq/identity';
 import { DeterministicReadModel, verifyFresh } from '@synq/read-model';
 import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
 import { writeDurableJson } from '@synq/execution-worker/persistence';
@@ -47,7 +46,7 @@ import { moduleAbi, registryAbi, tokenAbi } from '@synq/execution-worker/abi';
 import { formatDecimal, parseDecimal } from '@synq/domain';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import { localTransferPlugin } from './local-transfer-plugin.js';
-import { LocalApprovalDesk } from './approval-desk.js';
+import { startLocalIdentity } from './identity.js';
 import { startAnvil } from './anvil.js';
 import { deployLocalSynq, type LocalSynq } from './safe.js';
 import { indexedEvents } from './events.js';
@@ -144,6 +143,11 @@ function bindings(chain: LocalSynq, mandate: Mandate) {
 
 export async function startLocalVertical() {
   const node = await startAnvil();
+  const closers: (() => Promise<unknown>)[] = [];
+  const close = async () => {
+    for (const c of closers.splice(0)) await c().catch(() => undefined);
+    await node.close();
+  };
   try {
     const chain = await deployLocalSynq(node.url);
     const deployment = synqDeployment('local/anvil', {
@@ -175,19 +179,18 @@ export async function startLocalVertical() {
       toMandateConfig(mandate),
     );
     await chain.fund(FUNDING);
-    const registry = new PrincipalRegistry('local/anvil', () =>
-      chain.owners.map((o) => o.address),
-    );
-    chain.owners.forEach((owner, i) => {
-      registry.register({
-        principalId: `fixture_${i}`,
-        kind: 'HUMAN',
-        provider: 'fixture',
-        signer: owner.address,
-      });
-      registry.bindMembership(GROUP_ID, `member_${i}`, `fixture_${i}`);
+    const identity = await startLocalIdentity({
+      groupId: GROUP_ID,
+      chainGroupId: chain.chainGroupId,
+      account: chain.account,
+      owners: chain.owners,
+      executor: chain.executor.address,
+      executionModule: deployment.module,
+      asset,
+      threshold: 2,
+      now: () => clock.t,
     });
-    const desk = new LocalApprovalDesk(registry);
+    closers.push(identity.close);
     const calldatas = new Map<Hex, Hex>();
     const plugins = new PluginRegistry();
     const plugin = localTransferPlugin(chain.client, (h) => calldatas.get(h));
@@ -264,8 +267,9 @@ export async function startLocalVertical() {
       network: localProfile.network,
       executionModule: deployment.module,
       clock,
-      approvalLedger: desk,
-      membershipDirectory: registry,
+      approvalLedger: identity.approvalLedger,
+      membershipDirectory: identity.membershipDirectory,
+      delegations: identity.delegations,
       freshness: {
         probe,
         verifier,
@@ -387,16 +391,7 @@ export async function startLocalVertical() {
       });
       if (onchainDigest !== draft.digest)
         throw new Error('EIP712_DIGEST_DIVERGES_FROM_MODULE');
-      const approvals = [];
-      for (const i of [0, 1]) {
-        const challenge = await desk.issue(draft, `member_${i}`, clock.t);
-        const signature = await chain.owners[i]!.signTypedData(
-          executionGrantTypedData(draft.domain, draft.grant),
-        );
-        approvals.push(
-          await desk.submit(challenge.challengeId, signature, clock.t),
-        );
-      }
+      const approvals = await identity.approve(draft, [0, 1]);
       const decision = await kernel.authorize({ ...request, approvals });
       return { ...proposal, decision, onchainDigest };
     }
@@ -505,6 +500,10 @@ export async function startLocalVertical() {
 
     return {
       node,
+      close,
+      releaseIdentity: async () => {
+        for (const c of closers.splice(0)) await c().catch(() => undefined);
+      },
       chain,
       kernel,
       mandate,
@@ -521,7 +520,7 @@ export async function startLocalVertical() {
       bindings: bindings(chain, mandate),
     };
   } catch (error) {
-    await node.close();
+    await close();
     throw error;
   }
 }
@@ -620,7 +619,8 @@ export async function runLocalDemo(
     completed = true;
     return result;
   } finally {
-    if (!keepAlive || !completed) await local.node.close();
+    if (!keepAlive || !completed) await local.close();
+    else await local.releaseIdentity();
   }
 }
 
@@ -699,7 +699,7 @@ export async function runNegativeScenarios() {
       recipientBalance: String(await local.balanceOf(chain.recipient)),
     };
   } finally {
-    await local.node.close();
+    await local.close();
   }
 }
 

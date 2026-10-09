@@ -1,5 +1,5 @@
 import { recoverTypedDataAddress, type Hex } from 'viem';
-import { verifiedAsset } from '@synq/chain-registry';
+import { officialAssets, verifiedAsset } from '@synq/chain-registry';
 import {
   AddressSchema,
   ApprovalChallengeRequestSchema,
@@ -144,7 +144,7 @@ export class GrantApprovalGateway implements GrantApprovalPort {
     return this.store.transaction(async (tx) => {
       const group = await requireGroup(tx, draft.groupId);
       if (
-        draft.grant.groupId !== group.groupId ||
+        draft.grant.groupId !== group.chainGroupId ||
         draft.grant.account !== group.account ||
         draft.domain.chainId !== group.chainId ||
         (group.executors.length > 0 &&
@@ -157,6 +157,26 @@ export class GrantApprovalGateway implements GrantApprovalPort {
       await tx.insertDraft(record);
       return this.view(tx, record, group);
     });
+  }
+
+  resolveAsset(draft: GrantDraft): Asset {
+    const local =
+      this.config.profile === 'local/anvil'
+        ? (this.options.localAssets ?? [])
+        : [];
+    const match = [...Object.values(officialAssets), ...local].find(
+      (a) =>
+        a.chainId === Number(draft.grant.chainId) &&
+        a.address === draft.grant.token,
+    );
+    if (!match)
+      throw new IdentityError('DRAFT_INVALID', 'asset not in registry');
+    return match;
+  }
+
+  async registerKernelDraft(raw: GrantDraft): Promise<PendingIntentView> {
+    const draft = assertDraftConsistent(raw);
+    return this.registerDraft({ draft, asset: this.resolveAsset(draft) });
   }
 
   async pendingIntent(intentId: string): Promise<PendingIntentView> {

@@ -22,10 +22,12 @@ import {
   QuorumViewSchema,
   RecoveryChallengeRequestSchema,
   RecoveryResultSchema,
-  RegisterDraftRequestSchema,
+  IntentProposalResultSchema,
+  IntentProposalSchema,
   SignedChallengeInputSchema,
   VerifiedApprovalSchema,
   type Asset,
+  type GrantDraft,
 } from '@synq/schemas';
 import {
   DelegationService,
@@ -49,7 +51,28 @@ export interface MandateReadPort {
     mandateId: string,
   ): Promise<z.input<typeof MandateViewSchema> | null>;
 }
+export interface IntentAuthorizer {
+  authorize(request: unknown): Promise<
+    | {
+        status: 'AUTHORIZED';
+        intentId: string | null;
+        draft: GrantDraft;
+      }
+    | {
+        status: 'PENDING_APPROVAL';
+        intentId: string | null;
+        code: string;
+        draft: GrantDraft | null;
+      }
+    | {
+        status: 'POLICY_REJECTED' | 'RISK_REJECTED' | 'EXPIRED';
+        intentId: string | null;
+        code: string;
+      }
+  >;
+}
 export type V1Deps = {
+  intents?: IntentAuthorizer;
   store: IdentityStore;
   config: IdentityConfig;
   adminToken: string | null;
@@ -230,9 +253,30 @@ export function createV1Api(deps: V1Deps) {
     method: 'POST',
     url: '/v1/intents',
     admin: true,
-    body: RegisterDraftRequestSchema,
-    response: PendingIntentViewSchema,
-    handler: ({ body }) => approvals.registerDraft(body),
+    body: IntentProposalSchema,
+    response: IntentProposalResultSchema,
+    handler: async ({ body }) => {
+      if (!deps.intents) throw new IdentityError('KERNEL_UNAVAILABLE');
+      const decision = await deps.intents.authorize({ ...body, approvals: [] });
+      if (decision.status === 'PENDING_APPROVAL') {
+        if (!decision.draft)
+          throw new IdentityError('INTENT_REJECTED', decision.code);
+        return {
+          status: decision.status,
+          code: decision.code,
+          intentId: decision.intentId,
+          pending: await approvals.registerKernelDraft(decision.draft),
+        };
+      }
+      if (decision.status === 'AUTHORIZED')
+        return {
+          status: decision.status,
+          code: null,
+          intentId: decision.intentId,
+          pending: null,
+        };
+      throw new IdentityError('INTENT_REJECTED', decision.code);
+    },
   });
   route(app, ctx, {
     method: 'GET',

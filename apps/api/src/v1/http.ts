@@ -37,6 +37,8 @@ const STATUS: Record<IdentityErrorCode, number> = {
   DRAFT_INVALID: 422,
   DRAFT_INVALIDATED: 409,
   RATE_LIMITED: 429,
+  INTENT_REJECTED: 422,
+  KERNEL_UNAVAILABLE: 503,
   ALREADY_APPROVED: 409,
   DELEGATION_DENIED: 403,
   PROVIDER_BLOCKED: 503,
@@ -56,7 +58,9 @@ export function toApiError(error: unknown): ApiError {
       body: {
         error: error.code,
         message:
-          error.code === 'DELEGATION_DENIED' && error.detail
+          (error.code === 'DELEGATION_DENIED' ||
+            error.code === 'INTENT_REJECTED') &&
+          error.detail
             ? `${error.message}: ${error.detail}`
             : error.message,
       },

@@ -3,17 +3,23 @@ import { createV1Api } from '../../apps/api/src/v1/app.js';
 import {
   MemoryIdentityStore,
   PrivyAdapter,
+  StoreApprovalLedger,
+  StoreMembershipDirectory,
   identityChallengeTypedData,
   type IdentityStore,
 } from '../../packages/identity/src/server.js';
-import type { GrantPreview, IdentityChallenge } from '@synq/schemas';
+import type {
+  GrantDraft,
+  GrantPreview,
+  IdentityChallenge,
+} from '@synq/schemas';
 import {
-  addr,
-  fixtureAccounts,
-  makeDraft,
-  testAusd,
-  word,
-} from '../identity/fixtures.js';
+  configureSandboxGroup,
+  sandboxKernel,
+  sandboxProposal,
+  type SandboxGroup,
+} from './kernel-fixture.js';
+import { addr, fixtureAccounts, testAusd, word } from '../identity/fixtures.js';
 import {
   ADMIN,
   MODULE,
@@ -28,12 +34,19 @@ import {
 
 const groupId = word(0xa1);
 
-export function v1App(
+export function sandboxApi(
   store: IdentityStore = new MemoryIdentityStore(),
   clock = { now: 1000 },
   rateLimit = { capacity: 1000, refillPerSecond: 1000 },
 ) {
-  return createV1Api({
+  const kernel = sandboxKernel({
+    executionModule: MODULE,
+    now: () => clock.now,
+    approvalLedger: new StoreApprovalLedger(store),
+    membershipDirectory: new StoreMembershipDirectory(store),
+  });
+  const app = createV1Api({
+    intents: kernel,
     store,
     config: {
       profile: 'sandbox/monad-testnet',
@@ -46,10 +59,13 @@ export function v1App(
     executionModules: { 10143: MODULE },
     rateLimit,
   });
+  return { app, kernel };
 }
+export const v1App = (...args: Parameters<typeof sandboxApi>) =>
+  sandboxApi(...args).app;
 
 async function seeded(clock = { now: 1000 }) {
-  const app = v1App(new MemoryIdentityStore(), clock);
+  const { app, kernel } = sandboxApi(new MemoryIdentityStore(), clock);
   const { call, admin } = client(app);
   const humans = [
     await enrollViaApi(app, 'alice'),
@@ -61,6 +77,7 @@ async function seeded(clock = { now: 1000 }) {
     '/v1/groups',
     {
       groupId,
+      chainGroupId: groupId,
       chainId: 10143,
       account: addr(0xacc),
       owners: humans.map((h) => h.record.signer),
@@ -71,21 +88,45 @@ async function seeded(clock = { now: 1000 }) {
   expect(created.status).toBe(201);
   for (const [i, h] of humans.entries())
     expect((await joinViaApi(app, groupId, h, `member_${i}`)).status).toBe(201);
-  const draft = makeDraft();
-  const registered = await call(
-    'POST',
-    '/v1/intents',
-    { draft, asset: testAusd },
-    admin,
-  );
+  const group: SandboxGroup = {
+    groupId,
+    chainGroupId: groupId,
+    account: addr(0xacc),
+    executor: addr(0xe1),
+    recipient: addr(0xbeef),
+    members: humans.map((h, i) => ({
+      memberId: `member_${i}`,
+      signer: h.record.signer,
+    })),
+  };
+  configureSandboxGroup(kernel, group, clock.now);
+  const propose = (amount: bigint, nonce: string) =>
+    call(
+      'POST',
+      '/v1/intents',
+      sandboxProposal(kernel, group, { amount, nonce, now: clock.now }),
+      admin,
+    );
+  const registered = await propose(12_500_000n, '1');
   expect(registered.status).toBe(201);
+  expect(registered.body).toMatchObject({
+    status: 'PENDING_APPROVAL',
+    code: 'MISSING_QUORUM',
+  });
+  const pending = registered.body.pending as {
+    draft: GrantDraft;
+    preview: GrantPreview;
+  };
   return {
     app,
     call,
     admin,
     humans,
-    draft,
-    preview: registered.body.preview as GrantPreview,
+    kernel,
+    group,
+    propose,
+    draft: pending.draft,
+    preview: pending.preview,
   };
 }
 
@@ -101,7 +142,7 @@ describe('/v1 API (Fastify inject, in-memory store)', () => {
       recipient: addr(0xbeef),
       token: { symbol: 'AUSD', decimals: 6, address: testAusd.address },
       amount: { raw: '12500000', display: '12.5' },
-      validUntil: '999999999999',
+      validUntil: '1300',
       executor: addr(0xe1),
       verifyingContract: MODULE,
     });
@@ -325,6 +366,7 @@ describe('/v1 API (Fastify inject, in-memory store)', () => {
     const { call, admin } = client(app);
     const group = {
       groupId,
+      chainGroupId: groupId,
       chainId: 10143,
       account: addr(0xacc),
       owners: [addr(1), addr(2)],
@@ -355,7 +397,7 @@ describe('/v1 API (Fastify inject, in-memory store)', () => {
         await call(
           'POST',
           '/v1/groups',
-          { ...group, groupId: 'not-bytes32' },
+          { ...group, chainGroupId: 'not-bytes32' },
           admin,
         )
       ).status,
@@ -489,36 +531,51 @@ describe('/v1 API (Fastify inject, in-memory store)', () => {
     expect(adminDisabled.statusCode).toBe(401);
   });
 
-  it('keeps an intent pending without quorum (AUSD-009) and rejects a tampered or foreign-module draft (AUSD-006)', async () => {
-    const { call, admin, draft } = await seeded();
+  it('keeps an intent pending without quorum (AUSD-009) and surfaces Kernel rejections', async () => {
+    const { call, admin, draft, propose, humans, app } = await seeded();
     expect(
       (await call('GET', `/v1/intents/${draft.grant.intentHash}`)).body.status,
     ).toBe('PENDING_APPROVAL');
-    const tampered = {
-      ...draft,
-      grant: { ...draft.grant, recipient: addr(0x666), intentHash: word(0x99) },
-    };
-    expect(
-      await call(
-        'POST',
-        '/v1/intents',
-        { draft: tampered, asset: testAusd },
-        admin,
-      ),
-    ).toMatchObject({ status: 422, body: { error: 'DRAFT_INVALID' } });
-    const foreign = makeDraft(
-      { intentHash: word(0x98) },
-      {
-        domain: { ...draft.domain, verifyingContract: addr(0x7777) },
-      },
+    expect(await propose(100_000_001n, '2')).toMatchObject({
+      status: 422,
+      body: { error: 'INTENT_REJECTED' },
+    });
+    for (const i of [0, 1]) {
+      const signed = await approvalSignature(
+        app,
+        humans[i]!,
+        `member_${i}`,
+        draft,
+        (await call('GET', `/v1/intents/${draft.grant.intentHash}`)).body
+          .preview as GrantPreview,
+      );
+      expect(
+        (await call('POST', '/v1/approvals', submission(signed))).status,
+      ).toBe(201);
+    }
+    const verified = await call(
+      'GET',
+      `/v1/approvals/${draft.digest}/verified`,
+      undefined,
+      admin,
     );
-    expect(
-      await call(
-        'POST',
-        '/v1/intents',
-        { draft: foreign, asset: testAusd },
-        admin,
-      ),
-    ).toMatchObject({ status: 422, body: { error: 'DRAFT_INVALID' } });
+    expect(verified.body.satisfied).toBe(true);
+    const withoutKernel = createV1Api({
+      store: new MemoryIdentityStore(),
+      config: { profile: 'sandbox/monad-testnet', rpId, origin },
+      adminToken: ADMIN,
+      executionModules: { 10143: MODULE },
+    });
+    const res = await withoutKernel.inject({
+      method: 'POST',
+      url: '/v1/intents',
+      payload: { intent: {}, risk: {}, simulation: {} },
+      headers: {
+        'idempotency-key': 'kernel-missing-1',
+        authorization: `Bearer ${ADMIN}`,
+      },
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toBe('KERNEL_UNAVAILABLE');
   });
 });

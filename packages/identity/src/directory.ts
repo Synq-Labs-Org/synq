@@ -4,6 +4,8 @@ import {
   type IdentityPrincipalKind,
   type VerifiedApproval,
 } from '@synq/schemas';
+import { evaluateDelegation, type DelegationUse } from './delegation.js';
+import { activeMembership } from './membership.js';
 import type { IdentityStore } from './store.js';
 
 export type DirectoryMember = {
@@ -79,6 +81,71 @@ export class StoreApprovalLedger implements ApprovalLedger {
         JSON.stringify(VerifiedApprovalSchema.parse(stored)) ===
           JSON.stringify(approval)
       );
+    });
+  }
+}
+
+export type KernelDelegationRequest = {
+  groupId: string;
+  mandateId: string;
+  memberId: string;
+  principalId: string;
+  signer: string;
+  action: string;
+  token: string;
+  chainId: number;
+  recipient: string;
+  amount: string;
+  nativeValue: string;
+  at: number;
+};
+export type KernelDelegationVerdict =
+  | { allowed: true; policyId: string }
+  | { allowed: false; reason: string };
+
+export class StoreDelegationEvaluator {
+  constructor(readonly store: IdentityStore) {}
+  async evaluate(
+    request: KernelDelegationRequest,
+    history: (policyId: string) => readonly DelegationUse[],
+  ): Promise<KernelDelegationVerdict> {
+    if (request.action !== 'TRANSFER' || request.nativeValue !== '0')
+      return { allowed: false, reason: 'ACTION_NOT_DELEGATED' };
+    return this.store.transaction(async (tx) => {
+      const delegate = await tx.getPrincipal(request.principalId);
+      if (
+        !delegate ||
+        delegate.status !== 'ACTIVE' ||
+        delegate.kind !== 'PRIVY_DELEGATE' ||
+        delegate.signer !== request.signer.toLowerCase()
+      )
+        return { allowed: false, reason: 'DELEGATE_INACTIVE' };
+      let reason = 'NO_POLICY';
+      for (const policy of await tx.listDelegationPolicies(
+        request.groupId,
+        request.principalId,
+      )) {
+        const delegator = await activeMembership(
+          tx,
+          policy.groupId,
+          policy.delegatorMemberId,
+        );
+        if (!delegator || delegator.role !== 'APPROVER') {
+          reason = 'DELEGATOR_INACTIVE';
+          continue;
+        }
+        const decision = evaluateDelegation(policy, history(policy.policyId), {
+          amount: request.amount,
+          token: request.token,
+          chainId: request.chainId,
+          recipient: request.recipient,
+          at: request.at,
+        });
+        if (decision.allowed)
+          return { allowed: true, policyId: policy.policyId };
+        reason = decision.reason;
+      }
+      return { allowed: false, reason };
     });
   }
 }

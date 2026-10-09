@@ -24,6 +24,7 @@ export type PrincipalRecord = {
 };
 export type GroupRecord = {
   groupId: string;
+  chainGroupId: `0x${string}`;
   chainId: number;
   account: `0x${string}`;
   owners: `0x${string}`[];
@@ -114,6 +115,10 @@ export interface IdentityTx {
   revokeDelegationPolicy(id: string, now: number): Promise<void>;
   listDelegationUsage(policyId: string): Promise<DelegationUsage[]>;
   getDelegationUsage(usageId: string): Promise<DelegationUsage | null>;
+  listDelegationPolicies(
+    groupId: string,
+    delegatePrincipalId: string,
+  ): Promise<DelegationPolicy[]>;
   revokeDelegationsForMember(
     groupId: string,
     memberId: string,
@@ -365,6 +370,13 @@ function memoryTx(s: MemoryState): IdentityTx {
     },
     async listDelegationUsage(policyId) {
       return s.usage.filter((u) => u.policyId === policyId);
+    },
+    async listDelegationPolicies(groupId, delegatePrincipalId) {
+      return [...s.delegations.values()].filter(
+        (p) =>
+          p.groupId === groupId &&
+          p.delegatePrincipalId === delegatePrincipalId,
+      );
     },
     async getDelegationUsage(usageId) {
       return s.usage.find((u) => u.usageId === usageId) ?? null;

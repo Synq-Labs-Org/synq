@@ -30,6 +30,7 @@ export function groupView(
 ): GroupView {
   return GroupViewSchema.parse({
     groupId: group.groupId,
+    chainGroupId: group.chainGroupId,
     chainId: group.chainId,
     account: group.account,
     owners: group.owners,
@@ -86,6 +87,7 @@ export class MembershipService {
       throw new IdentityError('INVALID_INPUT', 'owners/threshold');
     const group: GroupRecord = {
       groupId: input.groupId,
+      chainGroupId: input.chainGroupId,
       chainId: input.chainId,
       account: input.account,
       owners: [...input.owners].sort(),

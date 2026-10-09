@@ -1,8 +1,11 @@
-import { formatUnits, hashTypedData, type Address, type Hex } from 'viem';
+import { formatUnits, type Address, type Hex } from 'viem';
 import {
   AssetSchema,
   GrantDraftSchema,
   GrantPreviewSchema,
+  executionGrantDigest,
+  executionGrantTypedData,
+  approvalAttestationTypedData as sharedAttestationTypedData,
   type Asset,
   type GrantDraft,
   type GrantApprovalChallenge,
@@ -10,68 +13,16 @@ import {
 } from '@synq/schemas';
 import { IdentityError } from './errors.js';
 
-export const EXECUTION_GRANT_TYPES = {
-  ExecutionGrant: [
-    { name: 'groupId', type: 'bytes32' },
-    { name: 'account', type: 'address' },
-    { name: 'mandateId', type: 'bytes32' },
-    { name: 'mandateVersion', type: 'uint256' },
-    { name: 'executor', type: 'address' },
-    { name: 'pluginId', type: 'bytes32' },
-    { name: 'chainId', type: 'uint256' },
-    { name: 'target', type: 'address' },
-    { name: 'selector', type: 'bytes4' },
-    { name: 'calldataHash', type: 'bytes32' },
-    { name: 'token', type: 'address' },
-    { name: 'maxInputAmount', type: 'uint256' },
-    { name: 'nativeValue', type: 'uint256' },
-    { name: 'minOutputAmount', type: 'uint256' },
-    { name: 'recipient', type: 'address' },
-    { name: 'validAfter', type: 'uint256' },
-    { name: 'validUntil', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'intentHash', type: 'bytes32' },
-  ],
-} as const;
 export const ERC20_TRANSFER_SELECTOR = '0xa9059cbb';
 
 export function grantTypedData(raw: GrantDraft) {
   const { domain, grant } = GrantDraftSchema.parse(raw);
-  return {
-    domain: {
-      name: domain.name,
-      version: domain.version,
-      chainId: BigInt(domain.chainId),
-      verifyingContract: domain.verifyingContract as Address,
-    },
-    types: EXECUTION_GRANT_TYPES,
-    primaryType: 'ExecutionGrant' as const,
-    message: {
-      groupId: grant.groupId as Hex,
-      account: grant.account as Address,
-      mandateId: grant.mandateId as Hex,
-      mandateVersion: BigInt(grant.mandateVersion),
-      executor: grant.executor as Address,
-      pluginId: grant.pluginId as Hex,
-      chainId: BigInt(grant.chainId),
-      target: grant.target as Address,
-      selector: grant.selector as Hex,
-      calldataHash: grant.calldataHash as Hex,
-      token: grant.token as Address,
-      maxInputAmount: BigInt(grant.maxInputAmount),
-      nativeValue: BigInt(grant.nativeValue),
-      minOutputAmount: BigInt(grant.minOutputAmount),
-      recipient: grant.recipient as Address,
-      validAfter: BigInt(grant.validAfter),
-      validUntil: BigInt(grant.validUntil),
-      nonce: BigInt(grant.nonce),
-      intentHash: grant.intentHash as Hex,
-    },
-  };
+  return executionGrantTypedData(domain, grant);
 }
 
 export function grantDigest(draft: GrantDraft): Hex {
-  return hashTypedData(grantTypedData(draft));
+  const { domain, grant } = GrantDraftSchema.parse(draft);
+  return executionGrantDigest(domain, grant);
 }
 
 export function assertDraftConsistent(raw: GrantDraft): GrantDraft {
@@ -154,34 +105,21 @@ export function synqIdentityDomain(draft: GrantDraft) {
   } as const;
 }
 
-export const APPROVAL_ATTESTATION_TYPES = {
-  SynqApprovalAttestation: [
-    { name: 'challengeId', type: 'bytes32' },
-    { name: 'challengeNonce', type: 'bytes32' },
-    { name: 'draftDigest', type: 'bytes32' },
-    { name: 'groupId', type: 'bytes32' },
-    { name: 'membershipEpoch', type: 'uint256' },
-    { name: 'expiresAt', type: 'uint256' },
-  ],
-} as const;
+export { APPROVAL_ATTESTATION_TYPES } from '@synq/schemas';
 
 export function approvalAttestationTypedData(
   draft: GrantDraft,
   challenge: GrantApprovalChallenge,
 ) {
-  return {
-    domain: synqIdentityDomain(draft),
-    types: APPROVAL_ATTESTATION_TYPES,
-    primaryType: 'SynqApprovalAttestation' as const,
-    message: {
-      challengeId: challenge.challengeId as Hex,
-      challengeNonce: challenge.challengeNonce as Hex,
-      draftDigest: challenge.draftDigest as Hex,
-      groupId: draft.grant.groupId as Hex,
-      membershipEpoch: BigInt(challenge.membershipEpoch),
-      expiresAt: BigInt(challenge.expiresAt),
-    },
-  };
+  const parsed = GrantDraftSchema.parse(draft);
+  return sharedAttestationTypedData(parsed.domain, {
+    challengeId: challenge.challengeId,
+    challengeNonce: challenge.challengeNonce,
+    draftDigest: challenge.draftDigest,
+    groupId: parsed.grant.groupId,
+    membershipEpoch: challenge.membershipEpoch,
+    expiresAt: challenge.expiresAt,
+  });
 }
 
 export const CHALLENGE_REQUEST_TYPES = {

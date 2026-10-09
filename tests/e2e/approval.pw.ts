@@ -14,11 +14,20 @@ import type { GrantDraft } from '@synq/schemas';
 import {
   PostgresIdentityStore,
   PrincipalService,
+  StoreApprovalLedger,
+  StoreMembershipDirectory,
   challengeRequestTypedData,
-  grantDigest,
   grantTypedData,
   identityChallengeTypedData,
 } from '@synq/identity/server';
+import { createV1Api } from '../../apps/api/src/v1/app.js';
+import {
+  configureSandboxGroup,
+  sandboxKernel,
+  sandboxProposal,
+  type SandboxGroup,
+} from '../api/kernel-fixture.js';
+import { prepareDatabase } from './prepare-db.js';
 import { readFileSync } from 'node:fs';
 import { API, E2E_ADMIN_TOKEN, E2E_DATABASE_URL, WEB } from './env.js';
 
@@ -96,9 +105,41 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
   const groupId = hex32();
   const account = address();
   let draft: GrantDraft;
+  const wall = () => Math.floor(Date.now() / 1000);
+  let pool: pg.Pool;
+  let kernel: ReturnType<typeof sandboxKernel>;
+  let server: ReturnType<typeof createV1Api>;
+
+  test.beforeAll(async () => {
+    await prepareDatabase(E2E_DATABASE_URL);
+    pool = new pg.Pool({ connectionString: E2E_DATABASE_URL, max: 8 });
+    const store = new PostgresIdentityStore(pool);
+    kernel = sandboxKernel({
+      executionModule: EXECUTION_MODULE,
+      now: wall,
+      approvalLedger: new StoreApprovalLedger(store),
+      membershipDirectory: new StoreMembershipDirectory(store),
+    });
+    server = createV1Api({
+      intents: kernel,
+      store,
+      config: {
+        profile: 'sandbox/monad-testnet',
+        rpId: 'localhost',
+        origin: WEB,
+      },
+      adminToken: E2E_ADMIN_TOKEN,
+      executionModules: { 10143: EXECUTION_MODULE },
+      trustProxy: '127.0.0.1',
+      rateLimit: { capacity: 60, refillPerSecond: 1 },
+    });
+    await server.listen({ port: Number(new URL(API).port), host: '127.0.0.1' });
+  });
 
   test.afterAll(async () => {
     for (const p of principals) await p.context.close();
+    await server?.close();
+    await pool?.end();
   });
 
   test('probe: the virtual authenticator exposes WebAuthn PRF', async ({
@@ -218,6 +259,7 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
       '/v1/groups',
       {
         groupId,
+        chainGroupId: groupId,
         chainId: 10143,
         account,
         owners: principals.map((p) => p.signer),
@@ -243,43 +285,30 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
   });
 
   test('two distinct principals approve the previewed EIP-712 grant; duplicates and operators cannot add quorum', async () => {
-    const base: Omit<GrantDraft, 'digest'> = {
-      schemaVersion: 1,
-      groupId: groupId as GrantDraft['groupId'],
-      domain: {
-        name: 'SynqExecutionModule',
-        version: '1',
-        chainId: 10143,
-        verifyingContract: EXECUTION_MODULE,
-      },
-      grant: {
-        groupId,
-        account,
-        mandateId: hex32(),
-        mandateVersion: '1',
-        executor: address(),
-        pluginId: hex32(),
-        chainId: '10143',
-        target: AUSD.address,
-        selector: '0xa9059cbb',
-        calldataHash: hex32(),
-        token: AUSD.address,
-        maxInputAmount: '25000000',
-        nativeValue: '0',
-        minOutputAmount: '25000000',
-        recipient: address(),
-        validAfter: '0',
-        validUntil: String(Math.floor(Date.now() / 1000) + 3600),
-        nonce: '1',
-        intentHash: hex32(),
-      },
-      requiredApprovals: 2,
-      createdAt: Math.floor(Date.now() / 1000),
+    const group: SandboxGroup = {
+      groupId,
+      chainGroupId: groupId,
+      account,
+      executor: address(),
+      recipient: address(),
+      members: principals.map((p, i) => ({
+        memberId: `member_${i}`,
+        signer: p.signer as `0x${string}`,
+      })),
     };
-    draft = { ...base, digest: grantDigest({ ...base, digest: hex32() }) };
-    expect(
-      (await api('POST', '/v1/intents', { draft, asset: AUSD }, true)).status,
-    ).toBe(201);
+    configureSandboxGroup(kernel, group, wall());
+    const proposal = sandboxProposal(kernel, group, {
+      amount: 25_000_000n,
+      nonce: '1',
+      now: wall(),
+    });
+    const proposed = await api('POST', '/v1/intents', proposal, true);
+    expect(proposed).toMatchObject({
+      status: 201,
+      body: { status: 'PENDING_APPROVAL', code: 'MISSING_QUORUM' },
+    });
+    draft = (proposed.body.pending as { draft: GrantDraft }).draft;
+    expect(draft.domain.verifyingContract).toBe(EXECUTION_MODULE);
 
     const approve = async (p: Principal) => {
       await p.page.goto(`/intents/${draft.grant.intentHash}`);
@@ -414,6 +443,14 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
     expect(
       (await api('GET', `/v1/intents/${draft.grant.intentHash}`)).body.status,
     ).toBe('APPROVED');
+    const decision = await kernel.authorize({
+      ...proposal,
+      approvals: quorum.body.counted as unknown[],
+    });
+    expect(decision.status).toBe('AUTHORIZED');
+    expect(
+      decision.status === 'AUTHORIZED' ? decision.draft.digest : null,
+    ).toBe(draft.digest);
   });
 
   test('recovery re-derives the same principal from the same passkey; an unregistered passkey is rejected', async ({
