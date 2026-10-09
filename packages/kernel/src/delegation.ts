@@ -1,28 +1,13 @@
 import type {
   ActionKind,
   BoundActionIntent,
-  IdentityPrincipalKind,
+  DirectoryMember,
   Mandate,
+  MembershipDirectory,
 } from '@synq/schemas';
 import { requireRule } from './errors.js';
 
-export type DirectoryMember = {
-  groupId: string;
-  memberId: string;
-  principalId: string;
-  principalKind: IdentityPrincipalKind;
-  role: 'APPROVER' | 'OPERATOR';
-  signer: `0x${string}`;
-  membershipEpoch: number;
-  ownerOfAccount: boolean;
-};
-export interface MembershipDirectory {
-  activeMember(
-    groupId: string,
-    memberId: string,
-  ): Promise<DirectoryMember | null>;
-  membershipEpoch(groupId: string): Promise<number | null>;
-}
+export type { DirectoryMember, MembershipDirectory };
 
 export type DelegationUse = { amount: string; at: number };
 export type DelegationRequest = {

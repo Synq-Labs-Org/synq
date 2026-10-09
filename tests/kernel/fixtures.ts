@@ -251,6 +251,9 @@ export class FixtureProbe {
     indexedThroughBlock: 100,
     headBlock: 100,
     accountPaused: false,
+    mandate: { active: true, version: 1, minValidVersion: 1 },
+    owners: owners.map((o) => o.address.toLowerCase() as `0x${string}`),
+    threshold: 2,
   };
   async observe(): Promise<FreshnessObservation> {
     return structuredClone(this.observation);

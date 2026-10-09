@@ -37,7 +37,7 @@ export interface SqlPool {
 }
 export type SqlTarget = { pool: SqlPool } | { client: SqlConnection };
 
-const MIGRATIONS = ['001-projection.sql'] as const;
+const MIGRATIONS = ['001-projection.sql', '002-build-identity.sql'] as const;
 const NULLABLE: { [T in TableName]?: readonly string[] } = {
   group: ['creator', 'salt', 'threshold', 'guard'],
   mandate_version: ['security_sensitive'],
@@ -122,12 +122,14 @@ const SignalSchema = z.strictObject({
 const tableName = (schema: string, t: TableName) => `"${schema}".rm_${t}`;
 
 export class PostgresProjectionStore implements ProjectionStore {
+  readonly namespace: string;
   private queue: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly target: SqlTarget,
     readonly chainId: number,
     readonly schema = 'synq_read_model',
   ) {
+    this.namespace = `pg:${schema}`;
     if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
       throw new ReadModelError('CONFIG_MISMATCH', 'invalid schema name');
     if (!Number.isSafeInteger(chainId) || chainId <= 0)
@@ -257,7 +259,7 @@ class PgSession implements ProjectionSession {
   }
   async checkpoint(): Promise<Checkpoint | null> {
     const { rows } = await this.db.query(
-      `SELECT indexed_through_block, generation, config_hash FROM ${this.t('checkpoint')} WHERE chain_id=$1`,
+      `SELECT indexed_through_block, generation, config_hash, build_id FROM ${this.t('checkpoint')} WHERE chain_id=$1`,
       [this.chainId],
     );
     const row = rows[0];
@@ -266,18 +268,29 @@ class PgSession implements ProjectionSession {
       .string()
       .regex(/^0x[0-9a-f]{64}$/)
       .parse(row.config_hash) as Hex;
+    const buildId = z
+      .string()
+      .regex(/^0x[0-9a-f]{32}$/)
+      .parse(row.build_id) as Hex;
     return {
       chainId: this.chainId,
       indexedThroughBlock: safeInt(row.indexed_through_block, 'checkpoint'),
       generation: safeInt(row.generation, 'generation'),
       configHash,
+      buildId,
     };
   }
   async saveCheckpoint(cp: Checkpoint): Promise<void> {
     await this.db.query(
-      `INSERT INTO ${this.t('checkpoint')}(chain_id,indexed_through_block,generation,config_hash,updated_at) VALUES ($1,$2,$3,$4,now())
-       ON CONFLICT (chain_id) DO UPDATE SET indexed_through_block=EXCLUDED.indexed_through_block, generation=EXCLUDED.generation, config_hash=EXCLUDED.config_hash, updated_at=now()`,
-      [this.chainId, cp.indexedThroughBlock, cp.generation, cp.configHash],
+      `INSERT INTO ${this.t('checkpoint')}(chain_id,indexed_through_block,generation,config_hash,build_id,updated_at) VALUES ($1,$2,$3,$4,$5,now())
+       ON CONFLICT (chain_id) DO UPDATE SET indexed_through_block=EXCLUDED.indexed_through_block, generation=EXCLUDED.generation, config_hash=EXCLUDED.config_hash, build_id=EXCLUDED.build_id, updated_at=now()`,
+      [
+        this.chainId,
+        cp.indexedThroughBlock,
+        cp.generation,
+        cp.configHash,
+        cp.buildId,
+      ],
     );
   }
   private decodeEvents(rows: Record<string, unknown>[]): StoredEvent[] {
@@ -401,9 +414,11 @@ class PgSession implements ProjectionSession {
     );
     await this.select('balance', 'account = ANY($2::text[])', [accounts], into);
   }
-  async groupIndex(): Promise<GroupRow[]> {
+  async groupIndex(groupIds?: readonly Hex[]): Promise<GroupRow[]> {
     const t = new Tables();
-    await this.select('group', 'true', [], t);
+    if (groupIds)
+      await this.select('group', 'group_id = ANY($2::text[])', [groupIds], t);
+    else await this.select('group', 'true', [], t);
     return t.rows('group');
   }
   async clearScope(scope: Scope2): Promise<void> {
@@ -523,6 +538,19 @@ class PgSession implements ProjectionSession {
       [this.chainId],
     );
     return new Set(rows.map((r) => z.string().parse(r.mandate_hash)));
+  }
+  async artifacts(): Promise<MandateArtifact[]> {
+    const { rows } = await this.db.query(
+      `SELECT mandate_hash, artifact FROM ${this.t('mandate_artifact')} WHERE chain_id=$1 ORDER BY mandate_hash`,
+      [this.chainId],
+    );
+    return rows.map((r) => ({
+      mandateHash: z
+        .string()
+        .regex(/^0x[0-9a-f]{64}$/)
+        .parse(r.mandate_hash) as Hex,
+      artifact: r.artifact,
+    }));
   }
   async allTables(): Promise<Tables> {
     const t = new Tables();

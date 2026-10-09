@@ -77,6 +77,13 @@ export function signingImport(specifier, names) {
   return false;
 }
 const DYNAMIC_LOADING_ALLOWED = new Set([]);
+const CHAIN_LITERAL_OWNERS = /^packages\/(schemas|chain-registry)$/;
+const CHAIN_COMPARISON = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+]);
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 
@@ -131,6 +138,7 @@ function analyze(file, text) {
   const identifiers = new Set();
   const dynamic = [];
   const cryptoNamespaces = new Set();
+  const rawChainIds = [];
   let anyCount = 0;
   const visitType = (node) => {
     if (node.kind === ts.SyntaxKind.AnyKeyword) anyCount++;
@@ -321,6 +329,22 @@ function analyze(file, text) {
       )
         identifiers.add(`crypto.subtle.${member ?? '<computed>'}`);
     }
+    if (
+      ts.isBinaryExpression(node) &&
+      CHAIN_COMPARISON.has(node.operatorToken.kind)
+    ) {
+      const sides = [node.left, node.right];
+      const chainSide = sides.some((side) => {
+        const name = ts.isIdentifier(side)
+          ? side.text
+          : ts.isPropertyAccessExpression(side)
+            ? side.name.text
+            : null;
+        return name !== null && /chainid$/i.test(name);
+      });
+      if (chainSide && sides.some((side) => ts.isNumericLiteral(side)))
+        rawChainIds.push(node.getText(source));
+    }
     if (ts.isIdentifier(node) && node.text === 'createRequire')
       dynamic.push('createRequire');
     if (ts.isIdentifier(node) && isSigningName(node.text))
@@ -328,7 +352,13 @@ function analyze(file, text) {
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return { imports, identifiers, anyCount, dynamic: [...new Set(dynamic)] };
+  return {
+    imports,
+    identifiers,
+    anyCount,
+    rawChainIds,
+    dynamic: [...new Set(dynamic)],
+  };
 }
 export function checkArchitecture(root) {
   const errors = [];
@@ -350,7 +380,7 @@ export function checkArchitecture(root) {
   for (const pkg of packages)
     for (const file of sourceFiles(join(root, pkg.dir))) {
       const name = posix(relative(root, file));
-      const { imports, identifiers, anyCount, dynamic } = analyze(
+      const { imports, identifiers, anyCount, rawChainIds, dynamic } = analyze(
         name,
         readFileSync(file, 'utf8'),
       );
@@ -375,6 +405,14 @@ export function checkArchitecture(root) {
         );
       if (anyCount && !/\.test\.|fixture/.test(name))
         errors.push(`${name}: unchecked any`);
+      if (
+        rawChainIds.length &&
+        !CHAIN_LITERAL_OWNERS.test(pkg.dir) &&
+        !/\.test\.|fixture/.test(name)
+      )
+        errors.push(
+          `${name}: raw chain-id comparison ${rawChainIds.join(', ')}; use @synq/chain-registry profile helpers`,
+        );
       for (const { specifier, names } of imports) {
         let target = null;
         if (specifier.startsWith('.')) {

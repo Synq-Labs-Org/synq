@@ -8,22 +8,17 @@ import { keccak256, stringToHex, type Address, type Hex } from 'viem';
 import {
   GrantApprovalChallengeSchema,
   IdentityChallengeSchema,
-  MandateSchema,
   PendingIntentViewSchema,
-  PrincipalViewSchema,
   QuorumViewSchema,
   VerifiedApprovalSchema,
-  type ExecutionGrant,
   type GrantDraft,
-  type Mandate,
   type VerifiedApproval,
 } from '@synq/schemas';
 import {
-  Kernel,
+  artifactHash,
   onchainMandateId,
   toMandateConfig,
-  type AuthorizationDecision,
-  type FreshnessProbe,
+  type Kernel,
 } from '@synq/kernel';
 import {
   ChainHeadObserver,
@@ -32,40 +27,32 @@ import {
   ProjectionReconciliationSignals,
   Projector,
   RpcDirectVerifier,
+  registerMandateArtifacts,
   syncToTarget,
 } from '@synq/read-model';
 import { PostgresProjectionStore } from '@synq/read-model/storage';
 import {
-  ReadModelFreshnessProbe,
-  RpcKernelDirectVerifier,
-  RpcNonceStatusReader,
-} from '@synq/read-model/kernel';
-import { monadTestnetProfile } from '@synq/chain-registry';
-import {
   ReorgReconciler,
   loadJournalKey,
   loadKernelAuditKey,
-  packSafeSignatures,
 } from '@synq/execution-worker';
 import { registryAbi } from '@synq/execution-worker/abi';
 import { formatDecimal } from '@synq/domain';
-import {
-  PostgresIdentityStore,
-  StoreApprovalLedger,
-  StoreDelegationEvaluator,
-  StoreMembershipDirectory,
-} from '@synq/identity';
+import { PostgresIdentityStore } from '@synq/identity';
 import { grantPreview } from '@synq/identity/grant';
 import {
   approveGrantWithMera,
-  enrollMeraPrincipal,
   signMeraIdentityChallenge,
   signMeraSafeTransaction,
-  type MeraCredential,
 } from '@synq/identity/mera-browser';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import { createV1Api } from '@synq/api/v1';
 import { mandateReader } from '@synq/api/v1-server';
+import {
+  createIntentKernel,
+  identityPorts,
+  kernelStateFromReadModel,
+} from '@synq/api/kernel-runtime';
 import { readModelRoutes } from '@synq/api/read-model-routes';
 import { registryDeploymentSettings } from '../../../scripts/envio-env.js';
 import { EnvioProcess } from '../../../scripts/envio-process.js';
@@ -83,131 +70,25 @@ import {
 } from './testnet-chain.js';
 import { erc20TransferPlugin } from './transfer-plugin.js';
 import { transferVertical, type DraftOutcome } from './vertical.js';
+import {
+  CHAIN_ID,
+  MAX_MON_SPEND,
+  PLUGIN_ID,
+  PROFILE,
+  RP,
+  UNITS,
+  WORKER_ID,
+  databaseUrl,
+  ensureDatabase,
+  errorCode,
+  grantOf,
+  testnetMandate,
+  type TestnetE2EOptions,
+} from './testnet-config.js';
+import { enrollPrincipals } from './testnet-enrollment.js';
+import { runNegativeScenarios } from './testnet-scenarios.js';
 
-const PROFILE = monadTestnetProfile;
-const CHAIN_ID = PROFILE.network.chainId;
-const RP = {
-  rpId: 'localhost',
-  rpName: 'Synq testnet e2e',
-  origin: 'http://localhost',
-};
-const LABELS = ['alice', 'bob', 'carol'] as const;
-const MANDATE_ID = 'testnet_transfer';
-const PLUGIN_ID = 'ausd-transfer';
-const WORKER_ID = 'testnet-execution-worker';
-const MAX_MON_SPEND = 1_500_000_000_000_000_000n;
-const UNITS = {
-  funding: 25_000_000n,
-  transfer: 1_500_000n,
-  perActionCap: 5_000_000n,
-  cumulativeBudget: 20_000_000n,
-  probe: 1_000_000n,
-};
-
-export type TestnetE2EOptions = {
-  databaseUrl?: string;
-  evidenceDirectory?: string;
-  workDirectory?: string;
-  authenticatorStore?: string;
-};
-
-function databaseUrl(options: TestnetE2EOptions): string {
-  return (
-    options.databaseUrl ??
-    process.env.SYNQ_E2E_TESTNET_DATABASE_URL ??
-    'postgresql://postgres:synq_local@127.0.0.1:55432/synq_e2e_testnet'
-  );
-}
-
-async function ensureDatabase(url: string): Promise<void> {
-  const name = new URL(url).pathname.slice(1);
-  if (!/^[a-z_][a-z0-9_]*e2e[a-z0-9_]*$/.test(name))
-    throw new Error('E2E_DATABASE_NAME_MUST_CONTAIN_E2E');
-  const admin = new pg.Client({
-    connectionString: url.replace(/\/[^/]+$/, '/postgres'),
-  });
-  await admin.connect();
-  try {
-    const exists = await admin.query(
-      'SELECT 1 FROM pg_database WHERE datname=$1',
-      [name],
-    );
-    if (!exists.rows.length) await admin.query(`CREATE DATABASE ${name}`);
-  } finally {
-    await admin.end();
-  }
-}
-
-function testnetMandate(input: {
-  chainGroupId: Hex;
-  account: Address;
-  executor: Address;
-  recipient: Address;
-  asset: Mandate['inputAsset'];
-  members: { memberId: string; signer: Address }[];
-  now: number;
-}): Mandate {
-  return MandateSchema.parse({
-    schemaVersion: 2,
-    mandateId: MANDATE_ID,
-    groupId: input.chainGroupId,
-    version: 1,
-    status: 'ACTIVE',
-    network: PROFILE.network,
-    account: input.account,
-    chainGroupId: input.chainGroupId,
-    operators: [input.executor],
-    bindings: [
-      {
-        pluginId: PLUGIN_ID,
-        action: 'TRANSFER',
-        target: input.asset.address,
-        selector: '0xa9059cbb',
-      },
-    ],
-    recipients: [{ address: input.recipient, purpose: 'COUNTERPARTY' }],
-    inputAsset: input.asset,
-    outputAssets: [],
-    perActionCap: String(UNITS.perActionCap),
-    cumulativeBudget: String(UNITS.cumulativeBudget),
-    maxNativeValue: '0',
-    cumulativeNativeBudget: '0',
-    maxSlippageBps: 0,
-    maxReferenceDeviationBps: 0,
-    maxLeverageBps: 0,
-    maxAllocationBps: 10_000,
-    tierPolicy: {
-      tokenSpend: { autoMax: '0', reviewMax: '0' },
-      nativeSpend: { autoMax: '0', reviewMax: '0' },
-      actionFloors: [],
-      newOutputAsset: 'CONSENSUS',
-      leverage: 'BLOCKED',
-      withdrawal: 'UNANIMOUS',
-    },
-    approvalPolicy: {
-      quorum: 2,
-      reviewApprovals: 1,
-      accountThreshold: 2,
-      eligibleKinds: ['MERA_HUMAN'],
-    },
-    delegationScope: null,
-    members: input.members.map((m) => ({ ...m, active: true })),
-    validAfter: input.now - 60,
-    validUntil: input.now + 7 * 86_400,
-    quoteTtlSeconds: 300,
-    evidenceTtlSeconds: 300,
-    simulationTtlSeconds: 300,
-    maxGrantTtlSeconds: 300,
-    minIntervalSeconds: 0,
-    maxExecutions: 10,
-  });
-}
-
-function errorCode(error: unknown): string {
-  if (error instanceof ApiCallError)
-    return error.rejectionCode ?? error.message;
-  return (error as { code?: string }).code ?? String(error);
-}
+export type { TestnetE2EOptions } from './testnet-config.js';
 
 export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
   const runId = `${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}Z-${randomBytes(3).toString('hex')}`;
@@ -318,77 +199,12 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
     let api = phase.api;
     closers.push(() => phase.app.close());
 
-    const principals: { label: string; record: MeraCredential }[] = [];
-    for (const label of LABELS) {
-      let record = authenticators.record(label);
-      if (!record) {
-        const enrolled = await enrollMeraPrincipal(
-          {
-            rpId: RP.rpId,
-            rpName: RP.rpName,
-            user: { name: label, displayName: label },
-            requestChallenge: async ({ signer, credential }) =>
-              IdentityChallengeSchema.parse(
-                await api.post('/v1/principals/enrollment-challenges', {
-                  kind: 'MERA_HUMAN',
-                  signer,
-                  credential: {
-                    credentialId: credential.credentialId,
-                    ...(credential.transports
-                      ? { transports: [...credential.transports] }
-                      : {}),
-                  },
-                  rpId: RP.rpId,
-                  origin: RP.origin,
-                }),
-              ),
-          },
-          webAuthn(label),
-        );
-        await api.post('/v1/principals', {
-          challengeId: enrolled.challenge.challengeId,
-          signature: enrolled.signature,
-        });
-        record = enrolled.record;
-        authenticators.saveRecord(label, record);
-        log(`enrolled new Mera principal ${label} ${record.principalId}`);
-      } else {
-        try {
-          await api.get(
-            `/v1/principals/${encodeURIComponent(record.principalId)}`,
-          );
-          log(`reusing enrolled Mera principal ${label} ${record.principalId}`);
-        } catch (error) {
-          if (!(error instanceof ApiCallError) || error.status !== 404)
-            throw error;
-          const challenge = IdentityChallengeSchema.parse(
-            await api.post('/v1/principals/enrollment-challenges', {
-              kind: 'MERA_HUMAN',
-              signer: record.signer,
-              credential: { credentialId: record.credential.credentialId },
-              rpId: RP.rpId,
-              origin: RP.origin,
-            }),
-          );
-          await api.post('/v1/principals', {
-            challengeId: challenge.challengeId,
-            signature: await signMeraIdentityChallenge(
-              record,
-              challenge,
-              webAuthn(label),
-            ),
-          });
-          log(`re-enrolled stored Mera passkey ${label} ${record.principalId}`);
-        }
-      }
-      PrincipalViewSchema.parse(
-        await api.get(
-          `/v1/principals/${encodeURIComponent(record.principalId)}`,
-        ),
-      );
-      principals.push({ label, record });
-    }
-    principals.sort((a, b) => (a.record.signer < b.record.signer ? -1 : 1));
+    const principals = await enrollPrincipals({
+      api,
+      authenticators,
+      webAuthn,
+      log,
+    });
     const owners: OwnerSigner[] = principals.map((p) => ({
       address: p.record.signer,
       label: p.label,
@@ -544,12 +360,6 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
       clock.t = Math.max(clock.t, Number(block.timestamp));
       return clock.t;
     };
-    const probe: FreshnessProbe = {
-      async observe(query) {
-        await catchUp();
-        return new ReadModelFreshnessProbe(reader, head).observe(query);
-      },
-    };
     const calldatas = new Map<Hex, Hex>();
     const plugin = erc20TransferPlugin({
       id: PLUGIN_ID,
@@ -560,33 +370,25 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
     });
     const plugins = new PluginRegistry();
     plugins.register(plugin);
-    const kernel = new Kernel({
+    await registerMandateArtifacts(projectionStore, [
+      { mandateHash: artifactHash(mandate), artifact: mandate },
+    ]);
+    const kernel = createIntentKernel({
       network: PROFILE.network,
       executionModule: deployment.module,
       clock,
-      approvalLedger: new StoreApprovalLedger(store),
-      membershipDirectory: new StoreMembershipDirectory(store),
-      delegations: new StoreDelegationEvaluator(store),
-      freshness: {
-        probe,
-        verifier: new RpcKernelDirectVerifier(client, settings.projection),
-        maxLagBlocks: settings.maxLagBlocks,
+      identity: identityPorts(store),
+      client,
+      projection: settings.projection,
+      snapshots: async () => {
+        await catchUp();
+        return reader;
       },
-      nonceStatus: new RpcNonceStatusReader(client, settings.projection),
+      head,
+      maxLagBlocks: settings.maxLagBlocks,
       auditKey: auditKey.bytes,
       plugins: [plugin.manifest],
-      mandates: [mandate],
-      balances: [
-        {
-          account: group.account,
-          asset: ausd,
-          balance:
-            initial.group.treasury.find(
-              (t) => t.asset === ausd.address.toLowerCase(),
-            )?.balance ?? '0',
-        },
-      ],
-      balanceBlock: String(initial.indexedThroughBlock),
+      state: await kernelStateFromReadModel(reader),
     });
     late.kernel = kernel;
 
@@ -692,15 +494,6 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
       confirmations: PROFILE.confirmationDepth,
       journalKey,
     });
-    const grantOf = (
-      d: AuthorizationDecision | DraftOutcome,
-    ): ExecutionGrant => {
-      if (d.status !== 'AUTHORIZED')
-        throw new Error(
-          `EXPECTED_GRANT:${d.status}:${'code' in d ? d.code : ''}`,
-        );
-      return d.grant;
-    };
 
     // Positive path: 1.5 AUSD transfer through API -> Kernel -> 2 Mera approvals -> worker.
     const safeBefore = await chain.balanceOf(group.account);
@@ -819,124 +612,17 @@ export async function runTestnetE2E(options: TestnetE2EOptions = {}) {
     );
 
     // Negative E2E-007 and quorum checks.
-    const quorumProbe = await vertical.authorize(UNITS.probe, '2');
-    const probeGrant = grantOf(quorumProbe.decision);
-    const firstApproval = probeGrant.approvals[0]!;
-    const oneOfThree = await vertical.onchainRevert(
-      probeGrant,
-      quorumProbe.data,
-      firstApproval.signature,
-    );
-    const fullQuorumWhileActive = await vertical.onchainRevert(
-      probeGrant,
-      quorumProbe.data,
-      packSafeSignatures(probeGrant.approvals, probeGrant.draft),
-    );
-    log(
-      `1-of-3 simulation: ${oneOfThree}; 2-of-3 simulation: ${fullQuorumWhileActive ?? 'would succeed'}`,
-    );
-
-    const pauseReceipt = await gov.pause();
-    await catchUp(pauseReceipt.blockNumber);
-    const whilePaused = await vertical.authorize(UNITS.probe, '3');
-    const pausedRevert = await vertical.onchainRevert(
-      probeGrant,
-      quorumProbe.data,
-    );
-    const unpauseReceipt = await gov.unpause();
-    await catchUp(unpauseReceipt.blockNumber);
-    log(
-      `pause: kernel=${'code' in whilePaused.decision ? whilePaused.decision.code : whilePaused.decision.status} onchain=${pausedRevert}`,
-    );
-
-    const beforeSupersede = await vertical.authorize(UNITS.probe, '4');
-    const supersededGrant = grantOf(beforeSupersede.decision);
-    const v2 = MandateSchema.parse({
-      ...mandate,
-      version: 2,
-      perActionCap: String(UNITS.perActionCap - 1_000_000n),
-    });
-    const supersedeReceipt = await gov.supersedeMandate(
+    evidence.negative = await runNegativeScenarios({
+      vertical,
+      gov,
+      kernel,
+      mandate,
+      current,
       onchainId,
-      2n,
-      toMandateConfig(v2),
-      true,
-    );
-    kernel.supersedeMandate(v2, { securitySensitive: true });
-    current.mandate = v2;
-    await catchUp(supersedeReceipt.blockNumber);
-    await sync();
-    let supersededKernel = 'ACCEPTED';
-    try {
-      kernel.verify(supersededGrant, beforeSupersede.intent);
-    } catch (error) {
-      supersededKernel = errorCode(error);
-    }
-    const supersededOnchain = await vertical.onchainRevert(
-      supersededGrant,
-      beforeSupersede.data,
-    );
-    const oldVersionDraft = await vertical.authorize(UNITS.probe, '7', 1);
-    log(`supersede: kernel=${supersededKernel} onchain=${supersededOnchain}`);
-
-    const beforeRevoke = await vertical.authorize(UNITS.probe, '5', 2);
-    const revokedGrant = grantOf(beforeRevoke.decision);
-    const revokeReceipt = await gov.revokeMandate(onchainId);
-    kernel.revokeMandate(v2.groupId, v2.mandateId);
-    await catchUp(revokeReceipt.blockNumber);
-    await sync();
-    let revokedKernel = 'ACCEPTED';
-    try {
-      kernel.verify(revokedGrant, beforeRevoke.intent);
-    } catch (error) {
-      revokedKernel = errorCode(error);
-    }
-    const revokedOnchain = await vertical.onchainRevert(
-      revokedGrant,
-      beforeRevoke.data,
-    );
-    const afterRevoke = await vertical.authorize(UNITS.probe, '6', 2);
-    log(`revoke: kernel=${revokedKernel} onchain=${revokedOnchain}`);
-
-    const codeOf = (d: AuthorizationDecision | DraftOutcome) =>
-      d.status === 'AUTHORIZED' ? 'AUTHORIZED' : d.code;
-    const negative = {
-      quorum: {
-        oneOfThreeSignatureSimulation: oneOfThree,
-        twoOfThreeSimulationWhileActive: fullQuorumWhileActive,
-      },
-      pause: {
-        kernelViaApi: codeOf(whilePaused.decision),
-        onchainSimulation: pausedRevert,
-        pauseTx: pauseReceipt.transactionHash,
-        unpauseTx: unpauseReceipt.transactionHash,
-      },
-      supersede: {
-        kernelVerifyOldGrant: supersededKernel,
-        onchainSimulationOldGrant: supersededOnchain,
-        newDraftAtOldVersion: codeOf(oldVersionDraft.decision),
-        supersedeTx: supersedeReceipt.transactionHash,
-      },
-      revoke: {
-        kernelVerifyGrant: revokedKernel,
-        onchainSimulation: revokedOnchain,
-        newIntentAfterRevoke: codeOf(afterRevoke.decision),
-        revokeTx: revokeReceipt.transactionHash,
-      },
-    };
-    evidence.negative = negative;
-    const blocked =
-      oneOfThree !== null &&
-      fullQuorumWhileActive === null &&
-      negative.pause.kernelViaApi !== 'AUTHORIZED' &&
-      pausedRevert !== null &&
-      supersededKernel !== 'ACCEPTED' &&
-      supersededOnchain !== null &&
-      negative.supersede.newDraftAtOldVersion !== 'AUTHORIZED' &&
-      revokedKernel !== 'ACCEPTED' &&
-      revokedOnchain !== null &&
-      negative.revoke.newIntentAfterRevoke !== 'AUTHORIZED';
-    if (!blocked) throw new Error('NEGATIVE_SCENARIO_NOT_BLOCKED');
+      catchUp,
+      sync,
+      log,
+    });
 
     await catchUp();
     const finalState = await api.get(`/v1/groups/${group.chainGroupId}/state`);

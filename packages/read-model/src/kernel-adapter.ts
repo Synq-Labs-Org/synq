@@ -34,7 +34,20 @@ const moduleAbi = parseAbi([
   'function registry() view returns (address)',
   'function factory() view returns (address)',
 ]);
+const safeAbi = parseAbi([
+  'function getOwners() view returns (address[])',
+  'function getThreshold() view returns (uint256)',
+]);
 const UINT = /^(0|[1-9][0-9]{0,77})$/;
+
+function safeNumber(value: bigint | string | null, what: string): number {
+  if (value === null)
+    throw new ReadModelError('INCONSISTENT_PROOF', `${what} missing`);
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 0)
+    throw new ReadModelError('INCONSISTENT_WITH_CHAIN', what);
+  return n;
+}
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 
@@ -57,11 +70,28 @@ export class ReadModelFreshnessProbe implements FreshnessProbe {
     if (!snapshot) throw new ReadModelError('NOT_FOUND', entry.groupId);
     if (snapshot.group.accountingStatus === 'FROZEN')
       throw new ReadModelError('ACCOUNTING_FROZEN', entry.groupId);
+    if (snapshot.group.account !== account)
+      throw new ReadModelError('INCONSISTENT_PROOF', 'account binding');
+    const mandateId = query.mandateId.toLowerCase();
+    const mandate = snapshot.group.mandates.find(
+      (m) => m.mandateId === mandateId,
+    );
+    if (!mandate) throw new ReadModelError('NOT_FOUND', mandateId);
     return {
       chainId: snapshot.sourceChainId,
       indexedThroughBlock: snapshot.indexedThroughBlock,
       headBlock: head.block,
       accountPaused: snapshot.group.paused,
+      mandate: {
+        active: mandate.status === 'ACTIVE',
+        version: safeNumber(mandate.currentVersion, 'mandate version'),
+        minValidVersion: safeNumber(
+          mandate.minValidVersion,
+          'mandate min valid version',
+        ),
+      },
+      owners: snapshot.group.owners as Hex[],
+      threshold: safeNumber(snapshot.group.threshold, 'threshold'),
     };
   }
 }
@@ -76,7 +106,7 @@ export class RpcKernelDirectVerifier implements DirectVerifier {
       throw new ReadModelError('CONFIG_MISMATCH', `chain ${query.chainId}`);
     const account = query.account.toLowerCase() as Hex;
     const blockNumber = await this.client.getBlockNumber({ cacheTime: 0 });
-    const [paused, state, balances] = await Promise.all([
+    const [paused, state, owners, threshold, balances] = await Promise.all([
       this.client.readContract({
         address: this.config.module,
         abi: moduleAbi,
@@ -89,6 +119,18 @@ export class RpcKernelDirectVerifier implements DirectVerifier {
         abi: registryAbi,
         functionName: 'mandateState',
         args: [account, query.mandateId],
+        blockNumber,
+      }),
+      this.client.readContract({
+        address: account,
+        abi: safeAbi,
+        functionName: 'getOwners',
+        blockNumber,
+      }),
+      this.client.readContract({
+        address: account,
+        abi: safeAbi,
+        functionName: 'getThreshold',
         blockNumber,
       }),
       Promise.all(
@@ -109,9 +151,6 @@ export class RpcKernelDirectVerifier implements DirectVerifier {
         })),
       ),
     ]);
-    const version = Number(state.currentVersion);
-    if (!Number.isSafeInteger(version))
-      throw new ReadModelError('INCONSISTENT_WITH_CHAIN', 'mandate version');
     return {
       chainId: this.config.chainId,
       account,
@@ -120,8 +159,14 @@ export class RpcKernelDirectVerifier implements DirectVerifier {
       mandate: {
         mandateId: query.mandateId.toLowerCase() as Hex,
         active: state.status === 1,
-        version,
+        version: safeNumber(state.currentVersion, 'mandate version'),
+        minValidVersion: safeNumber(
+          state.minValidVersion,
+          'mandate min valid version',
+        ),
       },
+      owners: owners.map((o) => o.toLowerCase() as Hex),
+      threshold: safeNumber(threshold, 'threshold'),
       balances,
     };
   }

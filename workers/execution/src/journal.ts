@@ -11,6 +11,7 @@ import {
   readdirSync,
 } from 'node:fs';
 import { createHmac } from 'node:crypto';
+import { isLocalChain } from '@synq/chain-registry';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { keccak256, stringToHex } from 'viem';
@@ -358,7 +359,7 @@ export class ExecutionJournal {
     const entry = parseOrThrow(JournalEntrySchema, input);
     if (entry.state !== 'SIGNED')
       throw new ExecutionError('INVALID_NEW_SUBMISSION');
-    if (this.key.source === 'LOCAL_GENERATED' && entry.chainId !== 31337)
+    if (this.key.source === 'LOCAL_GENERATED' && !isLocalChain(entry.chainId))
       throw new ExecutionError('INTEGRITY_KEY_REQUIRED');
     const record: JournalRecord = {
       entry,

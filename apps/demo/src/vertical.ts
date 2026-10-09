@@ -26,6 +26,7 @@ import {
   type Kernel,
 } from '@synq/kernel';
 import type { PluginRegistry } from '@synq/plugin-sdk';
+import { isMutationEnabledChain } from '@synq/chain-registry';
 import {
   ExecutionJournal,
   JournaledBroadcaster,
@@ -114,10 +115,14 @@ export type TransferProposal = {
 };
 
 export function transferVertical(ctx: TransferVerticalContext) {
-  const chainId = ctx.network.chainId;
-  if (chainId !== 31337 && chainId !== 10143)
+  const network = ctx.network;
+  if (
+    network.profile === 'proof/monad-mainnet' ||
+    !isMutationEnabledChain(network.chainId)
+  )
     throw new VerticalError('MAINNET_DISABLED');
-  const journalChainId: 31337 | 10143 = chainId;
+  const chainId = network.chainId;
+  const journalChainId = chainId;
 
   async function propose(
     amount: bigint,

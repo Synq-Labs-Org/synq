@@ -1,31 +1,15 @@
 import {
   VerifiedApprovalSchema,
   type ApprovalLedger,
-  type IdentityPrincipalKind,
+  type DirectoryMember,
+  type MembershipDirectory,
   type VerifiedApproval,
 } from '@synq/schemas';
 import { evaluateDelegation, type DelegationUse } from './delegation.js';
 import { activeMembership } from './membership.js';
 import type { IdentityStore } from './store.js';
 
-export type DirectoryMember = {
-  groupId: string;
-  memberId: string;
-  principalId: string;
-  principalKind: IdentityPrincipalKind;
-  role: 'APPROVER' | 'OPERATOR';
-  signer: `0x${string}`;
-  membershipEpoch: number;
-  ownerOfAccount: boolean;
-};
-
-export interface MembershipDirectory {
-  activeMember(
-    groupId: string,
-    memberId: string,
-  ): Promise<DirectoryMember | null>;
-  membershipEpoch(groupId: string): Promise<number | null>;
-}
+export type { DirectoryMember, MembershipDirectory };
 
 export class StoreMembershipDirectory implements MembershipDirectory {
   constructor(readonly store: IdentityStore) {}

@@ -172,6 +172,7 @@ describe('PolicyEngine typed result and tiers (B02.2)', () => {
         approvalPolicy: { ...mandate().approvalPolicy, accountThreshold: 1 },
       }),
     ]);
+    single.probe.observation.threshold = 1;
     const r = await single.kernel.authorize({ ...review, approvals: [] });
     expect(
       await single.kernel.authorize({

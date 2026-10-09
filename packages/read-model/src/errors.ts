@@ -18,6 +18,7 @@ export const READ_MODEL_ERROR_CODES = [
   'CACHE_INVALID',
   'NOT_FOUND',
   'SOURCE_UNAVAILABLE',
+  'NO_VERIFICATION_TARGETS',
 ] as const;
 export type ReadModelErrorCode = (typeof READ_MODEL_ERROR_CODES)[number];
 

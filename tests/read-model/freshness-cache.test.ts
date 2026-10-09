@@ -25,9 +25,17 @@ class FakeRedis implements RedisConnection {
 class CountingSource implements SnapshotSource {
   progressCalls = 0;
   groupCalls = 0;
+  stampCalls = 0;
   constructor(private readonly inner: SnapshotSource) {}
   get chainId() {
     return this.inner.chainId;
+  }
+  get scope() {
+    return this.inner.scope;
+  }
+  stamp(id: Hex) {
+    this.stampCalls++;
+    return this.inner.stamp(id);
   }
   progress() {
     this.progressCalls++;
@@ -140,17 +148,16 @@ describe('Redis read-through snapshot cache (R2)', () => {
     const cache = new RedisSnapshotCache(redis, source);
     const first = await cache.groupSnapshot(groupId);
     expect(source.groupCalls).toBe(1);
-    expect(source.progressCalls).toBe(1);
     const second = await cache.groupSnapshot(groupId);
     expect(second).toEqual(first);
     expect(source.groupCalls).toBe(1);
-    expect(source.progressCalls).toBe(1);
+    expect(source.stampCalls).toBe(2);
     expect(cache.stats.groupHits).toBe(1);
     redis.data.clear();
     const third = await cache.groupSnapshot(groupId);
     expect(third).toEqual(first);
     expect(source.groupCalls).toBe(2);
-    expect(redis.data.size).toBe(2);
+    expect(redis.data.size).toBe(1);
   });
   it('a new projection generation changes the key, and corrupt entries are not served', async () => {
     const { reader, projector } = await projected();
@@ -167,7 +174,7 @@ describe('Redis read-through snapshot cache (R2)', () => {
     const after = await cache.groupSnapshot(groupId);
     expect(after!.groupRevision).toBeGreaterThan(before!.groupRevision);
     expect(after!.group.treasury[0]!.balance).toBe('750005');
-    const key = cache.groupKey(groupId, after!.groupRevision);
+    const key = cache.groupKey(after!.build, groupId, after!.groupRevision);
     redis.data.set(
       key,
       JSON.stringify({

@@ -11,11 +11,29 @@ import type { Hash } from './canonical.js';
 import { KernelError, parseAs, requireRule } from './errors.js';
 
 const BlockSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const VersionSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+const OwnersSchema = z
+  .array(AddressSchema)
+  .min(1)
+  .refine((owners) => new Set(owners).size === owners.length);
+const ThresholdSchema = z.number().int().positive();
+export const MandateObservationSchema = z.strictObject({
+  active: z.boolean(),
+  version: VersionSchema,
+  minValidVersion: VersionSchema,
+});
 export const FreshnessObservationSchema = z.strictObject({
   chainId: z.number().int().positive(),
   indexedThroughBlock: BlockSchema,
   headBlock: BlockSchema,
   accountPaused: z.boolean(),
+  mandate: MandateObservationSchema,
+  owners: OwnersSchema,
+  threshold: ThresholdSchema,
 });
 export type FreshnessObservation = z.output<typeof FreshnessObservationSchema>;
 export const DirectVerificationSchema = z.strictObject({
@@ -23,11 +41,9 @@ export const DirectVerificationSchema = z.strictObject({
   account: AddressSchema,
   blockNumber: BlockSchema,
   paused: z.boolean(),
-  mandate: z.strictObject({
-    mandateId: HashSchema,
-    active: z.boolean(),
-    version: z.number().int().nonnegative(),
-  }),
+  mandate: MandateObservationSchema.extend({ mandateId: HashSchema }),
+  owners: OwnersSchema,
+  threshold: ThresholdSchema,
   balances: z.array(
     z.strictObject({
       account: AddressSchema,
@@ -42,7 +58,14 @@ export type FreshnessQuery = {
   account: `0x${string}`;
   mandateId: Hash;
   mandateVersion: number;
+  accountThreshold: number;
   assets: readonly AssetIdentity[];
+};
+export type AccountObservation = {
+  paused: boolean;
+  mandate: z.output<typeof MandateObservationSchema>;
+  owners: readonly string[];
+  threshold: number;
 };
 export interface FreshnessProbe {
   observe(query: FreshnessQuery): Promise<FreshnessObservation>;
@@ -61,7 +84,28 @@ export type FreshnessOutcome = {
   headBlock: number;
   indexedThroughBlock: number;
   verifiedBalances: TreasuryBalance[] | null;
+  owners: readonly `0x${string}`[];
 };
+
+export function assertAccountState(
+  state: AccountObservation,
+  query: FreshnessQuery,
+): void {
+  requireRule(!state.paused, 'ACCOUNT_PAUSED');
+  requireRule(state.mandate.active, 'MANDATE_REVOKED');
+  requireRule(
+    state.mandate.version === query.mandateVersion &&
+      query.mandateVersion >= state.mandate.minValidVersion,
+    'MANDATE_VERSION',
+  );
+  requireRule(
+    state.threshold === query.accountThreshold &&
+      state.threshold <= state.owners.length,
+    'ONCHAIN_QUORUM_REQUIRED',
+  );
+}
+const lowered = (owners: readonly string[]) =>
+  owners.map((o) => o.toLowerCase() as `0x${string}`);
 
 export class FreshnessGate {
   constructor(private readonly config: FreshnessConfig) {
@@ -93,8 +137,21 @@ export class FreshnessGate {
       indexedThroughBlock: observation.indexedThroughBlock,
     };
     if (lagBlocks <= this.config.maxLagBlocks) {
-      requireRule(!observation.accountPaused, 'ACCOUNT_PAUSED');
-      return { mode: 'INDEXED', ...base, verifiedBalances: null };
+      assertAccountState(
+        {
+          paused: observation.accountPaused,
+          mandate: observation.mandate,
+          owners: observation.owners,
+          threshold: observation.threshold,
+        },
+        query,
+      );
+      return {
+        mode: 'INDEXED',
+        ...base,
+        verifiedBalances: null,
+        owners: lowered(observation.owners),
+      };
     }
     requireRule(this.config.verifier !== undefined, 'STALE_READ_MODEL');
     let direct: DirectVerification;
@@ -121,12 +178,12 @@ export class FreshnessGate {
         ),
       'DIRECT_VERIFICATION_FAILED',
     );
-    requireRule(!direct.paused, 'ACCOUNT_PAUSED');
-    requireRule(direct.mandate.active, 'MANDATE_REVOKED');
-    requireRule(
-      direct.mandate.version === query.mandateVersion,
-      'MANDATE_VERSION',
-    );
-    return { mode: 'DIRECT', ...base, verifiedBalances: direct.balances };
+    assertAccountState(direct, query);
+    return {
+      mode: 'DIRECT',
+      ...base,
+      verifiedBalances: direct.balances,
+      owners: lowered(direct.owners),
+    };
   }
 }

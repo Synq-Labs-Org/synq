@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import {
   AddressSchema,
-  HashSchema,
   NetworkProfileSchema,
   PluginManifestSchema,
   RiskPacketSchema,
@@ -10,7 +9,6 @@ import {
   type ActionState,
   type ApprovalLedger,
   type ExecutionGrant,
-  type GrantDraft,
   type Mandate,
   type NetworkProfile,
   type PluginManifest,
@@ -18,34 +16,21 @@ import {
   type TransitionRecord,
   type TreasuryBalance,
 } from '@synq/domain';
-import { ApprovalCalculator, type RejectedApproval } from './approvals.js';
+import { ApprovalCalculator } from './approvals.js';
 import {
   AuditRecorder,
   type AuditKind,
   type AuditRecord,
   type AuditSink,
 } from './audit.js';
-import {
-  IntentCanonicalizer,
-  artifactHash,
-  type CanonicalIntent,
-  type Hash,
-} from './canonical.js';
+import { IntentCanonicalizer, artifactHash, type Hash } from './canonical.js';
 import {
   DelegationUsage,
   NO_DELEGATIONS,
   type DelegationEvaluator,
   type MembershipDirectory,
 } from './delegation.js';
-import {
-  KernelError,
-  asKernelError,
-  decisionStatus,
-  parseAs,
-  requireRule,
-  type Failure,
-  type Issue,
-} from './errors.js';
+import { KernelError, asKernelError, parseAs, requireRule } from './errors.js';
 import { FreshnessGate, type FreshnessConfig } from './freshness.js';
 import { GrantIssuer, GrantVerifier } from './grants.js';
 import {
@@ -53,11 +38,22 @@ import {
   nativeAssetFor,
   type Budget,
   type GrantClaim,
-  type NonceStatus,
 } from './ledger.js';
 import { ActionLifecycles, plannedPath } from './lifecycle.js';
 import { MandateResolver, onchainMandateId } from './mandates.js';
-import { PolicyEngine, type PolicyResult } from './policy.js';
+import { PolicyEngine } from './policy.js';
+import {
+  RequestSchema,
+  refusalDecision,
+  refusalPayload,
+  type AuthorizationDecision,
+  type Clock,
+  type DecisionContext,
+  type PendingDecision,
+  type RejectedDecision,
+  type TrustedEvidence,
+} from './decisions.js';
+import { readNonceStatus, type NonceStatusReader } from './nonce-status.js';
 import { RiskGate, SimulationGate } from './risk.js';
 import {
   restoreState,
@@ -66,35 +62,6 @@ import {
   type KernelSnapshot,
 } from './snapshot.js';
 
-export interface Clock {
-  now(): number;
-}
-export type TrustedEvidence = {
-  riskPacketHashes: readonly string[];
-  simulationHashes: readonly string[];
-};
-export const NonceStatusSchema = z.strictObject({
-  chainId: z.number().int().positive(),
-  module: AddressSchema,
-  account: AddressSchema,
-  nonce: z.string().regex(/^(0|[1-9][0-9]*)$/),
-  intentHash: HashSchema,
-  nonceUsed: z.boolean(),
-  intentUsed: z.boolean(),
-  blockNumber: z.number().int().nonnegative(),
-  blockTimestamp: z.number().int().nonnegative(),
-});
-export type NonceStatusQuery = {
-  chainId: number;
-  module: `0x${string}`;
-  account: `0x${string}`;
-  nonce: string;
-  intentHash: `0x${string}`;
-};
-export type NonceStatusReply = NonceStatus & NonceStatusQuery;
-export interface NonceStatusReader {
-  status(query: NonceStatusQuery): Promise<NonceStatusReply>;
-}
 export type KernelDependencies = {
   clock: Clock;
   approvalLedger: ApprovalLedger;
@@ -113,62 +80,6 @@ export type KernelOptions = KernelDependencies & {
   balances?: readonly TreasuryBalance[];
   balanceBlock?: string;
   trustedEvidence?: TrustedEvidence;
-};
-export type AuthorizationRequest = {
-  intent: unknown;
-  risk: unknown;
-  simulation: unknown;
-  approvals: readonly unknown[];
-};
-type DecisionCommon = {
-  intentId: string | null;
-  intentHash: Hash | null;
-  state: ActionState | null;
-  tier: Tier | null;
-  policy: PolicyResult | null;
-  transitions: TransitionRecord<ActionState>[];
-  audit: { sequence: number; hash: Hash } | null;
-};
-export type AuthorizedDecision = DecisionCommon & {
-  status: 'AUTHORIZED';
-  tier: Exclude<Tier, 'BLOCKED'>;
-  requiredApprovals: number;
-  draft: GrantDraft;
-  grant: ExecutionGrant;
-};
-export type PendingDecision = DecisionCommon & {
-  status: 'PENDING_APPROVAL';
-  code: Failure;
-  issues: Issue[];
-  draft: GrantDraft | null;
-  requiredApprovals: number | null;
-  countedApprovals: number;
-  rejectedApprovals: RejectedApproval[];
-};
-export type RejectedDecision = DecisionCommon & {
-  status: 'POLICY_REJECTED' | 'RISK_REJECTED' | 'EXPIRED';
-  code: Failure;
-  issues: Issue[];
-};
-export type AuthorizationDecision =
-  | AuthorizedDecision
-  | PendingDecision
-  | RejectedDecision;
-
-const RequestSchema = z.strictObject({
-  intent: z.unknown(),
-  risk: z.unknown(),
-  simulation: z.unknown(),
-  approvals: z.array(z.unknown()),
-});
-
-type Context = {
-  canonical?: CanonicalIntent;
-  policy?: PolicyResult;
-  draft?: GrantDraft;
-  counted?: number;
-  rejected?: RejectedApproval[];
-  required?: number;
 };
 
 export class Kernel {
@@ -280,36 +191,6 @@ export class Kernel {
       throw error;
     }
   }
-  private async readNonce(grant: ExecutionGrant): Promise<NonceStatus | null> {
-    if (!this.nonceStatus) return null;
-    const query: NonceStatusQuery = {
-      chainId: grant.chainId,
-      module: grant.draft.domain.verifyingContract,
-      account: grant.account,
-      nonce: grant.nonce,
-      intentHash: grant.intentHash,
-    };
-    try {
-      const reply = NonceStatusSchema.parse(
-        await this.nonceStatus.status({ ...query }),
-      );
-      const echoed =
-        reply.chainId === query.chainId &&
-        reply.module.toLowerCase() === query.module.toLowerCase() &&
-        reply.account.toLowerCase() === query.account.toLowerCase() &&
-        reply.nonce === query.nonce &&
-        reply.intentHash.toLowerCase() === query.intentHash.toLowerCase();
-      if (!echoed) return null;
-      return {
-        nonceUsed: reply.nonceUsed,
-        intentUsed: reply.intentUsed,
-        blockNumber: reply.blockNumber,
-        blockTimestamp: reply.blockTimestamp,
-      };
-    } catch {
-      return null;
-    }
-  }
 
   attestEvidence(evidence: TrustedEvidence): void {
     for (const hash of evidence.riskPacketHashes) this.trustedRisk.add(hash);
@@ -328,7 +209,7 @@ export class Kernel {
   }
 
   private async decide(request: unknown): Promise<AuthorizationDecision> {
-    const ctx: Context = {};
+    const ctx: DecisionContext = {};
     let now = this.lastNow ?? 0;
     try {
       now = this.tick();
@@ -382,6 +263,7 @@ export class Kernel {
         account: intent.account,
         mandateId: onchainMandateId(mandate),
         mandateVersion: mandate.version,
+        accountThreshold: mandate.approvalPolicy.accountThreshold,
         assets,
       });
       const verifiedBalances = freshness.verifiedBalances;
@@ -428,6 +310,7 @@ export class Kernel {
         network: this.network,
         approvals: req.approvals,
         requiredByPolicy: policy.requiredApprovals,
+        accountOwners: freshness.owners,
         ports: {
           ledger: this.approvalLedger,
           directory: this.directory,
@@ -526,13 +409,12 @@ export class Kernel {
   }
 
   private refuse(
-    ctx: Context,
+    ctx: DecisionContext,
     error: KernelError,
     now: number,
   ): PendingDecision | RejectedDecision {
     const code = error.code;
     const canonical = ctx.canonical;
-    const status = decisionStatus(code);
     let transitions: TransitionRecord<ActionState>[] = [];
     let audit: AuditRecord | null = null;
     try {
@@ -554,20 +436,7 @@ export class Kernel {
               : [];
           return {
             result: advanced,
-            payload: {
-              status,
-              code,
-              issues: [...error.issues],
-              intentId: canonical?.intentId ?? null,
-              proposedIntentId: canonical?.proposedIntentId ?? null,
-              intentHash: canonical?.intentHash ?? null,
-              tier: ctx.policy?.tier ?? null,
-              policyResultHash: ctx.policy ? artifactHash(ctx.policy) : null,
-              policy: ctx.policy ?? null,
-              draftDigest: ctx.draft?.digest ?? null,
-              rejectedApprovals: ctx.rejected ?? [],
-              transitions: advanced.map((t) => t.to),
-            },
+            payload: refusalPayload(ctx, error, advanced),
           };
         },
       ));
@@ -575,27 +444,11 @@ export class Kernel {
       transitions = [];
       audit = null;
     }
-    const common = {
-      intentId: canonical?.intentId ?? null,
-      intentHash: canonical?.intentHash ?? null,
+    return refusalDecision(ctx, error, {
       state: canonical ? this.lifecycles.state(canonical.intentId) : null,
-      tier: ctx.policy?.tier ?? null,
-      policy: ctx.policy ?? null,
       transitions,
-      audit: audit ? { sequence: audit.sequence, hash: audit.hash } : null,
-      code: audit ? code : ('AUDIT_UNAVAILABLE' as const),
-      issues: [...error.issues],
-    };
-    if (status === 'PENDING_APPROVAL')
-      return {
-        ...common,
-        status,
-        draft: ctx.draft ?? null,
-        requiredApprovals: ctx.required ?? null,
-        countedApprovals: ctx.counted ?? 0,
-        rejectedApprovals: ctx.rejected ?? [],
-      };
-    return { ...common, status };
+      audit,
+    });
   }
 
   verify(grant: unknown, intent: unknown): ExecutionGrant {
@@ -689,7 +542,10 @@ export class Kernel {
   }
   async releaseUnexecuted(grantId: string): Promise<void> {
     const now = this.tick();
-    const status = await this.readNonce(this.ledger.record(grantId).grant);
+    const status = await readNonceStatus(
+      this.nonceStatus,
+      this.ledger.record(grantId).grant,
+    );
     requireRule(status !== null, 'RECONCILIATION_INVALID');
     this.commit('RELEASE', now, () => ({
       result: this.ledger.release(grantId, status),
@@ -700,7 +556,7 @@ export class Kernel {
     const now = this.tick();
     let released = 0;
     for (const grant of this.ledger.expiredOutstanding(now)) {
-      const status = await this.readNonce(grant);
+      const status = await readNonceStatus(this.nonceStatus, grant);
       if (!status || !this.ledger.releasable(grant.grantId, status)) continue;
       this.commit('RELEASE', now, () => {
         const freed = this.ledger.release(grant.grantId, status);

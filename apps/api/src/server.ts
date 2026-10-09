@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import pg from 'pg';
 import { createClient } from 'redis';
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, type PublicClient } from 'viem';
 import { assetForRole, profileConfiguration } from '@synq/chain-registry';
+import { ProfileNameSchema, type ProfileName } from '@synq/schemas';
 import {
   ChainHeadObserver,
   ProjectionReader,
+  type ProjectionConfig,
   RedisSnapshotCache,
   deploymentFacts,
   projectionConfigFromDeployment,
@@ -40,26 +42,41 @@ export function createApi(options: { readModel?: ReadModelRouteDeps } = {}) {
   return api;
 }
 
-export async function readModelFromEnvironment(): Promise<ReadModelRouteDeps> {
-  const env = z
-    .object({
-      SYNQ_NETWORK: z.string().default('sandbox/monad-testnet'),
-      SYNQ_RM_DATABASE_URL: z.string().min(1),
-      SYNQ_RM_SCHEMA: z.string().default('synq_read_model'),
-      SYNQ_RM_REDIS_URL: z.string().min(1),
-      SYNQ_RM_REORG_WINDOW: z.coerce.number().int().positive().default(200),
-    })
-    .parse(process.env);
-  const profile = profileConfiguration(
-    z
-      .enum(['local/anvil', 'sandbox/monad-testnet', 'proof/monad-mainnet'])
-      .parse(env.SYNQ_NETWORK),
-  );
+export type ReadModelRuntime = ReadModelRouteDeps & {
+  reader: ProjectionReader;
+  projection: ProjectionConfig;
+  client: PublicClient;
+  close(): Promise<void>;
+};
+
+const ReadModelEnvSchema = z.object({
+  SYNQ_NETWORK: ProfileNameSchema.default('sandbox/monad-testnet'),
+  SYNQ_RM_DATABASE_URL: z.string().min(1),
+  SYNQ_RM_SCHEMA: z.string().default('synq_read_model'),
+  SYNQ_RM_REDIS_URL: z.string().min(1),
+  SYNQ_RM_REORG_WINDOW: z.coerce.number().int().positive().default(200),
+  SYNQ_DEPLOYMENTS_DIR: z.string().default('contracts/deployments'),
+});
+
+export async function readModelRuntime(
+  source: NodeJS.ProcessEnv = process.env,
+  profileName?: ProfileName,
+): Promise<ReadModelRuntime> {
+  const env = ReadModelEnvSchema.parse(source);
+  const profile = profileConfiguration(profileName ?? env.SYNQ_NETWORK);
   const chainId = profile.network.chainId;
   const facts = deploymentFacts(
-    JSON.parse(readFileSync(`contracts/deployments/${chainId}.json`, 'utf8')),
     JSON.parse(
-      readFileSync(`contracts/deployments/${chainId}.receipts.json`, 'utf8'),
+      readFileSync(
+        resolve(env.SYNQ_DEPLOYMENTS_DIR, `${chainId}.json`),
+        'utf8',
+      ),
+    ),
+    JSON.parse(
+      readFileSync(
+        resolve(env.SYNQ_DEPLOYMENTS_DIR, `${chainId}.receipts.json`),
+        'utf8',
+      ),
     ),
   );
   const config = projectionConfigFromDeployment({
@@ -69,28 +86,36 @@ export async function readModelFromEnvironment(): Promise<ReadModelRouteDeps> {
     reorgWindowBlocks: env.SYNQ_RM_REORG_WINDOW,
     confirmationDepth: profile.confirmationDepth,
   });
+  const pool = new pg.Pool({
+    connectionString: env.SYNQ_RM_DATABASE_URL,
+    max: 4,
+  });
   const store = new PostgresProjectionStore(
-    {
-      pool: new pg.Pool({ connectionString: env.SYNQ_RM_DATABASE_URL, max: 4 }),
-    },
+    { pool },
     chainId,
     env.SYNQ_RM_SCHEMA,
   );
   const redis = createClient({ url: env.SYNQ_RM_REDIS_URL });
   await redis.connect();
-  const rpcUrl = process.env[profile.rpcEnvironment] ?? profile.defaultRpcUrl;
+  const rpcUrl = source[profile.rpcEnvironment] ?? profile.defaultRpcUrl;
+  const client = createPublicClient({ transport: http(rpcUrl) });
+  const reader = new ProjectionReader(store, config);
   return {
-    snapshots: new RedisSnapshotCache(
-      redis,
-      new ProjectionReader(store, config),
-    ),
-    head: new ChainHeadObserver(
-      createPublicClient({ transport: http(rpcUrl) }),
-      chainId,
-      { ttlMs: 1000 },
-    ),
+    snapshots: new RedisSnapshotCache(redis, reader),
+    head: new ChainHeadObserver(client, chainId, { ttlMs: 1000 }),
     maxLagBlocks: Number(profile.maxIndexLagBlocks),
+    reader,
+    projection: config,
+    client,
+    async close() {
+      await redis.quit();
+      await pool.end();
+    },
   };
+}
+
+export async function readModelFromEnvironment(): Promise<ReadModelRouteDeps> {
+  return readModelRuntime();
 }
 
 if (
