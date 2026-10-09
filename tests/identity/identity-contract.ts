@@ -623,6 +623,34 @@ export function identityContract(label: string, harness: StoreHarness) {
         ).rejects.toMatchObject({ code: 'PRINCIPAL_NOT_ELIGIBLE' });
       });
 
+      it('binding or revoking an operator leaves the approver epoch and counted approvals intact', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const a = await approve(s, humans[0]!, 'member_0', draft);
+        await s.approvals.submit({
+          challengeId: a.challenge.challengeId,
+          signature: a.signature,
+        });
+        const outstanding = await approve(s, humans[1]!, 'member_1', draft);
+        const operator = await operatorPrincipal(s, 3);
+        await s.membership.bindOperator({
+          groupId,
+          memberId: 'op',
+          principalId: operator.principalId,
+        });
+        const afterRevoke = await s.membership.revoke({
+          groupId,
+          memberId: 'op',
+        });
+        expect(afterRevoke.membershipEpoch).toBe(3);
+        await s.approvals.submit({
+          challengeId: outstanding.challenge.challengeId,
+          signature: outstanding.signature,
+        });
+        expect((await s.approvals.quorum(draft.digest)).satisfied).toBe(true);
+      });
+
       it('an operator whose signer is a Safe owner cannot be bound', async () => {
         const s = services();
         const op = await operatorPrincipal(s, 1);

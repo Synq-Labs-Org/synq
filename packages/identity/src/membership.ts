@@ -220,7 +220,6 @@ export class MembershipService {
         principal.signer === group.account
       )
         throw new IdentityError('OPERATOR_IS_OWNER');
-      const epoch = group.membershipEpoch + 1;
       const membership = MembershipViewSchema.parse({
         groupId: group.groupId,
         memberId: memberId.data,
@@ -229,12 +228,11 @@ export class MembershipService {
         role: 'OPERATOR',
         signer: principal.signer,
         status: 'ACTIVE',
-        joinedEpoch: epoch,
+        joinedEpoch: group.membershipEpoch,
         joinedAt: now,
         revokedAt: null,
       });
       await tx.insertMembership(membership);
-      await tx.setGroupEpoch(group.groupId, epoch);
       return membership;
     });
   }
@@ -246,8 +244,13 @@ export class MembershipService {
     const now = this.config.now();
     return this.store.transaction(async (tx) => {
       const group = await requireGroup(tx, input.groupId, 'UPDATE');
+      const target = await activeMembership(tx, group.groupId, input.memberId);
+      if (!target) throw new IdentityError('MEMBERSHIP_NOT_FOUND');
       await tx.revokeMembership(group.groupId, input.memberId, now);
-      const epoch = group.membershipEpoch + 1;
+      const epoch =
+        target.role === 'APPROVER'
+          ? group.membershipEpoch + 1
+          : group.membershipEpoch;
       await tx.setGroupEpoch(group.groupId, epoch);
       return groupView(
         { ...group, membershipEpoch: epoch },
