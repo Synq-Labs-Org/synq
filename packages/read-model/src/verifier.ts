@@ -221,6 +221,8 @@ export class RpcDirectVerifier {
     if (!snapshot) throw new ReadModelError('NOT_FOUND', groupId);
     const block = await blockFor(snapshot);
     const list = targets ?? DEFAULT_VERIFICATION_TARGETS(this.config, snapshot);
+    if (list.length === 0)
+      throw new ReadModelError('NO_VERIFICATION_TARGETS', groupId);
     let observations: Observation[];
     try {
       observations = await Promise.all(
