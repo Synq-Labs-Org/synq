@@ -108,6 +108,22 @@ describe('P00-003 repository secret scan', () => {
       rmSync(dirty, { recursive: true, force: true });
     }
   });
+  it('P00-003 a key beside transaction-hash fields in evidence is still flagged', () => {
+    const hash = `0x${'cd'.repeat(32)}`;
+    const leaky = repo({
+      'reports/evidence/run.json': JSON.stringify({
+        pauseTx: hash,
+        createdTransaction: hash,
+        deployerKey: `0x${'ab'.repeat(32)}`,
+      }),
+    });
+    try {
+      expect(scanRepository(leaky).violations.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(leaky, { recursive: true, force: true });
+    }
+  });
+
   it('P00-003 legitimate 32-byte hashes in code and evidence are not flagged', () => {
     const hash = `0x${'cd'.repeat(32)}`;
     const clean = repo({
@@ -119,6 +135,9 @@ describe('P00-003 repository secret scan', () => {
           blockHash: hash,
           mandateId: hash,
           deploymentTransactions: [hash, hash],
+          pauseTx: hash,
+          configuredTx: hash,
+          createdTransaction: hash,
         },
         null,
         2,

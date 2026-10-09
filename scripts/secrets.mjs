@@ -59,6 +59,10 @@ const KEY_TOKENS = new Set([
 ]);
 const HASH_TOKENS = new Set([
   'hash',
+  'tx',
+  'txs',
+  'transaction',
+  'transactions',
   'hashes',
   'typehash',
   'codehash',
