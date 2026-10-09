@@ -6,6 +6,7 @@ import {
   type ActionIntent,
   type ExecutionGrant,
   type ExecutionReceipt,
+  type Mandate,
   type NetworkProfile,
   type PluginHealth,
   type PluginManifest,
@@ -64,6 +65,23 @@ export type RegisteredPlugin = Readonly<
 >;
 export type MutatorPlugin = RegisteredPlugin &
   Required<Pick<SynqPlugin, 'prepare' | 'simulate' | 'execute' | 'reconcile'>>;
+const healthKey = (id: string, network: NetworkProfile) =>
+  `${id}|${network.profile}|${network.chainId}`;
+export function effectiveGrantTtl(
+  manifest: Pick<PluginManifest, 'maxGrantTtlSeconds'>,
+  mandate: Pick<Mandate, 'maxGrantTtlSeconds' | 'validAfter' | 'validUntil'>,
+  now: number,
+): number {
+  if (!Number.isSafeInteger(now) || now < mandate.validAfter) return 0;
+  return Math.max(
+    0,
+    Math.min(
+      manifest.maxGrantTtlSeconds,
+      mandate.maxGrantTtlSeconds,
+      mandate.validUntil - now,
+    ),
+  );
+}
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value)) deepFreeze(child);
@@ -80,6 +98,11 @@ export class PluginRegistry {
     );
     if (this.plugins.has(manifest.id))
       throw new PluginError('PLUGIN_CONFLICT', manifest.id);
+    if (
+      manifest.riskClass === 'READ_ONLY' &&
+      (plugin.prepare || plugin.simulate || plugin.execute || plugin.reconcile)
+    )
+      throw new PluginError('PLUGIN_READ_ONLY_MUTATOR', manifest.id);
     if (
       manifest.riskClass === 'FINANCIAL_EXECUTION' &&
       (!plugin.prepare ||
@@ -112,12 +135,12 @@ export class PluginRegistry {
         checkedAt: context.now,
         reason: 'health timestamp in the future',
       };
-    this.health.set(id, result);
+    this.health.set(healthKey(id, context.network), result);
     return result.available;
   }
   get(id: string, network: NetworkProfile, now: number): RegisteredPlugin {
     const plugin = this.supported(id, network);
-    const health = this.health.get(id);
+    const health = this.health.get(healthKey(id, network));
     if (
       !health ||
       !health.available ||

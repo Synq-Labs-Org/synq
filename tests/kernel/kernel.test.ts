@@ -82,7 +82,7 @@ describe('Deterministic authorization', () => {
   ])('%s rejects before issuing authority', async (_name, patch, code) => {
     const input = await economicRequest(patch);
     expect(await kernelFor(input).authorize(input)).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code,
     });
   });

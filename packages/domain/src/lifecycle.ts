@@ -1,53 +1,15 @@
 import { z } from 'zod';
 import {
+  ACTION_STATES,
+  TX_STATES,
   HashSchema,
   IsoTimestampSchema,
   PrincipalRefSchema,
+  type ActionState,
   type PrincipalRef,
+  type TxState,
 } from '@synq/schemas';
 import { TransitionError, ValidationError, parseOrThrow } from './errors.js';
-
-export const ACTION_STATES = [
-  'RECEIVED',
-  'NORMALIZED',
-  'RESEARCHING',
-  'PROPOSED',
-  'RISKED',
-  'SIMULATED',
-  'PENDING_APPROVAL',
-  'AUTHORIZED',
-  'PREPARED',
-  'SIGNED',
-  'SUBMITTED',
-  'CONFIRMED',
-  'INDEXED',
-  'RECONCILED',
-  'EXPLAINED',
-  'POLICY_REJECTED',
-  'RISK_REJECTED',
-  'EXPIRED',
-  'CANCELLED',
-  'PREPARE_FAILED',
-  'SUBMIT_FAILED',
-  'RECONCILIATION_REQUIRED',
-  'MANUAL_REVIEW',
-] as const;
-export type ActionState = (typeof ACTION_STATES)[number];
-export const TX_STATES = [
-  'PREPARED',
-  'SIGNED',
-  'SUBMITTED',
-  'INCLUDED',
-  'CONFIRMED',
-  'INDEXED',
-  'RECONCILED',
-  'SETTLED',
-  'PREPARE_FAILED',
-  'SUBMIT_FAILED',
-  'RECONCILIATION_REQUIRED',
-  'MANUAL_REVIEW',
-] as const;
-export type TxState = (typeof TX_STATES)[number];
 
 export class StateMachine<S extends string> {
   constructor(
@@ -190,15 +152,17 @@ export type TransitionInput<S extends string> = Omit<
 export function currentState<S extends string>(
   machine: StateMachine<S>,
   history: readonly TransitionRecord<S>[],
+  start: S = machine.initial,
 ): S {
-  return history.at(-1)?.to ?? machine.initial;
+  return history.at(-1)?.to ?? start;
 }
 export function recordTransition<S extends string>(
   machine: StateMachine<S>,
   history: readonly TransitionRecord<S>[],
   input: TransitionInput<S>,
+  start: S = machine.initial,
 ): TransitionRecord<S> {
-  const from = currentState(machine, history);
+  const from = currentState(machine, history, start);
   machine.assertTransition(from, input.to);
   const record = parseOrThrow(transitionRecordSchema(machine), {
     ...input,
@@ -220,13 +184,60 @@ export function recordTransition<S extends string>(
 export function verifyHistory<S extends string>(
   machine: StateMachine<S>,
   history: readonly TransitionRecord<S>[],
+  start: S = machine.initial,
 ): S {
   const replayed: TransitionRecord<S>[] = [];
   for (const record of history) {
-    const expected = recordTransition(machine, replayed, record);
+    const expected = recordTransition(machine, replayed, record, start);
     if (expected.from !== record.from)
       throw new TransitionError(machine.name, record.from, record.to);
     replayed.push(expected);
   }
-  return currentState(machine, replayed);
+  return currentState(machine, replayed, start);
+}
+export class Lifecycle<S extends string> {
+  private readonly records: TransitionRecord<S>[];
+  constructor(
+    readonly machine: StateMachine<S>,
+    readonly start: S = machine.initial,
+    history: readonly TransitionRecord<S>[] = [],
+  ) {
+    verifyHistory(machine, history, start);
+    this.records = [...history];
+  }
+  get state(): S {
+    return currentState(this.machine, this.records, this.start);
+  }
+  get history(): readonly TransitionRecord<S>[] {
+    return [...this.records];
+  }
+  transition(
+    to: S,
+    actor: PrincipalRef,
+    evidenceHash: `0x${string}`,
+    at: Date = new Date(),
+  ): TransitionRecord<S> {
+    const record = recordTransition(
+      this.machine,
+      this.records,
+      { actor, at: at.toISOString(), to, evidenceHash },
+      this.start,
+    );
+    this.records.push(record);
+    return record;
+  }
+}
+export function projectTxTransition(
+  record: TransitionRecord<TxState>,
+): TransitionInput<ActionState> | null {
+  const from = actionStateOfTx(record.from);
+  const to = actionStateOfTx(record.to);
+  if (from === to) return null;
+  ACTION_MACHINE.assertTransition(from, to);
+  return {
+    actor: record.actor,
+    at: record.at,
+    to,
+    evidenceHash: record.evidenceHash,
+  };
 }

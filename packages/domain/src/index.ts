@@ -14,12 +14,7 @@ import {
   type PrincipalRef,
 } from '@synq/schemas';
 import type { z } from 'zod';
-import {
-  CapabilityError,
-  DuplicateIdError,
-  MoneyError,
-  parseOrThrow,
-} from './errors.js';
+import { CapabilityError, MoneyError, parseOrThrow } from './errors.js';
 
 export * from '@synq/schemas';
 export * from './errors.js';
@@ -69,13 +64,6 @@ export function delegateCapabilities(
   )
     throw new CapabilityError('CAPABILITY_ESCALATION');
   return [...child];
-}
-export class UniqueIds {
-  private readonly ids = new Set<string>();
-  claim(id: string): void {
-    if (this.ids.has(id)) throw new DuplicateIdError();
-    this.ids.add(id);
-  }
 }
 export function createDomainEvent<P extends z.ZodType>(
   payloadSchema: P,

@@ -115,6 +115,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:../../workers/execution

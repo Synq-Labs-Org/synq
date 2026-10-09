@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keccak256 } from 'viem';
 import { describe, it, expect } from 'vitest';
-import { TX_MACHINE, verifyHistory } from '@synq/domain';
+import {
+  ACTION_MACHINE,
+  ExecutionError,
+  TX_MACHINE,
+  verifyHistory,
+} from '@synq/domain';
 import {
   EXECUTION_WORKER_PRINCIPAL,
   ExecutionJournal,
@@ -140,12 +145,26 @@ describe('journal follows the canonical transaction lifecycle', () => {
         expect(record.evidenceHash).toMatch(/^0x[0-9a-f]{64}$/);
       }
       const events = journal.events(id);
-      expect(new Set(events.map((e) => e.eventId)).size).toBe(4);
+      expect(new Set(events.map((e) => e.eventId)).size).toBe(7);
       expect(events[0]).toMatchObject({
         type: 'execution.transaction.transitioned',
         schemaVersion: 1,
         correlationId: id,
       });
+      const actions = journal.actionHistory(id);
+      expect(actions.map((r) => `${r.from}->${r.to}`)).toEqual([
+        'PREPARED->SIGNED',
+        'SIGNED->SUBMITTED',
+        'SUBMITTED->CONFIRMED',
+      ]);
+      expect(verifyHistory(ACTION_MACHINE, actions, 'PREPARED')).toBe(
+        'CONFIRMED',
+      );
+      const actionEvents = events.filter(
+        (e) => e.type === 'action.transitioned',
+      );
+      for (const event of actionEvents)
+        expect(events.map((e) => e.eventId)).toContain(event.causationId);
       expect(await worker.reconcile(id)).toEqual(done);
       expect(journal.history(id)).toHaveLength(4);
     } finally {
@@ -241,5 +260,54 @@ describe('journal follows the canonical transaction lifecycle', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+describe('execution worker errors', () => {
+  it('journal failures are typed SynqErrors with stable codes and safe messages', async () => {
+    const { dir, journal, worker } = harness(() => null);
+    const port: BroadcastPort = {
+      sendRawTransaction: async () => keccak256(raw),
+      receipt: async () => null,
+    };
+    try {
+      const failures: [string, () => unknown][] = [
+        ['INVALID_GRANT_ID', () => journal.get('../etc/passwd')],
+        [
+          'UNKNOWN_EXECUTION',
+          () =>
+            journal.update(`0x${'2'.repeat(64)}`, {
+              state: 'SUBMITTED',
+              blockNumber: null,
+            }),
+        ],
+        [
+          'CONFIRMATION_DEPTH_REQUIRES_HEAD',
+          () => new JournaledBroadcaster(journal, port, 2),
+        ],
+        [
+          'INVALID_CONFIRMATION_DEPTH',
+          () => new JournaledBroadcaster(journal, port, 0),
+        ],
+      ];
+      for (const [code, run] of failures) {
+        let error: unknown;
+        try {
+          run();
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error, code).toBeInstanceOf(ExecutionError);
+        expect(JSON.parse(JSON.stringify(error))).toMatchObject({ code });
+      }
+      await expect(
+        worker.submit({ ...fixture(), state: 'SUBMITTED' }),
+      ).rejects.toBeInstanceOf(ExecutionError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    for (const file of ['journal.ts', 'index.ts'])
+      expect(
+        readFileSync(join('workers/execution/src', file), 'utf8'),
+      ).not.toMatch(/new Error\(/);
   });
 });

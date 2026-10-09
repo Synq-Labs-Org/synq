@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AssetSchema, ChainIdSchema, NetworkProfileSchema } from './network.js';
 import { ActionIntentSchema, ActionKindSchema } from './intent.js';
 import { PrincipalKindSchema } from './events.js';
+import { ActionStateSchema, TxStateSchema } from './lifecycle.js';
 import {
   AddressSchema,
   AmountSchema,
@@ -25,6 +26,7 @@ export * from './network.js';
 export * from './intent.js';
 export * from './plugin.js';
 export * from './events.js';
+export * from './lifecycle.js';
 
 export const MemberSchema = z.strictObject({
   memberId: MemberIdSchema,
@@ -162,7 +164,14 @@ export const ExecutionReceiptSchema = z.strictObject({
   chainId: ChainIdSchema,
   actualInputAmount: AmountSchema,
   actualOutputAmount: AmountSchema,
-  state: z.enum(['SUBMITTED', 'INCLUDED', 'CONFIRMED', 'RECONCILED']),
+  state: TxStateSchema.extract([
+    'SUBMITTED',
+    'INCLUDED',
+    'CONFIRMED',
+    'INDEXED',
+    'RECONCILED',
+    'SETTLED',
+  ]),
   outcome: z.enum(['SUCCESS', 'REVERTED']).nullable(),
   blockNumber: AmountSchema.nullable(),
 });
@@ -194,7 +203,17 @@ export const GroupSchema = z.strictObject({
 export const ProposalSchema = z.strictObject({
   proposalId: ProposalIdSchema,
   intent: ActionIntentSchema,
-  status: z.enum(['PROPOSED', 'PENDING_APPROVAL', 'AUTHORIZED', 'REJECTED']),
+  status: ActionStateSchema.extract([
+    'PROPOSED',
+    'RISKED',
+    'SIMULATED',
+    'PENDING_APPROVAL',
+    'AUTHORIZED',
+    'POLICY_REJECTED',
+    'RISK_REJECTED',
+    'EXPIRED',
+    'CANCELLED',
+  ]),
 });
 export const WorldSnapshotSchema = z.strictObject({
   group: GroupSchema,

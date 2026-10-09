@@ -11,6 +11,7 @@ it('distinct approvals authorize a real onchain transfer that can be rebuilt sol
     const result = await runLocalDemo(directory);
     expect(result.transactionHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(result.recipientBalance).toBe('60000000');
+    expect(result.transferAmount).toBe('60.000000');
     expect(result.accountBalance).toBe('140000000');
     expect(result.snapshot.treasuryBalance).toBe(result.accountBalance);
     expect(Object.values(result.snapshot.executed)).toHaveLength(1);

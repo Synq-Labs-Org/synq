@@ -94,7 +94,7 @@ describe('independent kernel security critic', () => {
       },
     };
     expect(await kernel.authorize(forged)).toMatchObject({
-      status: 'REJECTED',
+      status: 'RISK_REJECTED',
       code: 'EVIDENCE_MISMATCH',
     });
   });
@@ -106,7 +106,7 @@ describe('independent kernel security critic', () => {
     const data = evidence(intent({ inputToken: address(11) }));
     const input = { ...data, approvals: [], now };
     expect(await trustedKernel([input]).authorize(input)).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code: 'ASSET_FORBIDDEN',
     });
   });
@@ -136,7 +136,7 @@ describe('independent kernel security critic', () => {
     ];
     expect(
       await trustedKernel([input]).authorize({ ...input, approvals }),
-    ).toMatchObject({ status: 'REJECTED', code: 'INVALID_APPROVAL' });
+    ).toMatchObject({ status: 'POLICY_REJECTED', code: 'INVALID_APPROVAL' });
   });
 
   it.each([
@@ -161,7 +161,7 @@ describe('independent kernel security critic', () => {
       });
       expect(
         await trustedKernel([input], [policy]).authorize(input),
-      ).toMatchObject({ status: 'REJECTED', code: 'INVALID_APPROVAL' });
+      ).toMatchObject({ status: 'POLICY_REJECTED', code: 'INVALID_APPROVAL' });
     },
   );
 
@@ -178,7 +178,9 @@ describe('independent kernel security critic', () => {
       kernel.authorize(two),
     ]);
     expect(results.filter((r) => r.status === 'AUTHORIZED')).toHaveLength(1);
-    expect(results.filter((r) => r.status === 'REJECTED')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'POLICY_REJECTED')).toHaveLength(
+      1,
+    );
     expect(
       kernel
         .snapshot()
@@ -197,7 +199,7 @@ describe('independent kernel security critic', () => {
       JSON.parse(JSON.stringify(kernel.snapshot())),
     );
     expect(await restored.authorize(input)).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code: 'NONCE_REPLAY',
     });
   });
@@ -254,7 +256,7 @@ describe('independent kernel security critic', () => {
     });
     const input = { ...data, approvals: [], now };
     expect(await trustedKernel([input]).authorize(input)).toMatchObject({
-      status: 'REJECTED',
+      status: 'RISK_REJECTED',
       code: 'RISK_REJECTED',
     });
   });

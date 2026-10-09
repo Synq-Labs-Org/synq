@@ -6,6 +6,7 @@ import {
 } from 'viem';
 import { z } from 'zod';
 import {
+  ACTION_TERMINAL_REJECTIONS,
   BoundActionIntentSchema,
   AmountSchema,
   ApprovalSchema,
@@ -16,6 +17,7 @@ import {
   SimulationSchema,
   TreasuryBalanceSchema,
   type BoundActionIntent,
+  type ActionState,
   type Approval,
   type Asset,
   type ExecutionGrant,
@@ -133,6 +135,22 @@ export type Failure =
   | 'GRANT_EXPIRED'
   | 'GRANT_REPLAY'
   | 'RECONCILIATION_INVALID';
+const RISK_FAILURES: readonly Failure[] = [
+  'RISK_REJECTED',
+  'STALE_QUOTE',
+  'STALE_EVIDENCE',
+  'EVIDENCE_MISMATCH',
+  'SIMULATION_FAILED',
+  'SIMULATION_MISMATCH',
+  'STALE_SIMULATION',
+];
+export type ActionRejection = (typeof ACTION_TERMINAL_REJECTIONS)[number];
+export function decisionStatus(
+  code: Failure,
+): Extract<ActionState, 'PENDING_APPROVAL'> | ActionRejection {
+  if (code === 'MISSING_QUORUM') return 'PENDING_APPROVAL';
+  return RISK_FAILURES.includes(code) ? 'RISK_REJECTED' : 'POLICY_REJECTED';
+}
 export class KernelError extends Error {
   constructor(public readonly code: Failure) {
     super(code);
@@ -416,7 +434,7 @@ export type AuthorizationDecision =
       auditHash: `0x${string}`;
     }
   | {
-      status: 'REJECTED' | 'PENDING_APPROVAL';
+      status: Extract<ActionState, 'PENDING_APPROVAL'> | ActionRejection;
       tier: Tier;
       code: Failure;
       auditHash: `0x${string}`;
@@ -605,7 +623,7 @@ export class Kernel {
     } catch (error) {
       const code = error instanceof KernelError ? error.code : 'INVALID_INPUT';
       return {
-        status: code === 'MISSING_QUORUM' ? 'PENDING_APPROVAL' : 'REJECTED',
+        status: decisionStatus(code),
         tier,
         code,
         auditHash: artifactHash({

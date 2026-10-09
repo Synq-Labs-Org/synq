@@ -1,7 +1,11 @@
 import { keccak256, type Hex } from 'viem';
 import { artifactHash } from '@synq/kernel';
 import type { SynqPlugin } from '@synq/plugin-sdk';
-import { ExecutionReceiptSchema, SimulationSchema } from '@synq/schemas';
+import {
+  ExecutionReceiptSchema,
+  PluginError,
+  SimulationSchema,
+} from '@synq/domain';
 import type { SandboxContext } from './sandbox.js';
 
 export function localTransferPlugin(
@@ -34,7 +38,7 @@ export function localTransferPlugin(
     },
     async prepare(_context, grant) {
       if (keccak256(calldata) !== grant.calldataHash)
-        throw new Error('PREPARED_CALL_MISMATCH');
+        throw new PluginError('PREPARED_CALL_MISMATCH');
       return [
         {
           chainId: grant.chainId,
@@ -49,7 +53,7 @@ export function localTransferPlugin(
     async simulate(context, actions) {
       const [action] = actions;
       if (!action || actions.length !== 1 || action.chainId !== 31337)
-        throw new Error('SIMULATION_SCOPE');
+        throw new PluginError('SIMULATION_SCOPE');
       const block = await client.getBlock();
       const result = await client.call({
         account: action.account,

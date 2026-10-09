@@ -9,7 +9,11 @@ import {
   networkProfileForChain,
   type PluginManifestInput,
 } from '@synq/domain';
-import { PluginRegistry, type SynqPlugin } from '@synq/plugin-sdk';
+import {
+  PluginRegistry,
+  effectiveGrantTtl,
+  type SynqPlugin,
+} from '@synq/plugin-sdk';
 
 const testnet = networkProfileForChain(10143);
 const mainnet = networkProfileForChain(143);
@@ -199,6 +203,80 @@ describe('plugin contract', () => {
     );
     expect(() => registry.getMutator('reader', testnet, 50)).toThrow(
       'PLUGIN_MUTATOR_INCOMPLETE',
+    );
+  });
+  it('PLG-009 health is scoped per profile: healthy on local never vouches for testnet', async () => {
+    const local = networkProfileForChain(31337);
+    const registry = new PluginRegistry();
+    registry.register(
+      plugin(
+        { ...readOnly, id: 'dual', chains: [31337, 10143] },
+        async (ctx) => ({
+          available: ctx.network.chainId === 31337,
+          checkedAt: ctx.now,
+        }),
+      ),
+    );
+    expect(
+      await registry.refreshHealth('dual', { network: local, now: 10 }),
+    ).toBe(true);
+    expect(registry.get('dual', local, 10).manifest.id).toBe('dual');
+    expect(() => registry.get('dual', testnet, 10)).toThrow('PLUGIN_UNHEALTHY');
+    expect(
+      await registry.refreshHealth('dual', { network: testnet, now: 11 }),
+    ).toBe(false);
+    expect(() => registry.get('dual', testnet, 11)).toThrow('PLUGIN_UNHEALTHY');
+    expect(registry.get('dual', local, 11).manifest.id).toBe('dual');
+  });
+  it('read-only plugins exposing mutation entry points are rejected with a typed error', () => {
+    for (const method of [
+      'prepare',
+      'simulate',
+      'execute',
+      'reconcile',
+    ] as const) {
+      const registry = new PluginRegistry();
+      let error: unknown;
+      try {
+        registry.register({ ...plugin(readOnly), [method]: unsupported });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error, method).toBeInstanceOf(PluginError);
+      expect(error).toMatchObject({ code: 'PLUGIN_READ_ONLY_MUTATOR' });
+      expect(() => registry.get('reader', testnet, 0)).toThrow(
+        'PLUGIN_UNAVAILABLE',
+      );
+    }
+  });
+  it('effective grant TTL is the minimum of plugin, mandate and remaining mandate validity', () => {
+    const mandate = {
+      maxGrantTtlSeconds: 300,
+      validAfter: 100,
+      validUntil: 1000,
+    };
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 120 }, mandate, 200)).toBe(
+      120,
+    );
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, 200)).toBe(
+      300,
+    );
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, 950)).toBe(
+      50,
+    );
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, 1000)).toBe(
+      0,
+    );
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, 2000)).toBe(
+      0,
+    );
+    expect(effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, 50)).toBe(0);
+    expect(
+      effectiveGrantTtl({ maxGrantTtlSeconds: 900 }, mandate, Number.NaN),
+    ).toBe(0);
+    const manifest = PluginManifestSchema.parse(financial);
+    expect(effectiveGrantTtl(manifest, mandate, 200)).toBe(
+      Math.min(manifest.maxGrantTtlSeconds, 300),
     );
   });
   it('PLG-006 plugins are unavailable outside declared chains and environments', async () => {

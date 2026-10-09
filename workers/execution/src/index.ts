@@ -6,6 +6,7 @@ import {
   type Hex,
 } from 'viem';
 import { verifiedAsset } from '@synq/chain-registry';
+import { ExecutionError } from '@synq/domain';
 import {
   ExecutionGrantSchema,
   type Asset,
@@ -20,7 +21,7 @@ export function chainGrant(
   localAssets: readonly Asset[] = [],
 ) {
   const grant = ExecutionGrantSchema.parse(raw);
-  if (grant.chainId === 143) throw new Error('MAINNET_DISABLED');
+  if (grant.chainId === 143) throw new ExecutionError('MAINNET_DISABLED');
   const inputAsset = verifiedAsset(grant.inputAsset, localAssets);
   return {
     intentHash: grant.intentHash,
@@ -56,7 +57,7 @@ export function prepareModuleCall(
     keccak256(data) !== validated.calldataHash ||
     data.slice(0, 10) !== validated.selector
   )
-    throw new Error('PREPARED_CALL_MISMATCH');
+    throw new ExecutionError('PREPARED_CALL_MISMATCH');
   const calldata = encodeFunctionData({
     abi: moduleAbi,
     functionName: 'execute',

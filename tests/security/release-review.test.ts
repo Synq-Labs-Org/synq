@@ -125,7 +125,7 @@ describe('independent foundation release review', () => {
     const pending = kernel.authorize(input);
     kernel.mandates.update(mandate({ status: 'REVOKED' }));
     expect(await pending).toMatchObject({
-      status: 'REJECTED',
+      status: 'POLICY_REJECTED',
       code: 'MANDATE_VERSION',
     });
     expect(kernel.accounting('group_1', 'mandate_1').reserved).toBe('0');

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",

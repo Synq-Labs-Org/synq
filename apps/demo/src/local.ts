@@ -27,11 +27,13 @@ import {
   JournaledBroadcaster,
 } from '@synq/execution-worker';
 import { registryAbi, moduleAbi, tokenAbi } from '@synq/execution-worker/abi';
+import { formatDecimal, parseDecimal } from '@synq/domain';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import { localTransferPlugin } from './local-transfer-plugin.js';
 import { startAnvil } from './anvil.js';
 import { sandbox } from './sandbox.js';
 import { indexedEvents } from './events.js';
+const TRANSFER_AMOUNT = '60';
 export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
   const node = await startAnvil();
   let completed = false;
@@ -42,12 +44,12 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     const chain = await sandbox(node.url, groupHash);
     const block = await chain.client.getBlock();
     const now = Number(block.timestamp);
-    const amount = 60_000_000n;
     const decimals = await chain.client.readContract({
       address: chain.token,
       abi: tokenAbi,
       functionName: 'decimals',
     });
+    const amount = parseDecimal(TRANSFER_AMOUNT, decimals);
     const asset = AssetSchema.parse({
       canonicalAssetId: `eip155:31337/erc20:${chain.token.toLowerCase()}`,
       chainId: 31337,
@@ -375,6 +377,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       manifest,
       localTestToken: chain.token,
       localTokenSymbol: 'LOCAL_TEST',
+      transferAmount: formatDecimal(amount, decimals),
       transactionHash,
       grantId: grant.grantId,
       intentHash: intentHash(intent),
@@ -416,6 +419,7 @@ if (
     JSON.stringify(
       {
         transactionHash: result.transactionHash,
+        transferAmount: result.transferAmount,
         accountBalance: result.accountBalance,
         recipientBalance: result.recipientBalance,
         readState: result.snapshot,
