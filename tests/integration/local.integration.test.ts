@@ -6,7 +6,11 @@ import {
   runLocalDemo,
   runNegativeScenarios,
 } from '../../apps/demo/src/local.js';
-import { DeterministicReadModel } from '../../packages/read-model/src/index.js';
+import {
+  MemoryProjectionStore,
+  ProjectionReader,
+  Projector,
+} from '../../packages/read-model/src/index.js';
 import { KernelSnapshotSchema } from '../../packages/kernel/src/index.js';
 
 it('Safe 2-of-3 approvals over the EIP-712 grant authorize a real module transfer reconciled from GrantExecuted', async () => {
@@ -23,8 +27,10 @@ it('Safe 2-of-3 approvals over the EIP-712 grant authorize a real module transfe
     expect(result.recipientBalance).toBe('60000000');
     expect(result.transferAmount).toBe('0.000000000060000000');
     expect(result.accountBalance).toBe('140000000');
-    expect(result.snapshot.treasuryBalance).toBe(result.accountBalance);
-    expect(Object.values(result.snapshot.executed)).toHaveLength(1);
+    expect(result.snapshot.group.treasury[0]?.balance).toBe(
+      result.accountBalance,
+    );
+    expect(result.snapshot.group.grantsExecuted).toHaveLength(1);
     expect(result.observation).toMatchObject({
       receiptStatus: 'success',
       event: { grantHash: result.grantId, tokenAmount: '60000000' },
@@ -41,23 +47,18 @@ it('Safe 2-of-3 approvals over the EIP-712 grant authorize a real module transfe
       'PREPARED',
     ]);
     expect(KernelSnapshotSchema.safeParse(result.kernel).success).toBe(true);
-    const projection = new DeterministicReadModel(
-      31337,
-      result.localTestToken,
-      result.bindings,
-    );
-    projection.rebuild([...result.events].reverse(), result.checkpoint);
-    expect(
-      projection.snapshot(
-        result.bindings[0]!.groupId,
-        result.checkpoint,
-        result.snapshot.generatedAt,
-      ),
-    ).toMatchObject({
-      treasuryBalance: '140000000',
-      executed: result.snapshot.executed,
-      mandates: result.snapshot.mandates,
+    const store = new MemoryProjectionStore(31337);
+    const config = result.readModelConfig;
+    await new Projector(store, config).applyWindow({
+      fromBlockExclusive: config.startBlock - 1,
+      toBlockInclusive: result.checkpoint,
+      events: [...result.events].reverse(),
     });
+    const rebuilt = await new ProjectionReader(store, config).groupSnapshot(
+      result.chainGroupId,
+    );
+    expect(rebuilt?.stateHash).toBe(result.snapshot.stateHash);
+    expect(rebuilt?.group.treasury[0]?.balance).toBe('140000000');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
