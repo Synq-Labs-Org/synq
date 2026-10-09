@@ -408,6 +408,7 @@ describe.skipIf(!enabled)(
           chainId: CHAIN_ID,
           scope: reader.scope,
           stamp: (id) => reader.stamp(id),
+          checkpointStamp: () => reader.checkpointStamp(),
           progress: () => (calls++, reader.progress()),
           groupSnapshot: (id) => (calls++, reader.groupSnapshot(id)),
         };

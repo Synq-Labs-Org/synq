@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID } from '@synq/schemas';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createPublicClient, http } from 'viem';
@@ -21,7 +22,7 @@ export async function startAnvil(): Promise<{
       '--host',
       '127.0.0.1',
       '--chain-id',
-      '31337',
+      String(LOCAL_CHAIN_ID),
       '--silent',
     ],
     { stdio: ['ignore', 'ignore', 'pipe'] },
@@ -40,7 +41,7 @@ export async function startAnvil(): Promise<{
     if (child.exitCode !== null)
       throw new Error(`Anvil exited: ${errorOutput}`);
     try {
-      if ((await client.getChainId()) === 31337)
+      if ((await client.getChainId()) === LOCAL_CHAIN_ID)
         return {
           url,
           process: child,

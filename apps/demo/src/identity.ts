@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID } from '@synq/schemas';
 import pg from 'pg';
 import type { PrivateKeyAccount } from 'viem';
 import type { Asset, GrantDraft, VerifiedApproval } from '@synq/schemas';
@@ -67,7 +68,7 @@ export async function startLocalIdentity(input: {
   const principals = new PrincipalService(store, config);
   const membership = new MembershipService(store, config);
   const gateway = new GrantApprovalGateway(store, config, {
-    executionModules: { 31337: input.executionModule },
+    executionModules: { [LOCAL_CHAIN_ID]: input.executionModule },
     localAssets: [input.asset],
   });
   const principalIds: string[] = [];
@@ -90,7 +91,7 @@ export async function startLocalIdentity(input: {
     await membership.createGroup({
       groupId: input.groupId,
       chainGroupId: input.chainGroupId,
-      chainId: 31337,
+      chainId: LOCAL_CHAIN_ID,
       account: input.account,
       owners: input.owners.map((o) => o.address),
       threshold: input.threshold,

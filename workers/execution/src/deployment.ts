@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID, MONAD_TESTNET_CHAIN_ID } from '@synq/schemas';
 import { readFileSync } from 'node:fs';
 import { keccak256, stringToHex } from 'viem';
 import { z } from 'zod';
@@ -21,7 +22,7 @@ const ManifestFileSchema = z.strictObject({
   MandateRegistry: AddressSchema,
   SynqGroupFactory: AddressSchema,
   SynqSafeModuleSetup: AddressSchema,
-  chainId: z.literal(10143),
+  chainId: z.literal(MONAD_TESTNET_CHAIN_ID),
   compatibilityFallbackHandler: AddressSchema,
   deployer: AddressSchema,
   eip712Name: z.literal('SynqExecutionModule'),
@@ -43,7 +44,10 @@ export type SynqDeployment = {
 export function testnetDeployment(
   raw: unknown = JSON.parse(
     readFileSync(
-      new URL('../../../contracts/deployments/10143.json', import.meta.url),
+      new URL(
+        `../../../contracts/deployments/${MONAD_TESTNET_CHAIN_ID}.json`,
+        import.meta.url,
+      ),
       'utf8',
     ),
   ),
@@ -54,18 +58,22 @@ export function testnetDeployment(
   const m = parsed.data;
   if (
     m.grantTypehash !== EXECUTION_GRANT_TYPEHASH ||
-    m.safeL2Singleton !== contractAddress(10143, 'SAFE_L2').toLowerCase() ||
+    m.safeL2Singleton !==
+      contractAddress(MONAD_TESTNET_CHAIN_ID, 'SAFE_L2').toLowerCase() ||
     m.safeProxyFactory !==
-      contractAddress(10143, 'SAFE_PROXY_FACTORY').toLowerCase() ||
+      contractAddress(
+        MONAD_TESTNET_CHAIN_ID,
+        'SAFE_PROXY_FACTORY',
+      ).toLowerCase() ||
     m.compatibilityFallbackHandler !==
       contractAddress(
-        10143,
+        MONAD_TESTNET_CHAIN_ID,
         'SAFE_COMPATIBILITY_FALLBACK_HANDLER',
       ).toLowerCase()
   )
     throw new SigningError('DEPLOYMENT_MANIFEST_INVALID', 'registry drift');
   return {
-    chainId: 10143,
+    chainId: MONAD_TESTNET_CHAIN_ID,
     factory: m.SynqGroupFactory,
     registry: m.MandateRegistry,
     module: m.ExecutionModule,
@@ -83,7 +91,7 @@ export function synqDeployment(
   if (!local)
     throw new SigningError('DEPLOYMENT_MANIFEST_INVALID', 'local addresses');
   return {
-    chainId: 31337,
+    chainId: LOCAL_CHAIN_ID,
     factory: AddressSchema.parse(local.factory),
     registry: AddressSchema.parse(local.registry),
     module: AddressSchema.parse(local.module),

@@ -183,7 +183,7 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     const second = await build('schema_b');
     const a = await first.groupSnapshot(groupId);
     const b = await second.groupSnapshot(groupId);
-    expect(first.progressKey()).not.toBe(second.progressKey());
+    expect(first.progressKey(a!.build)).not.toBe(second.progressKey(b!.build));
     expect(a!.groupRevision).toBe(b!.groupRevision);
     expect(a!.build.id).not.toBe(b!.build.id);
     expect(a!.group.treasury).not.toEqual(b!.group.treasury);
@@ -206,7 +206,12 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     const reader = new ProjectionReader(store, cfg);
     const cache = new RedisSnapshotCache(redis, reader);
     const current = (await cache.groupSnapshot(groupId))!;
-    const key = cache.groupKey(current.build, groupId, current.groupRevision);
+    const key = cache.groupKey(
+      current.build,
+      groupId,
+      current.groupRevision,
+      current.revisionLineage!,
+    );
     redis.data.set(
       key,
       JSON.stringify({
@@ -217,5 +222,84 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     );
     expect(await cache.groupSnapshot(groupId)).toEqual(current);
     expect(cache.stats.invalid).toBe(1);
+  });
+
+  it('a backup restore that keeps the build id and replays a different history at the same generation is a miss', async () => {
+    const redis = new FakeRedis();
+    const cfg = config();
+    const a = new MemoryProjectionStore(chainId);
+    const pa = new Projector(a, cfg);
+    await pa.applyWindow({
+      fromBlockExclusive: 99,
+      toBlockInclusive: 101,
+      events: creation(101),
+    });
+    const b = new MemoryProjectionStore(chainId);
+    const pb = new Projector(b, cfg);
+    await pb.applyWindow({
+      fromBlockExclusive: 99,
+      toBlockInclusive: 101,
+      events: creation(101),
+    });
+    const restored = b as unknown as {
+      state: { checkpoint: unknown; lineage: Map<number, string> };
+    };
+    const original = a as unknown as typeof restored;
+    restored.state.checkpoint = structuredClone(original.state.checkpoint);
+    restored.state.lineage = new Map(original.state.lineage);
+    await pa.applyWindow({
+      fromBlockExclusive: 101,
+      toBlockInclusive: 102,
+      events: [funding(102, '9000000')],
+    });
+    await new RedisSnapshotCache(
+      redis,
+      new ProjectionReader(a, cfg),
+    ).groupSnapshot(groupId);
+    await pb.applyWindow({
+      fromBlockExclusive: 101,
+      toBlockInclusive: 103,
+      events: [funding(103, '1')],
+    });
+    const rb = new ProjectionReader(b, cfg);
+    const truth = (await rb.groupSnapshot(groupId))!;
+    const cache = new RedisSnapshotCache(redis, rb);
+    const served = (await cache.groupSnapshot(groupId))!;
+    expect(served.build.id).toBe(
+      (await new ProjectionReader(a, cfg).progress()).build.id,
+    );
+    expect(served.groupRevision).toBe(2);
+    expect(served.stateHash).toBe(truth.stateHash);
+    expect(served.group.treasury).toEqual(truth.group.treasury);
+    expect(cache.stats.groupHits).toBe(0);
+  });
+
+  it('a cached progress record is bound to the build and current lineage', async () => {
+    const redis = new FakeRedis();
+    const cfg = config();
+    const store = new MemoryProjectionStore(chainId);
+    const projector = new Projector(store, cfg);
+    await projector.applyWindow({
+      fromBlockExclusive: 99,
+      toBlockInclusive: 101,
+      events: creation(101),
+    });
+    const cache = new RedisSnapshotCache(
+      redis,
+      new ProjectionReader(store, cfg),
+    );
+    const first = await cache.progress();
+    expect(cache.progressKey(first.build)).toContain(first.build.id);
+    expect((await cache.progress()).lineage).toBe(first.lineage);
+    expect(cache.stats.progressHits).toBe(1);
+    await projector.applyWindow({
+      fromBlockExclusive: 101,
+      toBlockInclusive: 102,
+      events: [funding(102)],
+    });
+    const next = await cache.progress();
+    expect(next.lineage).not.toBe(first.lineage);
+    expect(next.indexedThroughBlock).toBe(102);
+    expect(cache.stats.progressHits).toBe(1);
   });
 });

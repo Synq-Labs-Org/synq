@@ -21,6 +21,7 @@ import {
 
 interface MemoryState {
   checkpoint: Checkpoint | null;
+  lineage: Map<number, Hex>;
   journal: Map<string, StoredEvent & { generation: number }>;
   tables: Tables;
   signals: Map<string, ReconciliationReopened>;
@@ -38,6 +39,7 @@ function cloneTables(t: Tables): Tables {
 export class MemoryProjectionStore implements ProjectionStore {
   private state: MemoryState = {
     checkpoint: null,
+    lineage: new Map(),
     journal: new Map(),
     tables: new Tables(),
     signals: new Map(),
@@ -64,6 +66,7 @@ export class MemoryProjectionStore implements ProjectionStore {
   async transaction<T>(fn: (s: ProjectionSession) => Promise<T>): Promise<T> {
     const working: MemoryState = {
       checkpoint: structuredClone(this.state.checkpoint),
+      lineage: new Map(this.state.lineage),
       journal: new Map(
         [...this.state.journal].map(([k, v]) => [k, structuredClone(v)]),
       ),
@@ -89,6 +92,12 @@ class MemorySession implements ProjectionSession {
   }
   async saveCheckpoint(cp: Checkpoint) {
     this.s.checkpoint = structuredClone(cp);
+  }
+  async saveLineage(generation: number, lineage: Hex) {
+    this.s.lineage.set(generation, lineage);
+  }
+  async lineageAt(generation: number) {
+    return this.s.lineage.get(generation) ?? null;
   }
   private events(filter: (e: StoredEvent) => boolean): StoredEvent[] {
     return [...this.s.journal.values()]

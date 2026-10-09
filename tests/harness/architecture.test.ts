@@ -364,6 +364,17 @@ describe('dependency boundary rules', () => {
     ]);
     expect(
       workspace({
+        'workers/execution/deployment.ts':
+          "import { z } from 'zod';\nexport const s = z.literal(10143);\nexport const local = { chainId: 31337 };\n",
+        'apps/demo/safe.ts':
+          'export const f = async (c: { getChainId(): Promise<number> }) => (await c.getChainId()) !== 143;\n',
+      }).sort(),
+    ).toEqual([
+      'apps/demo/safe.ts: raw chain-id comparison (await c.getChainId()) !== 143; use @synq/chain-registry profile helpers',
+      'workers/execution/deployment.ts: raw chain-id comparison 10143, 31337; use @synq/chain-registry profile helpers',
+    ]);
+    expect(
+      workspace({
         'packages/schemas/index.ts':
           'export const f = (chainId: number) => chainId === 143;\n',
         'workers/execution/index.test.ts':

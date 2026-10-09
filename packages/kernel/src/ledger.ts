@@ -20,6 +20,20 @@ export type Budget = {
   issued: number;
   lastIssued: number | null;
 };
+export type ChainUsage = {
+  spentToken: string;
+  spentNative: string;
+  executed: number;
+  lastExecutedAt: number | null;
+};
+export type ChainUsageObservation = Omit<ChainUsage, 'lastExecutedAt'> & {
+  groupId: string;
+  mandateId: string;
+  chainId: number;
+  account: string;
+  nonces: readonly string[];
+  intentHashes: readonly string[];
+};
 export type BalanceRecord = {
   account: `0x${string}`;
   asset: AssetIdentity;
@@ -97,12 +111,68 @@ export class Ledger {
   readonly balances = new Map<string, BalanceRecord>();
   readonly grants = new Map<string, GrantRecord>();
   readonly nonces = new Set<string>();
+  readonly chainUsage = new Map<string, ChainUsage>();
+  readonly chainNonces = new Set<string>();
+  readonly chainIntents = new Set<string>();
 
   budget(m: { groupId: string; mandateId: string }): Budget {
-    return structuredClone(this.budgets.get(mandateKey(m)) ?? emptyBudget());
+    const budget = structuredClone(
+      this.budgets.get(mandateKey(m)) ?? emptyBudget(),
+    );
+    const chain = this.chainUsage.get(mandateKey(m));
+    if (!chain) return budget;
+    const max = (a: string, b: string) =>
+      (BigInt(a) > BigInt(b) ? a : b).toString();
+    return {
+      ...budget,
+      spentToken: max(budget.spentToken, chain.spentToken),
+      spentNative: max(budget.spentNative, chain.spentNative),
+      issued: Math.max(budget.issued, chain.executed),
+      lastIssued:
+        budget.lastIssued === null
+          ? chain.lastExecutedAt
+          : chain.lastExecutedAt === null
+            ? budget.lastIssued
+            : Math.max(budget.lastIssued, chain.lastExecutedAt),
+    };
   }
   hasNonce(intent: BoundActionIntent): boolean {
-    return this.nonces.has(nonceKey(intent));
+    return (
+      this.nonces.has(nonceKey(intent)) ||
+      this.chainNonces.has(nonceKey(intent))
+    );
+  }
+  intentUsedOnChain(intentHash: string): boolean {
+    return this.chainIntents.has(intentHash.toLowerCase());
+  }
+  observeChainUsage(usage: ChainUsageObservation, now: number): void {
+    const key = mandateKey(usage);
+    const previous = this.chainUsage.get(key);
+    const known = Math.max(
+      previous?.executed ?? 0,
+      this.budgets.get(key)?.issued ?? 0,
+    );
+    const big = (a: string | undefined, b: string) =>
+      a !== undefined && BigInt(a) > BigInt(b) ? a : b;
+    this.chainUsage.set(key, {
+      spentToken: big(previous?.spentToken, usage.spentToken),
+      spentNative: big(previous?.spentNative, usage.spentNative),
+      executed: Math.max(previous?.executed ?? 0, usage.executed),
+      lastExecutedAt:
+        usage.executed > known
+          ? Math.max(now, previous?.lastExecutedAt ?? 0)
+          : (previous?.lastExecutedAt ?? null),
+    });
+    for (const nonce of usage.nonces)
+      this.chainNonces.add(
+        nonceKey({
+          chainId: usage.chainId,
+          account: usage.account.toLowerCase(),
+          nonce,
+        }),
+      );
+    for (const hash of usage.intentHashes)
+      this.chainIntents.add(hash.toLowerCase());
   }
   setBalance(raw: TreasuryBalance, asOfBlock: string): void {
     const key = balanceKey(raw.account, raw.asset);
@@ -375,6 +445,10 @@ export class Ledger {
       copy.balances.set(k, structuredClone(v));
     for (const [k, v] of this.grants) copy.grants.set(k, structuredClone(v));
     for (const n of this.nonces) copy.nonces.add(n);
+    for (const [k, v] of this.chainUsage)
+      copy.chainUsage.set(k, structuredClone(v));
+    for (const n of this.chainNonces) copy.chainNonces.add(n);
+    for (const h of this.chainIntents) copy.chainIntents.add(h);
     return copy;
   }
 }

@@ -2,7 +2,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Hex, PublicClient } from 'viem';
-import { AssetSchema, MandateSchema, type ExecutionGrant } from '@synq/schemas';
+import {
+  AssetSchema,
+  LOCAL_CHAIN_ID,
+  MandateSchema,
+  type ExecutionGrant,
+} from '@synq/schemas';
 import { onchainMandateId, toMandateConfig } from '@synq/kernel';
 import {
   ChainHeadObserver,
@@ -95,8 +100,8 @@ function localMandate(chain: LocalSynq, decimals: number, now: number) {
 }
 function localAsset(chain: LocalSynq, decimals: number) {
   return AssetSchema.parse({
-    canonicalAssetId: `eip155:31337/erc20:${chain.token.toLowerCase()}`,
-    chainId: 31337,
+    canonicalAssetId: `eip155:${LOCAL_CHAIN_ID}/erc20:${chain.token.toLowerCase()}`,
+    chainId: LOCAL_CHAIN_ID,
     address: chain.token,
     symbol: 'OTHER',
     decimals,
@@ -105,7 +110,7 @@ function localAsset(chain: LocalSynq, decimals: number) {
 function readModelConfig(chain: LocalSynq): ProjectionConfig {
   if (chain.deploymentBlock === null) throw new Error('DEPLOYMENT_BLOCK');
   return projectionConfig({
-    chainId: 31337,
+    chainId: LOCAL_CHAIN_ID,
     profile: localProfile.network.profile,
     startBlock: Number(chain.deploymentBlock),
     factory: chain.factory,
@@ -181,7 +186,7 @@ export async function startLocalVertical() {
     const rmConfig = readModelConfig(chain);
     const project = async () => {
       const indexed = await indexedEvents(chain);
-      const store = new MemoryProjectionStore(31337);
+      const store = new MemoryProjectionStore(LOCAL_CHAIN_ID);
       await new Projector(store, rmConfig).applyWindow({
         fromBlockExclusive: rmConfig.startBlock - 1,
         toBlockInclusive: indexed.checkpoint,
@@ -189,7 +194,9 @@ export async function startLocalVertical() {
       });
       return { indexed, reader: new ProjectionReader(store, rmConfig) };
     };
-    const head = new ChainHeadObserver(chain.client, 31337, { ttlMs: 0 });
+    const head = new ChainHeadObserver(chain.client, LOCAL_CHAIN_ID, {
+      ttlMs: 0,
+    });
     const kernel = createIntentKernel({
       network: localProfile.network,
       executionModule: deployment.module,
@@ -294,7 +301,7 @@ export async function runLocalDemo(
     const snapshot = await reader.groupSnapshot(chain.chainGroupId);
     if (!snapshot) throw new Error('GROUP_NOT_INDEXED');
     const freshness = assessFreshness({
-      sourceChainId: 31337,
+      sourceChainId: LOCAL_CHAIN_ID,
       indexedThroughBlock: snapshot.indexedThroughBlock,
       head: { block: indexed.checkpoint, observedAt: local.clock.t },
       maxLagBlocks: Number(localProfile.maxIndexLagBlocks),

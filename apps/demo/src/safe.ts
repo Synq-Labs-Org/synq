@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID } from '@synq/schemas';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import {
@@ -82,7 +83,7 @@ export async function deployLocalSynq(url: string): Promise<LocalSynq> {
     chain: anvil,
     transport,
   });
-  if ((await client.getChainId()) !== 31337)
+  if ((await client.getChainId()) !== LOCAL_CHAIN_ID)
     throw new Error('LOCAL_SYNQ_REQUIRES_ANVIL');
   const owners = [0, 1, 2]
     .map(() => privateKeyToAccount(generatePrivateKey()))
