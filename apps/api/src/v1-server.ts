@@ -3,20 +3,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { z } from 'zod';
-import {
-  AddressSchema,
-  LOCAL_CHAIN_ID,
-  MONAD_MAINNET_CHAIN_ID,
-  MONAD_TESTNET_CHAIN_ID,
-  ProfileNameSchema,
-  type ProfileName,
-} from '@synq/schemas';
-
-const PROFILE_CHAIN: Record<ProfileName, number> = {
-  'local/anvil': LOCAL_CHAIN_ID,
-  'sandbox/monad-testnet': MONAD_TESTNET_CHAIN_ID,
-  'proof/monad-mainnet': MONAD_MAINNET_CHAIN_ID,
-};
+import { AddressSchema, ProfileNameSchema } from '@synq/schemas';
+import { chainIdForProfile } from '@synq/chain-registry';
 import {
   DynamicAdapter,
   PostgresIdentityStore,
@@ -99,7 +87,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       `Invalid API configuration: ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}`,
     );
   const config = parsed.data;
-  const chainId = PROFILE_CHAIN[config.SYNQ_PROFILE];
+  const chainId = chainIdForProfile(config.SYNQ_PROFILE);
   const pool = new pg.Pool({
     connectionString: config.SYNQ_DATABASE_URL,
     max: 10,

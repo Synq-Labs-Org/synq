@@ -350,4 +350,27 @@ describe('dependency boundary rules', () => {
       'packages/domain/index.ts: unknown workspace package @synq/missing',
     ]);
   });
+  it('forbids raw chain-id literal comparisons outside the registry packages', () => {
+    expect(
+      workspace({
+        'workers/execution/index.ts':
+          'export const f = (g: { chainId: number }) => g.chainId === 143;\n',
+        'apps/api/index.ts':
+          'export const f = (chainId: number) => 31337 !== chainId;\n',
+      }).sort(),
+    ).toEqual([
+      'apps/api/index.ts: raw chain-id comparison 31337 !== chainId; use @synq/chain-registry profile helpers',
+      'workers/execution/index.ts: raw chain-id comparison g.chainId === 143; use @synq/chain-registry profile helpers',
+    ]);
+    expect(
+      workspace({
+        'packages/schemas/index.ts':
+          'export const f = (chainId: number) => chainId === 143;\n',
+        'workers/execution/index.test.ts':
+          'export const f = (chainId: number) => chainId === 143;\n',
+        'workers/execution/other.ts':
+          'export const f = (g: { count: number }) => g.count === 143;\n',
+      }),
+    ).toEqual([]);
+  });
 });

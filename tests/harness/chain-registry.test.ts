@@ -5,14 +5,18 @@ import {
   ChainRegistrySchema,
   DeploymentManifestSchema,
   assetForRole,
+  chainIdForProfile,
   chainRegistry,
   contractAddress,
+  isLocalChain,
+  isMutationEnabledChain,
   loadChainRegistry,
   localProfile,
   monadMainnetProfile,
   monadTestnetProfile,
   officialAssets,
   profileFor,
+  profileForChainId,
   verifiedAsset,
 } from '@synq/chain-registry';
 import { ASSET_ROLES, TREASURY_BUCKETS, type Asset } from '@synq/domain';
@@ -197,5 +201,21 @@ describe('chain registry', () => {
       chainId: 31337,
       providerEnvironment: 'local',
     });
+  });
+  it('chain-id helpers derive local and mutation-enabled chains from registry profiles', () => {
+    for (const p of [localProfile, monadTestnetProfile, monadMainnetProfile]) {
+      expect(chainIdForProfile(p.network.profile)).toBe(p.network.chainId);
+      expect(profileForChainId(p.network.chainId)).toBe(p);
+      expect(isMutationEnabledChain(p.network.chainId)).toBe(p.mutationEnabled);
+      expect(isLocalChain(p.network.chainId)).toBe(
+        p.network.profile === 'local/anvil',
+      );
+    }
+    expect(isMutationEnabledChain(monadMainnetProfile.network.chainId)).toBe(
+      false,
+    );
+    expect(profileForChainId(1)).toBeNull();
+    expect(isLocalChain(1)).toBe(false);
+    expect(isMutationEnabledChain(1)).toBe(false);
   });
 });

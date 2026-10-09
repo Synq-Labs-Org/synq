@@ -327,6 +327,20 @@ const profiles: Record<ProfileName, ChainConfiguration> = {
 export function profileConfiguration(name: ProfileName): ChainConfiguration {
   return profiles[parseOrThrow(ProfileNameSchema, name)];
 }
+export function chainIdForProfile(name: ProfileName): number {
+  return profileConfiguration(name).network.chainId;
+}
+export function profileForChainId(chainId: number): ChainConfiguration | null {
+  return (
+    Object.values(profiles).find((p) => p.network.chainId === chainId) ?? null
+  );
+}
+export function isLocalChain(chainId: number): boolean {
+  return profileForChainId(chainId)?.network.profile === 'local/anvil';
+}
+export function isMutationEnabledChain(chainId: number): boolean {
+  return profileForChainId(chainId)?.mutationEnabled === true;
+}
 export function profileFor(name: string): ChainConfiguration {
   const parsed = ProfileNameSchema.safeParse(name);
   if (!parsed.success || !profiles[parsed.data].mutationEnabled)

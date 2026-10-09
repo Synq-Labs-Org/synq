@@ -8,7 +8,7 @@ import {
   type Hex,
   type TransactionSerializableEIP1559,
 } from 'viem';
-import { verifiedAsset } from '@synq/chain-registry';
+import { isMutationEnabledChain, verifiedAsset } from '@synq/chain-registry';
 import {
   ExecutionError,
   ExecutionGrantSchema,
@@ -39,7 +39,8 @@ export function chainGrant(
   localAssets: readonly Asset[] = [],
 ) {
   const grant = ExecutionGrantSchema.parse(raw);
-  if (grant.chainId === 143) throw new ExecutionError('MAINNET_DISABLED');
+  if (!isMutationEnabledChain(grant.chainId))
+    throw new ExecutionError('MAINNET_DISABLED');
   if (grant.inputAsset) {
     const asset = verifiedAsset(grant.inputAsset, localAssets);
     if (asset.address !== grant.draft.grant.token)
