@@ -1,0 +1,11 @@
+type ChainEvent {
+  id: ID!
+  blockNumber: Int!
+  blockHash: String!
+  transactionHash: String!
+  transactionIndex: Int!
+  logIndex: Int!
+  contract: String!
+  eventName: String!
+  eventJson: String!
+}

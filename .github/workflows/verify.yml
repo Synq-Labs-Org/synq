@@ -1,0 +1,30 @@
+name: foundation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.2.3
+      - run: corepack pnpm indexer:codegen
+      - run: corepack pnpm indexer:typecheck
+      - run: corepack pnpm preflight
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm lint
+      - run: corepack pnpm format:check
+      - run: corepack pnpm build
+      - run: corepack pnpm test
+      - run: forge fmt --root contracts --check
+      - run: forge build --root contracts
+      - run: corepack pnpm test:contracts
+      - run: corepack pnpm infra:up
+      - run: corepack pnpm test:integration

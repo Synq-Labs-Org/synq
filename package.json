@@ -1,0 +1,55 @@
+{
+  "name": "synq",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint packages apps workers scripts tests --no-warn-ignored && node scripts/architecture.mjs",
+    "format": "prettier --write 'packages/**/*.ts' 'apps/**/*.ts' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.ts' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "test": "vitest run --exclude '**/*.integration.test.ts'",
+    "test:contracts": "forge test --root contracts --offline",
+    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts",
+    "architecture": "node scripts/architecture.mjs",
+    "preflight": "node --import tsx scripts/preflight.ts",
+    "dev": "node --import tsx apps/api/src/server.ts",
+    "demo": "node --import tsx apps/demo/src/local.ts",
+    "verify": "pnpm preflight && pnpm typecheck && pnpm lint && pnpm secrets && pnpm format:check && pnpm build && pnpm test && pnpm test:contracts && pnpm test:integration",
+    "secrets": "node scripts/secrets.mjs",
+    "test:indexer": "node --import tsx scripts/require-indexer-proof.ts && vitest run tests/read-model/envio.integration.test.ts",
+    "indexer:codegen": "node --import tsx scripts/envio-codegen.ts",
+    "indexer:typecheck": "pnpm --filter @synq/envio typecheck",
+    "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
+    "indexer:local": "node --import tsx scripts/indexer-local.ts start",
+    "indexer:migrate-local": "node --import tsx scripts/indexer-local.ts migrate",
+    "testnet:probe": "node --import tsx scripts/testnet-probe.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.5",
+    "viem": "2.57.4",
+    "fastify": "5.12.5",
+    "@category-labs/mera": "0.2.0",
+    "@scure/bip39": "2.4.0",
+    "@scure/bip32": "2.4.0",
+    "pg": "8.18.0",
+    "redis": "5.11.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsx": "4.23.15",
+    "vitest": "4.1.11",
+    "fast-check": "4.5.3",
+    "turbo": "2.11.7",
+    "eslint": "10.12.0",
+    "typescript-eslint": "8.71.1",
+    "prettier": "3.8.1",
+    "@types/node": "22.19.7",
+    "@types/pg": "8.16.0"
+  }
+}

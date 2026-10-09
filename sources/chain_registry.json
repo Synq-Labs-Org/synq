@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "network": "https://docs.monad.xyz/developer-essentials/testnet",
+    "ausd": "https://docs.agora.finance/developer/contract-deployments",
+    "usdc": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+    "verifiedAt": "2026-10-09T07:03:37Z"
+  },
+  "local": {
+    "network": {
+      "profile": "local",
+      "chainId": 31337,
+      "providerEnvironment": "local"
+    },
+    "rpcEnvironment": "SYNQ_LOCAL_RPC_URL",
+    "defaultRpcUrl": "http://127.0.0.1:8545",
+    "explorerUrl": null,
+    "confirmationDepth": 1,
+    "maxIndexLagBlocks": "0",
+    "treasuryAsset": null,
+    "edgeSettlementAsset": null,
+    "faucetAddress": null,
+    "mutationEnabled": true
+  },
+  "testnet": {
+    "network": {
+      "profile": "testnet",
+      "chainId": 10143,
+      "providerEnvironment": "sandbox"
+    },
+    "rpcEnvironment": "SYNQ_MONAD_TESTNET_RPC_URL",
+    "defaultRpcUrl": "https://testnet-rpc.monad.xyz",
+    "explorerUrl": "https://testnet.monadexplorer.com",
+    "confirmationDepth": 2,
+    "maxIndexLagBlocks": "5",
+    "treasuryAsset": {
+      "canonicalAssetId": "eip155:10143/erc20:0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
+      "chainId": 10143,
+      "address": "0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
+      "symbol": "AUSD",
+      "decimals": 6
+    },
+    "edgeSettlementAsset": {
+      "canonicalAssetId": "eip155:10143/erc20:0x534b2f3a21130d7a60830c2df862319e593943a3",
+      "chainId": 10143,
+      "address": "0x534b2f3a21130d7a60830c2df862319e593943a3",
+      "symbol": "USDC",
+      "decimals": 6
+    },
+    "faucetAddress": "0xd236c18d274e54faccc3dd9dda4b27965a73ee6c",
+    "mutationEnabled": true
+  },
+  "assets": {
+    "testnetAUSD": {
+      "canonicalAssetId": "eip155:10143/erc20:0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
+      "chainId": 10143,
+      "address": "0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
+      "symbol": "AUSD",
+      "decimals": 6
+    },
+    "testnetUSDC": {
+      "canonicalAssetId": "eip155:10143/erc20:0x534b2f3a21130d7a60830c2df862319e593943a3",
+      "chainId": 10143,
+      "address": "0x534b2f3a21130d7a60830c2df862319e593943a3",
+      "symbol": "USDC",
+      "decimals": 6
+    },
+    "mainnetAUSD": {
+      "canonicalAssetId": "eip155:143/erc20:0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
+      "chainId": 143,
+      "address": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
+      "symbol": "AUSD",
+      "decimals": 6
+    },
+    "mainnetUSDC": {
+      "canonicalAssetId": "eip155:143/erc20:0x754704bc059f8c67012fed69bc8a327a5aafb603",
+      "chainId": 143,
+      "address": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
+      "symbol": "USDC",
+      "decimals": 6
+    }
+  },
+  "mainnetMutationEnabled": false
+}

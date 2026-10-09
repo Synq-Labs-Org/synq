@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+  - apps/*
+  - workers/*
+  - indexer/envio
+onlyBuiltDependencies:
+  - esbuild
+overrides:
+  'envio>express': 4.22.3
+  ws: 8.22.0

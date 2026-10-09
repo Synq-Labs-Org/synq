@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-09T07:33:00Z",
+  "plugins": [
+    {"id":"local-transfer","environment":"LOCAL","chains":[31337],"capabilities":["TRANSFER"],"owner":"execution-worker","status":"EXECUTED","fallback":"fail closed; transfer-only sandbox"},
+    {"id":"envio","environment":"LOCAL","chains":[31337],"capabilities":["READ_CHAIN_PROOF"],"owner":"read-model","version":"3.14.0","status":"EXECUTED","fallback":"financial reads pause when stale or inconsistent"},
+    {"id":"mera","environment":"SANDBOX","chains":[10143],"capabilities":["HUMAN_APPROVAL"],"owner":"identity","version":"0.2.0","status":"BROWSER_EVIDENCE_BLOCKED","fallback":"no fixture-human substitution"},
+    {"id":"privy","environment":"SANDBOX","chains":[10143],"capabilities":["BOUNDED_MEMBER_DELEGATION"],"owner":"identity","status":"CREDENTIAL_BLOCKED","fallback":"disabled"},
+    {"id":"dynamic","environment":"SANDBOX","chains":[10143],"capabilities":["OPERATOR_IDENTITY"],"owner":"identity","status":"CREDENTIAL_BLOCKED","fallback":"disabled"}
+  ]
+}
