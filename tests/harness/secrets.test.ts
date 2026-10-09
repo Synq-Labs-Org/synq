@@ -224,6 +224,105 @@ describe('P00-003 repository secret scan', () => {
       rmSync(clean, { recursive: true, force: true });
     }
   });
+  it('detects signer literals in any argument, unquoted base64, markdown table cells and multi-piece joins', () => {
+    const hex = 'ab'.repeat(32);
+    const pieces = [hex.slice(0, 20), hex.slice(20, 40), hex.slice(40)];
+    const raw = Buffer.from(
+      Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 255),
+    ).toString('base64');
+    expect(raw).toMatch(/[0-9+/]/);
+    const tick = '`';
+    const planted: Record<string, [string, string]> = {
+      'src/fallback.ts': [
+        `export const a = privateKeyToAccount(process.env.PK ?? '0x${hex}');\n`,
+        'key-literal-in-signer',
+      ],
+      'src/bytes-account.ts': [
+        `export const a = toAccount(hexToBytes('0x${hex}'));\n`,
+        'key-literal-in-signer',
+      ],
+      'src/second-arg.ts': [
+        `export const w = new Wallet(\n  provider,\n  "${hex}",\n);\n`,
+        'key-literal-in-signer',
+      ],
+      'deploy/unquoted.yaml': [
+        `deployer_key: ${raw}\n`,
+        'labelled-encoded-key',
+      ],
+      'deploy/unquoted.env.sh': [
+        `SIGNER_SECRET=${raw}\n`,
+        'labelled-encoded-key',
+      ],
+      'docs/keys.md': [
+        `| name | value |\n|---|---|\n| PRIVATE_KEY | ${tick}0x${hex}${tick} |\n`,
+        'markdown-table-key',
+      ],
+      'docs/column.md': [
+        `| member | signer key |\n| --- | --- |\n| alice | 0x${hex} |\n`,
+        'markdown-table-key',
+      ],
+      'docs/encoded.md': [
+        `| label | value |\n|---|---|\n| operator secret | ${raw} |\n`,
+        'markdown-table-key',
+      ],
+      'src/three.ts': [
+        `const k = '0x${pieces[0]}' +\n  '${pieces[1]}' +\n  '${pieces[2]}';\n`,
+        'split-hex-key',
+      ],
+      'src/joined.ts': [
+        `const k = ['${pieces[0]}', '${pieces[1]}', '${pieces[2]}'].join('');\n`,
+        'split-hex-key',
+      ],
+      'src/template.ts': [
+        "const k = `0x${'" +
+          hex.slice(0, 32) +
+          "'}${'" +
+          hex.slice(32) +
+          "'}`;\n",
+        'split-hex-key',
+      ],
+    };
+    const dirty = repo(
+      Object.fromEntries(Object.entries(planted).map(([f, [c]]) => [f, c])),
+    );
+    try {
+      const { violations } = scanRepository(dirty);
+      for (const [file, [, rule]] of Object.entries(planted))
+        expect(violations, file).toContainEqual({ file, rule });
+    } finally {
+      rmSync(dirty, { recursive: true, force: true });
+    }
+  });
+  it('hash tables, hashing calls, generated keys and identifier-like labels stay clean', () => {
+    const hash = `0x${'cd'.repeat(32)}`;
+    const clean = repo({
+      'docs/evidence.md': [
+        '| step | transaction hash | block hash |',
+        '|---|---|---|',
+        `| deploy | ${hash} | ${hash} |`,
+        '',
+        '| field | value |',
+        '|---|---|',
+        `| grantId | \`${hash}\` |`,
+        `| intent hash | ${hash} |`,
+        '',
+      ].join('\n'),
+      'deploy/ok.yaml':
+        'account: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\n',
+      'src/ok.ts': [
+        'export const a = privateKeyToAccount(generatePrivateKey());',
+        `export const h = keccak256('${hash}');`,
+        '',
+        `export const parts = ['${'cd'.repeat(10)}', '${'cd'.repeat(10)}'].join('');`,
+        '',
+      ].join('\n'),
+    });
+    try {
+      expect(scanRepository(clean).violations).toEqual([]);
+    } finally {
+      rmSync(clean, { recursive: true, force: true });
+    }
+  });
   it('P00-003 the application repository itself carries no tracked secret', () => {
     const result = scanRepository(process.cwd());
     expect(result.scanned).toBeGreaterThan(100);
