@@ -11,4 +11,6 @@ export * from './ledger.js';
 export * from './audit.js';
 export * from './lifecycle.js';
 export * from './snapshot.js';
+export * from './decisions.js';
+export * from './nonce-status.js';
 export * from './kernel.js';

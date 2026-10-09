@@ -7,7 +7,7 @@ Deterministic authorization. Agents propose; only this policy authorizes. The Ke
 | `canonical.ts` | `IntentCanonicalizer`: the stable `intentId`, `intentHash` and economic hash (§36.2) |
 | `mandates.ts` | `MandateResolver`: tuple keys, versions, widening or security-sensitive supersession, terminal revocation, on-chain mapping |
 | `policy.ts` | `PolicyEngine`: the typed `PolicyResult` and AUTO/REVIEW/CONSENSUS/BLOCKED tiers |
-| `freshness.ts` | `FreshnessGate` with the `FreshnessProbe` and `DirectVerifier` ports (§20, SEC-006) |
+| `freshness.ts` | `FreshnessGate` with the `FreshnessProbe` and `DirectVerifier` ports (§20, SEC-006). Both modes carry pause, mandate status/version/minimum valid version, Safe owners and threshold, and refuse through one rule set (`assertAccountState`); approvals from signers that are not current Safe owners are rejected. |
 | `risk.ts` | `RiskGate` (quotes, evidence, minimum output, allocation) and `SimulationGate` |
 | `approvals.ts` | `ApprovalCalculator` (ADR-0011) over the `ApprovalLedger`, `MembershipDirectory` and `DelegationEvaluator` ports |
 | `grants.ts` | `GrantIssuer` (`GrantDraft`, then `ExecutionGrant`) and `GrantVerifier` |
@@ -15,6 +15,8 @@ Deterministic authorization. Agents propose; only this policy authorizes. The Ke
 | `audit.ts` | `AuditRecorder`: an append-only decision log, HMAC-SHA256-linked when `auditKey` is set, with an optional sink. A sink that exposes `head()` anchors restores |
 | `lifecycle.ts` | §11 `ACTION_MACHINE` transitions via `recordTransition` |
 | `snapshot.ts` | Snapshot and verified restore |
+| `decisions.ts` | Authorization request and decision types, refusal payload and decision shaping |
+| `nonce-status.ts` | `NonceStatusReader` port and the echo-checked nonce status read |
 | `kernel.ts` | Orchestration. Authorizations run one at a time, and the mandate and ledger are rechecked after every await. |
 
 ## Flow
