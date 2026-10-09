@@ -917,6 +917,11 @@
   },
   {
     "type": "error",
+    "name": "ModuleIsSafeOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ModuleNotAuthorized",
     "inputs": []
   },
@@ -924,6 +929,17 @@
     "type": "error",
     "name": "ModuleNotEnabled",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ModuleSelfApproval",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

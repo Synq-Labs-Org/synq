@@ -2,9 +2,11 @@
 
 Synq group accounts are Safe v1.4.1 proxies (SafeL2 singleton, CompatibilityFallbackHandler). On top of them sits a small, non-upgradeable Synq module layer, as described in ADR-0009:
 
-- `SynqGroupFactory`: creates a group Safe through the canonical SafeProxyFactory, enables `ExecutionModule` during `Safe.setup` via `SynqSafeModuleSetup`, binds the group in `MandateRegistry` and emits `GroupCreated`. Its constructor deploys the registry, module and setup helper. The Safe infrastructure addresses are constructor parameters.
+- `SynqGroupFactory`: creates a group Safe through the canonical SafeProxyFactory, enables `ExecutionModule` during `Safe.setup` via `SynqSafeModuleSetup`. The helper works only while the factory is creating that exact proxy, so a copied initializer cannot squat the address. The factory then binds the group in `MandateRegistry` and emits `GroupCreated`. Its constructor deploys the registry, module and setup helper. The Safe infrastructure addresses are constructor parameters.
 - `MandateRegistry`: per-group mandate governance. Only the group's Safe can call it (owner quorum). It handles versions, supersession with optional invalidation, terminal revocation, the (target, selector) and recipient allowlists, per-action and cumulative caps, and the cumulative spend ledger. The ledger is keyed by (account, mandateId) and written only by the group's authorized module.
 - `ExecutionModule`: verifies EIP-712 `ExecutionGrant`s with the Safe's own `checkSignatures` and rejects high-s ECDSA. It enforces the executor, nonce, intent, window, chain and group bindings and executes only CALLs through `execTransactionFromModule`. It then verifies exact balance deltas. Each Safe can pause or unpause it, and it has a reentrancy guard.
+
+A non-sensitive mandate supersession may only widen the mandate; any narrowing must be security-sensitive. The module refuses to execute while it is a Safe owner. Safe `approvedHashes` are permanent: to revoke a specific outstanding grant, use `cancelNonce`, pause, a security-sensitive supersession, `revokeMandate` or executor removal.
 
 Owner recovery, owner rotation, threshold changes and module enable/disable are Safe-native operations (`execTransaction` with quorum). They work while the module is paused. Integration details, the EIP-712 type string, events and errors are in [abi/INTEGRATION.md](abi/INTEGRATION.md).
 
@@ -40,6 +42,7 @@ python3 contracts/export-abi.py                          # refresh abi/*.json af
 Every test ID in tests/TEST_MATRIX.csv (CON-001 to CON-022) appears in a test name.
 
 - `test/unit/`: factory, registry, module, Safe-native signature paths (ECDSA, eth_sign, approved hash, nested-Safe ERC-1271 owner, malformed and malleable signatures), and Safe governance (recovery and rotation while paused; the module and executor cannot change owners, threshold or modules).
+- `test/unit/CriticRegressions.t.sol`: the critic's attacks A1 (proxy squat), A2 (module as owner) and A3 (narrowing non-sensitive supersession), ported with assertions that they now fail, plus each narrowing dimension and the harmless different-Safe case.
 - `test/fuzz/GrantBinding.t.sol`: every one of the 19 signed grant fields is mutated after signing, and each mutation must revert with `InvalidSignatures` specifically. It also covers model-checked arbitrary calldata, unsigned calldata and random signature bytes.
 - `test/invariant/`: §42 invariants 1–10 plus a model-agreement invariant, driven by an active handler (`SynqHandler`). The handler mixes valid spends with over-cap, stale-version, expired, replay, forged-signature, wrong-executor, non-allowlisted-recipient, disallowed-call and governance attacks. It also covers pause, revoke, supersede, warp and owner recovery. Mutation check: removing the cumulative-cap check makes `invariant_inv5_spendWithinCumulativeCap` fail (evidence/mutation-check.md).
 - `test/fork/MonadFork.t.sol`: runs against Monad testnet (chain 10143) using the real Safe v1.4.1 bytecode at the registry addresses. Codehashes are asserted against safe-deployments `codeHash`. The test funds the group Safe from the Agora faucet `requestFunds(address)` with official test AUSD (6 decimals), then executes a 2-of-3-approved AUSD transfer. It also covers caps, pause and owner recovery.
@@ -59,7 +62,7 @@ contracts/script/deploy.sh --broadcast     # submit; writes deployments/<chainId
 
 - The wrapper reads the key from the file into `SYNQ_DEPLOYER_PRIVATE_KEY` inside its own process only. The key is never printed or passed as an argument.
 - Broadcast receipts with tx hashes are written to `broadcast/` (gitignored), so capture them into the deployment report.
-- Monad charges by gas limit. The simulated deployment uses about 5.25M gas (evidence/deploy-dryrun-monad-testnet.txt).
+- Monad charges by gas limit. The simulated deployment uses about 6.41M gas (evidence/deploy-dryrun-monad-testnet.txt).
 
 ## Evidence
 

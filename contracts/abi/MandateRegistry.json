@@ -301,6 +301,52 @@
   },
   {
     "type": "function",
+    "name": "mandateLists",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "mandateId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "version",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct MandateRegistry.MandateLists",
+        "components": [
+          {
+            "name": "callTargets",
+            "type": "address[]",
+            "internalType": "address[]"
+          },
+          {
+            "name": "callSelectors",
+            "type": "bytes4[]",
+            "internalType": "bytes4[]"
+          },
+          {
+            "name": "recipients",
+            "type": "address[]",
+            "internalType": "address[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "mandateState",
     "inputs": [
       {
@@ -992,6 +1038,11 @@
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "NarrowingSupersessionMustInvalidate",
+    "inputs": []
   },
   {
     "type": "error",

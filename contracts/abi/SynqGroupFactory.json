@@ -106,6 +106,25 @@
   },
   {
     "type": "function",
+    "name": "isCreating",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "module",
     "inputs": [],
     "outputs": [
@@ -126,6 +145,43 @@
         "name": "",
         "type": "address",
         "internalType": "contract SynqSafeModuleSetup"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "predictAccount",
+    "inputs": [
+      {
+        "name": "initializer",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "saltNonce",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "proxyInitCodeHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "stateMutability": "view"
@@ -223,6 +279,11 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "CreationInProgress",
+    "inputs": []
   },
   {
     "type": "error",

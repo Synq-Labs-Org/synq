@@ -9,9 +9,11 @@ One transaction deploys `SynqGroupFactory(safeL2Singleton, safeProxyFactory, com
 ## Group lifecycle
 
 1. `factory.createGroup(address[] owners, uint256 threshold, bytes32 salt) returns (bytes32 groupId, address account)`.
-   - `groupId = keccak256(abi.encode(chainId, factory, msg.sender, salt))`. Use `factory.computeGroupId(creator, salt)` to get it ahead of time. Because the id includes the creator, it cannot be front-run.
+   - `groupId = keccak256(abi.encode(chainId, factory, msg.sender, salt))`. Use `factory.computeGroupId(creator, salt)` to get it ahead of time. Because the id includes the creator, another caller of `createGroup` cannot claim it.
    - The account is a SafeProxy over SafeL2 (`createProxyWithNonce`, `saltNonce = uint256(groupId)`). It is created with CompatibilityFallbackHandler, and `ExecutionModule` is enabled during `Safe.setup`.
    - The registry binds `groupId <-> account` and sets the module allowed to record spend.
+   - Squatting protection: SafeProxyFactory is permissionless and the initializer and `saltNonce` are public, so someone could copy a pending `createGroup` and deploy the identical proxy first. To prevent this, the factory stores the predicted proxy address (`factory.predictAccount(initializer, saltNonce)`) before it calls SafeProxyFactory, and clears it afterwards. `SynqSafeModuleSetup.enableModule` runs inside `Safe.setup` and reverts unless `factory.isCreating(address(this))`. A copied initializer therefore reverts, no proxy is deployed, and the real `createGroup` still succeeds. The factory also checks that the returned account equals the predicted address.
+   - An attacker can still deploy a different Safe (other owners, setup or salt) at a different address. This is harmless: that Safe is not bound in the registry, so the module rejects its grants (`GroupMismatch`), and the registry and module reject its governance calls (`OnlyGroupAccount`, `AccountNotRegistered`).
 2. Owner-quorum Safe transactions (`execTransaction`, CALL, 2-of-3 signatures) configure everything else. They can be batched through MultiSendCallOnly via DELEGATECALL from `execTransaction`, which is the standard Safe pattern.
    - `module.setExecutor(executor, true)`
    - `registry.configureMandate(mandateId, MandateConfig)`
@@ -27,8 +29,9 @@ Tuple order: `(bytes32 mandateHash, address token, uint256 maxTokenPerAction, ui
 - An ERC20 transfer needs `(token, 0xa9059cbb)` in the call allowlist. A native transfer to R needs `(R, 0x00000000)`. Every recipient must be in `recipients`.
 - Validation: `validAfter < validUntil` and `validUntil > now`. Lists must be non-empty and hold at most 32 entries each. If `token == 0`, the token caps must be 0. The account, registry, factory, current module and zero address are forbidden as token, call target or recipient. The token contract cannot be a recipient.
 - Versions: `configureMandate` creates v1. `supersedeMandate(id, current + 1, config, securitySensitive)` creates the next version. The token denomination cannot change. Revocation is terminal: a revoked id can never be configured or superseded again.
+- A supersession with `securitySensitive = false` must be a pure widening of the current version. If it lowers any per-action or cumulative cap, moves `validAfter` later or `validUntil` earlier, or removes any (target, selector) or recipient, it reverts with `NarrowingSupersessionMustInvalidate`. Any narrowing must therefore set `securitySensitive = true`, which invalidates earlier-version grants. `registry.mandateLists(account, id, version)` returns each version's allowlists.
 - Grant validity per version: a grant for version v is valid if `minValidVersion <= v <= currentVersion`. A security-sensitive supersession sets `minValidVersion` to the new version.
-- Caps: the per-action caps and window come from the granted version. Cumulative spend is per (account, mandateId) and persists across versions and modules. For each spent dimension, it is capped by the lower of the granted version's cap and the current version's cap.
+- Caps: the per-action caps, window and allowlists come from the granted version. Because non-sensitive versions only widen, a still-valid older grant is never looser than the current version. Cumulative spend is per (account, mandateId) and persists across versions and modules. For each spent dimension, it is capped by the lower of the granted version's cap and the current version's cap.
 
 ## ExecutionGrant (EIP-712)
 
@@ -60,7 +63,16 @@ Any other selector reverts with `UnsupportedAction`. The module checks `keccak25
 - approved hash, with `r = owner` and `v = 1`, after the owner calls `safe.approveHash(digest)`;
 - contract-owner signature, with `r = owner`, `s = offset` and `v = 0` plus dynamic data. The owner validates the 66-byte EIP-712 preimage `0x1901 || domainSeparator || structHash`. For a nested Safe owner, sign `getMessageHashForSafe(ownerSafe, preimage)`.
 
-Signatures with `s > secp256k1n/2` are rejected with `MalleableSignature(index)`.
+Signatures with `s > secp256k1n/2` are rejected with `MalleableSignature(index)`. An approved-hash entry (`v = 1`) whose owner is the module itself is rejected with `ModuleSelfApproval(index)`. If the module is ever an owner of the Safe, `execute` reverts with `ModuleIsSafeOwner`, because Safe would count `msg.sender == owner` as an approval. Owners must remove the module from the owner set before delegated execution works again.
+
+Revoking an outstanding grant: Safe `approvedHashes` are permanent (Safe v1.4.1 has no un-approve), and ECDSA signatures cannot be withdrawn. The only ways to stop a specific signed grant before it expires are:
+
+- `module.cancelNonce(nonce)`;
+- `module.pause()`;
+- `registry.supersedeMandate(..., securitySensitive = true)`;
+- `registry.revokeMandate(id)`;
+- `module.setExecutor(executor, false)`;
+- removing the signing owners from the Safe.
 
 The module checks signatures by calling `account.checkSignatures(digest, preimage, signatures)` on the group Safe. Owner identity therefore always comes from the Safe's current owner set and threshold.
 
@@ -88,6 +100,7 @@ event GrantExecuted(bytes32 indexed groupId, bytes32 indexed intentHash, bytes32
 
 ## Custom errors (selectors are in the ABI)
 
-- Registry: `OnlyFactory`, `OnlyGroupAccount`, `InvalidBinding`, `GroupAlreadyBound`, `InvalidModule`, `MandateAlreadyExists(bytes32)`, `MandateNotFound(bytes32)`, `MandateIsRevoked(bytes32)`, `InvalidMandateId`, `InvalidVersion(uint256,uint256)`, `TokenChanged`, `InvalidWindow`, `InvalidCaps`, `InvalidCallList`, `ListTooLong`, `ForbiddenAddress(address)`, `UnauthorizedModule(address)`, `MandateNotActive(bytes32)`, `MandateVersionNotValid(uint256)`, `MandateOutsideWindow`, `CallNotAllowed(address,bytes4)`, `RecipientNotAllowed(address)`, `TokenMismatch(address)`, `PerActionCapExceeded`, `CumulativeCapExceeded`.
-- Module: `AccountNotRegistered`, `InvalidExecutor`, `AlreadyPaused`, `NotPaused`, `Reentrancy`, `ExecutionPaused(address)`, `InvalidSignatures`, `MalleableSignature(uint256)`, `WrongChain(uint256,uint256)`, `UnauthorizedExecutor(address)`, `GroupMismatch`, `ModuleNotAuthorized`, `ModuleNotEnabled`, `GrantNotYetValid`, `GrantExpired`, `InvalidIntent`, `NonceAlreadyUsed(uint256)`, `IntentAlreadyExecuted(bytes32)`, `CalldataMismatch`, `SelectorMismatch`, `ProtectedAddress(address)`, `UnsupportedAction(bytes4)`, `InvalidActionShape`, `ExecutionFailed`, `BalanceDeltaMismatch`, `InsufficientOutput`.
-- Factory: `InfrastructureMissing(address)`, `InvalidOwners`, `InvalidThreshold`, `InvalidOwner(address)`, `SetupVerificationFailed`.
+- Registry: `OnlyFactory`, `OnlyGroupAccount`, `InvalidBinding`, `GroupAlreadyBound`, `InvalidModule`, `MandateAlreadyExists(bytes32)`, `MandateNotFound(bytes32)`, `MandateIsRevoked(bytes32)`, `InvalidMandateId`, `InvalidVersion(uint256,uint256)`, `TokenChanged`, `InvalidWindow`, `InvalidCaps`, `InvalidCallList`, `ListTooLong`, `ForbiddenAddress(address)`, `UnauthorizedModule(address)`, `MandateNotActive(bytes32)`, `MandateVersionNotValid(uint256)`, `MandateOutsideWindow`, `CallNotAllowed(address,bytes4)`, `RecipientNotAllowed(address)`, `TokenMismatch(address)`, `PerActionCapExceeded`, `CumulativeCapExceeded`, `NarrowingSupersessionMustInvalidate`.
+- Module: `AccountNotRegistered`, `InvalidExecutor`, `AlreadyPaused`, `NotPaused`, `Reentrancy`, `ExecutionPaused(address)`, `InvalidSignatures`, `MalleableSignature(uint256)`, `ModuleIsSafeOwner`, `ModuleSelfApproval(uint256)`, `WrongChain(uint256,uint256)`, `UnauthorizedExecutor(address)`, `GroupMismatch`, `ModuleNotAuthorized`, `ModuleNotEnabled`, `GrantNotYetValid`, `GrantExpired`, `InvalidIntent`, `NonceAlreadyUsed(uint256)`, `IntentAlreadyExecuted(bytes32)`, `CalldataMismatch`, `SelectorMismatch`, `ProtectedAddress(address)`, `UnsupportedAction(bytes4)`, `InvalidActionShape`, `ExecutionFailed`, `BalanceDeltaMismatch`, `InsufficientOutput`.
+- Factory: `InfrastructureMissing(address)`, `InvalidOwners`, `InvalidThreshold`, `InvalidOwner(address)`, `SetupVerificationFailed`, `CreationInProgress`.
+- Setup helper: `OnlyDelegateCall`, `NotFactoryCreation`.
