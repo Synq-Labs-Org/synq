@@ -132,6 +132,98 @@ describe('P00-003 repository secret scan', () => {
       rmSync(clean, { recursive: true, force: true });
     }
   });
+  it('P00-003 detects keys passed to signers, under wallet-like names, in JSON, split, keystores and encoded forms', () => {
+    const hex = 'ab'.repeat(32);
+    const upper = 'AB'.repeat(32);
+    const bytes = Array.from({ length: 32 }, (_, i) => i + 1).join(', ');
+    const base64 = Buffer.alloc(32, 7).toString('base64');
+    const keystore = JSON.stringify({
+      version: 3,
+      Crypto: { ciphertext: 'aa', kdf: 'scrypt', kdfparams: {} },
+    });
+    const planted: Record<string, [string, string]> = {
+      'src/account.ts': [
+        `export const acct = privateKeyToAccount('0x${hex}');\n`,
+        'key-literal-in-signer',
+      ],
+      'src/ethers.ts': [
+        `export const w = new Wallet('${hex}');\n`,
+        'key-literal-in-signer',
+      ],
+      'src/wallet.ts': [`const wallet = '0x${upper}';\n`, 'labelled-hex-key'],
+      'src/owner.ts': [`const owner = "0x${hex}";\n`, 'labelled-hex-key'],
+      'reports/evidence/innocuous.json': [
+        JSON.stringify({ txHash: `0x${'cd'.repeat(32)}`, value: `0x${hex}` }),
+        'unlabelled-hex-json',
+      ],
+      'src/split.ts': [
+        `const k = '0x${hex.slice(0, 32)}' +\n  '${hex.slice(32)}';\n`,
+        'split-hex-key',
+      ],
+      'misc/backup.dat': [keystore, 'keystore-json'],
+      'src/base64.ts': [
+        `const signerKey = '${base64}';\n`,
+        'labelled-encoded-key',
+      ],
+      'src/bytes.ts': [
+        `const privateKey = new Uint8Array([${bytes}]);\n`,
+        'labelled-encoded-key',
+      ],
+      'contracts/src/Bad.sol': [
+        `bytes32 constant PRIVATE_KEY = 0x${hex};\n`,
+        'labelled-hex-key',
+      ],
+      'contracts/script/Bad.s.sol': [
+        `uint256 internal constant deployerKey =\n    0x${hex};\n`,
+        'labelled-hex-key',
+      ],
+    };
+    const dirty = repo(
+      Object.fromEntries(Object.entries(planted).map(([f, [c]]) => [f, c])),
+    );
+    try {
+      const { violations } = scanRepository(dirty);
+      for (const [file, [, rule]] of Object.entries(planted))
+        expect(violations, file).toContainEqual({ file, rule });
+    } finally {
+      rmSync(dirty, { recursive: true, force: true });
+    }
+  });
+  it('P00-003 hash-named values, Solidity hash constants and hashing contexts are not secrets', () => {
+    const hash = `0x${'cd'.repeat(32)}`;
+    const clean = repo({
+      'src/names.ts': [
+        `export const secretHash = '${hash}';`,
+        `export const seed = '${hash}';`,
+        `export const storageKey = '${hash}';`,
+        `export const ownerId = '${hash}';`,
+        `export const accountRoot = '${hash}';`,
+        '',
+      ].join('\n'),
+      'contracts/src/Hashes.sol': [
+        `bytes32 internal constant SAFE_L2_CODEHASH = ${hash};`,
+        'bytes32 internal constant FALLBACK_HANDLER_CODEHASH =',
+        `    ${hash};`,
+        'bytes32 internal constant DOMAIN_TYPEHASH = keccak256(',
+        `    ${hash}`,
+        ');',
+        '',
+      ].join('\n'),
+      'reports/evidence/receipt.json': JSON.stringify({
+        transactionHash: hash,
+        blockHash: hash,
+        grantId: hash,
+        codeHash: hash,
+        topics: [hash, hash],
+        salt: hash,
+      }),
+    });
+    try {
+      expect(scanRepository(clean).violations).toEqual([]);
+    } finally {
+      rmSync(clean, { recursive: true, force: true });
+    }
+  });
   it('P00-003 the application repository itself carries no tracked secret', () => {
     const result = scanRepository(process.cwd());
     expect(result.scanned).toBeGreaterThan(100);

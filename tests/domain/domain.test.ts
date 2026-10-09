@@ -245,7 +245,7 @@ describe('Canonical domain boundaries', () => {
       evidenceHash,
     });
     expect(verifyHistory(ACTION_MACHINE, history)).toBe('EXPLAINED');
-    expect(ACTION_MACHINE.isTerminal('EXPLAINED')).toBe(true);
+    expect(ACTION_MACHINE.isTerminal('EXPLAINED')).toBe(false);
     expect(() =>
       recordTransition(ACTION_MACHINE, history.slice(0, 2), {
         actor,
@@ -333,7 +333,7 @@ describe('Canonical domain boundaries', () => {
       { numRuns: 300 },
     );
   });
-  it('DOM-009 every state pair matches an independently written section 11/37 edge table', () => {
+  it('DOM-009 every state pair matches an independently written section 11/34/37 edge table with provenance', () => {
     const HAPPY = [
       'RECEIVED',
       'NORMALIZED',
@@ -351,39 +351,159 @@ describe('Canonical domain boundaries', () => {
       'RECONCILED',
       'EXPLAINED',
     ] as const;
-    const EXPECTED_ACTION = new Set(
-      [
-        ...HAPPY.slice(1).map((to, i) => `${HAPPY[i]}>${to}`),
-        'RECEIVED>CANCELLED',
-        'NORMALIZED>PROPOSED NORMALIZED>POLICY_REJECTED NORMALIZED>CANCELLED',
-        'RESEARCHING>CANCELLED RESEARCHING>EXPIRED',
-        'PROPOSED>POLICY_REJECTED PROPOSED>CANCELLED PROPOSED>EXPIRED',
-        'RISKED>RISK_REJECTED RISKED>MANUAL_REVIEW RISKED>CANCELLED RISKED>EXPIRED',
-        'SIMULATED>AUTHORIZED SIMULATED>RISK_REJECTED SIMULATED>CANCELLED SIMULATED>EXPIRED',
-        'PENDING_APPROVAL>CANCELLED PENDING_APPROVAL>EXPIRED PENDING_APPROVAL>POLICY_REJECTED',
-        'AUTHORIZED>CANCELLED AUTHORIZED>EXPIRED AUTHORIZED>PREPARE_FAILED',
-        'PREPARED>PREPARE_FAILED PREPARED>CANCELLED PREPARED>EXPIRED',
-        'SIGNED>SUBMIT_FAILED SIGNED>RECONCILIATION_REQUIRED',
-        'SUBMITTED>RECONCILIATION_REQUIRED CONFIRMED>RECONCILIATION_REQUIRED',
-        'INDEXED>RECONCILIATION_REQUIRED RECONCILED>RECONCILIATION_REQUIRED',
-        'RECONCILIATION_REQUIRED>SUBMITTED RECONCILIATION_REQUIRED>CONFIRMED',
-        'RECONCILIATION_REQUIRED>INDEXED RECONCILIATION_REQUIRED>RECONCILED',
-        'RECONCILIATION_REQUIRED>SUBMIT_FAILED RECONCILIATION_REQUIRED>MANUAL_REVIEW',
-        'MANUAL_REVIEW>CANCELLED',
-      ].flatMap((edges) => edges.split(' ')),
-    );
-    const EXPECTED_TX = new Set(
-      [
-        'PREPARED>SIGNED PREPARED>PREPARE_FAILED',
-        'SIGNED>SUBMITTED SIGNED>SUBMIT_FAILED SIGNED>RECONCILIATION_REQUIRED',
-        'SUBMITTED>INCLUDED SUBMITTED>RECONCILIATION_REQUIRED',
-        'INCLUDED>CONFIRMED INCLUDED>RECONCILIATION_REQUIRED',
-        'CONFIRMED>INDEXED CONFIRMED>RECONCILIATION_REQUIRED',
-        'INDEXED>RECONCILED INDEXED>RECONCILIATION_REQUIRED',
-        'RECONCILED>SETTLED RECONCILED>RECONCILIATION_REQUIRED',
-        'RECONCILIATION_REQUIRED>INCLUDED RECONCILIATION_REQUIRED>SUBMIT_FAILED',
-        'RECONCILIATION_REQUIRED>MANUAL_REVIEW',
-      ].flatMap((edges) => edges.split(' ')),
+    type EdgeGroup = {
+      provenance: 'BIBLE' | 'DERIVED';
+      why: string;
+      edges: string[];
+    };
+    const ACTION_TABLE: EdgeGroup[] = [
+      {
+        provenance: 'BIBLE',
+        why: 'section 11 canonical sequence',
+        edges: HAPPY.slice(1).map((to, i) => `${HAPPY[i]}>${to}`),
+      },
+      {
+        provenance: 'BIBLE',
+        why: 'section 34 Reconciliation "terminal/re-open on reorg" and section 37 "a reorg or conflicting observation reopens reconciliation"',
+        edges: [
+          'RECONCILED>RECONCILIATION_REQUIRED',
+          'EXPLAINED>RECONCILIATION_REQUIRED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 14 AUTO tier executes without fresh human action, so approval is skipped',
+        edges: ['SIMULATED>AUTHORIZED'],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'deterministic actions (section 23 DCA) need no research step',
+        edges: ['NORMALIZED>PROPOSED'],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 14 policy is evaluated at normalization, proposal and approval',
+        edges: [
+          'NORMALIZED>POLICY_REJECTED',
+          'PROPOSED>POLICY_REJECTED',
+          'PENDING_APPROVAL>POLICY_REJECTED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 15 risk and simulation gates reject or escalate',
+        edges: [
+          'RISKED>RISK_REJECTED',
+          'SIMULATED>RISK_REJECTED',
+          'RISKED>MANUAL_REVIEW',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 35 cancel before authorization and section 13 validity windows expire unsigned work',
+        edges: [
+          'RECEIVED>CANCELLED',
+          'NORMALIZED>CANCELLED',
+          'RESEARCHING>CANCELLED',
+          'RESEARCHING>EXPIRED',
+          'PROPOSED>CANCELLED',
+          'PROPOSED>EXPIRED',
+          'RISKED>CANCELLED',
+          'RISKED>EXPIRED',
+          'SIMULATED>CANCELLED',
+          'SIMULATED>EXPIRED',
+          'PENDING_APPROVAL>CANCELLED',
+          'PENDING_APPROVAL>EXPIRED',
+          'AUTHORIZED>CANCELLED',
+          'AUTHORIZED>EXPIRED',
+          'PREPARED>CANCELLED',
+          'PREPARED>EXPIRED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 11 failure states placed at the preparation and submission steps',
+        edges: [
+          'AUTHORIZED>PREPARE_FAILED',
+          'PREPARED>PREPARE_FAILED',
+          'SIGNED>SUBMIT_FAILED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 36 rule 4: timeouts and ambiguous observations reconcile before retry',
+        edges: [
+          'SIGNED>RECONCILIATION_REQUIRED',
+          'SUBMITTED>RECONCILIATION_REQUIRED',
+          'CONFIRMED>RECONCILIATION_REQUIRED',
+          'INDEXED>RECONCILIATION_REQUIRED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'reconciliation re-enters the lifecycle at the observed state or escalates (section 36 rule 4, section 37)',
+        edges: [
+          'RECONCILIATION_REQUIRED>SUBMITTED',
+          'RECONCILIATION_REQUIRED>CONFIRMED',
+          'RECONCILIATION_REQUIRED>INDEXED',
+          'RECONCILIATION_REQUIRED>RECONCILED',
+          'RECONCILIATION_REQUIRED>SUBMIT_FAILED',
+          'RECONCILIATION_REQUIRED>MANUAL_REVIEW',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 11 MANUAL_REVIEW: a reviewer can only abandon a held action; resumption requires a new intent',
+        edges: ['MANUAL_REVIEW>CANCELLED'],
+      },
+    ];
+    const TX_HAPPY = [
+      'PREPARED',
+      'SIGNED',
+      'SUBMITTED',
+      'INCLUDED',
+      'CONFIRMED',
+      'INDEXED',
+      'RECONCILED',
+      'SETTLED',
+    ] as const;
+    const TX_TABLE: EdgeGroup[] = [
+      {
+        provenance: 'BIBLE',
+        why: 'section 37 transaction lifecycle',
+        edges: TX_HAPPY.slice(1).map((to, i) => `${TX_HAPPY[i]}>${to}`),
+      },
+      {
+        provenance: 'BIBLE',
+        why: 'section 34/37 reorg reopens reconciliation after settlement',
+        edges: [
+          'RECONCILED>RECONCILIATION_REQUIRED',
+          'SETTLED>RECONCILIATION_REQUIRED',
+        ],
+      },
+      {
+        provenance: 'DERIVED',
+        why: 'section 11 failure states and section 36 reconcile-before-retry',
+        edges: [
+          'PREPARED>PREPARE_FAILED',
+          'SIGNED>SUBMIT_FAILED',
+          'SIGNED>RECONCILIATION_REQUIRED',
+          'SUBMITTED>RECONCILIATION_REQUIRED',
+          'INCLUDED>RECONCILIATION_REQUIRED',
+          'CONFIRMED>RECONCILIATION_REQUIRED',
+          'INDEXED>RECONCILIATION_REQUIRED',
+          'RECONCILIATION_REQUIRED>INCLUDED',
+          'RECONCILIATION_REQUIRED>SUBMIT_FAILED',
+          'RECONCILIATION_REQUIRED>MANUAL_REVIEW',
+        ],
+      },
+    ];
+    for (const group of [...ACTION_TABLE, ...TX_TABLE])
+      expect(group.why, group.edges.join(',')).toMatch(/section \d+/);
+    const EXPECTED_ACTION = new Set(ACTION_TABLE.flatMap((g) => g.edges));
+    const EXPECTED_TX = new Set(TX_TABLE.flatMap((g) => g.edges));
+    expect(EXPECTED_ACTION.size).toBe(
+      ACTION_TABLE.reduce((n, g) => n + g.edges.length, 0),
     );
     for (const from of ACTION_STATES)
       for (const to of ACTION_STATES) {
@@ -399,8 +519,13 @@ describe('Canonical domain boundaries', () => {
         expect(TX_MACHINE.canTransition(from, to), `${from}>${to}`).toBe(
           EXPECTED_TX.has(`${from}>${to}`),
         );
+    expect(ACTION_MACHINE.successors('EXPLAINED')).toEqual([
+      'RECONCILIATION_REQUIRED',
+    ]);
+    expect(TX_MACHINE.successors('SETTLED')).toEqual([
+      'RECONCILIATION_REQUIRED',
+    ]);
     const TERMINAL: ActionState[] = [
-      'EXPLAINED',
       'POLICY_REJECTED',
       'RISK_REJECTED',
       'EXPIRED',

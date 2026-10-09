@@ -25,7 +25,7 @@ import {
   projectTxTransition,
   recordTransition,
   transitionRecordSchema,
-  verifyHistory,
+  currentState,
   type ActionState,
   type PrincipalRef,
   type TransitionRecord,
@@ -100,8 +100,18 @@ const actionRecords = (events: readonly TransitionEvent[]) =>
   events
     .filter((e): e is ActionEvent => e.type === ACTION_TRANSITION_EVENT)
     .map((e) => e.payload);
+const SnapshotSchema = z.strictObject({
+  state: TX_MACHINE.stateSchema(),
+  blockNumber: z
+    .string()
+    .regex(/^(0|[1-9][0-9]*)$/)
+    .nullable(),
+  outcome: z.enum(['SUCCESS', 'REVERTED']).optional(),
+});
+type Snapshot = z.output<typeof SnapshotSchema>;
 const JournalRecordSchema = z.strictObject({
   entry: JournalEntrySchema,
+  snapshots: z.array(SnapshotSchema).min(1),
   events: z.array(TransitionEventSchema).min(1),
 });
 type JournalRecord = z.output<typeof JournalRecordSchema>;
@@ -123,6 +133,30 @@ function evidenceOf(entry: JournalEntry): `0x${string}` {
     ),
   );
 }
+const GENESIS = `0x${'0'.repeat(64)}` as const;
+function chainHash(previous: string, entry: JournalEntry): `0x${string}` {
+  return keccak256(
+    stringToHex(
+      JSON.stringify([
+        previous,
+        entry.grantId,
+        entry.transactionHash,
+        entry.state,
+        entry.blockNumber,
+        entry.outcome ?? null,
+      ]),
+    ),
+  );
+}
+function snapshotOf(entry: JournalEntry): Snapshot {
+  return {
+    state: entry.state,
+    blockNumber: entry.blockNumber,
+    ...(entry.outcome === undefined ? {} : { outcome: entry.outcome }),
+  };
+}
+const samePrincipal = (a: PrincipalRef, b: PrincipalRef) =>
+  a.principalId === b.principalId && a.kind === b.kind;
 function fsyncDirectory(directory: string): void {
   const fd = openSync(directory, 'r');
   try {
@@ -147,26 +181,95 @@ export class ExecutionJournal {
   private read(grantId: string): JournalRecord | null {
     const path = this.path(grantId);
     if (!existsSync(path)) return null;
-    const record = parseOrThrow(
-      JournalRecordSchema,
-      JSON.parse(readFileSync(path, 'utf8')),
-    );
     try {
-      const tx = verifyHistory(TX_MACHINE, txRecords(record.events));
-      const action = verifyHistory(
-        ACTION_MACHINE,
-        actionRecords(record.events),
-        ACTION_SEGMENT_START,
+      const record = parseOrThrow(
+        JournalRecordSchema,
+        JSON.parse(readFileSync(path, 'utf8')),
       );
-      if (tx !== record.entry.state || action !== actionStateOfTx(tx))
-        throw new ExecutionError('JOURNAL_HISTORY_MISMATCH');
+      this.verify(record);
+      return record;
     } catch (error) {
       if (error instanceof ExecutionError) throw error;
       throw new ExecutionError('JOURNAL_HISTORY_MISMATCH', undefined, {
         cause: error,
       });
     }
-    return record;
+  }
+  private verify(record: JournalRecord): void {
+    const { entry, snapshots, events } = record;
+    const fail = (detail: string): never => {
+      throw new ExecutionError('JOURNAL_HISTORY_MISMATCH', detail);
+    };
+    const { state: _s, blockNumber: _b, outcome: _o, ...fixed } = entry;
+    const seen = new Set<string>();
+    const txHistory: TransitionRecord<TxState>[] = [];
+    const actionHistory: TransitionRecord<ActionState>[] = [];
+    let chain: string = GENESIS;
+    let index = 0;
+    let pending: {
+      eventId: string;
+      projected: NonNullable<ReturnType<typeof projectTxTransition>>;
+    } | null = null;
+    for (const event of events) {
+      if (seen.has(event.eventId)) fail('duplicate event id');
+      seen.add(event.eventId);
+      if (event.correlationId !== entry.grantId) fail('foreign correlation');
+      if (
+        !samePrincipal(event.actor, this.actor) ||
+        !samePrincipal(event.payload.actor, this.actor)
+      )
+        fail('actor mismatch');
+      if (Date.parse(event.occurredAt) !== Date.parse(event.payload.at))
+        fail('envelope time mismatch');
+      if (event.type === TX_TRANSITION_EVENT) {
+        if (pending) fail('missing action projection');
+        if (event.causationId !== undefined) fail('unexpected causation');
+        const snapshot = snapshots[index++] ?? fail('missing snapshot');
+        const at = parseOrThrow(JournalEntrySchema, { ...fixed, ...snapshot });
+        if (event.payload.to !== at.state) fail('snapshot state mismatch');
+        chain = chainHash(chain, at);
+        if (event.payload.evidenceHash !== chain) fail('evidence chain broken');
+        const replayed = recordTransition(TX_MACHINE, txHistory, event.payload);
+        if (replayed.from !== event.payload.from) fail('transaction order');
+        txHistory.push(replayed);
+        const projected = projectTxTransition(event.payload);
+        pending = projected ? { eventId: event.eventId, projected } : null;
+      } else {
+        if (!pending) fail('orphan action transition');
+        const expected = pending!;
+        if (event.causationId !== expected.eventId) fail('causation mismatch');
+        if (
+          event.payload.to !== expected.projected.to ||
+          event.payload.evidenceHash !== expected.projected.evidenceHash ||
+          event.payload.at !== expected.projected.at
+        )
+          fail('action projection mismatch');
+        const replayed = recordTransition(
+          ACTION_MACHINE,
+          actionHistory,
+          event.payload,
+          ACTION_SEGMENT_START,
+        );
+        if (replayed.from !== event.payload.from) fail('action order');
+        actionHistory.push(replayed);
+        pending = null;
+      }
+    }
+    if (pending) fail('missing action projection');
+    if (index !== snapshots.length) fail('dangling snapshot');
+    const last = snapshots.at(-1);
+    if (
+      !last ||
+      last.state !== entry.state ||
+      last.blockNumber !== entry.blockNumber ||
+      last.outcome !== entry.outcome
+    )
+      fail('entry disagrees with history');
+    if (
+      currentState(ACTION_MACHINE, actionHistory, ACTION_SEGMENT_START) !==
+      actionStateOfTx(entry.state)
+    )
+      fail('action state disagrees with transaction state');
   }
   get(grantId: string): JournalEntry | null {
     return this.read(grantId)?.entry ?? null;
@@ -185,11 +288,12 @@ export class ExecutionJournal {
     previous: readonly TransitionEvent[],
   ): TransitionEvent[] {
     const at = this.clock().toISOString();
-    const tx = recordTransition(TX_MACHINE, txRecords(previous), {
+    const history = txRecords(previous);
+    const tx = recordTransition(TX_MACHINE, history, {
       actor: this.actor,
       at,
       to: entry.state,
-      evidenceHash: evidenceOf(entry),
+      evidenceHash: chainHash(history.at(-1)?.evidenceHash ?? GENESIS, entry),
     });
     const common = {
       actor: this.actor,
@@ -229,6 +333,7 @@ export class ExecutionJournal {
       throw new ExecutionError('INVALID_NEW_SUBMISSION');
     const record: JournalRecord = {
       entry,
+      snapshots: [snapshotOf(entry)],
       events: this.transitionEvents(entry, []),
     };
     let fd: number;
@@ -264,6 +369,7 @@ export class ExecutionJournal {
     }
     const record: JournalRecord = {
       entry,
+      snapshots: [...current.snapshots, snapshotOf(entry)],
       events: [
         ...current.events,
         ...this.transitionEvents(entry, current.events),

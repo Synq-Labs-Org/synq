@@ -59,12 +59,24 @@ export function isSigningName(name) {
 }
 export function signingImport(specifier, names) {
   if (SIGNING_PRIMITIVE_MODULES.test(specifier)) return true;
+  if (/^(node:)?crypto$/.test(specifier))
+    return names.some((n) =>
+      [
+        'sign',
+        'createSign',
+        'generateKeyPair',
+        'generateKeyPairSync',
+        'createPrivateKey',
+        'privateEncrypt',
+      ].includes(n),
+    );
   if (VIEM_MODULES.test(specifier))
     return names.some((n) => n === '*' || isSigningName(n));
   if (ETHERS_MODULES.test(specifier))
     return names.some((n) => !ETHERS_VERIFICATION_API.has(n));
   return false;
 }
+const DYNAMIC_LOADING_ALLOWED = new Set([]);
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 
@@ -98,6 +110,15 @@ function discoverPackages(root) {
   }
   return packages;
 }
+const CRYPTO_MODULES = /^(node:)?crypto$/;
+const CRYPTO_SIGNING = new Set([
+  'sign',
+  'createSign',
+  'generateKeyPair',
+  'generateKeyPairSync',
+  'createPrivateKey',
+  'privateEncrypt',
+]);
 function analyze(file, text) {
   const source = ts.createSourceFile(
     file,
@@ -108,54 +129,99 @@ function analyze(file, text) {
   );
   const imports = [];
   const identifiers = new Set();
+  const dynamic = [];
+  const cryptoNamespaces = new Set();
   let anyCount = 0;
+  const visitType = (node) => {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) anyCount++;
+    ts.forEachChild(node, visitType);
+  };
+  const literal = (node) =>
+    node &&
+    (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+      ? node.text
+      : null;
   const visit = (node) => {
+    if (ts.isTypeNode(node)) {
+      visitType(node);
+      return;
+    }
     if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
-      const names = [];
+      const specifier = node.moduleSpecifier.text;
       const clause = ts.isImportDeclaration(node) ? node.importClause : null;
-      if (clause?.name) names.push('default');
-      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings))
-        names.push('*');
-      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings))
-        for (const el of clause.namedBindings.elements)
-          names.push((el.propertyName ?? el.name).text);
-      if (ts.isExportDeclaration(node) && !node.exportClause) names.push('*');
+      const runtime = [];
+      let typeOnly = ts.isImportDeclaration(node)
+        ? (clause?.isTypeOnly ?? false)
+        : node.isTypeOnly;
+      if (clause?.name) runtime.push('default');
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        runtime.push('*');
+        if (CRYPTO_MODULES.test(specifier))
+          cryptoNamespaces.add(clause.namedBindings.name.text);
+      }
+      if (clause?.name && CRYPTO_MODULES.test(specifier))
+        cryptoNamespaces.add(clause.name.text);
+      const elements =
+        clause?.namedBindings && ts.isNamedImports(clause.namedBindings)
+          ? clause.namedBindings.elements
+          : ts.isExportDeclaration(node) &&
+              node.exportClause &&
+              ts.isNamedExports(node.exportClause)
+            ? node.exportClause.elements
+            : [];
+      for (const el of elements)
+        if (!el.isTypeOnly) runtime.push((el.propertyName ?? el.name).text);
+      if (ts.isExportDeclaration(node) && !node.exportClause) runtime.push('*');
+      if (!typeOnly && runtime.length === 0 && elements.length > 0)
+        typeOnly = true;
+      if (!typeOnly) imports.push({ specifier, names: runtime });
+      return;
+    }
+    if (ts.isImportEqualsDeclaration(node)) {
       if (
-        ts.isExportDeclaration(node) &&
-        node.exportClause &&
-        ts.isNamedExports(node.exportClause)
-      )
-        for (const el of node.exportClause.elements)
-          names.push((el.propertyName ?? el.name).text);
-      imports.push({ specifier: node.moduleSpecifier.text, names });
-    } else if (
-      ts.isCallExpression(node) &&
-      node.arguments.length >= 1 &&
-      ts.isStringLiteralLike(node.arguments[0]) &&
-      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-        (ts.isIdentifier(node.expression) &&
-          node.expression.text === 'require'))
+        ts.isExternalModuleReference(node.moduleReference) &&
+        !node.isTypeOnly
+      ) {
+        const specifier = literal(node.moduleReference.expression);
+        if (specifier === null) dynamic.push('import = require(<computed>)');
+        else imports.push({ specifier, names: ['*'] });
+      }
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const loader =
+        callee.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(callee) && callee.text === 'require') ||
+        (ts.isCallExpression(callee) &&
+          ts.isIdentifier(callee.expression) &&
+          callee.expression.text === 'createRequire');
+      if (loader) {
+        const specifier = literal(node.arguments[0]);
+        if (specifier === null) dynamic.push(node.getText(source).slice(0, 60));
+        else imports.push({ specifier, names: ['*'] });
+      }
+    }
+    if (ts.isIdentifier(node) && node.text === 'createRequire')
+      dynamic.push('createRequire');
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      cryptoNamespaces.has(node.expression.text) &&
+      CRYPTO_SIGNING.has(node.name.text)
     )
-      imports.push({ specifier: node.arguments[0].text, names: ['*'] });
-    else if (
-      ts.isImportTypeNode(node) &&
-      ts.isLiteralTypeNode(node.argument) &&
-      ts.isStringLiteral(node.argument.literal)
-    )
-      imports.push({ specifier: node.argument.literal.text, names: [] });
-    else if (ts.isIdentifier(node) && isSigningName(node.text))
+      identifiers.add(`crypto.${node.name.text}`);
+    if (ts.isIdentifier(node) && isSigningName(node.text))
       identifiers.add(node.text);
-    else if (node.kind === ts.SyntaxKind.AnyKeyword) anyCount++;
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return { imports, identifiers, anyCount };
+  return { imports, identifiers, anyCount, dynamic: [...new Set(dynamic)] };
 }
-
 export function checkArchitecture(root) {
   const errors = [];
   const packages = discoverPackages(root);
@@ -176,7 +242,7 @@ export function checkArchitecture(root) {
   for (const pkg of packages)
     for (const file of sourceFiles(join(root, pkg.dir))) {
       const name = posix(relative(root, file));
-      const { imports, identifiers, anyCount } = analyze(
+      const { imports, identifiers, anyCount, dynamic } = analyze(
         name,
         readFileSync(file, 'utf8'),
       );
@@ -191,6 +257,14 @@ export function checkArchitecture(root) {
         if (deterministic)
           errors.push(`${name}: signing inside deterministic authority`);
       }
+      if (
+        (planner || deterministic) &&
+        dynamic.length &&
+        !DYNAMIC_LOADING_ALLOWED.has(name)
+      )
+        errors.push(
+          `${name}: unresolvable dynamic module loading in restricted zone (${dynamic.join(', ')})`,
+        );
       if (anyCount && !/\.test\.|fixture/.test(name))
         errors.push(`${name}: unchecked any`);
       for (const { specifier, names } of imports) {
@@ -227,8 +301,7 @@ export function checkArchitecture(root) {
         if (
           signingImport(specifier, names) &&
           !specifier.startsWith('@synq/') &&
-          !SIGNER_PACKAGES.test(pkg.dir) &&
-          !pkg.dir.startsWith('apps/demo')
+          !SIGNER_PACKAGES.test(pkg.dir)
         )
           signers.add(pkg.dir);
       }
