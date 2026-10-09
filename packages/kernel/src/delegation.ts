@@ -80,6 +80,9 @@ export class DelegationUsage {
   record(policyId: string, use: DelegationUse): void {
     this.uses.set(policyId, [...(this.uses.get(policyId) ?? []), use]);
   }
+  clone(): DelegationUsage {
+    return DelegationUsage.restore(this.export());
+  }
   export(): DelegationState {
     return structuredClone([...this.uses]);
   }

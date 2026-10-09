@@ -143,7 +143,7 @@ describe('Kernel authorization (KER-001…022)', () => {
       tierPolicy: { ...mandate().tierPolicy, leverage: 'CONSENSUS' },
     });
     expect(await decide({ leverageBps: 300 }, tolerated)).toMatchObject({
-      code: 'LEVERAGE_CAP',
+      code: 'LEVERAGE_BLOCKED',
     });
     expect(
       await decide({ leverageBps: 100, maxInputAmount: '1' }, tolerated, false),
@@ -295,7 +295,7 @@ describe('Kernel authorization (KER-001…022)', () => {
     const h = harness([one, two], [mandate({ maxExecutions: 1 })]);
     await grantFor(h, one);
     h.clock.t = now + 25;
-    expect(h.kernel.releaseExpired()).toBe(1);
+    expect(await h.kernel.releaseExpired()).toBe(1);
     h.clock.t = now;
     const later = harness([one, two], [mandate({ maxExecutions: 1 })]);
     await grantFor(later, one);

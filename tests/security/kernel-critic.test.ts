@@ -225,7 +225,7 @@ describe('independent kernel security critic', () => {
         plugins: [manifest],
       },
     );
-    expect(restored.releaseExpired()).toBe(0);
+    expect(await restored.releaseExpired()).toBe(0);
     expect(() =>
       restored.claimForExecution(grant, input.intent, 'other'),
     ).toThrow('GRANT_REPLAY');

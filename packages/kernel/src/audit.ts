@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { HashSchema } from '@synq/schemas';
 import { artifactHash, type Hash } from './canonical.js';
-import { parseAs, requireRule } from './errors.js';
+import { KernelError, parseAs, requireRule } from './errors.js';
 
 export const AUDIT_KINDS = [
   'AUTHORIZATION',
@@ -10,6 +10,7 @@ export const AUDIT_KINDS = [
   'RECONCILE',
   'RELEASE',
   'GOVERNANCE',
+  'SNAPSHOT',
 ] as const;
 export const GENESIS_HASH = `0x${'0'.repeat(64)}` as const;
 export const AuditRecordSchema = z.strictObject({
@@ -45,7 +46,11 @@ export class AuditRecorder {
       payload: JSON.parse(JSON.stringify(payload)) as z.core.util.JSONType,
     };
     const record = { ...body, hash: recordHash(body) };
-    this.sink?.append(structuredClone(record));
+    try {
+      this.sink?.append(structuredClone(record));
+    } catch {
+      throw new KernelError('AUDIT_UNAVAILABLE');
+    }
     this.log.push(record);
     return structuredClone(record);
   }
