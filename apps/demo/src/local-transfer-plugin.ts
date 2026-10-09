@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID } from '@synq/schemas';
 import type { Hex } from 'viem';
 import type { SynqPlugin } from '@synq/plugin-sdk';
 import type { LocalSynq } from './safe.js';
@@ -9,7 +10,7 @@ export function localTransferPlugin(
 ): SynqPlugin {
   return erc20TransferPlugin({
     id: 'local-transfer',
-    chainId: 31337,
+    chainId: LOCAL_CHAIN_ID,
     environment: 'local/anvil',
     client,
     calldataFor,

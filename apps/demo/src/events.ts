@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID } from '@synq/schemas';
 import { decodeEventLog, parseAbi } from 'viem';
 import {
   EVENT_NAMES,
@@ -84,7 +85,7 @@ export async function indexedEvents(
     events.push(
       parseChainEvent({
         schemaVersion: 1,
-        chainId: 31337,
+        chainId: LOCAL_CHAIN_ID,
         blockNumber: Number(log.blockNumber),
         blockHash: log.blockHash,
         transactionHash: log.transactionHash,

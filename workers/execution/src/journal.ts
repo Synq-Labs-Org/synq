@@ -1,3 +1,4 @@
+import { LOCAL_CHAIN_ID, MONAD_TESTNET_CHAIN_ID } from '@synq/schemas';
 import {
   mkdirSync,
   readFileSync,
@@ -62,7 +63,10 @@ export const JournalEntrySchema = z
     transactionHash: hash,
     rawTransaction: hex,
     state: TX_MACHINE.stateSchema(),
-    chainId: z.union([z.literal(31337), z.literal(10143)]),
+    chainId: z.union([
+      z.literal(LOCAL_CHAIN_ID),
+      z.literal(MONAD_TESTNET_CHAIN_ID),
+    ]),
     blockNumber: z
       .string()
       .regex(/^(0|[1-9][0-9]*)$/)

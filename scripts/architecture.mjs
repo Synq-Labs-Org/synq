@@ -77,6 +77,7 @@ export function signingImport(specifier, names) {
   return false;
 }
 const DYNAMIC_LOADING_ALLOWED = new Set([]);
+const DISTINCTIVE_CHAIN_IDS = new Set(['31337', '10143']);
 const CHAIN_LITERAL_OWNERS = /^packages\/(schemas|chain-registry)$/;
 const CHAIN_COMPARISON = new Set([
   ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -139,6 +140,7 @@ function analyze(file, text) {
   const dynamic = [];
   const cryptoNamespaces = new Set();
   const rawChainIds = [];
+  const reportedChainLiterals = new WeakSet();
   let anyCount = 0;
   const visitType = (node) => {
     if (node.kind === ts.SyntaxKind.AnyKeyword) anyCount++;
@@ -335,6 +337,10 @@ function analyze(file, text) {
     ) {
       const sides = [node.left, node.right];
       const chainSide = sides.some((side) => {
+        while (ts.isParenthesizedExpression(side)) side = side.expression;
+        if (ts.isAwaitExpression(side)) side = side.expression;
+        while (ts.isParenthesizedExpression(side)) side = side.expression;
+        if (ts.isCallExpression(side)) side = side.expression;
         const name = ts.isIdentifier(side)
           ? side.text
           : ts.isPropertyAccessExpression(side)
@@ -342,9 +348,16 @@ function analyze(file, text) {
             : null;
         return name !== null && /chainid$/i.test(name);
       });
-      if (chainSide && sides.some((side) => ts.isNumericLiteral(side)))
+      if (chainSide && sides.some((side) => ts.isNumericLiteral(side))) {
         rawChainIds.push(node.getText(source));
-    }
+        for (const side of sides) reportedChainLiterals.add(side);
+      }
+    } else if (
+      ts.isNumericLiteral(node) &&
+      DISTINCTIVE_CHAIN_IDS.has(node.text) &&
+      !reportedChainLiterals.has(node)
+    )
+      rawChainIds.push(node.getText(source));
     if (ts.isIdentifier(node) && node.text === 'createRequire')
       dynamic.push('createRequire');
     if (ts.isIdentifier(node) && isSigningName(node.text))
