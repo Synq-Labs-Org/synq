@@ -93,6 +93,7 @@ export const REFRESHABLE_FAILURES: ReadonlySet<Failure> = new Set<Failure>([
   'STALE_READ_MODEL',
   'DIRECT_VERIFICATION_FAILED',
   'DRAFT_EXPIRED',
+  'AUDIT_UNAVAILABLE',
 ]);
 
 export type DecisionStatus = Extract<

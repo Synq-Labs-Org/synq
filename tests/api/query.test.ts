@@ -1,63 +1,83 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { it, expect } from 'vitest';
 import { createApi } from '../../apps/api/src/server.js';
-import { ProofQueryService } from '../../apps/api/src/service.js';
-import { binding, proof, treasuryToken } from '../read-model/fixtures.js';
-it('queries reconstructed proof and rejects malformed ingress without exposing signing controls', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'synq-api-'));
-  const path = join(dir, 'proof.json');
-  writeFileSync(
-    path,
-    JSON.stringify({
-      manifest: {
-        schemaVersion: 1,
-        network: {
-          profile: 'local',
-          chainId: 31337,
-          providerEnvironment: 'local',
-        },
-        account: binding.account,
-        mandateRegistry: binding.registry,
-        executionModule: binding.module,
-        deploymentTransactions: Array(3).fill(`0x${'1'.repeat(64)}`),
-        deploymentBlock: '1',
-        sandboxOnly: true,
-      },
-      localTestToken: treasuryToken,
-      bindings: [binding],
-      events: proof().map((e) => ({
-        ...e,
-        chainId: 31337,
-        payload:
-          e.eventName === 'GrantExecuted'
-            ? { ...e.payload, chainId: '31337' }
-            : e.payload,
-      })),
-      checkpoint: 3,
-      snapshot: { generatedAt: 1000 },
-    }),
+import {
+  ChainHeadObserver,
+  MemoryProjectionStore,
+  ProjectionReader,
+  Projector,
+  RedisSnapshotCache,
+  type RedisConnection,
+} from '../../packages/read-model/src/index.js';
+import { chainId, config, groupId, lifecycle } from '../read-model/fixtures.js';
+
+class MapRedis implements RedisConnection {
+  data = new Map<string, string>();
+  async get(k: string) {
+    return this.data.get(k) ?? null;
+  }
+  async set(k: string, v: string) {
+    this.data.set(k, v);
+  }
+}
+
+it('serves /v1/world and /v1/groups/:groupId/state from the cached read model with freshness', async () => {
+  const store = new MemoryProjectionStore(chainId);
+  const cfg = config();
+  await new Projector(store, cfg).applyWindow({
+    fromBlockExclusive: 99,
+    toBlockInclusive: 110,
+    events: lifecycle(),
+  });
+  let headCalls = 0;
+  const head = new ChainHeadObserver(
+    {
+      getBlockNumber: async () => (headCalls++, 120n),
+      getChainId: async () => chainId,
+    },
+    chainId,
+    { ttlMs: 60_000 },
   );
-  const api = createApi(new ProofQueryService(path));
+  const api = createApi({
+    readModel: {
+      snapshots: new RedisSnapshotCache(
+        new MapRedis(),
+        new ProjectionReader(store, cfg),
+      ),
+      head,
+      maxLagBlocks: 5,
+    },
+  });
   try {
-    const reply = await api.inject({
-      url: `/dev/groups/${binding.groupId}/state`,
+    const world = await api.inject({ url: '/v1/world' });
+    expect(world.statusCode).toBe(200);
+    expect(world.json()).toMatchObject({
+      sourceChainId: chainId,
+      indexedThroughBlock: 110,
+      freshness: { observedHead: 120, lagBlocks: 10, status: 'STALE' },
+      groups: [{ groupId, accountingStatus: 'OPEN' }],
     });
-    expect(reply.statusCode).toBe(200);
-    expect(reply.json()).toMatchObject({
-      currentHeadVerified: false,
-      state: { treasuryBalance: '900000' },
+    const state = await api.inject({ url: `/v1/groups/${groupId}/state` });
+    expect(state.statusCode).toBe(200);
+    expect(state.json()).toMatchObject({
+      snapshot: {
+        indexedThroughBlock: 110,
+        group: { treasury: [{ balance: '750000' }] },
+      },
+      freshness: { indexedThroughBlock: 110, status: 'STALE' },
     });
+    expect(headCalls).toBe(1);
     expect(
-      (await api.inject({ url: '/dev/groups/not-a-hash/state' })).statusCode,
+      (await api.inject({ url: '/v1/groups/not-a-hash/state' })).statusCode,
     ).toBe(400);
+    expect(
+      (await api.inject({ url: `/v1/groups/0x${'ab'.repeat(32)}/state` }))
+        .statusCode,
+    ).toBe(404);
     expect(
       (await api.inject({ method: 'POST', url: '/dev/execute', payload: {} }))
         .statusCode,
     ).toBe(404);
   } finally {
     await api.close();
-    rmSync(dir, { recursive: true, force: true });
   }
 });

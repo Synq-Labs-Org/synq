@@ -27,7 +27,8 @@ import {
   createV1Api,
   type MandateReadPort,
 } from './v1/app.js';
-import { ProofQueryService } from './service.js';
+import type { GroupSnapshot } from '@synq/read-model';
+import { readModelFromEnvironment } from './server.js';
 
 const EnvSchema = z.object({
   SYNQ_DATABASE_URL: z.string().min(1),
@@ -41,23 +42,34 @@ const EnvSchema = z.object({
   SYNQ_RATE_LIMIT_REFILL_PER_SECOND: z.coerce.number().positive().default(1),
   SYNQ_TRUST_PROXY: z.string().optional(),
   SYNQ_API_PORT: z.coerce.number().int().min(1).max(65535).default(3200),
-  SYNQ_PROOF_ARTIFACT: z.string().optional(),
 });
 
-export function mandateReader(proof: ProofQueryService): MandateReadPort {
+export function mandateReader(snapshots: {
+  groupSnapshot(groupId: `0x${string}`): Promise<GroupSnapshot | null>;
+}): MandateReadPort {
   return {
     async read(groupId, mandateId) {
-      const { state, currentHeadVerified } = await proof.state(groupId);
-      const mandate = state.mandates[mandateId.toLowerCase()];
-      return mandate
+      const snapshot = await snapshots.groupSnapshot(
+        groupId.toLowerCase() as `0x${string}`,
+      );
+      const mandate = snapshot?.group.mandates.find(
+        (m) => m.mandateId === mandateId.toLowerCase(),
+      );
+      return snapshot && mandate
         ? {
             groupId,
             mandateId,
-            version: mandate.version,
-            active: mandate.active,
-            terms: mandate.terms,
+            version: mandate.currentVersion,
+            active: mandate.status === 'ACTIVE',
+            terms: {
+              status: mandate.status,
+              minValidVersion: mandate.minValidVersion,
+              spentToken: mandate.spentToken,
+              spentNative: mandate.spentNative,
+              indexedThroughBlock: String(snapshot.indexedThroughBlock),
+            },
             source: 'indexed-read-model',
-            currentHeadVerified,
+            currentHeadVerified: false,
           }
         : null;
     },
@@ -114,11 +126,9 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
     },
     privy: new PrivyAdapter(env),
     dynamic: new DynamicAdapter(env),
-    ...(config.SYNQ_PROOF_ARTIFACT
+    ...(env.SYNQ_RM_DATABASE_URL
       ? {
-          mandates: mandateReader(
-            new ProofQueryService(resolve(config.SYNQ_PROOF_ARTIFACT)),
-          ),
+          mandates: mandateReader((await readModelFromEnvironment()).snapshots),
         }
       : {}),
     logger: {

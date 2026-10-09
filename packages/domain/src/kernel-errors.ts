@@ -75,6 +75,7 @@ export const KERNEL_FAILURE_MESSAGES = {
   BALANCE_REGRESSION: 'Balance observation is older than the recorded one.',
   SNAPSHOT_INVALID: 'Kernel snapshot is malformed or inconsistent.',
   AUDIT_CHAIN_BROKEN: 'Audit decision chain is not hash-linked.',
+  AUDIT_UNAVAILABLE: 'The audit sink rejected the decision record.',
 } as const;
 export type KernelFailureCode = keyof typeof KERNEL_FAILURE_MESSAGES;
 export const KERNEL_FAILURE_CODES = Object.keys(

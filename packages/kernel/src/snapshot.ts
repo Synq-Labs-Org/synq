@@ -16,7 +16,7 @@ import {
   type NetworkProfile,
 } from '@synq/schemas';
 import { AuditRecordSchema, type AuditRecord } from './audit.js';
-import { canonicalJson } from './canonical.js';
+import { artifactHash, canonicalJson, type Hash } from './canonical.js';
 import { DelegationUsage, type DelegationState } from './delegation.js';
 import { KernelError, parseAs, requireRule } from './errors.js';
 import { grantDigestMatches } from './grants.js';
@@ -53,6 +53,7 @@ const GrantRecordSchema = z.strictObject({
     })
     .nullable(),
   preparedCallHash: HashSchema.nullable(),
+  submissions: z.array(HashSchema),
   execution: z
     .strictObject({
       transactionHash: HashSchema,
@@ -134,14 +135,61 @@ export function snapshotState(state: {
   }) as KernelSnapshot;
 }
 
+export function stateHash(snapshot: KernelSnapshot): Hash {
+  const {
+    audit: _audit,
+    lastNow: _lastNow,
+    ...state
+  } = KernelSnapshotSchema.parse(snapshot);
+  return artifactHash(state);
+}
+
+function auditCoversState(parsed: z.output<typeof KernelSnapshotSchema>) {
+  const head = parsed.audit.at(-1);
+  if (
+    !head ||
+    head.kind !== 'SNAPSHOT' ||
+    (head.payload as { stateHash?: unknown } | null)?.stateHash !==
+      stateHash({ ...parsed, audit: [] })
+  )
+    return false;
+  const authorized = new Set<string>();
+  const reconciled = new Set<string>();
+  for (const r of parsed.audit) {
+    const p = r.payload as Record<string, unknown> | null;
+    if (r.kind === 'AUTHORIZATION' && p?.status === 'AUTHORIZED')
+      authorized.add(String(p.grantId));
+    if (r.kind === 'RECONCILE' && p?.state === 'RECONCILED')
+      reconciled.add(String(p.grantId));
+  }
+  const grants = new Set<string>(parsed.grants.map((g) => g.grant.grantId));
+  return (
+    authorized.size === grants.size &&
+    [...authorized].every((id) => grants.has(id)) &&
+    parsed.grants.every(
+      (g) => g.state !== 'RECONCILED' || reconciled.has(g.grant.grantId),
+    )
+  );
+}
+
 function consistentRecord(r: GrantRecord): boolean {
   const g = r.grant;
   const claimed = r.claim !== null && r.claim.grantId === g.grantId;
   switch (r.state) {
     case 'RESERVED':
-      return r.claim === null && r.preparedCallHash === null && !r.execution;
+      return (
+        r.claim === null &&
+        r.preparedCallHash === null &&
+        r.submissions.length === 0 &&
+        !r.execution
+      );
     case 'CONSUMED':
-      return claimed && r.preparedCallHash === null && !r.execution;
+      return (
+        claimed &&
+        r.preparedCallHash === null &&
+        r.submissions.length === 0 &&
+        !r.execution
+      );
     case 'PREPARED':
     case 'REVERTED':
       return claimed && r.preparedCallHash !== null && !r.execution;
@@ -165,6 +213,7 @@ export function restoreState(raw: unknown) {
     if (error instanceof KernelError) throw error;
     throw new KernelError('SNAPSHOT_INVALID');
   }
+  requireRule(auditCoversState(parsed), 'SNAPSHOT_INVALID');
   const mandates = MandateResolver.fromRecords(parsed.mandates);
   const ledger = new Ledger();
   const keys = new Set(parsed.mandates.map((m) => mandateKey(m.versions[0]!)));

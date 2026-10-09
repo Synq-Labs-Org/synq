@@ -49,6 +49,7 @@ export function plannedPath(
     if (outcome.kind === 'PENDING')
       return ['RISKED', 'SIMULATED', 'PENDING_APPROVAL'];
     const code = outcome.code;
+    if (code === 'AUDIT_UNAVAILABLE') return [];
     if (PENDING_FAILURES.has(code))
       return ['RISKED', 'SIMULATED', 'PENDING_APPROVAL'];
     if (code === 'DRAFT_EXPIRED') return ['RISKED', 'SIMULATED', 'EXPIRED'];
@@ -111,6 +112,9 @@ export class ActionLifecycles {
     }
     if (records.length) this.histories.set(intentId, history);
     return records;
+  }
+  clone(): ActionLifecycles {
+    return ActionLifecycles.restore(this.export());
   }
   export(): [string, TransitionRecord<ActionState>[]][] {
     return structuredClone([...this.histories]);

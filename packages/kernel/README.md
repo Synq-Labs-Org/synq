@@ -21,7 +21,7 @@ Deterministic authorization. Agents propose; only this policy authorizes. The Ke
 1. Call `authorize({intent, risk, simulation, approvals: []})`. It returns `PENDING_APPROVAL` with a deterministic `draft`.
 2. Members sign `executionGrantTypedData(draft.domain, draft.grant)` (from `@synq/schemas`) through identity challenges, which produce `VerifiedApproval`s.
 3. Call `authorize({..., approvals})`. It returns `AUTHORIZED` with a grant whose `grantId` is the EIP-712 digest that `ExecutionModule.hashGrant` returns.
-4. The worker calls `claimForExecution(grant, intent, workerId)`, then `prepareModuleCall(kernel, claim, data)` once, then `signGrantBoundTransaction`.
+4. The worker calls `claimForExecution(grant, intent, workerId)`, then `prepareModuleCall(kernel, claim, data)` once, then `signGrantBoundTransaction`, then `recordSubmission(claim, txHash)` before it broadcasts.
 5. Call `reconcile(grantId, observeGrantExecution(receipt, module, chainId))`.
 
 ## Mapping a mandate to the on-chain MandateRegistry

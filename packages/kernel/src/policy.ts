@@ -231,7 +231,7 @@ export class PolicyEngine {
         check(
           'leverage.cap',
           intent.leverageBps <= mandate.maxLeverageBps,
-          'LEVERAGE_CAP',
+          'LEVERAGE_BLOCKED',
         );
       }
       check(
