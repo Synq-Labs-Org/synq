@@ -12,7 +12,6 @@ import {
   AssetSchema,
   BoundActionIntentSchema,
   MandateSchema,
-  executionGrantTypedData,
   type BoundActionIntent,
   type ExecutionGrant,
   type RiskPacket,

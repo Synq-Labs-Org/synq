@@ -16,7 +16,7 @@ import {
   StoreMembershipDirectory,
 } from '../../packages/identity/src/server.js';
 import type { GrantDraft, GrantPreview } from '@synq/schemas';
-import { addr, makeDraft, testAusd, word } from '../identity/fixtures.js';
+import { addr, word } from '../identity/fixtures.js';
 import {
   ADMIN,
   MODULE,
