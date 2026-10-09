@@ -83,8 +83,44 @@ export function testnetRpcUrl(): string {
   );
 }
 
+export type TestnetGovernance = {
+  setExecutor(who: Address, allowed: boolean): Promise<TransactionReceipt>;
+  configureMandate(
+    mandateId: Hex,
+    config: MandateConfig,
+  ): Promise<TransactionReceipt>;
+  supersedeMandate(
+    mandateId: Hex,
+    version: bigint,
+    config: MandateConfig,
+    securitySensitive: boolean,
+  ): Promise<TransactionReceipt>;
+  revokeMandate(mandateId: Hex): Promise<TransactionReceipt>;
+  pause(): Promise<TransactionReceipt>;
+  unpause(): Promise<TransactionReceipt>;
+};
+export type TestnetChain = {
+  client: PublicClient;
+  deployer: PrivateKeyAccount;
+  deployment: ReturnType<typeof synqDeployment>;
+  ausd: ReturnType<typeof assetForRole>;
+  transactions: RecordedTx[];
+  createGroup(
+    owners: readonly Address[],
+    salt: Hex,
+  ): Promise<{ chainGroupId: Hex; account: Address; blockNumber: bigint }>;
+  governance(
+    account: Address,
+    owners: readonly OwnerSigner[],
+  ): TestnetGovernance;
+  fund(account: Address, amount: bigint): Promise<TransactionReceipt>;
+  balanceOf(who: Address, blockNumber?: bigint): Promise<bigint>;
+};
+
 /** Deployer/gas payer and module executor on Monad testnet; addresses come from the manifest and registry only. */
-export async function connectTestnet(deployer: PrivateKeyAccount) {
+export async function connectTestnet(
+  deployer: PrivateKeyAccount,
+): Promise<TestnetChain> {
   const transport = http(testnetRpcUrl(), {
     batch: { wait: 16 },
     retryCount: 6,
@@ -183,7 +219,10 @@ export async function connectTestnet(deployer: PrivateKeyAccount) {
     };
   }
 
-  function governance(account: Address, owners: readonly OwnerSigner[]) {
+  function governance(
+    account: Address,
+    owners: readonly OwnerSigner[],
+  ): TestnetGovernance {
     async function safeExec(
       step: string,
       to: Address,
@@ -345,4 +384,3 @@ export async function connectTestnet(deployer: PrivateKeyAccount) {
     balanceOf,
   };
 }
-export type TestnetChain = Awaited<ReturnType<typeof connectTestnet>>;
