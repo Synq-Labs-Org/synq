@@ -119,6 +119,36 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  apps/demo:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@synq/execution-worker':
+        specifier: workspace:*
+        version: link:../../workers/execution
+      '@synq/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@synq/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@synq/read-model':
+        specifier: workspace:*
+        version: link:../../packages/read-model
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+
   indexer/envio:
     dependencies:
       envio:
@@ -164,9 +194,9 @@ importers:
       '@scure/bip39':
         specifier: 2.4.0
         version: 2.4.0
-      '@synq/kernel':
+      '@synq/domain':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../domain
       '@synq/read-model':
         specifier: workspace:*
         version: link:../read-model
@@ -185,6 +215,9 @@ importers:
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain
+      '@synq/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -206,6 +239,12 @@ importers:
 
   packages/read-model:
     dependencies:
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
