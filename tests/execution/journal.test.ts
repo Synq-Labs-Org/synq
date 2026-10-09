@@ -311,3 +311,140 @@ describe('execution worker errors', () => {
       ).not.toMatch(/new Error\(/);
   });
 });
+type JournalFile = {
+  entry: Record<string, unknown>;
+  snapshots: Record<string, unknown>[];
+  events: {
+    type: string;
+    eventId: string;
+    causationId?: string;
+    correlationId: string;
+    actor: unknown;
+    payload: { evidenceHash: string; actor: unknown };
+  }[];
+};
+const actionEvents = (r: JournalFile) =>
+  r.events.filter((e) => e.type === 'action.transitioned');
+const txEvents = (r: JournalFile) =>
+  r.events.filter((e) => e.type === 'execution.transaction.transitioned');
+const mallory = { principalId: 'mallory', kind: 'HUMAN' };
+describe('journal integrity verification fails closed on tampering', () => {
+  it.each<[string, (r: JournalFile) => void]>([
+    [
+      'action evidenceHash swapped',
+      (r) => {
+        actionEvents(r)[0]!.payload.evidenceHash = `0x${'f'.repeat(64)}`;
+      },
+    ],
+    [
+      'action actor forged in envelope and payload',
+      (r) => {
+        actionEvents(r)[0]!.payload.actor = mallory;
+        actionEvents(r)[0]!.actor = mallory;
+      },
+    ],
+    [
+      'every actor forged consistently',
+      (r) => {
+        for (const e of r.events) {
+          e.actor = mallory;
+          e.payload.actor = mallory;
+        }
+      },
+    ],
+    [
+      'transaction evidenceHash swapped',
+      (r) => {
+        txEvents(r)[1]!.payload.evidenceHash = `0x${'e'.repeat(64)}`;
+      },
+    ],
+    [
+      'causationId dropped',
+      (r) => {
+        for (const e of actionEvents(r)) delete e.causationId;
+      },
+    ],
+    [
+      'causationId pointed at another transaction',
+      (r) => {
+        actionEvents(r)[1]!.causationId = txEvents(r)[0]!.eventId;
+      },
+    ],
+    [
+      'events reordered',
+      (r) => {
+        r.events = [...txEvents(r), ...actionEvents(r)];
+      },
+    ],
+    [
+      'eventId duplicated',
+      (r) => {
+        actionEvents(r)[1]!.eventId = actionEvents(r)[0]!.eventId;
+      },
+    ],
+    [
+      'envelope actor differs from payload actor',
+      (r) => {
+        txEvents(r)[0]!.actor = { principalId: 'other', kind: 'AGENT' };
+      },
+    ],
+    [
+      'entry blockNumber edited without history',
+      (r) => {
+        r.entry.blockNumber = '8';
+      },
+    ],
+    [
+      'snapshot blockNumber edited',
+      (r) => {
+        r.snapshots.at(-1)!.blockNumber = '8';
+        r.entry.blockNumber = '8';
+      },
+    ],
+    [
+      'last event removed and entry rolled back',
+      (r) => {
+        r.events = r.events.slice(0, -1);
+        r.entry.state = 'INCLUDED';
+      },
+    ],
+    [
+      'foreign correlation id',
+      (r) => {
+        txEvents(r)[0]!.correlationId = `0x${'3'.repeat(64)}`;
+      },
+    ],
+    [
+      'action projection dropped',
+      (r) => {
+        r.events = r.events.filter((e) => e !== actionEvents(r)[1]);
+      },
+    ],
+  ])('%s', async (_name, tamper) => {
+    const { dir, journal, worker } = harness(() => ({
+      status: 'success',
+      blockNumber: 7n,
+    }));
+    const id = fixture().grantId;
+    try {
+      await worker.submit(fixture());
+      await worker.reconcile(id);
+      expect(journal.get(id)?.state).toBe('CONFIRMED');
+      const path = join(dir, `${id}.json`);
+      const record: JournalFile = JSON.parse(readFileSync(path, 'utf8'));
+      tamper(record);
+      writeFileSync(path, JSON.stringify(record));
+      let error: unknown;
+      try {
+        journal.get(id);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ExecutionError);
+      expect(error).toMatchObject({ code: 'JOURNAL_HISTORY_MISMATCH' });
+      await expect(worker.reconcile(id)).rejects.toBeInstanceOf(ExecutionError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
