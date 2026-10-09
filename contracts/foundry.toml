@@ -18,7 +18,11 @@ via_ir = true
 additional_compiler_profiles = [{ name = "safe-legacy", via_ir = false }]
 compilation_restrictions = [{ paths = "lib/safe-smart-account/**", via_ir = false }]
 no_match_path = "**/test/fork/**"
-fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./deployments" }]
+fs_permissions = [
+  { access = "read", path = "./out" },
+  { access = "read", path = "../sources" },
+  { access = "read-write", path = "./deployments" },
+]
 
 [profile.default.fuzz]
 runs = 256

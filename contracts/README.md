@@ -29,13 +29,23 @@ The compiler is pinned to solc 0.8.28 with Cancun, optimizer 200 and via-IR for 
 
 ```sh
 forge fmt --check --root contracts
-forge build --root contracts --offline
+forge build --root contracts --offline                  # required first: tests deploy Safe from out/ artifacts
 forge test --root contracts --offline                   # unit + fuzz + invariant (fork suite excluded)
 FOUNDRY_PROFILE=fork forge test --root contracts --fork-url https://testnet-rpc.monad.xyz   # fork suite
 python3 contracts/export-abi.py                          # refresh abi/*.json after a build
 ```
 
 `--offline` avoids a Foundry/macOS proxy initialization panic seen in this environment (evidence/runtime-finding.md).
+
+`forge test` on its own does not write the artifacts of the separately compiled Safe sources, so a clean checkout must run `forge build` first. `pnpm test:contracts` and the CI contracts job both build before testing.
+
+Network facts are never hard-coded in Synq contract code or tests. `script/SynqChainRegistry.sol` reads them from `sources/chain_registry.json` (fs read permission on `../sources`):
+
+- the Safe infrastructure: `contracts.testnetSafeL2`, `contracts.testnetSafeProxyFactory` and `contracts.testnetSafeFallbackHandler`, each with `address`, `codeHash` and `version`;
+- the test AUSD: `assets.testnetAUSD`;
+- the faucet: `contracts.testnetAUSDFaucet`.
+
+Every entry is checked against the expected `chainId`.
 
 ## Test layout
 
@@ -45,19 +55,15 @@ Every test ID in tests/TEST_MATRIX.csv (CON-001 to CON-022) appears in a test na
 - `test/unit/CriticRegressions.t.sol`: the critic's attacks A1 (proxy squat), A2 (module as owner) and A3 (narrowing non-sensitive supersession), ported with assertions that they now fail, plus each narrowing dimension and the harmless different-Safe case.
 - `test/fuzz/GrantBinding.t.sol`: every one of the 19 signed grant fields is mutated after signing, and each mutation must revert with `InvalidSignatures` specifically. It also covers model-checked arbitrary calldata, unsigned calldata and random signature bytes.
 - `test/invariant/`: §42 invariants 1–10 plus a model-agreement invariant, driven by an active handler (`SynqHandler`). The handler mixes valid spends with over-cap, stale-version, expired, replay, forged-signature, wrong-executor, non-allowlisted-recipient, disallowed-call and governance attacks. It also covers pause, revoke, supersede, warp and owner recovery. Mutation check: removing the cumulative-cap check makes `invariant_inv5_spendWithinCumulativeCap` fail (evidence/mutation-check.md).
-- `test/fork/MonadFork.t.sol`: runs against Monad testnet (chain 10143) using the real Safe v1.4.1 bytecode at the registry addresses. Codehashes are asserted against safe-deployments `codeHash`. The test funds the group Safe from the Agora faucet `requestFunds(address)` with official test AUSD (6 decimals), then executes a 2-of-3-approved AUSD transfer. It also covers caps, pause and owner recovery.
+- `test/fork/MonadFork.t.sol`: runs against Monad testnet (chain 10143) using the real Safe v1.4.1 bytecode at the registry addresses. Live codehashes are asserted against the registry's `codeHash` values, which are sourced from safe-deployments. The test funds the group Safe from the Agora faucet `requestFunds(address)` with official test AUSD (6 decimals), then executes a 2-of-3-approved AUSD transfer. It also covers caps, pause and owner recovery.
 
 ## Deployment
 
-`script/Deploy.s.sol` deploys `SynqGroupFactory`, which in turn deploys the registry, module and setup helper. It refuses to run unless SafeL2 reports `VERSION() == "1.4.1"`. On non-local chains it also requires the singleton, proxy factory and fallback handler codehashes to equal the safe-deployments v1.4.1 canonical `codeHash`. Use the `script/deploy.sh` wrapper:
+`script/Deploy.s.sol` deploys `SynqGroupFactory`, which in turn deploys the registry, module and setup helper. It refuses to run unless SafeL2 reports `VERSION() == "1.4.1"`. On Monad testnet it takes the singleton, proxy factory and fallback handler from the chain registry entries listed above. It requires their live codehashes to equal the registry `codeHash` and their registry `version` to be `1.4.1`. On local Anvil (31337) it reads the locally deployed Safe addresses from `SYNQ_SAFE_L2_SINGLETON`, `SYNQ_SAFE_PROXY_FACTORY` and `SYNQ_SAFE_FALLBACK_HANDLER`. It refuses every other chain, including mainnet. Use the `script/deploy.sh` wrapper; its RPC URL defaults to the registry's `profiles["sandbox/monad-testnet"].defaultRpcUrl`, which `SYNQ_MONAD_TESTNET_RPC_URL` overrides:
 
 ```sh
-SYNQ_TESTNET_KEY_FILE=/secure/path/test-only.key \
-SYNQ_SAFE_L2_SINGLETON=0x29fcB43b46531BcA003ddC8FCB67FFE91900C762 \
-SYNQ_SAFE_PROXY_FACTORY=0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67 \
-SYNQ_SAFE_FALLBACK_HANDLER=0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99 \
-contracts/script/deploy.sh                 # simulation
-contracts/script/deploy.sh --broadcast     # submit; writes deployments/<chainId>.json
+SYNQ_TESTNET_KEY_FILE=/secure/path/test-only.key contracts/script/deploy.sh               # simulation
+SYNQ_TESTNET_KEY_FILE=/secure/path/test-only.key contracts/script/deploy.sh --broadcast   # submit; writes deployments/<chainId>.json
 ```
 
 - The wrapper reads the key from the file into `SYNQ_DEPLOYER_PRIVATE_KEY` inside its own process only. The key is never printed or passed as an argument.
