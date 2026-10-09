@@ -40,7 +40,7 @@ export function createApi(options: { readModel?: ReadModelRouteDeps } = {}) {
   return api;
 }
 
-async function readModelFromEnvironment(): Promise<ReadModelRouteDeps> {
+export async function readModelFromEnvironment(): Promise<ReadModelRouteDeps> {
   const env = z
     .object({
       SYNQ_NETWORK: z.string().default('sandbox/monad-testnet'),

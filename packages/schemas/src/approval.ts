@@ -159,3 +159,45 @@ export function executionGrantDigest(
 ): `0x${string}` {
   return hashTypedData(executionGrantTypedData(domain, grant));
 }
+
+export const APPROVAL_ATTESTATION_TYPES = {
+  SynqApprovalAttestation: [
+    { name: 'challengeId', type: 'bytes32' },
+    { name: 'challengeNonce', type: 'bytes32' },
+    { name: 'draftDigest', type: 'bytes32' },
+    { name: 'groupId', type: 'bytes32' },
+    { name: 'membershipEpoch', type: 'uint256' },
+    { name: 'expiresAt', type: 'uint256' },
+  ],
+} as const;
+export type ApprovalAttestation = {
+  challengeId: `0x${string}`;
+  challengeNonce: `0x${string}`;
+  draftDigest: `0x${string}`;
+  groupId: `0x${string}`;
+  membershipEpoch: number;
+  expiresAt: number;
+};
+export function approvalAttestationTypedData(
+  domain: GrantDomain,
+  attestation: ApprovalAttestation,
+) {
+  return {
+    domain: {
+      name: 'SynqIdentity',
+      version: '1',
+      chainId: BigInt(domain.chainId),
+      verifyingContract: domain.verifyingContract,
+    },
+    types: APPROVAL_ATTESTATION_TYPES,
+    primaryType: 'SynqApprovalAttestation' as const,
+    message: {
+      challengeId: attestation.challengeId,
+      challengeNonce: attestation.challengeNonce,
+      draftDigest: attestation.draftDigest,
+      groupId: attestation.groupId,
+      membershipEpoch: BigInt(attestation.membershipEpoch),
+      expiresAt: BigInt(attestation.expiresAt),
+    },
+  };
+}

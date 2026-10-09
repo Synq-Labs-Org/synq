@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@synq/chain-registry": "workspace:*",
+    "@synq/identity": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
     "fastify": "5.12.5",
