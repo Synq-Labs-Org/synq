@@ -15,7 +15,7 @@
     "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.ts' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
     "test": "vitest run --exclude '**/*.integration.test.ts'",
     "test:contracts": "forge build --root contracts --offline && forge test --root contracts --offline",
-    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts",
+    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts tests/execution/reorg.integration.test.ts",
     "demo": "node --import tsx apps/demo/src/local.ts",
     "architecture": "node scripts/architecture.mjs",
     "preflight": "node --import tsx scripts/preflight.ts",

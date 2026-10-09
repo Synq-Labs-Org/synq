@@ -35,6 +35,8 @@ export type SynqErrorCode =
   | 'GRANT_REPREPARATION_FORBIDDEN'
   | 'RPC_TRANSACTION_HASH_MISMATCH'
   | 'JOURNAL_HISTORY_MISMATCH'
+  | 'INTEGRITY_KEY_REQUIRED'
+  | 'INTEGRITY_KEY_INVALID'
   | 'INVALID_CONFIRMATION_DEPTH'
   | 'CONFIRMATION_DEPTH_REQUIRES_HEAD'
   | 'MAINNET_DISABLED'
@@ -78,6 +80,10 @@ const publicMessages: Record<SynqErrorCode, string> = {
     'A grant cannot be re-prepared with a different transaction.',
   RPC_TRANSACTION_HASH_MISMATCH: 'RPC returned an unexpected transaction hash.',
   JOURNAL_HISTORY_MISMATCH: 'Journal state disagrees with its history.',
+  INTEGRITY_KEY_REQUIRED:
+    'An integrity key file is required outside the local profile.',
+  INTEGRITY_KEY_INVALID:
+    'Integrity key file is missing, too short, shared or inside a data directory.',
   INVALID_CONFIRMATION_DEPTH: 'Confirmation depth must be a positive integer.',
   CONFIRMATION_DEPTH_REQUIRES_HEAD:
     'Confirmation depth above one needs a chain head source.',

@@ -8,7 +8,9 @@ import {
   openSync,
   closeSync,
   fsyncSync,
+  readdirSync,
 } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { keccak256, stringToHex } from 'viem';
@@ -31,6 +33,11 @@ import {
   type TransitionRecord,
   type TxState,
 } from '@synq/domain';
+import {
+  MIN_INTEGRITY_KEY_BYTES,
+  loadJournalKey,
+  type IntegrityKey,
+} from './integrity.js';
 
 const hex = z
   .string()
@@ -134,9 +141,13 @@ function evidenceOf(entry: JournalEntry): `0x${string}` {
   );
 }
 const GENESIS = `0x${'0'.repeat(64)}` as const;
-function chainHash(previous: string, entry: JournalEntry): `0x${string}` {
-  return keccak256(
-    stringToHex(
+function chainHash(
+  key: Uint8Array,
+  previous: string,
+  entry: JournalEntry,
+): `0x${string}` {
+  const mac = createHmac('sha256', key)
+    .update(
       JSON.stringify([
         previous,
         entry.grantId,
@@ -145,8 +156,9 @@ function chainHash(previous: string, entry: JournalEntry): `0x${string}` {
         entry.blockNumber,
         entry.outcome ?? null,
       ]),
-    ),
-  );
+    )
+    .digest('hex');
+  return `0x${mac}`;
 }
 function snapshotOf(entry: JournalEntry): Snapshot {
   return {
@@ -166,12 +178,23 @@ function fsyncDirectory(directory: string): void {
   }
 }
 export class ExecutionJournal {
+  private readonly key: IntegrityKey;
   constructor(
     readonly directory: string,
     private readonly actor: PrincipalRef = EXECUTION_WORKER_PRINCIPAL,
     private readonly clock: () => Date = () => new Date(),
+    key?: IntegrityKey,
   ) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
+    this.key = key ?? loadJournalKey(directory);
+    if (this.key.bytes.length < MIN_INTEGRITY_KEY_BYTES)
+      throw new ExecutionError('INTEGRITY_KEY_INVALID');
+  }
+  grantIds(): `0x${string}`[] {
+    return readdirSync(this.directory)
+      .filter((name) => /^0x[0-9a-f]{64}\.json$/.test(name))
+      .map((name) => name.slice(0, -5) as `0x${string}`)
+      .sort();
   }
   private path(grantId: string) {
     if (!/^0x[0-9a-f]{64}$/.test(grantId))
@@ -227,7 +250,7 @@ export class ExecutionJournal {
         const snapshot = snapshots[index++] ?? fail('missing snapshot');
         const at = parseOrThrow(JournalEntrySchema, { ...fixed, ...snapshot });
         if (event.payload.to !== at.state) fail('snapshot state mismatch');
-        chain = chainHash(chain, at);
+        chain = chainHash(this.key.bytes, chain, at);
         if (event.payload.evidenceHash !== chain) fail('evidence chain broken');
         const replayed = recordTransition(TX_MACHINE, txHistory, event.payload);
         if (replayed.from !== event.payload.from) fail('transaction order');
@@ -293,7 +316,11 @@ export class ExecutionJournal {
       actor: this.actor,
       at,
       to: entry.state,
-      evidenceHash: chainHash(history.at(-1)?.evidenceHash ?? GENESIS, entry),
+      evidenceHash: chainHash(
+        this.key.bytes,
+        history.at(-1)?.evidenceHash ?? GENESIS,
+        entry,
+      ),
     });
     const common = {
       actor: this.actor,
@@ -331,6 +358,8 @@ export class ExecutionJournal {
     const entry = parseOrThrow(JournalEntrySchema, input);
     if (entry.state !== 'SIGNED')
       throw new ExecutionError('INVALID_NEW_SUBMISSION');
+    if (this.key.source === 'LOCAL_GENERATED' && entry.chainId !== 31337)
+      throw new ExecutionError('INTEGRITY_KEY_REQUIRED');
     const record: JournalRecord = {
       entry,
       snapshots: [snapshotOf(entry)],
