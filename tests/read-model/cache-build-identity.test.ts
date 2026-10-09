@@ -16,9 +16,10 @@ import {
   creation,
   ev,
   funding,
+  governance,
   groupId,
+  mandateId,
   tx,
-  word,
 } from './fixtures.js';
 
 class FakeRedis implements RedisConnection {
@@ -97,7 +98,7 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     await pa.applyWindow({
       fromBlockExclusive: 99,
       toBlockInclusive: 102,
-      events: creation(101),
+      events: [...creation(101), ...governance(102)],
     });
     await new RedisSnapshotCache(
       redis,
@@ -118,7 +119,7 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     await new Projector(b, cfg).applyWindow({
       fromBlockExclusive: 99,
       toBlockInclusive: 103,
-      events: [...creation(101), paused],
+      events: [...creation(101), ...governance(102), paused],
     });
     const readerB = new ProjectionReader(b, cfg);
     expect((await readerB.groupSnapshot(groupId))!.group.paused).toBe(true);
@@ -130,8 +131,9 @@ describe('Redis snapshot cache is bound to the projection build', () => {
     ).observe({
       chainId,
       account,
-      mandateId: word('mandate-1'),
+      mandateId,
       mandateVersion: 1,
+      accountThreshold: 2,
       assets: [],
     });
     expect(observation.accountPaused).toBe(true);

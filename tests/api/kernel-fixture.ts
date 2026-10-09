@@ -104,17 +104,23 @@ export function sandboxKernel(input: {
   approvalLedger: ApprovalLedger;
   membershipDirectory: MembershipDirectory;
 }) {
+  const groups = new Map<string, SandboxGroup>();
   const probe = {
-    async observe() {
+    async observe(query: { account: string }) {
+      const g = groups.get(query.account.toLowerCase());
+      if (!g) throw new Error('unknown sandbox account');
       return {
         chainId: 10143,
         indexedThroughBlock: 100,
         headBlock: 100,
         accountPaused: false,
+        mandate: { active: true, version: 1, minValidVersion: 1 },
+        owners: g.members.map((m) => m.signer.toLowerCase() as `0x${string}`),
+        threshold: 2,
       };
     },
   };
-  return new Kernel({
+  const kernel = new Kernel({
     network: monadTestnetProfile.network,
     executionModule: input.executionModule,
     clock: { now: input.now },
@@ -125,13 +131,17 @@ export function sandboxKernel(input: {
     mandates: [],
     auditKey: new Uint8Array(32).fill(5),
   });
+  sandboxGroups.set(kernel, groups);
+  return kernel;
 }
+const sandboxGroups = new WeakMap<Kernel, Map<string, SandboxGroup>>();
 
 export function configureSandboxGroup(
   kernel: Kernel,
   g: SandboxGroup,
   now: number,
 ) {
+  sandboxGroups.get(kernel)?.set(g.account.toLowerCase(), g);
   kernel.configureMandate(sandboxMandate(g, now));
   kernel.observeBalance(
     { account: g.account, asset: AUSD, balance: '1000000000' },

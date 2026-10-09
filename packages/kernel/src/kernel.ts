@@ -382,6 +382,7 @@ export class Kernel {
         account: intent.account,
         mandateId: onchainMandateId(mandate),
         mandateVersion: mandate.version,
+        accountThreshold: mandate.approvalPolicy.accountThreshold,
         assets,
       });
       const verifiedBalances = freshness.verifiedBalances;
@@ -428,6 +429,7 @@ export class Kernel {
         network: this.network,
         approvals: req.approvals,
         requiredByPolicy: policy.requiredApprovals,
+        accountOwners: freshness.owners,
         ports: {
           ledger: this.approvalLedger,
           directory: this.directory,

@@ -76,9 +76,13 @@ export class ApprovalCalculator {
     network: NetworkProfile;
     approvals: readonly unknown[];
     requiredByPolicy: number;
+    accountOwners: readonly string[];
     ports: ApprovalPorts;
     now: number;
   }): Promise<ApprovalOutcome> {
+    const accountOwners = new Set(
+      input.accountOwners.map((o) => o.toLowerCase()),
+    );
     const { draft, mandate, network, intent, ports } = input;
     const typed = executionGrantTypedData(draft.domain, draft.grant);
     const rejected: RejectedApproval[] = [];
@@ -108,6 +112,7 @@ export class ApprovalCalculator {
         continue;
       }
       if (
+        !accountOwners.has(approval.signer.toLowerCase()) ||
         !mandate.members.some(
           (m) =>
             m.memberId === approval.memberId &&

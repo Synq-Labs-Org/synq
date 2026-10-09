@@ -12,9 +12,13 @@ import {
   harness,
   intent,
   mandate,
+  owners,
 } from './fixtures.js';
 
 const input = () => evidence(intent());
+const ownerAddresses = owners.map(
+  (o) => o.address.toLowerCase() as `0x${string}`,
+);
 function lagging(verifier?: DirectVerifier) {
   const data = input();
   const h = harness(data, [mandate()], {
@@ -25,6 +29,9 @@ function lagging(verifier?: DirectVerifier) {
           indexedThroughBlock: 95,
           headBlock: 100,
           accountPaused: false,
+          mandate: { active: true, version: 1, minValidVersion: 1 },
+          owners: ownerAddresses,
+          threshold: 2,
         }),
       },
       maxLagBlocks: 2,
@@ -43,7 +50,10 @@ const direct = (patch: Partial<DirectVerification> = {}): DirectVerifier => ({
       mandateId: onchainMandateId(mandate()),
       active: true,
       version: 1,
+      minValidVersion: 1,
     },
+    owners: ownerAddresses,
+    threshold: 2,
     balances: [{ account: ACCOUNT, asset, balance: '10000' }],
     ...patch,
   }),
@@ -97,6 +107,7 @@ describe('SEC-006 FreshnessGate (B02.7)', () => {
           mandateId: onchainMandateId(mandate()),
           active: false,
           version: 1,
+          minValidVersion: 1,
         },
       }),
       'MANDATE_REVOKED',
@@ -108,6 +119,7 @@ describe('SEC-006 FreshnessGate (B02.7)', () => {
           mandateId: onchainMandateId(mandate()),
           active: true,
           version: 2,
+          minValidVersion: 1,
         },
       }),
       'MANDATE_VERSION',
@@ -152,4 +164,79 @@ describe('SEC-006 FreshnessGate (B02.7)', () => {
       code: 'ACCOUNT_PAUSED',
     });
   });
+});
+
+describe('indexed mode refuses on chain account state exactly as direct mode', () => {
+  type AccountPatch = {
+    paused?: boolean;
+    mandate?: { active: boolean; version: number; minValidVersion: number };
+    owners?: `0x${string}`[];
+    threshold?: number;
+  };
+  const indexed = (patch: AccountPatch) => {
+    const data = input();
+    const h = harness(data);
+    const { paused, ...rest } = patch;
+    h.probe.observation = {
+      ...h.probe.observation,
+      ...rest,
+      ...(paused === undefined ? {} : { accountPaused: paused }),
+    };
+    return { h, data };
+  };
+  const directMode = (patch: AccountPatch) =>
+    lagging(
+      direct({
+        ...patch,
+        ...(patch.mandate
+          ? {
+              mandate: {
+                mandateId: onchainMandateId(mandate()),
+                ...patch.mandate,
+              },
+            }
+          : {}),
+      }),
+    );
+  const cases: [string, AccountPatch, string][] = [
+    ['account paused', { paused: true }, 'ACCOUNT_PAUSED'],
+    [
+      'mandate revoked',
+      { mandate: { active: false, version: 1, minValidVersion: 1 } },
+      'MANDATE_REVOKED',
+    ],
+    [
+      'mandate version below the minimum valid version',
+      { mandate: { active: true, version: 1, minValidVersion: 2 } },
+      'MANDATE_VERSION',
+    ],
+    [
+      'mandate version differs from the Kernel version',
+      { mandate: { active: true, version: 2, minValidVersion: 1 } },
+      'MANDATE_VERSION',
+    ],
+    ['Safe threshold differs', { threshold: 3 }, 'ONCHAIN_QUORUM_REQUIRED'],
+    [
+      'approver signer is no longer a Safe owner',
+      { owners: ownerAddresses.slice(1) },
+      'APPROVER_NOT_MEMBER',
+    ],
+  ];
+  const modes = [
+    ['INDEXED', indexed],
+    ['DIRECT', directMode],
+  ] as const;
+  for (const [mode, build] of modes)
+    it.each(cases)(`${mode}: %s refuses`, async (_name, patch, code) => {
+      const { h, data } = build(patch);
+      expect(await authorizeWith(h, data, [0, 1])).toMatchObject({ code });
+      expect(h.kernel.auditLog().at(-1)?.payload).toMatchObject({ code });
+    });
+  for (const [mode, build] of modes)
+    it(`${mode}: approvals from current owners authorize after an owner change`, async () => {
+      const { h, data } = build({ owners: ownerAddresses.slice(1) });
+      expect(await authorizeWith(h, data, [1, 2])).toMatchObject({
+        status: 'AUTHORIZED',
+      });
+    });
 });
