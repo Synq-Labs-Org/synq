@@ -26,6 +26,10 @@ contract SynqGroupFactory {
     ExecutionModule public immutable module;
     /// @notice Delegatecall helper used by Safe.setup to enable `module`.
     SynqSafeModuleSetup public immutable moduleSetup;
+    /// @notice keccak256 of the SafeProxy init code for `safeSingleton` (used to predict proxy addresses).
+    bytes32 public immutable proxyInitCodeHash;
+
+    address private _creating;
 
     /// @notice A group Safe was created, `module` enabled and the group bound in `registry`.
     event GroupCreated(
@@ -44,6 +48,7 @@ contract SynqGroupFactory {
     error InvalidThreshold();
     error InvalidOwner(address owner);
     error SetupVerificationFailed();
+    error CreationInProgress();
 
     /// @param safeSingleton_ SafeL2 v1.4.1 singleton.
     /// @param safeProxyFactory_ SafeProxyFactory v1.4.1.
@@ -58,6 +63,29 @@ contract SynqGroupFactory {
         registry = new MandateRegistry();
         module = new ExecutionModule(registry);
         moduleSetup = new SynqSafeModuleSetup();
+        proxyInitCodeHash = keccak256(
+            abi.encodePacked(ISafeProxyFactory(safeProxyFactory_).proxyCreationCode(), uint256(uint160(safeSingleton_)))
+        );
+    }
+
+    /// @notice Whether `account` is the Safe proxy this factory is creating in the current call.
+    /// @dev SynqSafeModuleSetup requires this during Safe.setup, so the factory's initializer cannot be replayed
+    ///      through the permissionless SafeProxyFactory to squat a group's proxy address.
+    /// @param account Proxy address executing Safe.setup.
+    function isCreating(address account) external view returns (bool) {
+        return account != address(0) && account == _creating;
+    }
+
+    /// @notice CREATE2 address SafeProxyFactory will assign for `initializer` and `saltNonce`.
+    /// @param initializer Safe.setup calldata.
+    /// @param saltNonce SafeProxyFactory salt nonce.
+    function predictAccount(bytes memory initializer, uint256 saltNonce) public view returns (address) {
+        bytes32 salt = keccak256(abi.encodePacked(keccak256(initializer), saltNonce));
+        return address(
+            uint160(
+                uint256(keccak256(abi.encodePacked(bytes1(0xff), address(safeProxyFactory), salt, proxyInitCodeHash)))
+            )
+        );
     }
 
     /// @notice Deterministic group id for a creator and salt on this chain and factory.
@@ -68,7 +96,8 @@ contract SynqGroupFactory {
     }
 
     /// @notice Creates a Safe group account with `owners`/`threshold`, enables the module and binds the group.
-    /// @dev The group id is namespaced by `msg.sender`, so a front-runner cannot claim another creator's id.
+    /// @dev The group id is namespaced by `msg.sender`, so a front-runner cannot claim another creator's id, and the
+    ///      initializer only succeeds while this factory is creating that exact proxy, so it cannot be squatted.
     /// @param owners Safe owners (unique, non-zero, not Synq contracts).
     /// @param threshold Safe owner threshold (1..owners.length).
     /// @param salt Creator-chosen salt.
@@ -93,10 +122,15 @@ contract SynqGroupFactory {
                 payable(address(0))
             )
         );
+        if (_creating != address(0)) revert CreationInProgress();
+        address predicted = predictAccount(initializer, uint256(groupId));
+        _creating = predicted;
         account = safeProxyFactory.createProxyWithNonce(safeSingleton, initializer, uint256(groupId));
-        if (!ISafe(account).isModuleEnabled(address(module)) || ISafe(account).getThreshold() != threshold) {
-            revert SetupVerificationFailed();
-        }
+        delete _creating;
+        if (
+            account != predicted || !ISafe(account).isModuleEnabled(address(module))
+                || ISafe(account).getThreshold() != threshold
+        ) revert SetupVerificationFailed();
         registry.bindGroup(groupId, account, address(module));
         emit GroupCreated(groupId, account, owners, threshold, address(module), address(registry), msg.sender, salt);
     }

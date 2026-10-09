@@ -27,6 +27,8 @@ interface ISafe {
     function getThreshold() external view returns (uint256);
 
     function getOwners() external view returns (address[] memory);
+
+    function isOwner(address owner) external view returns (bool);
 }
 
 /// @notice Subset of the Safe v1.4.1 SafeProxyFactory interface.
@@ -34,4 +36,6 @@ interface ISafeProxyFactory {
     function createProxyWithNonce(address singleton, bytes calldata initializer, uint256 saltNonce)
         external
         returns (address proxy);
+
+    function proxyCreationCode() external pure returns (bytes memory);
 }

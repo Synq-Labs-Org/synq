@@ -51,6 +51,13 @@ contract MandateRegistry {
         uint256 spentNative;
     }
 
+    /// @notice Allowlists stored for each mandate version.
+    struct MandateLists {
+        address[] callTargets;
+        bytes4[] callSelectors;
+        address[] recipients;
+    }
+
     /// @notice One delegated action presented by the group's authorized module for envelope checks and accounting.
     struct SpendRequest {
         address target;
@@ -82,6 +89,7 @@ contract MandateRegistry {
     mapping(
         address account => mapping(bytes32 mandateId => mapping(uint256 version => mapping(address recipient => bool)))
     ) private _recipientAllowed;
+    mapping(address account => mapping(bytes32 mandateId => mapping(uint256 version => MandateLists))) private _lists;
 
     /// @notice A factory-created Safe account was bound to a group id and initial module.
     event GroupBound(bytes32 indexed groupId, address indexed account, address indexed module);
@@ -157,6 +165,7 @@ contract MandateRegistry {
     error TokenMismatch(address token);
     error PerActionCapExceeded();
     error CumulativeCapExceeded();
+    error NarrowingSupersessionMustInvalidate();
 
     modifier onlyGroupAccount() {
         if (groupOf[msg.sender] == bytes32(0)) revert OnlyGroupAccount();
@@ -210,8 +219,10 @@ contract MandateRegistry {
 
     /// @notice Supersedes an active mandate with version `newVersion` (= current + 1).
     /// @dev Only the group's Safe. The token denomination is immutable per mandate id. If `securitySensitive`, grants
-    ///      for every earlier version become invalid; otherwise earlier versions stay grantable under their own terms
-    ///      while cumulative spend is capped by the stricter of the granted and current versions.
+    ///      for every earlier version become invalid. A non-sensitive supersession must be a pure widening of the
+    ///      current version (no cap decreased, window not shortened, no call or recipient removed), otherwise it
+    ///      reverts with NarrowingSupersessionMustInvalidate; earlier versions then stay grantable under their own
+    ///      terms, which the new version contains.
     /// @param mandateId Mandate id.
     /// @param newVersion Expected new version number.
     /// @param config New mandate envelope.
@@ -229,6 +240,9 @@ contract MandateRegistry {
         if (newVersion != previous + 1) revert InvalidVersion(previous + 1, newVersion);
         if (config.token != _terms[msg.sender][mandateId][previous].token) revert TokenChanged();
         _write(mandateId, newVersion, config);
+        if (!securitySensitive && _narrows(mandateId, previous, newVersion)) {
+            revert NarrowingSupersessionMustInvalidate();
+        }
         state.currentVersion = newVersion;
         if (securitySensitive) state.minValidVersion = newVersion;
         emit MandateSuperseded(
@@ -332,6 +346,18 @@ contract MandateRegistry {
         return _callAllowed[account][mandateId][version][_callKey(target, selector)];
     }
 
+    /// @notice Allowlists of a mandate version.
+    /// @param account Group Safe account.
+    /// @param mandateId Mandate id.
+    /// @param version Mandate version.
+    function mandateLists(address account, bytes32 mandateId, uint256 version)
+        external
+        view
+        returns (MandateLists memory)
+    {
+        return _lists[account][mandateId][version];
+    }
+
     /// @notice Whether `recipient` is allowlisted in a mandate version.
     /// @param account Group Safe account.
     /// @param mandateId Mandate id.
@@ -364,6 +390,10 @@ contract MandateRegistry {
         for (uint256 i; i < config.recipients.length; ++i) {
             _recipientAllowed[msg.sender][mandateId][version][config.recipients[i]] = true;
         }
+        MandateLists storage lists = _lists[msg.sender][mandateId][version];
+        lists.callTargets = config.callTargets;
+        lists.callSelectors = config.callSelectors;
+        lists.recipients = config.recipients;
         emit MandateConfigured(
             groupOf[msg.sender],
             mandateId,
@@ -381,6 +411,26 @@ contract MandateRegistry {
             config.callSelectors,
             config.recipients
         );
+    }
+
+    function _narrows(bytes32 mandateId, uint256 previous, uint256 next) private view returns (bool) {
+        MandateTerms storage a = _terms[msg.sender][mandateId][previous];
+        MandateTerms storage b = _terms[msg.sender][mandateId][next];
+        if (
+            b.maxTokenPerAction < a.maxTokenPerAction || b.maxNativePerAction < a.maxNativePerAction
+                || b.cumulativeTokenCap < a.cumulativeTokenCap || b.cumulativeNativeCap < a.cumulativeNativeCap
+                || b.validAfter > a.validAfter || b.validUntil < a.validUntil
+        ) return true;
+        MandateLists storage lists = _lists[msg.sender][mandateId][previous];
+        for (uint256 i; i < lists.callTargets.length; ++i) {
+            if (!_callAllowed[msg.sender][mandateId][next][_callKey(lists.callTargets[i], lists.callSelectors[i])]) {
+                return true;
+            }
+        }
+        for (uint256 i; i < lists.recipients.length; ++i) {
+            if (!_recipientAllowed[msg.sender][mandateId][next][lists.recipients[i]]) return true;
+        }
+        return false;
     }
 
     function _validate(MandateConfig calldata config) private view {

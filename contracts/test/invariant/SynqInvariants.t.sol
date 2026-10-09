@@ -107,6 +107,7 @@ contract SynqInvariantsTest is SynqTestBase {
     /// Invariant 9: grants for versions invalidated by security-sensitive supersession never execute.
     function invariant_inv9_staleVersionCannotExecute() public view {
         assertFalse(handler.violationStaleVersion());
+        assertFalse(handler.violationNarrowingKeptOldGrants());
     }
 
     /// Invariant 10: no funds become stranded in Synq contracts; all value is in the Safe, recipient or vault.

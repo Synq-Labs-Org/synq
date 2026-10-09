@@ -67,6 +67,7 @@ contract SynqHandler is CommonBase, StdUtils {
     bool public violationRecoveryBlocked;
     bool public violationStaleVersion;
     bool public violationRecipient;
+    bool public violationNarrowingKeptOldGrants;
     bool public unexpectedRejection;
 
     mapping(bytes32 action => uint256) public calls;
@@ -258,20 +259,21 @@ contract SynqHandler is CommonBase, StdUtils {
         tokenCap = bound(tokenCap, ctx.cumToken / 2, 2 * ctx.cumToken);
         nativeCap = bound(nativeCap, ctx.cumNative / 2, 2 * ctx.cumNative);
         uint256 next = currentVersion + 1;
+        bool narrowing = tokenCap < tokenCapOf[currentVersion] || nativeCap < nativeCapOf[currentVersion];
+        bool expected = sensitive || !narrowing;
         MandateRegistry.MandateConfig memory config = _config(tokenCap, nativeCap);
-        if (
-            _safeExec(
-                address(ctx.registry),
-                0,
-                abi.encodeCall(MandateRegistry.supersedeMandate, (ctx.mandateId, next, config, sensitive))
-            )
-        ) {
+        bool ok = _safeExec(
+            address(ctx.registry),
+            0,
+            abi.encodeCall(MandateRegistry.supersedeMandate, (ctx.mandateId, next, config, sensitive))
+        );
+        if (ok && !expected) violationNarrowingKeptOldGrants = true;
+        if (!ok && expected) unexpectedRejection = true;
+        if (ok) {
             currentVersion = next;
             tokenCapOf[next] = tokenCap;
             nativeCapOf[next] = nativeCap;
             if (sensitive) minValidVersion = next;
-        } else {
-            unexpectedRejection = true;
         }
     }
 

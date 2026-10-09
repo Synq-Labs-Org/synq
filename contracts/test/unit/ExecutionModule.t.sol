@@ -686,15 +686,15 @@ contract ExecutionModuleTest is SynqTestBase {
         assertEq(spentToken(), 10e6);
     }
 
-    function test_supersession_nonSensitiveKeepsPriorVersionUnderStricterCumulativeCap() public {
+    function test_supersession_nonSensitiveCapReductionRejected() public {
         MandateRegistry.MandateConfig memory tighter = defaultConfig();
         tighter.cumulativeTokenCap = 500e6;
-        supersede(2, tighter, false);
-        (ExecutionModule.ExecutionGrant memory big, bytes memory bigData) = tokenGrant(1, 600e6);
-        execGrantExpectRevert(big, bigData, abi.encodeWithSelector(MandateRegistry.CumulativeCapExceeded.selector));
-        (ExecutionModule.ExecutionGrant memory small, bytes memory smallData) = tokenGrant(2, 400e6);
+        vm.prank(address(safe));
+        vm.expectRevert(MandateRegistry.NarrowingSupersessionMustInvalidate.selector);
+        registry.supersedeMandate(MANDATE, 2, tighter, false);
+        (ExecutionModule.ExecutionGrant memory small, bytes memory smallData) = tokenGrant(2, 600e6);
         execGrant(small, smallData);
-        assertEq(spentToken(), 400e6);
+        assertEq(spentToken(), 600e6);
     }
 
     function test_supersession_tokenCapBelowSpendDoesNotBlockNativeDimension() public {

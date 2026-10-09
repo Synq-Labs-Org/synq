@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {SynqGroupFactory} from "../../src/SynqGroupFactory.sol";
 import {MandateRegistry} from "../../src/MandateRegistry.sol";
 import {ExecutionModule} from "../../src/ExecutionModule.sol";
+import {SynqSafeModuleSetup} from "../../src/SynqSafeModuleSetup.sol";
+import {ISafe, ISafeProxyFactory} from "../../src/interfaces/ISafe.sol";
 import {ISafeFull} from "../utils/ISafeFull.sol";
 
 interface IAgoraFaucet {
@@ -100,6 +102,35 @@ contract MonadForkTest is Test {
         );
         assertEq(registry.groupOf(address(safe)), groupId);
         assertEq(registry.moduleOf(address(safe)), address(module));
+    }
+
+    function test_fork_copiedInitializerCannotSquatRealSafeProxyFactory() public onlyMonadFork {
+        address victim = makeAddr("fork-victim");
+        bytes32 salt = keccak256("fork-victim-salt");
+        bytes32 gid = factory.computeGroupId(victim, salt);
+        address[] memory owners = safe.getOwners();
+        bytes memory initializer = abi.encodeCall(
+            ISafe.setup,
+            (
+                owners,
+                2,
+                address(factory.moduleSetup()),
+                abi.encodeCall(SynqSafeModuleSetup.enableModule, (address(module))),
+                COMPATIBILITY_FALLBACK_HANDLER,
+                address(0),
+                0,
+                payable(address(0))
+            )
+        );
+        address predicted = factory.predictAccount(initializer, uint256(gid));
+        vm.prank(makeAddr("fork-attacker"));
+        vm.expectRevert();
+        ISafeProxyFactory(SAFE_PROXY_FACTORY).createProxyWithNonce(SAFE_L2_SINGLETON, initializer, uint256(gid));
+        assertEq(predicted.code.length, 0);
+        vm.prank(victim);
+        (, address account) = factory.createGroup(owners, 2, salt);
+        assertEq(account, predicted);
+        assertTrue(ISafeFull(account).isModuleEnabled(address(module)));
     }
 
     function test_fork_twoOfThreeApprovedAusdTransferViaFaucetFunding() public onlyMonadFork {

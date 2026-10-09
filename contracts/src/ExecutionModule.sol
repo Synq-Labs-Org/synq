@@ -111,6 +111,8 @@ contract ExecutionModule {
     error ExecutionPaused(address account);
     error InvalidSignatures();
     error MalleableSignature(uint256 index);
+    error ModuleIsSafeOwner();
+    error ModuleSelfApproval(uint256 index);
     error WrongChain(uint256 expected, uint256 provided);
     error UnauthorizedExecutor(address caller);
     error GroupMismatch();
@@ -200,7 +202,9 @@ contract ExecutionModule {
     }
 
     /// @notice Executes one quorum-signed grant from the named Safe.
-    /// @dev Order: pause, quorum signature (Safe `checkSignatures`), grant/executor/group binding, validity window,
+    /// @dev Reverts with ModuleIsSafeOwner if this module is an owner of the Safe: Safe treats `msg.sender == owner`
+    ///      as an approved-hash signature, which would let any executor fill a quorum slot.
+    ///      Order: pause, quorum signature (Safe `checkSignatures`), grant/executor/group binding, validity window,
     ///      replay, calldata and action shape, registry envelope + spend accounting, CALL via the Safe, balance deltas.
     /// @param grant Execution grant signed by a threshold of the Safe's owners.
     /// @param data Exact calldata; keccak256(data) must equal `grant.calldataHash`.
@@ -265,12 +269,20 @@ contract ExecutionModule {
             revert InvalidSignatures();
         }
         if (threshold == 0 || threshold > signatures.length / 65) revert InvalidSignatures();
+        bool moduleIsOwner;
+        try ISafe(account).isOwner(address(this)) returns (bool value) {
+            moduleIsOwner = value;
+        } catch {
+            revert InvalidSignatures();
+        }
+        if (moduleIsOwner) revert ModuleIsSafeOwner();
         for (uint256 i; i < threshold; ++i) {
             uint256 offset = i * 65;
-            if (
-                uint8(signatures[offset + 64]) > 1
-                    && uint256(bytes32(signatures[offset + 32:offset + 64])) > SECP256K1_HALF_N
-            ) {
+            uint8 v = uint8(signatures[offset + 64]);
+            if (v == 1 && address(uint160(uint256(bytes32(signatures[offset:offset + 32])))) == address(this)) {
+                revert ModuleSelfApproval(i);
+            }
+            if (v > 1 && uint256(bytes32(signatures[offset + 32:offset + 64])) > SECP256K1_HALF_N) {
                 revert MalleableSignature(i);
             }
         }
