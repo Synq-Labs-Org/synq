@@ -15,7 +15,6 @@ import {
   executionGrantTypedData,
   type BoundActionIntent,
   type ExecutionGrant,
-  type Mandate,
   type RiskPacket,
 } from '@synq/schemas';
 import {
@@ -29,7 +28,19 @@ import {
   type FreshnessProbe,
 } from '@synq/kernel';
 import { PrincipalRegistry } from '@synq/identity';
-import { DeterministicReadModel, verifyFresh } from '@synq/read-model';
+import {
+  ChainHeadObserver,
+  MemoryProjectionStore,
+  ProjectionReader,
+  Projector,
+  assessFreshness,
+  projectionConfig,
+  type ProjectionConfig,
+} from '@synq/read-model';
+import {
+  ReadModelFreshnessProbe,
+  RpcKernelDirectVerifier,
+} from '@synq/read-model/kernel';
 import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
 import { writeDurableJson } from '@synq/execution-worker/persistence';
 import {
@@ -127,19 +138,19 @@ function localAsset(chain: LocalSynq, decimals: number) {
     decimals,
   });
 }
-function bindings(chain: LocalSynq, mandate: Mandate) {
-  return [
-    {
-      groupId: chain.chainGroupId,
-      account: chain.account,
-      registry: chain.registry,
-      module: chain.module,
-      members: mandate.members.map((m) => ({
-        memberId: m.memberId,
-        signer: m.signer,
-      })),
-    },
-  ];
+function readModelConfig(chain: LocalSynq): ProjectionConfig {
+  if (chain.deploymentBlock === null) throw new Error('DEPLOYMENT_BLOCK');
+  return projectionConfig({
+    chainId: 31337,
+    profile: localProfile.network.profile,
+    startBlock: Number(chain.deploymentBlock),
+    factory: chain.factory,
+    registry: chain.registry,
+    module: chain.module,
+    treasuryAssets: [chain.token],
+    reorgWindowBlocks: 64,
+    confirmationDepth: localProfile.confirmationDepth,
+  });
 }
 
 export async function startLocalVertical() {
@@ -199,67 +210,28 @@ export async function startLocalVertical() {
         functionName: 'balanceOf',
         args: [who],
       });
+    const rmConfig = readModelConfig(chain);
     const project = async () => {
       const indexed = await indexedEvents(chain);
-      const model = new DeterministicReadModel(
-        31337,
-        chain.token,
-        bindings(chain, mandate),
-      );
-      model.ingest(indexed.events, indexed.checkpoint);
-      return { indexed, model };
+      const store = new MemoryProjectionStore(31337);
+      await new Projector(store, rmConfig).applyWindow({
+        fromBlockExclusive: rmConfig.startBlock - 1,
+        toBlockInclusive: indexed.checkpoint,
+        events: indexed.events,
+      });
+      return { indexed, reader: new ProjectionReader(store, rmConfig) };
     };
+    const head = new ChainHeadObserver(chain.client, 31337, { ttlMs: 0 });
     const probe: FreshnessProbe = {
-      async observe() {
-        const { indexed, model } = await project();
-        const head = Number(
-          await chain.client.getBlockNumber({ cacheTime: 0 }),
-        );
-        return {
-          chainId: 31337,
-          indexedThroughBlock: indexed.checkpoint,
-          headBlock: head,
-          accountPaused: model.snapshot(chain.chainGroupId, head, clock.t)
-            .paused,
-        };
+      async observe(query) {
+        const { reader } = await project();
+        return new ReadModelFreshnessProbe(reader, head).observe(query);
       },
     };
-    const verifier: DirectVerifier = {
-      async verify(query) {
-        const blockNumber = await chain.client.getBlockNumber({ cacheTime: 0 });
-        const state = await chain.client.readContract({
-          address: chain.registry,
-          abi: registryAbi,
-          functionName: 'mandateState',
-          args: [chain.account, query.mandateId],
-          blockNumber,
-        });
-        return {
-          chainId: 31337,
-          account: chain.account.toLowerCase() as `0x${string}`,
-          blockNumber: Number(blockNumber),
-          paused: await chain.client.readContract({
-            address: chain.module,
-            abi: moduleAbi,
-            functionName: 'paused',
-            args: [chain.account],
-            blockNumber,
-          }),
-          mandate: {
-            mandateId: query.mandateId,
-            active: state.status === 1,
-            version: Number(state.currentVersion),
-          },
-          balances: [
-            {
-              account: chain.account.toLowerCase() as `0x${string}`,
-              asset,
-              balance: String(await balanceOf(chain.account)),
-            },
-          ],
-        };
-      },
-    };
+    const verifier: DirectVerifier = new RpcKernelDirectVerifier(
+      chain.client,
+      rmConfig,
+    );
     const kernel = new Kernel({
       network: localProfile.network,
       executionModule: deployment.module,
@@ -518,7 +490,7 @@ export async function startLocalVertical() {
       execute,
       onchainRevert,
       balanceOf,
-      bindings: bindings(chain, mandate),
+      readModelConfig: rmConfig,
     };
   } catch (error) {
     await node.close();
@@ -551,16 +523,20 @@ export async function runLocalDemo(
       authorized.data,
       join(outputDirectory, 'journal'),
     );
-    const { indexed, model } = await local.project();
-    const snapshot = model.snapshot(
-      chain.chainGroupId,
-      indexed.checkpoint,
-      local.clock.t,
-    );
-    await verifyFresh(snapshot, indexed.checkpoint, 0);
+    const { indexed, reader } = await local.project();
+    const snapshot = await reader.groupSnapshot(chain.chainGroupId);
+    if (!snapshot) throw new Error('GROUP_NOT_INDEXED');
+    const freshness = assessFreshness({
+      sourceChainId: 31337,
+      indexedThroughBlock: snapshot.indexedThroughBlock,
+      head: { block: indexed.checkpoint, observedAt: local.clock.t },
+      maxLagBlocks: Number(localProfile.maxIndexLagBlocks),
+      frozen: snapshot.group.accountingStatus === 'FROZEN',
+    });
+    if (freshness.status !== 'FRESH') throw new Error('STALE_READ_MODEL');
     const recipientBalance = await local.balanceOf(chain.recipient);
     const accountBalance = await local.balanceOf(chain.account);
-    if (BigInt(snapshot.treasuryBalance) !== accountBalance)
+    if (BigInt(snapshot.group.treasury[0]?.balance ?? -1) !== accountBalance)
       throw new Error('INDEX_BALANCE_MISMATCH');
     if (
       executed.observation.event?.tokenAmount !== String(amount) ||
@@ -603,7 +579,7 @@ export async function runLocalDemo(
       snapshot,
       events: indexed.events,
       checkpoint: indexed.checkpoint,
-      bindings: local.bindings,
+      readModelConfig: local.readModelConfig,
       proofSource: 'actual-anvil-receipts',
       identityAssurance: 'local-cryptographic-fixtures',
       kernel: kernel.snapshot(),

@@ -12,14 +12,14 @@ import {
   SimulationSchema,
 } from '../../packages/schemas/src/index.js';
 import {
-  DeterministicReadModel,
-  verifyFresh,
-} from '../../packages/read-model/src/index.js';
-import {
-  PostgresReadModel,
+  ChainHeadObserver,
+  MemoryProjectionStore,
+  ProjectionReader,
+  Projector,
+  ReadModelAuthorizationAdapter,
   RedisSnapshotCache,
-  type SqlConnection,
-} from '../../packages/read-model/src/storage.js';
+} from '../../packages/read-model/src/index.js';
+import { decodeRow } from '../../packages/read-model/src/storage.js';
 import {
   ExecutionJournal,
   JournaledBroadcaster,
@@ -41,14 +41,13 @@ import {
   harness,
   intent,
   mandate,
-  now,
   type Harness,
 } from '../kernel/fixtures.js';
 import {
-  binding,
   chainId,
-  proof,
-  treasuryToken,
+  config as readModelConfig,
+  groupId,
+  lifecycle,
 } from '../read-model/fixtures.js';
 
 describe('independent foundation release review', () => {
@@ -245,64 +244,69 @@ describe('independent foundation release review', () => {
     }
   });
 
-  it('persisted projection corruption is rejected against canonical event proof', async () => {
-    const replay = new DeterministicReadModel(chainId, treasuryToken, [
-      binding,
-    ]);
-    replay.ingest(proof(), 3);
-    const snapshot = replay.snapshot(binding.groupId, 3, now);
-    let state = snapshot;
-    const db: SqlConnection = {
-      query: async () => {
-        return {
-          rows: [
-            {
-              state_json: state,
-              indexed_through_block: '3',
-              revision: 1,
-              proof_json: proof(),
-              binding_json: {
-                treasuryToken: treasuryToken.toLowerCase(),
-                bindings: [binding],
-              },
-            },
-          ],
-        };
-      },
+  it('persisted projection rows are schema-checked on read instead of trusted', () => {
+    const row = {
+      account: `0x${'1'.repeat(40)}`,
+      asset: `0x${'2'.repeat(40)}`,
+      balance: '900000',
+      baseline_block: '1',
+      baseline_balance: '0',
+      last_block: '3',
     };
-    const stored = new PostgresReadModel(db, chainId, treasuryToken, [binding]);
-    await expect(stored.snapshot(binding.groupId, 3, now)).resolves.toEqual(
-      snapshot,
+    expect(decodeRow('balance', row)).toMatchObject({
+      balance: '900000',
+      last_block: 3,
+    });
+    expect(() => decodeRow('balance', { ...row, balance: '-1' })).toThrow(
+      'INCONSISTENT_PROOF',
     );
-    state = { ...snapshot, treasuryBalance: '999999999' };
-    await expect(stored.snapshot(binding.groupId, 3, now)).rejects.toThrow();
+    expect(() => decodeRow('balance', { ...row, last_block: 'x' })).toThrow(
+      'INCONSISTENT_PROOF',
+    );
   });
 
   it('corrupt cache cannot replace current durable state and stale proof requires successful direct verification', async () => {
-    const replay = new DeterministicReadModel(chainId, treasuryToken, [
-      binding,
-    ]);
-    replay.ingest(proof(), 3);
-    const current = replay.snapshot(binding.groupId, 10, now);
+    const store = new MemoryProjectionStore(chainId);
+    const cfg = readModelConfig();
+    await new Projector(store, cfg).applyWindow({
+      fromBlockExclusive: 99,
+      toBlockInclusive: 110,
+      events: lifecycle(),
+    });
+    const reader = new ProjectionReader(store, cfg);
+    const current = await reader.groupSnapshot(groupId);
     let replacement = '';
     const cache = new RedisSnapshotCache(
       {
-        get: async () =>
-          JSON.stringify({ ...current, treasuryBalance: '999999' }),
-        set: async (_key, value) => {
-          replacement = value;
+        get: async (key) =>
+          key.endsWith(':progress')
+            ? null
+            : JSON.stringify({
+                ...current,
+                group: {
+                  ...current!.group,
+                  treasury: [{ ...current!.group.treasury[0], balance: 'x' }],
+                },
+              }),
+        set: async (key, value) => {
+          if (!key.endsWith(':progress')) replacement = value;
         },
       },
-      { snapshot: async () => current },
+      reader,
     );
-    expect(await cache.snapshot(binding.groupId, 10, now)).toEqual(current);
-    expect(JSON.parse(replacement).treasuryBalance).toBe('900000');
-    await expect(verifyFresh(current, 10, 2)).rejects.toThrow('Stale');
-    await expect(
-      verifyFresh(current, 10, 2, async () => false),
-    ).rejects.toThrow('Stale');
-    await expect(verifyFresh(current, 10, 2, async () => true)).resolves.toBe(
-      'direct',
+    expect(await cache.groupSnapshot(groupId)).toEqual(current);
+    expect(JSON.parse(replacement).group.treasury[0].balance).toBe('750000');
+    const stale = new ReadModelAuthorizationAdapter({
+      source: reader,
+      head: new ChainHeadObserver(
+        { getBlockNumber: async () => 200n, getChainId: async () => chainId },
+        chainId,
+      ),
+      verifier: null,
+      maxLagBlocks: 2,
+    });
+    await expect(stale.readForAuthorization(groupId)).rejects.toThrow(
+      'STALE_INDEX',
     );
   });
 
