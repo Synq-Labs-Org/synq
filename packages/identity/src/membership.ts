@@ -34,6 +34,7 @@ export function groupView(
     account: group.account,
     owners: group.owners,
     threshold: group.threshold,
+    executors: group.executors,
     membershipEpoch: group.membershipEpoch,
     memberships,
   });
@@ -79,7 +80,8 @@ export class MembershipService {
     if (
       new Set(input.owners).size !== input.owners.length ||
       input.threshold > input.owners.length ||
-      input.owners.includes(input.account)
+      input.owners.includes(input.account) ||
+      input.executors.some((e) => input.owners.includes(e))
     )
       throw new IdentityError('INVALID_INPUT', 'owners/threshold');
     const group: GroupRecord = {
@@ -88,6 +90,7 @@ export class MembershipService {
       account: input.account,
       owners: [...input.owners].sort(),
       threshold: input.threshold,
+      executors: [...new Set(input.executors)].sort(),
       membershipEpoch: 0,
       createdAt: this.config.now(),
     };
@@ -160,6 +163,7 @@ export class MembershipService {
   }
 
   async join(input: {
+    groupId: string;
     challengeId: string;
     signature: string;
   }): Promise<MembershipView> {
@@ -169,6 +173,8 @@ export class MembershipService {
     );
     if (!stored || stored.challenge.purpose !== 'JOIN')
       throw new IdentityError('CHALLENGE_NOT_FOUND');
+    if (stored.challenge.groupId !== input.groupId)
+      throw new IdentityError('CHALLENGE_MISMATCH');
     await verifyChallengeSignature(stored.challenge, input.signature);
     return this.store.transaction(async (tx) => {
       const c = await tx.consumeChallenge(input.challengeId, now);
@@ -196,6 +202,7 @@ export class MembershipService {
       });
       await tx.insertMembership(membership);
       await tx.setGroupEpoch(group.groupId, epoch);
+      await tx.invalidatePendingDrafts(group.groupId);
       return membership;
     });
   }
@@ -252,6 +259,14 @@ export class MembershipService {
           ? group.membershipEpoch + 1
           : group.membershipEpoch;
       await tx.setGroupEpoch(group.groupId, epoch);
+      if (target.role === 'APPROVER') {
+        await tx.invalidatePendingDrafts(group.groupId);
+        await tx.revokeDelegationsForMember(
+          group.groupId,
+          target.memberId,
+          now,
+        );
+      }
       return groupView(
         { ...group, membershipEpoch: epoch },
         await tx.listMemberships(group.groupId),

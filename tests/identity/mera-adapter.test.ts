@@ -8,12 +8,15 @@ import {
   signMeraIdentityChallenge,
   MeraAdapterError,
   type MeraCredential,
+  type SignedChallengeRequest,
 } from '../../packages/identity/src/mera-browser.js';
 import {
   meraPrincipalId,
   recoverIdentityChallengeSigner,
 } from '../../packages/identity/src/challenge.js';
 import {
+  approvalAttestationTypedData,
+  challengeRequestTypedData,
   grantPreview,
   grantTypedData,
 } from '../../packages/identity/src/grant.js';
@@ -167,17 +170,21 @@ describe('Mera adapter via injected WebAuthnClient (unit tier; not a real authen
     expect(auth.calls.get).toBe(before);
   });
 
-  describe('grant approval (AUSD-006)', () => {
+  describe('grant approval (AUSD-006, ADR-0011 Amendment 1)', () => {
     async function setup() {
       const auth = new DeterministicAuthenticator('hank');
       const { record } = await enroll(auth);
       const draft = makeDraft();
       const preview = grantPreview(draft, testAusd);
-      const challenge: GrantApprovalChallenge = {
+      const requests: SignedChallengeRequest[] = [];
+      const challengeFor = (
+        request: SignedChallengeRequest,
+      ): GrantApprovalChallenge => ({
         schemaVersion: 1,
-        challengeId: 'g1',
+        challengeId: word(0x6c),
+        challengeNonce: word(0x6d),
         groupId: draft.groupId,
-        memberId: 'member_0' as GrantApprovalChallenge['memberId'],
+        memberId: request.memberId as GrantApprovalChallenge['memberId'],
         principalId:
           record.principalId as GrantApprovalChallenge['principalId'],
         principalKind: 'MERA_HUMAN',
@@ -186,47 +193,72 @@ describe('Mera adapter via injected WebAuthnClient (unit tier; not a real authen
         membershipEpoch: 3,
         issuedAt: 1000,
         expiresAt: 1100,
-      };
-      return { auth, record, draft, preview, challenge };
+      });
+      return { auth, record, draft, preview, requests, challengeFor };
     }
+    type Setup = Awaited<ReturnType<typeof setup>>;
     const sign = (
-      s: Awaited<ReturnType<typeof setup>>,
+      s: Setup,
       over: Partial<Parameters<typeof approveGrantWithMera>[0]> = {},
     ) =>
       approveGrantWithMera(
         {
           record: s.record as MeraCredential,
+          memberId: 'member_0',
           draft: s.draft,
           asset: testAusd,
           confirmedPreview: s.preview,
-          challenge: s.challenge,
+          requestChallenge: async (request) => {
+            s.requests.push(request);
+            return s.challengeFor(request);
+          },
+          now: () => 1000,
           ...over,
         },
         { webAuthnClient: s.auth },
       );
 
-    it('signs exactly the previewed EIP-712 ExecutionGrant', async () => {
+    it('signs the request, the previewed ExecutionGrant and the challenge attestation in one ceremony', async () => {
       const s = await setup();
       expect(s.preview.amount.display).toBe('12.5');
       expect(s.preview.token.symbol).toBe('AUSD');
-      const signature = await sign(s);
-      const signer = await recoverTypedDataAddress({
-        ...grantTypedData(s.draft),
-        signature,
-      });
-      expect(signer.toLowerCase()).toBe(s.record.signer);
+      const before = s.auth.calls.get;
+      const out = await sign(s);
+      expect(s.auth.calls.get - before).toBe(1);
+      const [request] = s.requests;
+      expect(
+        (
+          await recoverTypedDataAddress({
+            ...challengeRequestTypedData(s.draft, request!),
+            signature: request!.requestSignature,
+          })
+        ).toLowerCase(),
+      ).toBe(s.record.signer);
+      expect(
+        (
+          await recoverTypedDataAddress({
+            ...grantTypedData(s.draft),
+            signature: out.grantSignature,
+          })
+        ).toLowerCase(),
+      ).toBe(s.record.signer);
+      expect(
+        (
+          await recoverTypedDataAddress({
+            ...approvalAttestationTypedData(s.draft, out.challenge),
+            signature: out.attestationSignature,
+          })
+        ).toLowerCase(),
+      ).toBe(s.record.signer);
     });
 
     it('blocks signing when the draft recipient differs from the confirmed preview', async () => {
       const s = await setup();
       const swapped = makeDraft({ recipient: `0x${'6'.repeat(40)}` });
       const before = s.auth.calls.get;
-      await expect(
-        sign(s, {
-          draft: swapped,
-          challenge: { ...s.challenge, draftDigest: swapped.digest },
-        }),
-      ).rejects.toMatchObject({ code: 'PREVIEW_MISMATCH' });
+      await expect(sign(s, { draft: swapped })).rejects.toMatchObject({
+        code: 'PREVIEW_MISMATCH',
+      });
       expect(s.auth.calls.get).toBe(before);
     });
 
@@ -244,10 +276,15 @@ describe('Mera adapter via injected WebAuthnClient (unit tier; not a real authen
       });
     });
 
-    it('blocks a challenge bound to another draft digest', async () => {
+    it('refuses to sign the grant when the server returns a challenge for another draft', async () => {
       const s = await setup();
       await expect(
-        sign(s, { challenge: { ...s.challenge, draftDigest: word(5) } }),
+        sign(s, {
+          requestChallenge: async (request) => ({
+            ...s.challengeFor(request),
+            draftDigest: word(5),
+          }),
+        }),
       ).rejects.toMatchObject({ code: 'CHALLENGE_MISMATCH' });
     });
   });

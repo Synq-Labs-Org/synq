@@ -5,6 +5,7 @@ import {
   DelegationPolicySchema,
   EnrollmentChallengeRequestSchema,
   GrantApprovalChallengeSchema,
+  GrantApprovalSubmissionSchema,
   GroupBindingInputSchema,
   GroupViewSchema,
   HashSchema,
@@ -17,6 +18,7 @@ import {
   PrincipalIdSchema,
   PrincipalViewSchema,
   ProviderStatusViewSchema,
+  PublicQuorumViewSchema,
   QuorumViewSchema,
   RecoveryChallengeRequestSchema,
   RecoveryResultSchema,
@@ -37,6 +39,9 @@ import {
   type IdentityStore,
 } from '@synq/identity/server';
 import { route, toApiError, type RouteContext } from './http.js';
+import { TokenBucketLimiter, type RateLimitConfig } from './rate-limit.js';
+
+export const MIN_ADMIN_TOKEN_LENGTH = 32;
 
 export interface MandateReadPort {
   read(
@@ -48,7 +53,10 @@ export type V1Deps = {
   store: IdentityStore;
   config: IdentityConfig;
   adminToken: string | null;
+  executionModules: Readonly<Record<number, string>>;
   localAssets?: readonly Asset[];
+  rateLimit?: RateLimitConfig;
+  trustProxy?: boolean | string;
   mandates?: MandateReadPort;
   privy?: PrivyAdapter;
   dynamic?: DynamicAdapter;
@@ -59,14 +67,24 @@ const GroupParams = z.strictObject({ groupId: IdSchema });
 const PrincipalParams = z.strictObject({ principalId: PrincipalIdSchema });
 
 export function createV1Api(deps: V1Deps) {
-  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 64 * 1024 });
+  if (
+    deps.adminToken !== null &&
+    deps.adminToken.length < MIN_ADMIN_TOKEN_LENGTH
+  )
+    throw new Error(
+      `admin token must be at least ${MIN_ADMIN_TOKEN_LENGTH} characters`,
+    );
+  const app = Fastify({
+    logger: deps.logger ?? false,
+    bodyLimit: 64 * 1024,
+    trustProxy: deps.trustProxy ?? false,
+  });
   const principals = new PrincipalService(deps.store, deps.config);
   const membership = new MembershipService(deps.store, deps.config);
-  const approvals = new GrantApprovalGateway(
-    deps.store,
-    deps.config,
-    deps.localAssets ?? [],
-  );
+  const approvals = new GrantApprovalGateway(deps.store, deps.config, {
+    executionModules: deps.executionModules,
+    localAssets: deps.localAssets ?? [],
+  });
   const delegation = new DelegationService(deps.store, deps.config);
   const privy = deps.privy ?? new PrivyAdapter({});
   const dynamic = deps.dynamic ?? new DynamicAdapter({});
@@ -74,6 +92,9 @@ export function createV1Api(deps: V1Deps) {
     store: deps.store,
     adminToken: deps.adminToken,
     now: principals.config.now,
+    limiter: new TokenBucketLimiter(
+      deps.rateLimit ?? { capacity: 30, refillPerSecond: 1 },
+    ),
   };
 
   app.get('/v1/health', async () => ({ status: 'ok' }));
@@ -156,14 +177,8 @@ export function createV1Api(deps: V1Deps) {
     params: GroupParams,
     body: SignedChallengeInputSchema,
     response: MembershipViewSchema,
-    handler: async ({ params, body }) => {
-      const stored = await deps.store.transaction((tx) =>
-        tx.getChallenge(body.challengeId),
-      );
-      if (stored && stored.challenge.groupId !== params.groupId)
-        throw new IdentityError('CHALLENGE_MISMATCH');
-      return membership.join(body);
-    },
+    handler: ({ params, body }) =>
+      membership.join({ groupId: params.groupId, ...body }),
   });
   route(app, ctx, {
     method: 'POST',
@@ -237,13 +252,29 @@ export function createV1Api(deps: V1Deps) {
   route(app, ctx, {
     method: 'POST',
     url: '/v1/approvals',
-    body: SignedChallengeInputSchema,
+    body: GrantApprovalSubmissionSchema,
     response: VerifiedApprovalSchema,
     handler: ({ body }) => approvals.submit(body),
   });
   route(app, ctx, {
     method: 'GET',
     url: '/v1/approvals/:draftDigest/quorum',
+    params: z.strictObject({ draftDigest: HashSchema }),
+    response: PublicQuorumViewSchema,
+    handler: async ({ params }) => {
+      const quorum = await approvals.quorum(params.draftDigest);
+      return {
+        ...quorum,
+        counted: quorum.counted.map(
+          ({ signature: _signature, ...rest }) => rest,
+        ),
+      };
+    },
+  });
+  route(app, ctx, {
+    method: 'GET',
+    url: '/v1/approvals/:draftDigest/verified',
+    admin: true,
     params: z.strictObject({ draftDigest: HashSchema }),
     response: QuorumViewSchema,
     handler: ({ params }) => approvals.quorum(params.draftDigest),

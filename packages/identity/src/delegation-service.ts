@@ -75,12 +75,16 @@ export class DelegationService {
     return this.store.transaction(async (tx) => {
       const policy = await tx.getDelegationPolicy(input.policyId, true);
       if (!policy) throw new IdentityError('INVALID_INPUT', 'unknown policy');
-      const history = await tx.listDelegationUsage(policy.policyId);
-      const previous = history.find((u) => u.usageId === input.usageId);
+      const previous = await tx.getDelegationUsage(input.usageId);
       if (previous) {
-        if (previous.amount !== input.request.amount)
+        if (
+          previous.policyId !== policy.policyId ||
+          previous.amount !== input.request.amount
+        )
           throw new IdentityError('IDEMPOTENCY_CONFLICT');
-        const others = history.filter((u) => u.usageId !== input.usageId);
+        const others = (await tx.listDelegationUsage(policy.policyId)).filter(
+          (u) => u.usageId !== input.usageId,
+        );
         return {
           ...evaluateDelegation(policy, others, {
             ...input.request,
@@ -89,18 +93,34 @@ export class DelegationService {
           replayed: true,
         };
       }
+      const delegate = await tx.getPrincipal(policy.delegatePrincipalId);
+      if (
+        !delegate ||
+        delegate.status !== 'ACTIVE' ||
+        delegate.kind !== 'PRIVY_DELEGATE'
+      )
+        throw new IdentityError('DELEGATION_DENIED', 'DELEGATE_INACTIVE');
+      const delegator = await activeMembership(
+        tx,
+        policy.groupId,
+        policy.delegatorMemberId,
+      );
+      if (!delegator || delegator.role !== 'APPROVER')
+        throw new IdentityError('DELEGATION_DENIED', 'DELEGATOR_INACTIVE');
+      const history = await tx.listDelegationUsage(policy.policyId);
       const decision = evaluateDelegation(policy, history, {
         ...input.request,
         at,
       });
       if (!decision.allowed)
         throw new IdentityError('DELEGATION_DENIED', decision.reason);
-      await tx.insertDelegationUsage({
+      const recorded = await tx.insertDelegationUsage({
         usageId: input.usageId,
         policyId: policy.policyId,
         amount: input.request.amount,
         at,
       });
+      if (!recorded) throw new IdentityError('IDEMPOTENCY_CONFLICT');
       return { ...decision, replayed: false };
     });
   }

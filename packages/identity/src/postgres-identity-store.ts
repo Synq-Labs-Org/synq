@@ -38,6 +38,7 @@ const UNIQUE_CODES: Record<string, IdentityErrorCode> = {
   identity_membership_active_signer: 'DUPLICATE_MEMBERSHIP',
   identity_grant_draft_pkey: 'DRAFT_EXISTS',
   identity_grant_draft_intent_key: 'DRAFT_EXISTS',
+  identity_grant_draft_pending_intent: 'DRAFT_EXISTS',
   identity_approval_challenge_key: 'ALREADY_APPROVED',
   identity_approval_member_key: 'ALREADY_APPROVED',
   identity_approval_signer_key: 'ALREADY_APPROVED',
@@ -79,6 +80,9 @@ function groupRow(r: Row): GroupRecord {
     account: String(r.account) as `0x${string}`,
     owners: (r.owners as string[]).map((o) => o as `0x${string}`),
     threshold: Number(r.threshold),
+    executors: ((r.executors as string[] | null) ?? []).map(
+      (e) => e as `0x${string}`,
+    ),
     membershipEpoch: Number(r.membership_epoch),
     createdAt: Number(r.created_at),
   };
@@ -98,19 +102,42 @@ function membershipRow(r: Row): MembershipView {
   };
 }
 
+const MIGRATIONS = ['001-identity', '002-approval-binding'] as const;
+
 export class PostgresIdentityStore implements IdentityStore {
   constructor(readonly pool: PgPoolLike) {}
   async migrate(): Promise<void> {
-    const sql = await readFile(
-      new URL('../sql/001-identity.sql', import.meta.url),
-      'utf8',
-    );
     const client = await this.pool.connect();
     try {
       await client.query('SELECT pg_advisory_lock(hashtext($1))', [
         'synq_identity_migrate',
       ]);
-      await client.query(sql);
+      await client.query(
+        'CREATE TABLE IF NOT EXISTS identity_schema_migration (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())',
+      );
+      for (const version of MIGRATIONS) {
+        const done = await client.query(
+          'SELECT 1 FROM identity_schema_migration WHERE version=$1',
+          [version],
+        );
+        if (done.rows.length) continue;
+        const sql = await readFile(
+          new URL(`../sql/${version}.sql`, import.meta.url),
+          'utf8',
+        );
+        await client.query('BEGIN');
+        try {
+          await client.query(sql);
+          await client.query(
+            'INSERT INTO identity_schema_migration(version) VALUES($1)',
+            [version],
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      }
     } finally {
       await client.query('SELECT pg_advisory_unlock(hashtext($1))', [
         'synq_identity_migrate',
@@ -201,7 +228,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
     },
     async insertGroup(g) {
       await q(
-        'INSERT INTO identity_group(group_id,chain_id,account,owners,threshold,membership_epoch,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',
+        'INSERT INTO identity_group(group_id,chain_id,account,owners,threshold,membership_epoch,created_at,executors) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
         [
           g.groupId,
           g.chainId,
@@ -210,6 +237,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
           g.threshold,
           g.membershipEpoch,
           g.createdAt,
+          g.executors,
         ],
       );
     },
@@ -274,7 +302,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
     },
     async insertDraft(r) {
       await q(
-        'INSERT INTO identity_grant_draft(draft_digest,intent_hash,group_id,draft_json,asset_json,created_at) VALUES($1,$2,$3,$4,$5,$6)',
+        'INSERT INTO identity_grant_draft(draft_digest,intent_hash,group_id,draft_json,asset_json,created_at,status) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [
           r.draft.digest,
           r.draft.grant.intentHash,
@@ -282,6 +310,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
           JSON.stringify(r.draft),
           JSON.stringify(r.asset),
           r.createdAt,
+          r.status,
         ],
       );
     },
@@ -294,10 +323,18 @@ function postgresTx(db: PgClientLike): IdentityTx {
     },
     async getDraftByIntent(intentHash) {
       const [r] = await q(
-        'SELECT * FROM identity_grant_draft WHERE intent_hash=$1',
+        "SELECT * FROM identity_grant_draft WHERE intent_hash=$1 ORDER BY (status='PENDING') DESC, created_at DESC, draft_digest LIMIT 1",
         [intentHash],
       );
       return r ? draftRow(r) : null;
+    },
+    async invalidatePendingDrafts(groupId) {
+      return (
+        await q(
+          "UPDATE identity_grant_draft SET status='INVALIDATED' WHERE group_id=$1 AND status='PENDING' RETURNING draft_digest",
+          [groupId],
+        )
+      ).length;
     },
     async insertGrantChallenge(c) {
       await q(
@@ -325,9 +362,9 @@ function postgresTx(db: PgClientLike): IdentityTx {
       if (r) return GrantApprovalChallengeSchema.parse(r.challenge_json);
       return consumable(await this.getGrantChallenge(id), now);
     },
-    async insertApproval(a) {
+    async insertApproval(a, attestationSignature) {
       await q(
-        'INSERT INTO identity_verified_approval(approval_id,challenge_id,draft_digest,member_id,signer,membership_epoch,approval_json,verified_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+        'INSERT INTO identity_verified_approval(approval_id,challenge_id,draft_digest,member_id,signer,membership_epoch,approval_json,verified_at,attestation_signature) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
         [
           a.approvalId,
           a.challengeId,
@@ -337,6 +374,7 @@ function postgresTx(db: PgClientLike): IdentityTx {
           a.membershipEpoch,
           JSON.stringify(a),
           a.verifiedAt,
+          attestationSignature,
         ],
       );
     },
@@ -348,10 +386,10 @@ function postgresTx(db: PgClientLike): IdentityTx {
         )
       ).map((r) => VerifiedApprovalSchema.parse(r.approval_json));
     },
-    async claimIdempotency(r: IdempotencyRecord) {
+    async claimIdempotency(r: IdempotencyRecord, staleBefore: number) {
       const inserted = await q(
-        'INSERT INTO identity_idempotency(scope,key,request_hash,state,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING key',
-        [r.scope, r.key, r.requestHash, 'PENDING', r.createdAt],
+        "INSERT INTO identity_idempotency(scope,key,request_hash,state,created_at) VALUES($1,$2,$3,'PENDING',$4) ON CONFLICT (scope,key) DO UPDATE SET created_at=EXCLUDED.created_at WHERE identity_idempotency.state='PENDING' AND identity_idempotency.created_at<$5 AND identity_idempotency.request_hash=EXCLUDED.request_hash RETURNING key",
+        [r.scope, r.key, r.requestHash, r.createdAt, staleBefore],
       );
       if (inserted.length) return null;
       const [e] = await q(
@@ -426,6 +464,28 @@ function postgresTx(db: PgClientLike): IdentityTx {
         at: Number(r.at),
       }));
     },
+    async getDelegationUsage(usageId) {
+      const [r] = await q(
+        'SELECT usage_id,policy_id,amount::text AS amount,at FROM identity_delegation_usage WHERE usage_id=$1',
+        [usageId],
+      );
+      return r
+        ? {
+            usageId: String(r.usage_id),
+            policyId: String(r.policy_id),
+            amount: String(r.amount),
+            at: Number(r.at),
+          }
+        : null;
+    },
+    async revokeDelegationsForMember(groupId, memberId, now) {
+      return (
+        await q(
+          "UPDATE identity_delegation_policy SET revoked_at=$3 WHERE group_id=$1 AND policy_json->>'delegatorMemberId'=$2 AND revoked_at IS NULL RETURNING policy_id",
+          [groupId, memberId, now],
+        )
+      ).length;
+    },
     async insertDelegationUsage(u) {
       const rows = await q(
         'INSERT INTO identity_delegation_usage(usage_id,policy_id,amount,at) VALUES($1,$2,$3,$4) ON CONFLICT (usage_id) DO NOTHING RETURNING usage_id',
@@ -439,6 +499,7 @@ function draftRow(r: Row): DraftRecord {
   return {
     draft: r.draft_json as DraftRecord['draft'],
     asset: r.asset_json as DraftRecord['asset'],
+    status: r.status as DraftRecord['status'],
     createdAt: Number(r.created_at),
   };
 }

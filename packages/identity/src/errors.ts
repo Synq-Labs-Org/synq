@@ -22,6 +22,8 @@ export type IdentityErrorCode =
   | 'READ_MODEL_UNAVAILABLE'
   | 'DRAFT_NOT_FOUND'
   | 'DRAFT_INVALID'
+  | 'DRAFT_INVALIDATED'
+  | 'RATE_LIMITED'
   | 'ALREADY_APPROVED'
   | 'DELEGATION_DENIED'
   | 'PROVIDER_BLOCKED'
@@ -53,6 +55,9 @@ const SAFE_MESSAGES: Record<IdentityErrorCode, string> = {
   READ_MODEL_UNAVAILABLE: 'Read model unavailable',
   DRAFT_NOT_FOUND: 'Grant draft not found',
   DRAFT_INVALID: 'Grant draft is inconsistent',
+  DRAFT_INVALIDATED:
+    'Grant draft was invalidated by a membership change; a new draft is required',
+  RATE_LIMITED: 'Too many requests',
   ALREADY_APPROVED: 'Member already approved this draft',
   DELEGATION_DENIED: 'Delegation policy denies this action',
   PROVIDER_BLOCKED: 'Provider credentials are not configured',

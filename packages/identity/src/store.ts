@@ -28,13 +28,16 @@ export type GroupRecord = {
   account: `0x${string}`;
   owners: `0x${string}`[];
   threshold: number;
+  executors: `0x${string}`[];
   membershipEpoch: number;
   createdAt: number;
 };
 export type MembershipRecord = MembershipView;
+export type DraftStatus = 'PENDING' | 'INVALIDATED';
 export type DraftRecord = {
   draft: GrantDraft;
   asset: Asset;
+  status: DraftStatus;
   createdAt: number;
 };
 export type IdempotencyRecord = {
@@ -77,6 +80,7 @@ export interface IdentityTx {
   insertDraft(record: DraftRecord): Promise<void>;
   getDraft(digest: string): Promise<DraftRecord | null>;
   getDraftByIntent(intentHash: string): Promise<DraftRecord | null>;
+  invalidatePendingDrafts(groupId: string): Promise<number>;
   insertGrantChallenge(challenge: GrantApprovalChallenge): Promise<void>;
   getGrantChallenge(id: string): Promise<{
     challenge: GrantApprovalChallenge;
@@ -86,10 +90,14 @@ export interface IdentityTx {
     id: string,
     now: number,
   ): Promise<GrantApprovalChallenge>;
-  insertApproval(approval: VerifiedApproval): Promise<void>;
+  insertApproval(
+    approval: VerifiedApproval,
+    attestationSignature: string,
+  ): Promise<void>;
   listApprovals(draftDigest: string): Promise<VerifiedApproval[]>;
   claimIdempotency(
     record: IdempotencyRecord,
+    staleBefore: number,
   ): Promise<IdempotencyRecord | null>;
   completeIdempotency(
     scope: string,
@@ -105,6 +113,12 @@ export interface IdentityTx {
   ): Promise<DelegationPolicy | null>;
   revokeDelegationPolicy(id: string, now: number): Promise<void>;
   listDelegationUsage(policyId: string): Promise<DelegationUsage[]>;
+  getDelegationUsage(usageId: string): Promise<DelegationUsage | null>;
+  revokeDelegationsForMember(
+    groupId: string,
+    memberId: string,
+    now: number,
+  ): Promise<number>;
   insertDelegationUsage(usage: DelegationUsage): Promise<boolean>;
 }
 export interface IdentityStore {
@@ -125,6 +139,7 @@ type MemoryState = {
     { challenge: GrantApprovalChallenge; consumedAt: number | null }
   >;
   approvals: VerifiedApproval[];
+  attestations: Map<string, string>;
   idempotency: Map<string, IdempotencyRecord>;
   delegations: Map<string, DelegationPolicy>;
   usage: DelegationUsage[];
@@ -137,6 +152,7 @@ const emptyState = (): MemoryState => ({
   drafts: new Map(),
   grantChallenges: new Map(),
   approvals: [],
+  attestations: new Map(),
   idempotency: new Map(),
   delegations: new Map(),
   usage: [],
@@ -254,7 +270,9 @@ function memoryTx(s: MemoryState): IdentityTx {
       if (
         s.drafts.has(r.draft.digest) ||
         [...s.drafts.values()].some(
-          (x) => x.draft.grant.intentHash === r.draft.grant.intentHash,
+          (x) =>
+            x.status === 'PENDING' &&
+            x.draft.grant.intentHash === r.draft.grant.intentHash,
         )
       )
         throw new IdentityError('DRAFT_EXISTS');
@@ -264,11 +282,21 @@ function memoryTx(s: MemoryState): IdentityTx {
       return s.drafts.get(digest) ?? null;
     },
     async getDraftByIntent(intentHash) {
-      return (
-        [...s.drafts.values()].find(
-          (x) => x.draft.grant.intentHash === intentHash,
-        ) ?? null
+      const matches = [...s.drafts.values()].filter(
+        (x) => x.draft.grant.intentHash === intentHash,
       );
+      return (
+        matches.find((x) => x.status === 'PENDING') ?? matches.at(-1) ?? null
+      );
+    },
+    async invalidatePendingDrafts(groupId) {
+      let n = 0;
+      for (const d of s.drafts.values())
+        if (d.draft.groupId === groupId && d.status === 'PENDING') {
+          d.status = 'INVALIDATED';
+          n++;
+        }
+      return n;
     },
     async insertGrantChallenge(c) {
       if (s.grantChallenges.has(c.challengeId))
@@ -284,26 +312,34 @@ function memoryTx(s: MemoryState): IdentityTx {
       row!.consumedAt = now;
       return challenge;
     },
-    async insertApproval(a) {
+    async insertApproval(a, attestationSignature) {
       if (
         s.approvals.some(
           (x) =>
             x.challengeId === a.challengeId ||
             (x.draftDigest === a.draftDigest &&
-              x.membershipEpoch === a.membershipEpoch &&
               (x.memberId === a.memberId || x.signer === a.signer)),
         )
       )
         throw new IdentityError('ALREADY_APPROVED');
       s.approvals.push(a);
+      s.attestations.set(a.approvalId, attestationSignature);
     },
     async listApprovals(digest) {
       return s.approvals.filter((a) => a.draftDigest === digest);
     },
-    async claimIdempotency(r) {
+    async claimIdempotency(r, staleBefore) {
       const id = `${r.scope}\u0000${r.key}`;
       const existing = s.idempotency.get(id);
-      if (existing) return existing;
+      if (
+        existing &&
+        !(
+          existing.state === 'PENDING' &&
+          existing.createdAt < staleBefore &&
+          existing.requestHash === r.requestHash
+        )
+      )
+        return existing;
       s.idempotency.set(id, r);
       return null;
     },
@@ -329,6 +365,22 @@ function memoryTx(s: MemoryState): IdentityTx {
     },
     async listDelegationUsage(policyId) {
       return s.usage.filter((u) => u.policyId === policyId);
+    },
+    async getDelegationUsage(usageId) {
+      return s.usage.find((u) => u.usageId === usageId) ?? null;
+    },
+    async revokeDelegationsForMember(groupId, memberId, now) {
+      let n = 0;
+      for (const p of s.delegations.values())
+        if (
+          p.groupId === groupId &&
+          p.delegatorMemberId === memberId &&
+          p.revokedAt === null
+        ) {
+          p.revokedAt = now;
+          n++;
+        }
+      return n;
     },
     async insertDelegationUsage(u) {
       if (s.usage.some((x) => x.usageId === u.usageId)) return false;

@@ -50,6 +50,7 @@ it('serves /v1/mandates from the indexed read model and labels head verification
       origin: 'http://localhost:3100',
     },
     adminToken: null,
+    executionModules: {},
     mandates: mandateReader(new ProofQueryService(path)),
   });
   try {

@@ -109,24 +109,34 @@ export async function approvalSignature(
   memberId: string,
   draft: GrantDraft,
   preview: GrantPreview,
+  now: () => number = () => 1000,
 ) {
   const { call } = client(app);
-  const c = await call('POST', '/v1/approvals/challenges', {
-    draftDigest: draft.digest,
-    memberId,
-  });
-  if (c.status !== 201)
-    return { challenge: null, signature: null, response: c };
-  const challenge = c.body as unknown as GrantApprovalChallenge;
-  const signature = await approveGrantWithMera(
+  return approveGrantWithMera(
     {
       record: h.record as MeraCredential,
+      memberId,
       draft,
       asset: testAusd,
       confirmedPreview: preview,
-      challenge,
+      requestChallenge: async (request) => {
+        const c = await call('POST', '/v1/approvals/challenges', request);
+        if (c.status !== 201)
+          throw Object.assign(new Error(String(c.body.error)), {
+            code: c.body.error,
+            status: c.status,
+          });
+        return c.body as unknown as GrantApprovalChallenge;
+      },
+      now,
     },
     { webAuthnClient: h.auth },
   );
-  return { challenge, signature, response: c };
 }
+export type SignedApproval = Awaited<ReturnType<typeof approvalSignature>>;
+export const submission = (x: SignedApproval) => ({
+  challengeId: x.challenge.challengeId,
+  grantSignature: x.grantSignature,
+  attestationSignature: x.attestationSignature,
+});
+export const MODULE = '0x0000000000000000000000000000000000005151';

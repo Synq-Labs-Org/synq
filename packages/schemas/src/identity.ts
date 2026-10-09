@@ -92,12 +92,17 @@ export const MembershipViewSchema = z.strictObject({
 });
 export type MembershipView = z.output<typeof MembershipViewSchema>;
 
+const OnchainGroupIdSchema = z
+  .string()
+  .regex(/^0x[0-9a-f]{64}$/, 'on-chain bytes32 group id (lowercase hex)')
+  .pipe(GroupIdSchema);
 export const GroupBindingInputSchema = z.strictObject({
-  groupId: GroupIdSchema,
+  groupId: OnchainGroupIdSchema,
   chainId: ChainIdSchema,
   account: AddressSchema,
   owners: z.array(AddressSchema).min(1).max(32),
   threshold: z.number().int().positive(),
+  executors: z.array(AddressSchema).max(16).default([]),
 });
 export const GroupViewSchema = z.strictObject({
   groupId: GroupIdSchema,
@@ -105,6 +110,7 @@ export const GroupViewSchema = z.strictObject({
   account: AddressSchema,
   owners: z.array(AddressSchema),
   threshold: z.number().int().positive(),
+  executors: z.array(AddressSchema),
   membershipEpoch: z.number().int().nonnegative(),
   memberships: z.array(MembershipViewSchema),
 });
@@ -127,6 +133,9 @@ export const GrantPreviewSchema = z.strictObject({
   mandateId: HashSchema,
   mandateVersion: AmountSchema,
   nonce: AmountSchema,
+  executor: AddressSchema,
+  verifyingContract: AddressSchema,
+  calldataHash: HashSchema,
   intentHash: HashSchema,
   digest: HashSchema,
 });
@@ -134,7 +143,7 @@ export type GrantPreview = z.output<typeof GrantPreviewSchema>;
 
 export const PendingIntentViewSchema = z.strictObject({
   intentId: HashSchema,
-  status: z.enum(['PENDING_APPROVAL', 'APPROVED']),
+  status: z.enum(['PENDING_APPROVAL', 'APPROVED', 'INVALIDATED']),
   draft: GrantDraftSchema,
   asset: AssetSchema,
   preview: GrantPreviewSchema,
@@ -143,7 +152,8 @@ export type PendingIntentView = z.output<typeof PendingIntentViewSchema>;
 
 export const GrantApprovalChallengeSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  challengeId: IdSchema,
+  challengeId: HashSchema,
+  challengeNonce: HashSchema,
   groupId: GroupIdSchema,
   memberId: MemberIdSchema,
   principalId: PrincipalIdSchema,
@@ -161,12 +171,20 @@ export type GrantApprovalChallenge = z.output<
 export const QuorumViewSchema = z.strictObject({
   draftDigest: HashSchema,
   groupId: GroupIdSchema,
+  draftStatus: z.enum(['PENDING', 'INVALIDATED']),
   required: z.number().int().positive(),
   membershipEpoch: z.number().int().nonnegative(),
   counted: z.array(VerifiedApprovalSchema),
   satisfied: z.boolean(),
 });
 export type QuorumView = z.output<typeof QuorumViewSchema>;
+export const PublicApprovalSchema = VerifiedApprovalSchema.omit({
+  signature: true,
+});
+export const PublicQuorumViewSchema = QuorumViewSchema.extend({
+  counted: z.array(PublicApprovalSchema),
+});
+export type PublicQuorumView = z.output<typeof PublicQuorumViewSchema>;
 
 export const DelegationPolicySchema = z
   .strictObject({
@@ -198,6 +216,11 @@ export type DelegationPolicy = z.output<typeof DelegationPolicySchema>;
 export const SignedChallengeInputSchema = z.strictObject({
   challengeId: IdSchema,
   signature: SignatureSchema,
+});
+export const GrantApprovalSubmissionSchema = z.strictObject({
+  challengeId: HashSchema,
+  grantSignature: SignatureSchema,
+  attestationSignature: SignatureSchema,
 });
 export const ApiErrorSchema = z.strictObject({
   error: z.string(),
@@ -232,7 +255,13 @@ export const RegisterDraftRequestSchema = z.strictObject({
 export const ApprovalChallengeRequestSchema = z.strictObject({
   draftDigest: HashSchema,
   memberId: MemberIdSchema,
+  principalId: PrincipalIdSchema,
+  requestedAt: TimestampSchema,
+  requestSignature: SignatureSchema,
 });
+export type ApprovalChallengeRequest = z.output<
+  typeof ApprovalChallengeRequestSchema
+>;
 export const MandateViewSchema = z.strictObject({
   groupId: HashSchema,
   mandateId: HashSchema,

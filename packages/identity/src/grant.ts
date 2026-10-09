@@ -5,6 +5,7 @@ import {
   GrantPreviewSchema,
   type Asset,
   type GrantDraft,
+  type GrantApprovalChallenge,
   type GrantPreview,
 } from '@synq/schemas';
 import { IdentityError } from './errors.js';
@@ -119,6 +120,9 @@ export function grantPreview(
     mandateId: grant.mandateId,
     mandateVersion: grant.mandateVersion,
     nonce: grant.nonce,
+    executor: grant.executor,
+    verifyingContract: draft.domain.verifyingContract,
+    calldataHash: grant.calldataHash,
     intentHash: grant.intentHash,
     digest: draft.digest,
   });
@@ -138,4 +142,70 @@ function sortKeys(value: unknown): unknown {
         .map(([k, v]) => [k, sortKeys(v)]),
     );
   return value;
+}
+
+export function synqIdentityDomain(draft: GrantDraft) {
+  const { domain } = GrantDraftSchema.parse(draft);
+  return {
+    name: 'SynqIdentity',
+    version: '1',
+    chainId: BigInt(domain.chainId),
+    verifyingContract: domain.verifyingContract as Address,
+  } as const;
+}
+
+export const APPROVAL_ATTESTATION_TYPES = {
+  SynqApprovalAttestation: [
+    { name: 'challengeId', type: 'bytes32' },
+    { name: 'challengeNonce', type: 'bytes32' },
+    { name: 'draftDigest', type: 'bytes32' },
+    { name: 'groupId', type: 'bytes32' },
+    { name: 'membershipEpoch', type: 'uint256' },
+    { name: 'expiresAt', type: 'uint256' },
+  ],
+} as const;
+
+export function approvalAttestationTypedData(
+  draft: GrantDraft,
+  challenge: GrantApprovalChallenge,
+) {
+  return {
+    domain: synqIdentityDomain(draft),
+    types: APPROVAL_ATTESTATION_TYPES,
+    primaryType: 'SynqApprovalAttestation' as const,
+    message: {
+      challengeId: challenge.challengeId as Hex,
+      challengeNonce: challenge.challengeNonce as Hex,
+      draftDigest: challenge.draftDigest as Hex,
+      groupId: draft.grant.groupId as Hex,
+      membershipEpoch: BigInt(challenge.membershipEpoch),
+      expiresAt: BigInt(challenge.expiresAt),
+    },
+  };
+}
+
+export const CHALLENGE_REQUEST_TYPES = {
+  SynqChallengeRequest: [
+    { name: 'draftDigest', type: 'bytes32' },
+    { name: 'principalId', type: 'string' },
+    { name: 'memberId', type: 'string' },
+    { name: 'requestedAt', type: 'uint256' },
+  ],
+} as const;
+
+export function challengeRequestTypedData(
+  draft: GrantDraft,
+  request: { principalId: string; memberId: string; requestedAt: number },
+) {
+  return {
+    domain: synqIdentityDomain(draft),
+    types: CHALLENGE_REQUEST_TYPES,
+    primaryType: 'SynqChallengeRequest' as const,
+    message: {
+      draftDigest: draft.digest as Hex,
+      principalId: request.principalId,
+      memberId: request.memberId,
+      requestedAt: BigInt(request.requestedAt),
+    },
+  };
 }

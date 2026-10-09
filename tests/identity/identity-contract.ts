@@ -7,7 +7,10 @@ import {
   PrincipalService,
   StoreApprovalLedger,
   StoreMembershipDirectory,
+  approvalAttestationTypedData,
+  challengeRequestTypedData,
   grantPreview,
+  grantTypedData,
   identityChallengeTypedData,
   type IdentityConfig,
   type IdentityStore,
@@ -36,6 +39,7 @@ export type StoreHarness = {
 const rpId = 'synq.test';
 const origin = 'https://synq.test';
 const groupId = word(0xa1);
+const MODULE = addr(0x5151);
 const account = addr(0xacc);
 
 export function identityContract(label: string, harness: StoreHarness) {
@@ -52,7 +56,9 @@ export function identityContract(label: string, harness: StoreHarness) {
     const services = (s = store) => ({
       principals: new PrincipalService(s, config()),
       membership: new MembershipService(s, config()),
-      approvals: new GrantApprovalGateway(s, config()),
+      approvals: new GrantApprovalGateway(s, config(), {
+        executionModules: { 10143: MODULE },
+      }),
       delegation: new DelegationService(s, config()),
     });
     beforeEach(async () => {
@@ -99,6 +105,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         webAuthnClient: h.auth,
       });
       return s.membership.join({
+        groupId,
         challengeId: challenge.challengeId,
         signature,
       });
@@ -129,21 +136,47 @@ export function identityContract(label: string, harness: StoreHarness) {
       draft: GrantDraft,
       asset: Asset = testAusd,
     ) {
-      const challenge = await s.approvals.issueChallenge({
-        draftDigest: draft.digest,
-        memberId,
-      });
-      const signature = await approveGrantWithMera(
+      return approveGrantWithMera(
         {
           record: h.record as MeraCredential,
+          memberId,
           draft,
           asset,
           confirmedPreview: grantPreview(draft, asset),
-          challenge,
+          requestChallenge: (request) => s.approvals.issueChallenge(request),
+          now: () => clock,
         },
         { webAuthnClient: h.auth },
       );
-      return { challenge, signature };
+    }
+    const submit = (
+      s: ReturnType<typeof services>,
+      x: Awaited<ReturnType<typeof approve>>,
+      over: Partial<{
+        grantSignature: string;
+        attestationSignature: string;
+      }> = {},
+    ) =>
+      s.approvals.submit({
+        challengeId: x.challenge.challengeId,
+        grantSignature: x.grantSignature,
+        attestationSignature: x.attestationSignature,
+        ...over,
+      });
+    async function keyRequest(
+      key: (typeof fixtureAccounts)[number],
+      draft: GrantDraft,
+      memberId: string,
+      principalId: string,
+    ) {
+      const request = { principalId, memberId, requestedAt: clock };
+      return {
+        ...request,
+        draftDigest: draft.digest,
+        requestSignature: await key.signTypedData(
+          challengeRequestTypedData(draft, request),
+        ),
+      };
     }
 
     async function operatorPrincipal(s = services(), n = 0) {
@@ -341,6 +374,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         });
         await expect(
           s.membership.join({
+            groupId,
             challengeId: staleA.challengeId,
             signature: sig,
           }),
@@ -398,7 +432,7 @@ export function identityContract(label: string, harness: StoreHarness) {
       });
     });
 
-    describe('grant approvals (ADR-0011)', () => {
+    describe('grant approvals (ADR-0011 with Amendment 1)', () => {
       it('reaches 2-of-3 only with distinct members and attributable signers', async () => {
         const { s, humans } = await trio();
         const draft = makeDraft();
@@ -410,12 +444,15 @@ export function identityContract(label: string, harness: StoreHarness) {
         expect(pending.preview).toMatchObject({
           recipient: addr(0xbeef),
           amount: { display: '12.5' },
+          executor: addr(0xe1),
+          verifyingContract: MODULE,
+          calldataHash: word(0xca11),
+          nonce: '7',
         });
-        const a = await approve(s, humans[0]!, 'member_0', draft);
-        const first = await s.approvals.submit({
-          challengeId: a.challenge.challengeId,
-          signature: a.signature,
-        });
+        const first = await submit(
+          s,
+          await approve(s, humans[0]!, 'member_0', draft),
+        );
         expect(first).toMatchObject({
           principalKind: 'MERA_HUMAN',
           signer: humans[0]!.record.signer,
@@ -424,12 +461,10 @@ export function identityContract(label: string, harness: StoreHarness) {
         expect((await s.approvals.quorum(draft.digest)).satisfied).toBe(false);
         await expect(
           approve(s, humans[0]!, 'member_0', draft),
-        ).rejects.toMatchObject({ code: 'ALREADY_APPROVED' });
-        const b = await approve(s, humans[2]!, 'member_2', draft);
-        await s.approvals.submit({
-          challengeId: b.challenge.challengeId,
-          signature: b.signature,
+        ).rejects.toMatchObject({
+          code: 'ALREADY_APPROVED',
         });
+        await submit(s, await approve(s, humans[2]!, 'member_2', draft));
         const quorum = await s.approvals.quorum(draft.digest);
         expect(quorum.satisfied).toBe(true);
         expect(new Set(quorum.counted.map((x) => x.signer))).toEqual(
@@ -440,6 +475,264 @@ export function identityContract(label: string, harness: StoreHarness) {
         ).toBe('APPROVED');
       });
 
+      it('binds each approval to its challenge with a second, attestation signature', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const a = await approve(s, humans[0]!, 'member_0', draft);
+        const b = await approve(s, humans[1]!, 'member_1', draft);
+        await expect(
+          submit(s, a, { attestationSignature: b.attestationSignature }),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+        await expect(
+          submit(s, a, { attestationSignature: a.grantSignature }),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+        await expect(
+          submit(s, b, {
+            grantSignature: a.grantSignature,
+            attestationSignature: a.attestationSignature,
+          }),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+        await submit(s, a);
+        await submit(s, b);
+        expect((await s.approvals.quorum(draft.digest)).satisfied).toBe(true);
+      });
+
+      it('regression: harvested signatures cannot restore quorum after an epoch change (critic repro A)', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const a = await approve(s, humans[0]!, 'member_0', draft);
+        const c = await approve(s, humans[2]!, 'member_2', draft);
+        await submit(s, a);
+        await submit(s, c);
+        const harvested = (await s.approvals.quorum(draft.digest)).counted;
+        expect(harvested).toHaveLength(2);
+        await s.membership.revoke({ groupId, memberId: 'member_1' });
+        const after = await s.approvals.quorum(draft.digest);
+        expect(after).toMatchObject({
+          draftStatus: 'INVALIDATED',
+          satisfied: false,
+          counted: [],
+        });
+        expect(
+          (await s.approvals.pendingIntent(draft.grant.intentHash)).status,
+        ).toBe('INVALIDATED');
+        const callsBefore = humans.map((h) => ({ ...h.auth.calls }));
+        for (const approval of harvested)
+          await expect(
+            s.approvals.issueChallenge({
+              draftDigest: draft.digest,
+              memberId: approval.memberId,
+              principalId: approval.principalId,
+              requestedAt: clock,
+              requestSignature: approval.signature,
+            }),
+          ).rejects.toMatchObject({ code: 'DRAFT_INVALIDATED' });
+        await expect(submit(s, a)).rejects.toMatchObject({
+          code: 'DRAFT_INVALIDATED',
+        });
+        const redraft = makeDraft({ nonce: '8' });
+        await s.approvals.registerDraft({ draft: redraft, asset: testAusd });
+        for (const approval of harvested)
+          await expect(
+            s.approvals.issueChallenge({
+              draftDigest: redraft.digest,
+              memberId: approval.memberId,
+              principalId: approval.principalId,
+              requestedAt: clock,
+              requestSignature: approval.signature,
+            }),
+          ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+        expect(humans.map((h) => ({ ...h.auth.calls }))).toEqual(callsBefore);
+        expect((await s.approvals.quorum(redraft.digest)).counted).toHaveLength(
+          0,
+        );
+        await submit(s, await approve(s, humans[0]!, 'member_0', redraft));
+        await submit(s, await approve(s, humans[2]!, 'member_2', redraft));
+        expect((await s.approvals.quorum(redraft.digest)).satisfied).toBe(true);
+      });
+
+      it('rejects unsigned, stale and impersonated challenge requests', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const alice = humans[0]!.record.principalId;
+        const forged = await keyRequest(
+          fixtureAccounts[0]!,
+          draft,
+          'member_0',
+          alice,
+        );
+        await expect(s.approvals.issueChallenge(forged)).rejects.toMatchObject({
+          code: 'SIGNATURE_MISMATCH',
+        });
+        clock += 121;
+        await expect(s.approvals.issueChallenge(forged)).rejects.toMatchObject({
+          code: 'CHALLENGE_EXPIRED',
+        });
+        clock -= 121;
+        await expect(
+          approveGrantWithMera(
+            {
+              record: humans[1]!.record,
+              memberId: 'member_0',
+              draft,
+              asset: testAusd,
+              confirmedPreview: grantPreview(draft, testAusd),
+              requestChallenge: (request) =>
+                s.approvals.issueChallenge(request),
+              now: () => clock,
+            },
+            { webAuthnClient: humans[1]!.auth },
+          ),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+      });
+
+      it('rejects challenge reuse, expiry and impersonation (SEC-008/SEC-020)', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        const forAlice = await approve(s, humans[0]!, 'member_0', draft);
+        const bobSignsAsAlice = await approveGrantWithMera(
+          {
+            record: humans[1]!.record,
+            memberId: 'member_0',
+            draft,
+            asset: testAusd,
+            confirmedPreview: grantPreview(draft, testAusd),
+            requestChallenge: async () => ({
+              ...forAlice.challenge,
+              signer: humans[1]!.record.signer,
+              principalId: humans[1]!.view.principalId,
+            }),
+            now: () => clock,
+          },
+          { webAuthnClient: humans[1]!.auth },
+        );
+        await expect(
+          submit(s, forAlice, {
+            grantSignature: bobSignsAsAlice.grantSignature,
+            attestationSignature: bobSignsAsAlice.attestationSignature,
+          }),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+        const ok = await approve(s, humans[1]!, 'member_1', draft);
+        clock += 121;
+        await expect(submit(s, ok)).rejects.toMatchObject({
+          code: 'CHALLENGE_EXPIRED',
+        });
+        clock -= 121;
+        await submit(s, ok);
+        await expect(submit(s, ok)).rejects.toMatchObject({
+          code: 'CHALLENGE_CONSUMED',
+        });
+        expect((await s.approvals.quorum(draft.digest)).counted).toHaveLength(
+          1,
+        );
+      });
+
+      it('revocation invalidates the draft, outstanding challenges and counted approvals; a new draft is required', async () => {
+        const { s, humans } = await trio();
+        const draft = makeDraft();
+        await s.approvals.registerDraft({ draft, asset: testAusd });
+        await submit(s, await approve(s, humans[0]!, 'member_0', draft));
+        const b = await approve(s, humans[1]!, 'member_1', draft);
+        const group = await s.membership.revoke({
+          groupId,
+          memberId: 'member_1',
+        });
+        expect(group.membershipEpoch).toBe(4);
+        await expect(submit(s, b)).rejects.toMatchObject({
+          code: 'DRAFT_INVALIDATED',
+        });
+        await expect(
+          approve(s, humans[0]!, 'member_0', draft),
+        ).rejects.toMatchObject({ code: 'DRAFT_INVALIDATED' });
+        expect((await s.approvals.quorum(draft.digest)).counted).toHaveLength(
+          0,
+        );
+        await expect(
+          s.approvals.registerDraft({ draft, asset: testAusd }),
+        ).rejects.toMatchObject({ code: 'DRAFT_EXISTS' });
+        const redraft = makeDraft({ nonce: '8' });
+        await s.approvals.registerDraft({ draft: redraft, asset: testAusd });
+        await expect(
+          approve(s, humans[1]!, 'member_1', redraft),
+        ).rejects.toMatchObject({ code: 'MEMBERSHIP_NOT_FOUND' });
+        await submit(s, await approve(s, humans[0]!, 'member_0', redraft));
+        await submit(s, await approve(s, humans[2]!, 'member_2', redraft));
+        expect((await s.approvals.quorum(redraft.digest)).satisfied).toBe(true);
+        expect(
+          (await s.approvals.pendingIntent(draft.grant.intentHash)).draft
+            .digest,
+        ).toBe(redraft.digest);
+      });
+
+      it('does not carry approvals to a new mandate version draft (quorum change)', async () => {
+        const { s, humans } = await trio();
+        const v1 = makeDraft();
+        const v2 = makeDraft(
+          { mandateVersion: '2', intentHash: word(0x1e) },
+          { requiredApprovals: 3 },
+        );
+        await s.approvals.registerDraft({ draft: v1, asset: testAusd });
+        await s.approvals.registerDraft({ draft: v2, asset: testAusd });
+        const firstV1 = await approve(s, humans[0]!, 'member_0', v1);
+        await submit(s, firstV1);
+        await submit(s, await approve(s, humans[1]!, 'member_1', v1));
+        expect((await s.approvals.quorum(v1.digest)).satisfied).toBe(true);
+        expect((await s.approvals.quorum(v2.digest)).counted).toHaveLength(0);
+        const v2Alice = await approve(s, humans[0]!, 'member_0', v2);
+        await expect(
+          submit(s, v2Alice, { grantSignature: firstV1.grantSignature }),
+        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
+      });
+
+      it('rejects drafts inconsistent with their digest, module, group binding, executor or threshold', async () => {
+        const { s } = await trio();
+        const draft = makeDraft();
+        const bad = (d: GrantDraft) =>
+          expect(
+            s.approvals.registerDraft({ draft: d, asset: testAusd }),
+          ).rejects.toMatchObject({ code: 'DRAFT_INVALID' });
+        await bad({ ...draft, digest: word(1) });
+        await bad(makeDraft({ account: addr(0xdead) }));
+        await bad(makeDraft({}, { requiredApprovals: 1 }));
+        await bad(makeDraft({ groupId: word(0xa2) }));
+        await bad(
+          makeDraft(
+            {},
+            { domain: { ...draft.domain, verifyingContract: addr(0x6666) } },
+          ),
+        );
+        const owners = (await s.membership.getGroup(groupId)).owners;
+        await bad(makeDraft({ executor: owners[0]! }));
+      });
+
+      it('enforces the allowed executor list when the group binding declares one', async () => {
+        const s = services();
+        const humans = [await enrollMera('x1', s), await enrollMera('x2', s)];
+        await s.membership.createGroup({
+          groupId,
+          chainId: 10143,
+          account,
+          owners: humans.map((h) => h.record.signer),
+          threshold: 2,
+          executors: [addr(0xe2)],
+        });
+        await expect(
+          s.approvals.registerDraft({ draft: makeDraft(), asset: testAusd }),
+        ).rejects.toMatchObject({ code: 'DRAFT_INVALID' });
+        expect(
+          (
+            await s.approvals.registerDraft({
+              draft: makeDraft({ executor: addr(0xe2) }),
+              asset: testAusd,
+            })
+          ).status,
+        ).toBe('PENDING_APPROVAL');
+      });
+
       it('counts one approval per member when the same member races two challenges', async () => {
         const { s, humans } = await trio();
         const draft = makeDraft();
@@ -447,12 +740,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         const first = await approve(s, humans[0]!, 'member_0', draft);
         const second = await approve(s, humans[0]!, 'member_0', draft);
         const results = await Promise.allSettled(
-          [first, second].map((x) =>
-            s.approvals.submit({
-              challengeId: x.challenge.challengeId,
-              signature: x.signature,
-            }),
-          ),
+          [first, second].map((x) => submit(s, x)),
         );
         expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
         expect(
@@ -471,11 +759,10 @@ export function identityContract(label: string, harness: StoreHarness) {
         const { s, humans } = await trio();
         const draft = makeDraft();
         await s.approvals.registerDraft({ draft, asset: testAusd });
-        const a = await approve(s, humans[0]!, 'member_0', draft);
-        const approval = await s.approvals.submit({
-          challengeId: a.challenge.challengeId,
-          signature: a.signature,
-        });
+        const approval = await submit(
+          s,
+          await approve(s, humans[0]!, 'member_0', draft),
+        );
         const ledger = new StoreApprovalLedger(store);
         expect(await ledger.isConsumed(approval)).toBe(true);
         expect(
@@ -499,153 +786,36 @@ export function identityContract(label: string, harness: StoreHarness) {
         expect(await directory.membershipEpoch(groupId)).toBe(4);
       });
 
-      it('rejects challenge reuse, expiry and impersonation (SEC-008/SEC-020)', async () => {
-        const { s, humans } = await trio();
+      it('defines the attestation under the SynqIdentity domain of the deployed module', () => {
         const draft = makeDraft();
-        await s.approvals.registerDraft({ draft, asset: testAusd });
-        const forAlice = await s.approvals.issueChallenge({
+        const typed = approvalAttestationTypedData(draft, {
+          schemaVersion: 1,
+          challengeId: word(1),
+          challengeNonce: word(2),
+          groupId: draft.groupId,
+          memberId: 'm' as never,
+          principalId: 'p' as never,
+          principalKind: 'MERA_HUMAN',
+          signer: addr(1),
           draftDigest: draft.digest,
-          memberId: 'member_0',
+          membershipEpoch: 3,
+          issuedAt: 1,
+          expiresAt: 2,
         });
-        const bobSignsAsAlice = await approveGrantWithMera(
-          {
-            record: humans[1]!.record,
-            draft,
-            asset: testAusd,
-            confirmedPreview: grantPreview(draft, testAusd),
-            challenge: {
-              ...forAlice,
-              signer: humans[1]!.record.signer,
-              principalId: humans[1]!.view.principalId,
-            },
-          },
-          { webAuthnClient: humans[1]!.auth },
+        expect(typed.domain).toEqual({
+          name: 'SynqIdentity',
+          version: '1',
+          chainId: 10143n,
+          verifyingContract: MODULE,
+        });
+        expect(
+          typed.types.SynqApprovalAttestation.map(
+            (f) => `${f.type} ${f.name}`,
+          ).join(','),
+        ).toBe(
+          'bytes32 challengeId,bytes32 challengeNonce,bytes32 draftDigest,bytes32 groupId,uint256 membershipEpoch,uint256 expiresAt',
         );
-        await expect(
-          s.approvals.submit({
-            challengeId: forAlice.challengeId,
-            signature: bobSignsAsAlice,
-          }),
-        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
-        const ok = await approve(s, humans[1]!, 'member_1', draft);
-        clock += 121;
-        await expect(
-          s.approvals.submit({
-            challengeId: ok.challenge.challengeId,
-            signature: ok.signature,
-          }),
-        ).rejects.toMatchObject({ code: 'CHALLENGE_EXPIRED' });
-        clock -= 121;
-        await s.approvals.submit({
-          challengeId: ok.challenge.challengeId,
-          signature: ok.signature,
-        });
-        await expect(
-          s.approvals.submit({
-            challengeId: ok.challenge.challengeId,
-            signature: ok.signature,
-          }),
-        ).rejects.toMatchObject({ code: 'CHALLENGE_CONSUMED' });
-        expect((await s.approvals.quorum(draft.digest)).counted).toHaveLength(
-          1,
-        );
-      });
-
-      it('revocation bumps the epoch, invalidates outstanding challenges and previously counted approvals', async () => {
-        const { s, humans } = await trio();
-        const draft = makeDraft();
-        await s.approvals.registerDraft({ draft, asset: testAusd });
-        const a = await approve(s, humans[0]!, 'member_0', draft);
-        await s.approvals.submit({
-          challengeId: a.challenge.challengeId,
-          signature: a.signature,
-        });
-        const b = await approve(s, humans[1]!, 'member_1', draft);
-        const group = await s.membership.revoke({
-          groupId,
-          memberId: 'member_1',
-        });
-        expect(group.membershipEpoch).toBe(4);
-        await expect(
-          s.approvals.submit({
-            challengeId: b.challenge.challengeId,
-            signature: b.signature,
-          }),
-        ).rejects.toMatchObject({ code: 'MEMBERSHIP_CHANGED' });
-        await expect(
-          approve(s, humans[1]!, 'member_1', draft),
-        ).rejects.toMatchObject({ code: 'MEMBERSHIP_NOT_FOUND' });
-        const quorum = await s.approvals.quorum(draft.digest);
-        expect(quorum.counted).toHaveLength(0);
-        const again = await approve(s, humans[0]!, 'member_0', draft);
-        await s.approvals.submit({
-          challengeId: again.challenge.challengeId,
-          signature: again.signature,
-        });
-        const c = await approve(s, humans[2]!, 'member_2', draft);
-        await s.approvals.submit({
-          challengeId: c.challenge.challengeId,
-          signature: c.signature,
-        });
-        expect((await s.approvals.quorum(draft.digest)).satisfied).toBe(true);
-      });
-
-      it('does not carry approvals to a new mandate version draft (quorum change)', async () => {
-        const { s, humans } = await trio();
-        const v1 = makeDraft();
-        const v2 = makeDraft(
-          { mandateVersion: '2', intentHash: word(0x1e) },
-          { requiredApprovals: 3 },
-        );
-        await s.approvals.registerDraft({ draft: v1, asset: testAusd });
-        await s.approvals.registerDraft({ draft: v2, asset: testAusd });
-        for (const i of [0, 1]) {
-          const x = await approve(s, humans[i]!, `member_${i}`, v1);
-          await s.approvals.submit({
-            challengeId: x.challenge.challengeId,
-            signature: x.signature,
-          });
-        }
-        expect((await s.approvals.quorum(v1.digest)).satisfied).toBe(true);
-        expect((await s.approvals.quorum(v2.digest)).counted).toHaveLength(0);
-        const wrongDraftSig = await approve(
-          s,
-          humans[0]!,
-          'member_0',
-          v1,
-        ).catch(() => null);
-        expect(wrongDraftSig).toBeNull();
-        const c2 = await s.approvals.issueChallenge({
-          draftDigest: v2.digest,
-          memberId: 'member_0',
-        });
-        const v1Sig = (await approve(s, humans[2]!, 'member_2', v1)).signature;
-        await expect(
-          s.approvals.submit({ challengeId: c2.challengeId, signature: v1Sig }),
-        ).rejects.toMatchObject({ code: 'SIGNATURE_MISMATCH' });
-      });
-
-      it('rejects drafts inconsistent with their digest, group account or threshold', async () => {
-        const { s } = await trio();
-        const draft = makeDraft();
-        await expect(
-          s.approvals.registerDraft({
-            draft: { ...draft, digest: word(1) },
-            asset: testAusd,
-          }),
-        ).rejects.toMatchObject({ code: 'DRAFT_INVALID' });
-        await expect(
-          s.approvals.registerDraft({
-            draft: makeDraft({ account: addr(0xdead) }),
-            asset: testAusd,
-          }),
-        ).rejects.toMatchObject({ code: 'DRAFT_INVALID' });
-        await expect(
-          s.approvals.registerDraft({
-            draft: makeDraft({}, { requiredApprovals: 1 }),
-            asset: testAusd,
-          }),
-        ).rejects.toMatchObject({ code: 'DRAFT_INVALID' });
+        expect(grantTypedData(draft).domain.name).toBe('SynqExecutionModule');
       });
     });
 
@@ -670,10 +840,14 @@ export function identityContract(label: string, harness: StoreHarness) {
         const draft = makeDraft();
         await s.approvals.registerDraft({ draft, asset: testAusd });
         await expect(
-          s.approvals.issueChallenge({
-            draftDigest: draft.digest,
-            memberId: 'op',
-          }),
+          s.approvals.issueChallenge(
+            await keyRequest(
+              fixtureAccounts[0]!,
+              draft,
+              'op',
+              operator.principalId,
+            ),
+          ),
         ).rejects.toMatchObject({ code: 'PRINCIPAL_NOT_ELIGIBLE' });
         await expect(
           s.membership.bindOperator({
@@ -689,10 +863,7 @@ export function identityContract(label: string, harness: StoreHarness) {
         const draft = makeDraft();
         await s.approvals.registerDraft({ draft, asset: testAusd });
         const a = await approve(s, humans[0]!, 'member_0', draft);
-        await s.approvals.submit({
-          challengeId: a.challenge.challengeId,
-          signature: a.signature,
-        });
+        await submit(s, a);
         const outstanding = await approve(s, humans[1]!, 'member_1', draft);
         const operator = await operatorPrincipal(s, 3);
         await s.membership.bindOperator({
@@ -705,10 +876,7 @@ export function identityContract(label: string, harness: StoreHarness) {
           memberId: 'op',
         });
         expect(afterRevoke.membershipEpoch).toBe(3);
-        await s.approvals.submit({
-          challengeId: outstanding.challenge.challengeId,
-          signature: outstanding.signature,
-        });
+        await submit(s, outstanding);
         expect((await s.approvals.quorum(draft.digest)).satisfied).toBe(true);
       });
 
@@ -856,6 +1024,60 @@ export function identityContract(label: string, harness: StoreHarness) {
             delegatorMemberId: 'ghost' as DelegationPolicy['delegatorMemberId'],
           }),
         ).rejects.toMatchObject({ code: 'MEMBERSHIP_NOT_FOUND' });
+      });
+
+      it('regression: a usage id from another policy never authorizes unrecorded spend (critic repro B)', async () => {
+        const { s, policy } = await delegated();
+        await s.delegation.createPolicy({ ...policy, policyId: 'policy_b' });
+        const first = await s.delegation.authorize({
+          policyId: 'weekly_contribution',
+          usageId: 'usage_shared',
+          request: req('20000000'),
+        });
+        expect(first).toMatchObject({ allowed: true, replayed: false });
+        for (let i = 0; i < 5; i++) {
+          clock += 60;
+          await expect(
+            s.delegation.authorize({
+              policyId: 'policy_b',
+              usageId: 'usage_shared',
+              request: req('20000000'),
+            }),
+          ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+        }
+        expect(
+          await s.delegation.authorize({
+            policyId: 'policy_b',
+            usageId: 'usage_b1',
+            request: req('20000000'),
+          }),
+        ).toMatchObject({ allowed: true, replayed: false });
+        await expect(
+          s.delegation.authorize({
+            policyId: 'policy_b',
+            usageId: 'usage_b2',
+            request: req('1'),
+          }),
+        ).rejects.toMatchObject({ detail: 'FREQUENCY_EXCEEDED' });
+        const replay = await s.delegation.authorize({
+          policyId: 'policy_b',
+          usageId: 'usage_b1',
+          request: req('20000000'),
+        });
+        expect(replay.replayed).toBe(true);
+      });
+
+      it('regression: revoking the delegator membership stops the delegation (critic repro C)', async () => {
+        const { s } = await delegated();
+        await s.membership.revoke({ groupId, memberId: 'member_0' });
+        clock += 8 * 86400;
+        await expect(
+          s.delegation.authorize({
+            policyId: 'weekly_contribution',
+            usageId: 'usage_after_revoke',
+            request: req('20000000'),
+          }),
+        ).rejects.toMatchObject({ code: 'DELEGATION_DENIED' });
       });
     });
   });

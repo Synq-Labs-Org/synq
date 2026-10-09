@@ -14,11 +14,22 @@ import type { GrantDraft } from '@synq/schemas';
 import {
   PostgresIdentityStore,
   PrincipalService,
+  challengeRequestTypedData,
   grantDigest,
   grantTypedData,
   identityChallengeTypedData,
 } from '@synq/identity/server';
+import { readFileSync } from 'node:fs';
 import { API, E2E_ADMIN_TOKEN, E2E_DATABASE_URL, WEB } from './env.js';
+
+const EXECUTION_MODULE = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../contracts/deployments/10143.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { ExecutionModule: string }
+).ExecutionModule.toLowerCase() as `0x${string}`;
 
 type Principal = {
   label: string;
@@ -239,7 +250,7 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
         name: 'SynqExecutionModule',
         version: '1',
         chainId: 10143,
-        verifyingContract: address(),
+        verifyingContract: EXECUTION_MODULE,
       },
       grant: {
         groupId,
@@ -303,6 +314,7 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
 
     const operatorKey = privateKeyToAccount(generatePrivateKey());
     const pool = new pg.Pool({ connectionString: E2E_DATABASE_URL });
+    let operatorPrincipalId = '';
     try {
       const trusted = new PrincipalService(new PostgresIdentityStore(pool), {
         profile: 'sandbox/monad-testnet',
@@ -322,6 +334,7 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
           identityChallengeTypedData(challenge),
         ),
       });
+      operatorPrincipalId = operator.principalId;
       const bound = await api(
         'POST',
         `/v1/groups/${groupId}/operators`,
@@ -335,9 +348,17 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
     } finally {
       await pool.end();
     }
-    const operatorChallenge = await api('POST', '/v1/approvals/challenges', {
-      draftDigest: draft.digest,
+    const operatorRequest = {
+      principalId: operatorPrincipalId,
       memberId: 'operator',
+      requestedAt: Math.floor(Date.now() / 1000),
+    };
+    const operatorChallenge = await api('POST', '/v1/approvals/challenges', {
+      ...operatorRequest,
+      draftDigest: draft.digest,
+      requestSignature: await operatorKey.signTypedData(
+        challengeRequestTypedData(draft, operatorRequest),
+      ),
     });
     expect(operatorChallenge).toMatchObject({
       status: 403,
@@ -353,7 +374,19 @@ test.describe('three Mera principals on Chromium virtual authenticators (virtual
       '2 of 2 approvals — quorum reached',
     );
 
-    const quorum = await api('GET', `/v1/approvals/${draft.digest}/quorum`);
+    const publicQuorum = await api(
+      'GET',
+      `/v1/approvals/${draft.digest}/quorum`,
+    );
+    expect(publicQuorum.body.satisfied).toBe(true);
+    for (const c of publicQuorum.body.counted as object[])
+      expect(c).not.toHaveProperty('signature');
+    const quorum = await api(
+      'GET',
+      `/v1/approvals/${draft.digest}/verified`,
+      undefined,
+      true,
+    );
     expect(quorum.body.satisfied).toBe(true);
     const counted = quorum.body.counted as {
       signer: string;

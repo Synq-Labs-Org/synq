@@ -7,18 +7,21 @@ import type { GrantPreview } from '@synq/schemas';
 import { addr, makeDraft, testAusd, word } from '../identity/fixtures.js';
 import {
   ADMIN,
+  MODULE,
   approvalSignature,
   client,
   enrollViaApi,
   joinViaApi,
   origin,
   rpId,
+  submission,
 } from './v1-harness.js';
 
 const url =
   process.env.SYNQ_IDENTITY_API_TEST_DATABASE_URL ??
   'postgresql://postgres:synq_local@127.0.0.1:55432/synq_identity_api_test';
 const pools: pg.Pool[] = [];
+const wallClock = () => Math.floor(Date.now() / 1000);
 const app = () => {
   const pool = new pg.Pool({ connectionString: url, max: 6 });
   pools.push(pool);
@@ -26,6 +29,7 @@ const app = () => {
     store: new PostgresIdentityStore(pool),
     config: { profile: 'sandbox/monad-testnet', rpId, origin },
     adminToken: ADMIN,
+    executionModules: { 10143: MODULE },
   });
 };
 
@@ -94,16 +98,20 @@ describe('/v1 API on real PostgreSQL', () => {
     );
     expect(registered.status).toBe(201);
     const preview = registered.body.preview as GrantPreview;
-    const a = await approvalSignature(first, humans[0]!, 'm0', draft, preview);
+    const a = await approvalSignature(
+      first,
+      humans[0]!,
+      'm0',
+      draft,
+      preview,
+      wallClock,
+    );
     const key = randomUUID();
     const submit = (target: ReturnType<typeof app>) =>
       target.inject({
         method: 'POST',
         url: '/v1/approvals',
-        payload: {
-          challengeId: a.challenge!.challengeId,
-          signature: a.signature,
-        },
+        payload: submission(a),
         headers: { 'idempotency-key': key },
       });
     expect((await submit(first)).statusCode).toBe(201);
@@ -113,15 +121,17 @@ describe('/v1 API on real PostgreSQL', () => {
     const replay = await submit(second);
     expect(replay.statusCode).toBe(201);
     expect(replay.headers['idempotent-replay']).toBe('true');
-    const b = await approvalSignature(second, humans[1]!, 'm1', draft, preview);
+    const b = await approvalSignature(
+      second,
+      humans[1]!,
+      'm1',
+      draft,
+      preview,
+      wallClock,
+    );
     const again = client(second);
     expect(
-      (
-        await again.call('POST', '/v1/approvals', {
-          challengeId: b.challenge!.challengeId,
-          signature: b.signature,
-        })
-      ).status,
+      (await again.call('POST', '/v1/approvals', submission(b))).status,
     ).toBe(201);
     const quorum = await again.call(
       'GET',

@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApiErrorSchema } from '@synq/schemas';
+import type { TokenBucketLimiter } from './rate-limit.js';
 import {
   IdentityError,
   canonicalJson,
@@ -34,6 +35,8 @@ const STATUS: Record<IdentityErrorCode, number> = {
   READ_MODEL_UNAVAILABLE: 503,
   DRAFT_NOT_FOUND: 404,
   DRAFT_INVALID: 422,
+  DRAFT_INVALIDATED: 409,
+  RATE_LIMITED: 429,
   ALREADY_APPROVED: 409,
   DELEGATION_DENIED: 403,
   PROVIDER_BLOCKED: 503,
@@ -85,7 +88,9 @@ export type RouteContext = {
   store: IdentityStore;
   adminToken: string | null;
   now: () => number;
+  limiter: TokenBucketLimiter;
 };
+export const IDEMPOTENCY_LEASE_SECONDS = 60;
 
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9_.:-]{8,128}$/);
 const digest = (value: string) => createHash('sha256').update(value).digest();
@@ -127,6 +132,20 @@ export function route<
     url: spec.url,
     handler: async (request: FastifyRequest, reply: FastifyReply) => {
       if (spec.admin) assertAdmin(request, ctx.adminToken);
+      else if (spec.method === 'POST') {
+        const principal =
+          request.body &&
+          typeof request.body === 'object' &&
+          'principalId' in request.body &&
+          typeof request.body.principalId === 'string'
+            ? request.body.principalId.slice(0, 160)
+            : null;
+        if (
+          !ctx.limiter.take(`ip:${request.ip}`) ||
+          (principal !== null && !ctx.limiter.take(`principal:${principal}`))
+        )
+          throw new IdentityError('RATE_LIMITED');
+      }
       const params = (spec.params ?? z.object({})).parse(
         request.params,
       ) as z.output<P>;
@@ -141,20 +160,24 @@ export function route<
       );
       if (!key.success)
         throw new IdentityError('INVALID_INPUT', 'idempotency-key header');
-      const scope = `${spec.method} ${spec.url}`;
+      const caller = spec.admin ? 'admin' : `ip:${request.ip}`;
+      const scope = `${caller}|${spec.method} ${spec.url}`;
       const requestHash = digest(
         canonicalJson({ params, body: request.body ?? null }),
       ).toString('hex');
       const claimed = await ctx.store.transaction((tx) =>
-        tx.claimIdempotency({
-          scope,
-          key: key.data,
-          requestHash,
-          state: 'PENDING',
-          statusCode: null,
-          response: null,
-          createdAt: ctx.now(),
-        }),
+        tx.claimIdempotency(
+          {
+            scope,
+            key: key.data,
+            requestHash,
+            state: 'PENDING',
+            statusCode: null,
+            response: null,
+            createdAt: ctx.now(),
+          },
+          ctx.now() - IDEMPOTENCY_LEASE_SECONDS,
+        ),
       );
       if (claimed) {
         if (claimed.requestHash !== requestHash || claimed.state !== 'DONE')

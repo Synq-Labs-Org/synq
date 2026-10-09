@@ -20,7 +20,9 @@ import type {
 } from '@synq/schemas';
 import { identityChallengeTypedData, meraPrincipalId } from './challenge.js';
 import {
+  approvalAttestationTypedData,
   assertDraftConsistent,
+  challengeRequestTypedData,
   grantPreview,
   grantTypedData,
   previewsEqual,
@@ -286,17 +288,33 @@ export async function signMeraIdentityChallenge(
   );
 }
 
+export type SignedChallengeRequest = {
+  draftDigest: string;
+  memberId: string;
+  principalId: string;
+  requestedAt: number;
+  requestSignature: Hex;
+};
+
 export async function approveGrantWithMera(
   input: {
     record: MeraCredential;
+    memberId: string;
     draft: GrantDraft;
     asset: Asset;
     confirmedPreview: GrantPreview;
-    challenge: GrantApprovalChallenge;
+    requestChallenge: (
+      request: SignedChallengeRequest,
+    ) => Promise<GrantApprovalChallenge>;
+    now?: () => number;
   },
   options: MeraOptions = {},
-): Promise<Hex> {
-  const { record, challenge } = input;
+): Promise<{
+  challenge: GrantApprovalChallenge;
+  grantSignature: Hex;
+  attestationSignature: Hex;
+}> {
+  const { record } = input;
   let draft: GrantDraft, preview: GrantPreview;
   try {
     draft = assertDraftConsistent(input.draft);
@@ -312,18 +330,37 @@ export async function approveGrantWithMera(
       'PREVIEW_MISMATCH',
       'draft differs from the confirmed preview',
     );
-  if (
-    challenge.draftDigest !== draft.digest ||
-    !same(challenge.signer, record.signer) ||
-    challenge.principalId !== record.principalId ||
-    challenge.groupId !== draft.groupId
-  )
-    throw new MeraAdapterError(
-      'CHALLENGE_MISMATCH',
-      'challenge does not bind this draft',
+  const grant = grantTypedData(draft);
+  const requestedAt = (input.now ?? (() => Math.floor(Date.now() / 1000)))();
+  return withRecordAccount(record, options, async (account) => {
+    const request = {
+      principalId: record.principalId,
+      memberId: input.memberId,
+      requestedAt,
+    };
+    const requestSignature = await account.signTypedData(
+      challengeRequestTypedData(draft, request),
     );
-  const typed = grantTypedData(draft);
-  return withRecordAccount(record, options, (account) =>
-    account.signTypedData(typed),
-  );
+    const challenge = await input.requestChallenge({
+      ...request,
+      draftDigest: draft.digest,
+      requestSignature,
+    });
+    if (
+      challenge.draftDigest !== draft.digest ||
+      !same(challenge.signer, record.signer) ||
+      challenge.principalId !== record.principalId ||
+      challenge.memberId !== input.memberId ||
+      challenge.groupId !== draft.groupId
+    )
+      throw new MeraAdapterError(
+        'CHALLENGE_MISMATCH',
+        'challenge does not bind this draft',
+      );
+    const grantSignature = await account.signTypedData(grant);
+    const attestationSignature = await account.signTypedData(
+      approvalAttestationTypedData(draft, challenge),
+    );
+    return { challenge, grantSignature, attestationSignature };
+  });
 }

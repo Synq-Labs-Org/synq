@@ -10,11 +10,11 @@ import {
   GrantApprovalChallengeSchema,
   GroupViewSchema,
   PendingIntentViewSchema,
-  QuorumViewSchema,
+  PublicQuorumViewSchema,
   VerifiedApprovalSchema,
   type GrantPreview,
   type PendingIntentView,
-  type QuorumView,
+  type PublicQuorumView,
 } from '@synq/schemas';
 import { api, describeError } from '../../../lib/api';
 import { loadCredential } from '../../../lib/session';
@@ -36,7 +36,7 @@ export default function IntentPage({
   const [intent, setIntent] = useState<PendingIntentView | null>(null);
   const [preview, setPreview] = useState<GrantPreview | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
-  const [quorum, setQuorum] = useState<QuorumView | null>(null);
+  const [quorum, setQuorum] = useState<PublicQuorumView | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(
@@ -45,7 +45,7 @@ export default function IntentPage({
 
   const refresh = useCallback(async (digest: string) => {
     setQuorum(
-      await api.get(`/v1/approvals/${digest}/quorum`, QuorumViewSchema),
+      await api.get(`/v1/approvals/${digest}/quorum`, PublicQuorumViewSchema),
     );
   }, []);
 
@@ -78,24 +78,23 @@ export default function IntentPage({
     setBusy(true);
     setResult(null);
     try {
-      const challenge = await api.post(
-        '/v1/approvals/challenges',
-        GrantApprovalChallengeSchema,
-        {
-          draftDigest: intent.draft.digest,
-          memberId,
-        },
-      );
-      const signature = await approveGrantWithMera({
+      const signed = await approveGrantWithMera({
         record,
+        memberId,
         draft: intent.draft,
         asset: intent.asset,
         confirmedPreview: preview,
-        challenge,
+        requestChallenge: (request) =>
+          api.post(
+            '/v1/approvals/challenges',
+            GrantApprovalChallengeSchema,
+            request,
+          ),
       });
       const approval = await api.post('/v1/approvals', VerifiedApprovalSchema, {
-        challengeId: challenge.challengeId,
-        signature,
+        challengeId: signed.challenge.challengeId,
+        grantSignature: signed.grantSignature,
+        attestationSignature: signed.attestationSignature,
       });
       setResult({ ok: true, text: `Approved by ${approval.signer}` });
       await refresh(intent.draft.digest);
@@ -131,6 +130,16 @@ export default function IntentPage({
           <dd data-testid="preview-expiry">{when(preview.validUntil)}</dd>
           <dt>Mandate version</dt>
           <dd>{preview.mandateVersion}</dd>
+          <dt>Executor</dt>
+          <dd data-testid="preview-executor">{preview.executor}</dd>
+          <dt>Execution module</dt>
+          <dd data-testid="preview-module">{preview.verifyingContract}</dd>
+          <dt>Grant nonce</dt>
+          <dd>{preview.nonce}</dd>
+          <dt>Calldata hash</dt>
+          <dd>
+            <code>{preview.calldataHash}</code>
+          </dd>
           <dt>Digest</dt>
           <dd>
             <code>{preview.digest}</code>
@@ -146,7 +155,13 @@ export default function IntentPage({
           {quorum.satisfied ? ' — quorum reached' : ''}
         </div>
       )}
-      {preview && record && memberId && (
+      {intent?.status === 'INVALIDATED' && (
+        <div className="status bad" data-testid="intent-invalidated">
+          This draft was invalidated by a membership change. A new draft is
+          required before anyone can approve.
+        </div>
+      )}
+      {preview && record && memberId && intent?.status !== 'INVALIDATED' && (
         <>
           <label>
             <input
