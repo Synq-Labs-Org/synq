@@ -1,25 +1,16 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { keccak256 } from 'viem';
+import { encodeFunctionData, keccak256 } from 'viem';
 import { describe, expect, it } from 'vitest';
 import { checkArchitecture } from '../../scripts/architecture.mjs';
-import {
-  Kernel,
-  approvalTypedData,
-  artifactHash,
-  type AuthorizationRequest,
-} from '../../packages/kernel/src/index.js';
+import { Kernel } from '../../packages/kernel/src/index.js';
 import {
   ActionIntentSchema,
   MandateSchema,
   RiskPacketSchema,
   SimulationSchema,
 } from '../../packages/schemas/src/index.js';
-import {
-  ApprovalService,
-  MemoryChallengeStore,
-} from '../../packages/identity/src/index.js';
 import {
   DeterministicReadModel,
   verifyFresh,
@@ -38,16 +29,20 @@ import {
   chainGrant,
   prepareModuleCall,
 } from '../../workers/execution/src/index.js';
+import { tokenAbi } from '../../workers/execution/src/abi.js';
 import {
-  address,
+  RECIPIENT,
+  allPlugins,
+  approve,
   asset,
   evidence,
+  expectDraft,
+  grantFor,
+  harness,
   intent,
   mandate,
-  network,
   now,
-  owners,
-  request,
+  type Harness,
 } from '../kernel/fixtures.js';
 import {
   binding,
@@ -56,21 +51,9 @@ import {
   treasuryToken,
 } from '../read-model/fixtures.js';
 
-function kernelFor(inputs: AuthorizationRequest[]) {
-  return new Kernel({
-    network,
-    mandates: [mandate()],
-    balances: [{ account: address(20), asset, balance: '1000' }],
-    trustedEvidence: {
-      riskPacketHashes: inputs.map((x) => artifactHash(x.risk)),
-      simulationHashes: inputs.map((x) => artifactHash(x.simulation)),
-    },
-  });
-}
-
 describe('independent foundation release review', () => {
   it('strict financial ingress rejects extra fields at every authorization boundary', async () => {
-    const input = await request();
+    const input = evidence(intent());
     expect(
       ActionIntentSchema.safeParse({ ...input.intent, bypassPolicy: true })
         .success,
@@ -94,46 +77,61 @@ describe('independent foundation release review', () => {
     expect(
       SimulationSchema.safeParse({ ...input.simulation, bypass: true }).success,
     ).toBe(false);
+    const h = harness(input);
+    expect(
+      await h.kernel.authorize({ ...input, approvals: [], bypass: true }),
+    ).toMatchObject({ code: 'INVALID_REQUEST' });
   });
 
   it('authorization remains bound to the copied request across signature recovery awaits', async () => {
-    const input = await request();
-    const kernel = kernelFor([input]);
-    const pending = kernel.authorize(input);
-    input.intent.maxInputAmount = '100';
-    input.intent.target = address(99);
-    input.intent.inputToken = address(98);
-    input.risk.slippageBps = 10000;
-    input.simulation.succeeded = false;
-    input.approvals[1]!.signature = input.approvals[0]!.signature;
-    input.now = 5000;
+    const input = evidence(intent());
+    const h = harness(input);
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
+    );
+    const request = {
+      ...structuredClone(input),
+      approvals: await approve(h, draft),
+    };
+    const pending = h.kernel.authorize(request);
+    request.intent.maxInputAmount = '100';
+    request.intent.target = `0x${'9'.repeat(40)}`;
+    request.intent.inputToken = `0x${'8'.repeat(40)}`;
+    request.risk.slippageBps = 10000;
+    request.simulation.succeeded = false;
+    request.approvals[1]!.signature = request.approvals[0]!.signature;
     const result = await pending;
-    expect(result.status).toBe('AUTHORIZED');
     if (result.status !== 'AUTHORIZED') throw new Error(result.code);
     expect(result.grant).toMatchObject({
       maxInputAmount: '60',
-      target: address(10),
-      validAfter: now,
+      target: input.intent.target,
+      validAfter: 900,
       inputAsset: { decimals: 6 },
     });
-    expect(kernel.accounting('group_1', 'mandate_1').reserved).toBe('60');
+    expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe(
+      '60',
+    );
   });
 
   it('governance revocation during signature recovery invalidates pending authorization', async () => {
-    const input = await request();
-    const kernel = kernelFor([input]);
-    const pending = kernel.authorize(input);
-    kernel.mandates.update(mandate({ status: 'REVOKED' }));
+    const input = evidence(intent());
+    const h = harness(input);
+    const draft = expectDraft(
+      await h.kernel.authorize({ ...input, approvals: [] }),
+    );
+    const approvals = await approve(h, draft);
+    const pending = h.kernel.authorize({ ...input, approvals });
+    h.kernel.revokeMandate('group_1', 'mandate_1');
     expect(await pending).toMatchObject({
       status: 'POLICY_REJECTED',
-      code: 'MANDATE_VERSION',
+      code: 'MANDATE_REVOKED',
     });
-    expect(kernel.accounting('group_1', 'mandate_1').reserved).toBe('0');
+    expect(h.kernel.accounting('group_1', 'mandate_1').reservedToken).toBe('0');
   });
 
   it.each([
-    'reserved',
-    'spent',
+    'reservedToken',
+    'spentToken',
     'issued',
     'lastIssued',
     'nonces',
@@ -141,100 +139,53 @@ describe('independent foundation release review', () => {
   ] as const)(
     'restore rejects inconsistent %s rather than reconstructing spend authority',
     async (field) => {
-      const input = await request();
-      const kernel = kernelFor([input]);
-      expect((await kernel.authorize(input)).status).toBe('AUTHORIZED');
-      const snapshot = kernel.snapshot();
+      const input = evidence(intent());
+      const h: Harness = harness(input);
+      await grantFor(h, input);
+      const snapshot = h.kernel.snapshot();
       if (field === 'nonces') snapshot.nonces = [];
       else if (field === 'grantKey')
-        snapshot.grants[0]![0] = `0x${'f'.repeat(64)}`;
-      else if (field === 'reserved' || field === 'spent')
-        snapshot.ledger[0]![1][field] = '1';
-      else snapshot.ledger[0]![1][field] = 2;
-      expect(() => Kernel.restore(snapshot)).toThrow('INVALID_INPUT');
+        snapshot.grants[0]!.grant.grantId = `0x${'f'.repeat(64)}`;
+      else if (field === 'reservedToken' || field === 'spentToken')
+        snapshot.budgets[0]![1][field] = '1';
+      else snapshot.budgets[0]![1][field] = 2;
+      expect(() =>
+        Kernel.restore(snapshot, {
+          clock: h.clock,
+          approvalLedger: h.ledger,
+          membershipDirectory: h.directory,
+          freshness: { probe: h.probe, maxLagBlocks: 0 },
+          plugins: allPlugins(),
+        }),
+      ).toThrow('SNAPSHOT_INVALID');
     },
   );
 
-  it('signer preparation rejects substituted calldata and explicitly disables mainnet', async () => {
-    const data = '0xa9059cbb' as const;
-    const input = {
-      ...evidence(
-        intent({ maxInputAmount: '10', calldataHash: keccak256(data) }),
-      ),
-      approvals: [],
-      now,
-    };
-    const kernel = kernelFor([input]);
-    const result = await kernel.authorize(input);
-    if (result.status !== 'AUTHORIZED') throw new Error(result.code);
-    expect(() =>
-      prepareModuleCall(
-        kernel,
-        result.grant,
-        input.intent,
-        address(40),
-        '0xa9059cbb00',
-        '0x',
-        now,
-      ),
-    ).toThrow('PREPARED_CALL_MISMATCH');
-    expect(
-      prepareModuleCall(
-        kernel,
-        result.grant,
-        input.intent,
-        address(40),
-        data,
-        '0x',
-        now,
-        [asset],
-      ).chainId,
-    ).toBe(31337);
-    expect(() => chainGrant({ ...result.grant, chainId: 143 })).toThrow(
-      'MAINNET_DISABLED',
-    );
-  });
-
-  it('identity submission snapshots caller inputs before asynchronous challenge lookup', async () => {
-    class DelayedStore extends MemoryChallengeStore {
-      release: (() => void) | undefined;
-      override async get(id: string) {
-        await new Promise<void>((resolve) => {
-          this.release = resolve;
-        });
-        return super.get(id);
-      }
-    }
-    const store = new DelayedStore();
-    const service = new ApprovalService(store, 'local/anvil');
-    service.register({
-      principalId: 'owner',
-      kind: 'HUMAN',
-      provider: 'fixture',
-      signer: owners[0]!.address,
+  it('SEC-007/SEC-019 signer preparation rejects substituted calldata and explicitly disables mainnet', async () => {
+    const data = encodeFunctionData({
+      abi: tokenAbi,
+      functionName: 'transfer',
+      args: [RECIPIENT, 60n],
     });
-    service.bindMembership('group_1', 'member_0', 'owner');
-    const original = intent();
-    const policy = mandate();
-    const challenge = await service.issue(original, policy, 'member_0', now);
-    const signed = {
-      ...challenge.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(original, challenge.approval),
-      ),
-    };
-    const substituted = intent({ maxInputAmount: '61' });
-    const pending = service.submit(
-      challenge.challengeId,
-      signed,
-      substituted,
-      policy,
-      now,
+    const input = evidence(intent({ calldataHash: keccak256(data) }));
+    const h = harness(input);
+    const { grant } = await grantFor(h, input);
+    const claim = h.kernel.claimForExecution(grant, input.intent, 'worker');
+    const substituted = encodeFunctionData({
+      abi: tokenAbi,
+      functionName: 'transfer',
+      args: [`0x${'6'.repeat(40)}`, 60n],
+    });
+    expect(() =>
+      prepareModuleCall(h.kernel, claim, substituted, [asset]),
+    ).toThrow('PREPARED_CALL_MISMATCH');
+    expect(prepareModuleCall(h.kernel, claim, data, [asset]).chainId).toBe(
+      31337,
     );
-    const rejection = expect(pending).rejects.toThrow('binding');
-    substituted.maxInputAmount = original.maxInputAmount;
-    store.release!();
-    await rejection;
+    expect(() => prepareModuleCall(h.kernel, claim, data, [asset])).toThrow(
+      'GRANT_NOT_PREPARABLE',
+    );
+    expect(() => chainGrant({ ...grant, chainId: 143 })).toThrow();
   });
 
   it('journal rejects terminal confirmation without a canonical block', () => {

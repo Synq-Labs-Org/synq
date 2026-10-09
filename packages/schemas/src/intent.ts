@@ -13,6 +13,7 @@ import {
   PositiveAmountSchema,
   SelectorSchema,
   TimestampSchema,
+  canonicalBigInt,
 } from './primitives.js';
 
 export const ONCHAIN_ACTION_KINDS = [
@@ -64,6 +65,7 @@ const intentFields = {
   riskPacketHash: HashSchema,
   account: AddressSchema.optional(),
   operator: AddressSchema.optional(),
+  recipient: AddressSchema.optional(),
   nativeValue: AmountSchema.default('0'),
   maxSlippageBps: BpsSchema.default(0),
   leverageBps: z.number().int().min(0).max(1_000_000).default(0),
@@ -127,11 +129,23 @@ export const BoundActionIntentSchema = z
     selector: SelectorSchema,
     calldataHash: HashSchema,
     inputToken: AddressSchema,
-    maxInputAmount: PositiveAmountSchema,
+    maxInputAmount: AmountSchema,
     minOutputAmount: AmountSchema.default('0'),
     account: AddressSchema,
     operator: AddressSchema,
+    recipient: NonZeroAddressSchema,
   })
-  .superRefine(checkEnvelope);
+  .superRefine((v, ctx) => {
+    checkEnvelope(v, ctx);
+    if (
+      (canonicalBigInt(v.maxInputAmount) ?? 0n) === 0n &&
+      (canonicalBigInt(v.nativeValue) ?? 0n) === 0n
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['maxInputAmount'],
+        message: 'a bound intent must move a token amount or native value',
+      });
+  });
 export type BoundActionIntent = z.output<typeof BoundActionIntentSchema>;
 export type BoundActionIntentInput = z.input<typeof BoundActionIntentSchema>;

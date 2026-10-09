@@ -14,7 +14,7 @@
     "@category-labs/mera": "0.2.0",
     "@scure/bip32": "2.4.0",
     "@scure/bip39": "2.4.0",
-    "@synq/kernel": "workspace:*",
+    "@synq/domain": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
     "viem": "2.57.4",
