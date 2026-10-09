@@ -3,43 +3,30 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encodeFunctionData, keccak256, stringToHex } from 'viem';
 import {
-  ActionIntentSchema,
+  BoundActionIntentSchema,
   MandateSchema,
   AssetSchema,
   type RiskPacket,
   type Simulation,
-} from '../../../packages/schemas/src/index.js';
+} from '@synq/schemas';
 import {
   Kernel,
   artifactHash,
   economicIntentHash,
   intentHash,
   approvalTypedData,
-} from '../../../packages/kernel/src/index.js';
-import {
-  ApprovalService,
-  MemoryChallengeStore,
-} from '../../../packages/identity/src/index.js';
-import {
-  DeterministicReadModel,
-  verifyFresh,
-} from '../../../packages/read-model/src/index.js';
-import {
-  localProfile,
-  DeploymentManifestSchema,
-} from '../../../packages/chain-registry/src/index.js';
-import { writeDurableJson } from '../../../workers/execution/src/persistence.js';
+} from '@synq/kernel';
+import { ApprovalService, MemoryChallengeStore } from '@synq/identity';
+import { DeterministicReadModel, verifyFresh } from '@synq/read-model';
+import { localProfile, DeploymentManifestSchema } from '@synq/chain-registry';
+import { writeDurableJson } from '@synq/execution-worker/persistence';
 import {
   chainGrant,
   prepareModuleCall,
   ExecutionJournal,
   JournaledBroadcaster,
-} from '../../../workers/execution/src/index.js';
-import {
-  registryAbi,
-  moduleAbi,
-  tokenAbi,
-} from '../../../workers/execution/src/abi.js';
+} from '@synq/execution-worker';
+import { registryAbi, moduleAbi, tokenAbi } from '@synq/execution-worker/abi';
 import { startAnvil } from './anvil.js';
 import { sandbox } from './sandbox.js';
 import { indexedEvents } from './events.js';
@@ -131,14 +118,13 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       args: [chain.recipient, amount],
     });
     const zeroHash = `0x${'0'.repeat(64)}`;
-    const input = ActionIntentSchema.parse({
+    const input = BoundActionIntentSchema.parse({
       schemaVersion: 1,
       intentId: 'local_intent',
       groupId,
       mandateId,
       mandateVersion: 1,
       action: 'TRANSFER',
-      network: localProfile.network,
       chainId: 31337,
       account: chain.account,
       operator: chain.operator.address,
@@ -146,9 +132,8 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       target: chain.token,
       selector: '0xa9059cbb',
       calldataHash: keccak256(data),
-      inputAsset: asset,
+      inputToken: asset.address,
       maxInputAmount: String(amount),
-      outputAsset: null,
       minOutputAmount: '0',
       nativeValue: '0',
       maxSlippageBps: 0,
@@ -178,7 +163,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       blocked: false,
       evidence: [reference],
     };
-    const intent = ActionIntentSchema.parse({
+    const intent = BoundActionIntentSchema.parse({
       ...input,
       evidenceHash: artifactHash(risk.evidence),
       riskPacketHash: artifactHash(risk),
@@ -219,7 +204,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     });
     const approvalService = new ApprovalService(
       new MemoryChallengeStore(),
-      'local',
+      'local/anvil',
     );
     chain.owners.forEach((owner, index) => {
       approvalService.register({
@@ -267,7 +252,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
     if (decision.status !== 'AUTHORIZED')
       throw new Error(`KERNEL_REJECTED:${decision.code}`);
     const grant = decision.grant;
-    const onchainGrant = chainGrant(grant);
+    const onchainGrant = chainGrant(grant, [asset]);
     const digest = await chain.client.readContract({
       address: chain.module,
       abi: moduleAbi,
@@ -283,6 +268,7 @@ export async function runLocalDemo(outputDirectory: string, keepAlive = false) {
       data,
       signatures,
       now,
+      [asset],
     );
     await chain.client.call({ account: chain.operator.address, ...prepared });
     mkdirSync(outputDirectory, { recursive: true });

@@ -1,1 +1,18 @@
-{"name":"@synq/demo","version":"0.1.0","private":true,"type":"module","scripts":{"build":"tsc --noEmit -p ../../tsconfig.json"}}
+{
+  "name": "@synq/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/chain-registry": "workspace:*",
+    "@synq/execution-worker": "workspace:*",
+    "@synq/identity": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/read-model": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "viem": "2.57.4"
+  }
+}

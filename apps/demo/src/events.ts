@@ -1,13 +1,6 @@
 import { decodeEventLog, type Address } from 'viem';
-import {
-  ChainEventSchema,
-  type ChainEvent,
-} from '../../../packages/read-model/src/index.js';
-import {
-  registryAbi,
-  moduleAbi,
-  tokenAbi,
-} from '../../../workers/execution/src/abi.js';
+import { ChainEventSchema, type ChainEvent } from '@synq/read-model';
+import { registryAbi, moduleAbi, tokenAbi } from '@synq/execution-worker/abi';
 import type { sandbox } from './sandbox.js';
 export async function indexedEvents(
   chain: Awaited<ReturnType<typeof sandbox>>,

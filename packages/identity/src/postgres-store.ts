@@ -1,5 +1,5 @@
 import type { ChallengeStore, ApprovalChallenge } from './index.js';
-import type { SqlConnection } from '../../read-model/src/storage.js';
+import type { SqlConnection } from '@synq/read-model/storage';
 
 export class PostgresChallengeStore implements ChallengeStore {
   constructor(readonly db: SqlConnection) {}

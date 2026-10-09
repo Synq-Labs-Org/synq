@@ -41,15 +41,23 @@
     "redis": "5.11.0"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "tsx": "4.23.15",
-    "vitest": "4.1.11",
-    "fast-check": "4.5.3",
-    "turbo": "2.11.7",
-    "eslint": "10.12.0",
-    "typescript-eslint": "8.71.1",
-    "prettier": "3.8.1",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/execution-worker": "workspace:*",
+    "@synq/identity": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/plugin-sdk": "workspace:*",
+    "@synq/read-model": "workspace:*",
+    "@synq/schemas": "workspace:*",
     "@types/node": "22.19.7",
-    "@types/pg": "8.16.0"
+    "@types/pg": "8.16.0",
+    "eslint": "10.12.0",
+    "fast-check": "4.5.3",
+    "prettier": "3.8.1",
+    "tsx": "4.23.15",
+    "turbo": "2.11.7",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
+    "vitest": "4.1.11"
   }
 }

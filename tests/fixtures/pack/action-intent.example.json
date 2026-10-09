@@ -1,0 +1,16 @@
+{
+  "intentId": "01JEXAMPLE",
+  "groupId": "grp_example",
+  "mandateId": "man_example",
+  "mandateVersion": 1,
+  "action": "SPOT_TRADE",
+  "chainId": 10143,
+  "pluginId": "kuru",
+  "target": "0x0000000000000000000000000000000000000000",
+  "maxInputAmount": "25000000",
+  "validAfter": 0,
+  "validUntil": 9999999999,
+  "nonce": "1",
+  "evidenceHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "riskPacketHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+}

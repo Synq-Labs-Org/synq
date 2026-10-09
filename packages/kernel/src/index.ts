@@ -6,7 +6,7 @@ import {
 } from 'viem';
 import { z } from 'zod';
 import {
-  ActionIntentSchema,
+  BoundActionIntentSchema,
   AmountSchema,
   ApprovalSchema,
   ExecutionGrantSchema,
@@ -15,7 +15,7 @@ import {
   RiskPacketSchema,
   SimulationSchema,
   TreasuryBalanceSchema,
-  type ActionIntent,
+  type BoundActionIntent,
   type Approval,
   type Asset,
   type ExecutionGrant,
@@ -23,7 +23,7 @@ import {
   type NetworkProfile,
   type RiskPacket,
   type Simulation,
-} from '../../schemas/src/index.js';
+} from '@synq/schemas';
 
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -40,18 +40,19 @@ export function canonicalJson(value: unknown): string {
 export function artifactHash(value: unknown): `0x${string}` {
   return keccak256(stringToHex(canonicalJson(value)));
 }
-export function intentHash(intent: ActionIntent): `0x${string}` {
-  return artifactHash(ActionIntentSchema.parse(intent));
+export function intentHash(intent: BoundActionIntent): `0x${string}` {
+  return artifactHash(BoundActionIntentSchema.parse(intent));
 }
-export function economicIntentHash(intent: ActionIntent): `0x${string}` {
-  const economic: Partial<ActionIntent> = ActionIntentSchema.parse(intent);
+export function economicIntentHash(intent: BoundActionIntent): `0x${string}` {
+  const economic: Partial<BoundActionIntent> =
+    BoundActionIntentSchema.parse(intent);
   delete economic.evidenceHash;
   delete economic.riskPacketHash;
   return artifactHash(economic);
 }
 export type UnsignedApproval = Omit<Approval, 'signature'>;
 export function approvalTypedData(
-  intent: ActionIntent,
+  intent: BoundActionIntent,
   approval: UnsignedApproval,
 ) {
   return {
@@ -87,7 +88,7 @@ export function approvalTypedData(
   };
 }
 export function approvalDigest(
-  intent: ActionIntent,
+  intent: BoundActionIntent,
   approval: UnsignedApproval,
 ): `0x${string}` {
   return hashTypedData(approvalTypedData(intent, approval));
@@ -172,7 +173,7 @@ export class MandateResolver {
       throw new KernelError('MANDATE_VERSION');
     this.mandates.set(mandateKey(mandate), mandate);
   }
-  resolve(intent: ActionIntent): Mandate {
+  resolve(intent: BoundActionIntent): Mandate {
     const value = this.mandates.get(mandateKey(intent));
     requireRule(value !== undefined, 'MANDATE_NOT_FOUND');
     return structuredClone(value);
@@ -183,7 +184,7 @@ export class MandateResolver {
 }
 export class PolicyEngine {
   evaluate(
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     mandate: Mandate,
     network: NetworkProfile,
     now: number,
@@ -196,7 +197,7 @@ export class PolicyEngine {
     );
     requireRule(mandate.status === 'ACTIVE', 'MANDATE_REVOKED');
     requireRule(
-      canonicalJson(intent.network) === canonicalJson(network) &&
+      intent.chainId === network.chainId &&
         canonicalJson(mandate.network) === canonicalJson(network),
       'NETWORK_MISMATCH',
     );
@@ -213,12 +214,12 @@ export class PolicyEngine {
       'SELECTOR_FORBIDDEN',
     );
     requireRule(
-      sameAsset(intent.inputAsset, mandate.inputAsset),
+      intent.inputToken === mandate.inputAsset.address,
       'ASSET_FORBIDDEN',
     );
     const newAsset =
-      intent.outputAsset !== null &&
-      !mandate.outputAssets.some((a) => sameAsset(a, intent.outputAsset!));
+      intent.outputToken !== undefined &&
+      !mandate.outputAssets.some((a) => a.address === intent.outputToken);
     requireRule(!newAsset || mandate.allowNewOutputAssets, 'ASSET_FORBIDDEN');
     requireRule(
       BigInt(intent.maxInputAmount) <= BigInt(mandate.perActionCap),
@@ -251,7 +252,7 @@ export class PolicyEngine {
 }
 export class RiskGate {
   verify(
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     mandate: Mandate,
     risk: RiskPacket,
     now: number,
@@ -295,7 +296,7 @@ export class RiskGate {
 }
 export class SimulationGate {
   verify(
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     mandate: Mandate,
     simulation: Simulation,
     now: number,
@@ -318,7 +319,7 @@ export class SimulationGate {
 }
 export class ApprovalCalculator {
   async verify(
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     mandate: Mandate,
     approvals: readonly Approval[],
     tier: Tier,
@@ -400,7 +401,7 @@ export type KernelSnapshot = {
   balances: TreasuryBalance[];
 };
 export type AuthorizationRequest = {
-  intent: ActionIntent;
+  intent: BoundActionIntent;
   risk: RiskPacket;
   simulation: Simulation;
   approvals: readonly Approval[];
@@ -459,7 +460,7 @@ export class Kernel {
     );
   }
   private ledgerGate(
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     mandate: Mandate,
     now: number,
   ): void {
@@ -476,19 +477,19 @@ export class Kernel {
       'BUDGET_EXHAUSTED',
     );
     const balance = this.balances.get(
-      `${intent.account}:${intent.inputAsset.canonicalAssetId}`,
+      `${intent.account}:${mandate.inputAsset.canonicalAssetId}`,
     );
     const reserved = [...this.grants.values()]
       .filter(
         (r) =>
           ['RESERVED', 'CONSUMED'].includes(r.state) &&
           r.grant.account === intent.account &&
-          sameAsset(r.grant.inputAsset, intent.inputAsset),
+          sameAsset(r.grant.inputAsset, mandate.inputAsset),
       )
       .reduce((sum, r) => sum + BigInt(r.grant.maxInputAmount), 0n);
     requireRule(
       balance !== undefined &&
-        sameAsset(balance.asset, intent.inputAsset) &&
+        sameAsset(balance.asset, mandate.inputAsset) &&
         BigInt(balance.balance) >= reserved + BigInt(intent.maxInputAmount),
       'INSUFFICIENT_BALANCE',
     );
@@ -505,7 +506,7 @@ export class Kernel {
     let tier: Tier = 'BLOCKED';
     const now = request.now;
     try {
-      const intent = ActionIntentSchema.parse(request.intent),
+      const intent = BoundActionIntentSchema.parse(request.intent),
         risk = RiskPacketSchema.parse(request.risk),
         simulation = SimulationSchema.parse(request.simulation);
       requireRule(Number.isSafeInteger(now) && now >= 0, 'INVALID_INPUT');
@@ -549,9 +550,9 @@ export class Kernel {
         target: intent.target,
         selector: intent.selector,
         calldataHash: intent.calldataHash,
-        inputAsset: intent.inputAsset,
+        inputAsset: mandate.inputAsset,
         maxInputAmount: intent.maxInputAmount,
-        outputAsset: intent.outputAsset,
+        outputToken: intent.outputToken ?? null,
         minOutputAmount: intent.minOutputAmount,
         nativeValue: intent.nativeValue,
         validAfter: now,
@@ -617,11 +618,11 @@ export class Kernel {
   }
   verify(
     grantInput: ExecutionGrant,
-    intentInput: ActionIntent,
+    intentInput: BoundActionIntent,
     now: number,
   ): ExecutionGrant {
     const grant = ExecutionGrantSchema.parse(grantInput),
-      intent = ActionIntentSchema.parse(intentInput);
+      intent = BoundActionIntentSchema.parse(intentInput);
     const record = this.grants.get(grant.grantId);
     requireRule(record !== undefined, 'GRANT_UNKNOWN');
     requireRule(
@@ -642,7 +643,7 @@ export class Kernel {
     );
     return structuredClone(grant);
   }
-  consume(grant: ExecutionGrant, intent: ActionIntent, now: number): void {
+  consume(grant: ExecutionGrant, intent: BoundActionIntent, now: number): void {
     const valid = this.verify(grant, intent, now);
     this.grants.get(valid.grantId)!.state = 'CONSUMED';
   }
@@ -814,7 +815,7 @@ export class GrantVerifier {
   constructor(private readonly kernel: Kernel) {}
   verify(
     grant: ExecutionGrant,
-    intent: ActionIntent,
+    intent: BoundActionIntent,
     now: number,
   ): ExecutionGrant {
     return this.kernel.verify(grant, intent, now);

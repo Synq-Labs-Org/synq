@@ -100,7 +100,10 @@ describe('independent kernel security critic', () => {
   });
 
   it('rejects a symbol-only AUSD impersonation despite a valid canonical address', async () => {
-    const data = evidence(intent({ inputAsset: { ...asset, symbol: 'AUSD' } }));
+    expect(() =>
+      intent({ inputAsset: { ...asset, symbol: 'AUSD' } }),
+    ).toThrow();
+    const data = evidence(intent({ inputToken: address(11) }));
     const input = { ...data, approvals: [], now };
     expect(await trustedKernel([input]).authorize(input)).toMatchObject({
       status: 'REJECTED',

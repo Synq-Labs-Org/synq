@@ -5,17 +5,23 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import { verifiedAsset } from '@synq/chain-registry';
 import {
   ExecutionGrantSchema,
-  type ActionIntent,
+  type Asset,
+  type BoundActionIntent,
   type ExecutionGrant,
-} from '../../../packages/schemas/src/index.js';
-import type { Kernel } from '../../../packages/kernel/src/index.js';
+} from '@synq/schemas';
+import type { Kernel } from '@synq/kernel';
 import { moduleAbi } from './abi.js';
 export * from './journal.js';
-export function chainGrant(raw: ExecutionGrant) {
+export function chainGrant(
+  raw: ExecutionGrant,
+  localAssets: readonly Asset[] = [],
+) {
   const grant = ExecutionGrantSchema.parse(raw);
   if (grant.chainId === 143) throw new Error('MAINNET_DISABLED');
+  const inputAsset = verifiedAsset(grant.inputAsset, localAssets);
   return {
     intentHash: grant.intentHash,
     mandateId: keccak256(stringToHex(grant.mandateId)),
@@ -24,7 +30,7 @@ export function chainGrant(raw: ExecutionGrant) {
     target: grant.target,
     selector: grant.selector,
     calldataHash: grant.calldataHash,
-    inputToken: grant.inputAsset.address,
+    inputToken: inputAsset.address,
     maxInputAmount: BigInt(grant.maxInputAmount),
     value: BigInt(grant.nativeValue),
     validAfter: BigInt(grant.validAfter),
@@ -38,11 +44,12 @@ export function chainGrant(raw: ExecutionGrant) {
 export function prepareModuleCall(
   kernel: Kernel,
   grant: ExecutionGrant,
-  intent: ActionIntent,
+  intent: BoundActionIntent,
   module: Address,
   data: Hex,
   signatures: Hex,
   now: number,
+  localAssets: readonly Asset[] = [],
 ) {
   const validated = kernel.verify(grant, intent, now);
   if (
@@ -53,7 +60,7 @@ export function prepareModuleCall(
   const calldata = encodeFunctionData({
     abi: moduleAbi,
     functionName: 'execute',
-    args: [chainGrant(validated), data, signatures],
+    args: [chainGrant(validated, localAssets), data, signatures],
   });
   return {
     to: module,

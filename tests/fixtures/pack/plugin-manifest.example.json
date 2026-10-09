@@ -1,0 +1,15 @@
+{
+  "id": "kuru",
+  "version": "1.0.0",
+  "capabilities": [
+    "READ_MARKET",
+    "QUOTE",
+    "SPOT_TRADE"
+  ],
+  "chains": [
+    143
+  ],
+  "riskClass": "FINANCIAL_EXECUTION",
+  "requiresSimulation": true,
+  "maxGrantTtlSeconds": 120
+}

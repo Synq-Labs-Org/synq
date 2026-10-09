@@ -109,7 +109,7 @@ describe('real Postgres and Redis persistence', () => {
   it('persists used approval challenges across service restart and admits one concurrent consume', async () => {
     const store = new PostgresChallengeStore(db);
     await store.migrate();
-    const service = new ApprovalService(store, 'local');
+    const service = new ApprovalService(store, 'local/anvil');
     service.register({
       principalId: 'fixture_0',
       kind: 'HUMAN',

@@ -1,12 +1,17 @@
 import {
+  PluginError,
+  PluginHealthSchema,
   PluginManifestSchema,
+  parseOrThrow,
   type ActionIntent,
   type ExecutionGrant,
   type ExecutionReceipt,
   type NetworkProfile,
+  type PluginHealth,
   type PluginManifest,
+  type PluginManifestInput,
   type Simulation,
-} from '../../schemas/src/index.js';
+} from '@synq/domain';
 
 export type PluginContext = Readonly<{ network: NetworkProfile; now: number }>;
 export type PreparedAction = Readonly<{
@@ -24,10 +29,8 @@ export interface BoundedExecutor {
   ): Promise<ExecutionReceipt>;
 }
 export interface SynqPlugin {
-  manifest: PluginManifest;
-  health(
-    context: PluginContext,
-  ): Promise<{ available: boolean; checkedAt: number }>;
+  manifest: PluginManifestInput;
+  health(context: PluginContext): Promise<PluginHealth>;
   read?(context: PluginContext, request: unknown): Promise<unknown>;
   quote?(
     context: PluginContext,
@@ -56,11 +59,25 @@ export interface SynqPlugin {
     receipt: ExecutionReceipt,
   ): Promise<ExecutionReceipt>;
 }
+export type RegisteredPlugin = Readonly<
+  Omit<SynqPlugin, 'manifest'> & { manifest: Readonly<PluginManifest> }
+>;
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
 export class PluginRegistry {
-  private readonly plugins = new Map<string, SynqPlugin>();
-  register(plugin: SynqPlugin): void {
-    const manifest = PluginManifestSchema.parse(plugin.manifest);
-    if (this.plugins.has(manifest.id)) throw new Error('PLUGIN_CONFLICT');
+  private readonly plugins = new Map<string, RegisteredPlugin>();
+  private readonly health = new Map<string, PluginHealth>();
+  register(plugin: SynqPlugin): Readonly<PluginManifest> {
+    const manifest = deepFreeze(
+      parseOrThrow(PluginManifestSchema, plugin.manifest),
+    );
+    if (this.plugins.has(manifest.id))
+      throw new PluginError('PLUGIN_CONFLICT', manifest.id);
     if (
       manifest.riskClass === 'FINANCIAL_EXECUTION' &&
       (!plugin.prepare ||
@@ -68,22 +85,54 @@ export class PluginRegistry {
         !plugin.execute ||
         !plugin.reconcile)
     )
-      throw new Error('PLUGIN_MUTATOR_INCOMPLETE');
-    Object.freeze(manifest.capabilities);
-    Object.freeze(manifest.chains);
-    Object.freeze(manifest.environments);
-    Object.freeze(manifest.sourceDocs);
-    Object.freeze(manifest);
+      throw new PluginError('PLUGIN_MUTATOR_INCOMPLETE', manifest.id);
     this.plugins.set(manifest.id, Object.freeze({ ...plugin, manifest }));
+    return manifest;
   }
-  get(id: string, network: NetworkProfile): SynqPlugin {
+  manifests(): Readonly<PluginManifest>[] {
+    return [...this.plugins.values()].map((p) => p.manifest);
+  }
+  async refreshHealth(id: string, context: PluginContext): Promise<boolean> {
+    const plugin = this.supported(id, context.network);
+    let result: PluginHealth;
+    try {
+      result = parseOrThrow(PluginHealthSchema, await plugin.health(context));
+    } catch {
+      result = {
+        available: false,
+        checkedAt: context.now,
+        reason: 'health check failed',
+      };
+    }
+    if (result.checkedAt > context.now)
+      result = {
+        available: false,
+        checkedAt: context.now,
+        reason: 'health timestamp in the future',
+      };
+    this.health.set(id, result);
+    return result.available;
+  }
+  get(id: string, network: NetworkProfile, now: number): RegisteredPlugin {
+    const plugin = this.supported(id, network);
+    const health = this.health.get(id);
+    if (
+      !health ||
+      !health.available ||
+      now < health.checkedAt ||
+      now - health.checkedAt > plugin.manifest.health.maxStalenessSeconds
+    )
+      throw new PluginError('PLUGIN_UNHEALTHY', id);
+    return plugin;
+  }
+  private supported(id: string, network: NetworkProfile): RegisteredPlugin {
     const plugin = this.plugins.get(id);
     if (
       !plugin ||
       !plugin.manifest.chains.includes(network.chainId) ||
       !plugin.manifest.environments.includes(network.profile)
     )
-      throw new Error('PLUGIN_UNAVAILABLE');
+      throw new PluginError('PLUGIN_UNAVAILABLE', id);
     return plugin;
   }
 }
