@@ -1,3 +1,4 @@
+import { hashTypedData } from 'viem';
 import { z } from 'zod';
 import { ChainIdSchema } from './network.js';
 import {
@@ -88,4 +89,73 @@ export type VerifiedApproval = z.output<typeof VerifiedApprovalSchema>;
 
 export interface ApprovalLedger {
   isConsumed(approval: VerifiedApproval): Promise<boolean>;
+}
+
+export const EXECUTION_GRANT_TYPES = {
+  ExecutionGrant: [
+    { name: 'groupId', type: 'bytes32' },
+    { name: 'account', type: 'address' },
+    { name: 'mandateId', type: 'bytes32' },
+    { name: 'mandateVersion', type: 'uint256' },
+    { name: 'executor', type: 'address' },
+    { name: 'pluginId', type: 'bytes32' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'target', type: 'address' },
+    { name: 'selector', type: 'bytes4' },
+    { name: 'calldataHash', type: 'bytes32' },
+    { name: 'token', type: 'address' },
+    { name: 'maxInputAmount', type: 'uint256' },
+    { name: 'nativeValue', type: 'uint256' },
+    { name: 'minOutputAmount', type: 'uint256' },
+    { name: 'recipient', type: 'address' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validUntil', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'intentHash', type: 'bytes32' },
+  ],
+} as const;
+export function executionGrantMessage(grant: OnchainGrant) {
+  return {
+    groupId: grant.groupId,
+    account: grant.account,
+    mandateId: grant.mandateId,
+    mandateVersion: BigInt(grant.mandateVersion),
+    executor: grant.executor,
+    pluginId: grant.pluginId,
+    chainId: BigInt(grant.chainId),
+    target: grant.target,
+    selector: grant.selector,
+    calldataHash: grant.calldataHash,
+    token: grant.token,
+    maxInputAmount: BigInt(grant.maxInputAmount),
+    nativeValue: BigInt(grant.nativeValue),
+    minOutputAmount: BigInt(grant.minOutputAmount),
+    recipient: grant.recipient,
+    validAfter: BigInt(grant.validAfter),
+    validUntil: BigInt(grant.validUntil),
+    nonce: BigInt(grant.nonce),
+    intentHash: grant.intentHash,
+  };
+}
+export function executionGrantTypedData(
+  domain: GrantDomain,
+  grant: OnchainGrant,
+) {
+  return {
+    domain: {
+      name: domain.name,
+      version: domain.version,
+      chainId: domain.chainId,
+      verifyingContract: domain.verifyingContract,
+    },
+    types: EXECUTION_GRANT_TYPES,
+    primaryType: 'ExecutionGrant' as const,
+    message: executionGrantMessage(grant),
+  };
+}
+export function executionGrantDigest(
+  domain: GrantDomain,
+  grant: OnchainGrant,
+): `0x${string}` {
+  return hashTypedData(executionGrantTypedData(domain, grant));
 }

@@ -1,4 +1,12 @@
 import { safeParse, type z } from 'zod';
+import {
+  APPROVAL_ERROR_MESSAGES,
+  KERNEL_FAILURE_MESSAGES,
+  SIGNING_ERROR_MESSAGES,
+  type ApprovalErrorCode,
+  type KernelFailureCode,
+  type SigningErrorCode,
+} from './kernel-errors.js';
 
 export type SynqErrorCode =
   | 'VALIDATION_FAILED'
@@ -31,9 +39,15 @@ export type SynqErrorCode =
   | 'CONFIRMATION_DEPTH_REQUIRES_HEAD'
   | 'MAINNET_DISABLED'
   | 'PREPARED_CALL_MISMATCH'
-  | 'SIMULATION_SCOPE';
+  | 'SIMULATION_SCOPE'
+  | KernelFailureCode
+  | ApprovalErrorCode
+  | SigningErrorCode;
 
 const publicMessages: Record<SynqErrorCode, string> = {
+  ...KERNEL_FAILURE_MESSAGES,
+  ...APPROVAL_ERROR_MESSAGES,
+  ...SIGNING_ERROR_MESSAGES,
   VALIDATION_FAILED: 'Input failed schema validation.',
   INVALID_DECIMAL: 'Amount is not a valid decimal string.',
   INVALID_DECIMALS: 'Token decimals are out of range.',
@@ -118,6 +132,8 @@ export class DuplicateIdError extends SynqError {
 export class PluginError extends SynqError {}
 export class ExecutionError extends SynqError {}
 export class RegistryError extends SynqError {}
+export class ApprovalError extends SynqError {}
+export class SigningError extends SynqError {}
 
 export function parseOrThrow<S extends z.core.$ZodType>(
   schema: S,

@@ -16,23 +16,60 @@ const base = z.object({
   contract: address,
 });
 const group = { groupId: hash, account: address };
+const selector = z.string().regex(/^0x[0-9a-fA-F]{8}$/);
+const grantFields = {
+  ...group,
+  intentHash: hash,
+  mandateId: hash,
+  mandateVersion: amount,
+  executor: address,
+  pluginId: hash,
+  chainId: amount,
+  nonce: amount,
+  grantHash: hash,
+  target: address,
+  selector,
+  calldataHash: hash,
+  recipient: address,
+  outputAmount: amount,
+};
 export const ChainEventSchema = z.discriminatedUnion('eventName', [
   base.extend({
     eventName: z.literal('MandateConfigured'),
-    payload: z
-      .object({
-        ...group,
-        mandateId: hash,
-        version: amount,
-        target: address,
-        selector: z.string().regex(/^0x[0-9a-fA-F]{8}$/),
-        inputToken: address,
-        maxPerCall: amount,
-        cumulativeCap: amount,
-        maxValue: amount,
-        validUntil: amount,
-      })
-      .strict(),
+    payload: z.union([
+      z
+        .object({
+          ...group,
+          mandateId: hash,
+          version: amount,
+          target: address,
+          selector,
+          inputToken: address,
+          maxPerCall: amount,
+          cumulativeCap: amount,
+          maxValue: amount,
+          validUntil: amount,
+        })
+        .strict(),
+      z
+        .object({
+          ...group,
+          mandateId: hash,
+          version: amount,
+          mandateHash: hash,
+          token: address,
+          maxTokenPerAction: amount,
+          maxNativePerAction: amount,
+          cumulativeTokenCap: amount,
+          cumulativeNativeCap: amount,
+          validAfter: amount,
+          validUntil: amount,
+          callTargets: z.array(address),
+          callSelectors: z.array(selector),
+          recipients: z.array(address),
+        })
+        .strict(),
+    ]),
   }),
   base.extend({
     eventName: z.literal('MandateRevoked'),
@@ -43,28 +80,40 @@ export const ChainEventSchema = z.discriminatedUnion('eventName', [
     payload: z.object({ ...group, paused: z.boolean() }).strict(),
   }),
   base.extend({
+    eventName: z.literal('Paused'),
+    payload: z.object(group).strict(),
+  }),
+  base.extend({
+    eventName: z.literal('Unpaused'),
+    payload: z.object(group).strict(),
+  }),
+  base.extend({
     eventName: z.literal('GrantExecuted'),
-    payload: z
-      .object({
-        ...group,
-        intentHash: hash,
-        mandateId: hash,
-        mandateVersion: amount,
-        executor: address,
-        pluginId: hash,
-        chainId: amount,
-        nonce: amount,
-        grantHash: hash,
-        target: address,
-        selector: z.string().regex(/^0x[0-9a-fA-F]{8}$/),
-        calldataHash: hash,
-        inputToken: address,
-        recipient: address,
-        inputAmount: amount,
-        value: amount,
-        outputAmount: amount,
-      })
-      .strict(),
+    payload: z.union([
+      z
+        .object({
+          ...grantFields,
+          inputToken: address,
+          inputAmount: amount,
+          value: amount,
+        })
+        .strict()
+        .transform((p) => p),
+      z
+        .object({
+          ...grantFields,
+          token: address,
+          tokenAmount: amount,
+          nativeValue: amount,
+        })
+        .strict()
+        .transform(({ token, tokenAmount, nativeValue, ...rest }) => ({
+          ...rest,
+          inputToken: token,
+          inputAmount: tokenAmount,
+          value: nativeValue,
+        })),
+    ]),
   }),
   base.extend({
     eventName: z.literal('Transfer'),
@@ -85,7 +134,11 @@ export type GroupState = {
   members: { memberId: string; signer: Address }[];
   mandates: Record<
     string,
-    { version: string; active: boolean; terms: Record<string, string> }
+    {
+      version: string;
+      active: boolean;
+      terms: Record<string, string | string[]>;
+    }
   >;
   paused: boolean;
   treasuryBalance: string;
@@ -285,6 +338,8 @@ export class DeterministicReadModel {
         old.active = false;
       } else if (event.eventName === 'PauseChanged')
         state.paused = event.payload.paused;
+      else if (event.eventName === 'Paused') state.paused = true;
+      else if (event.eventName === 'Unpaused') state.paused = false;
       else {
         const p = event.payload,
           mandate = state.mandates[p.mandateId.toLowerCase()];

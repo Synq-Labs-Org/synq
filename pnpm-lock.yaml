@@ -237,9 +237,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../chain-registry
-      '@synq/kernel':
+      '@synq/domain':
         specifier: workspace:*
-        version: link:../kernel
+        version: link:../domain
       '@synq/read-model':
         specifier: workspace:*
         version: link:../read-model
@@ -258,6 +258,9 @@ importers:
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain
+      '@synq/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas

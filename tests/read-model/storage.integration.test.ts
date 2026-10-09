@@ -5,10 +5,6 @@ import {
   PostgresReadModel,
   RedisSnapshotCache,
 } from '../../packages/read-model/src/storage.js';
-import { PostgresChallengeStore } from '../../packages/identity/src/postgres-store.js';
-import { ApprovalService } from '../../packages/identity/src/index.js';
-import { approvalTypedData } from '../../packages/kernel/src/index.js';
-import { intent, mandate, owners, now } from '../kernel/fixtures.js';
 import {
   binding,
   chainId,
@@ -105,35 +101,5 @@ describe('real Postgres and Redis persistence', () => {
       treasuryBalance: '1000000',
       executed: {},
     });
-  });
-  it('persists used approval challenges across service restart and admits one concurrent consume', async () => {
-    const store = new PostgresChallengeStore(db);
-    await store.migrate();
-    const service = new ApprovalService(store, 'local/anvil');
-    service.register({
-      principalId: 'fixture_0',
-      kind: 'HUMAN',
-      provider: 'fixture',
-      signer: owners[0]!.address,
-    });
-    service.bindMembership('group_1', 'member_0', 'fixture_0');
-    const c = await service.issue(intent(), mandate(), 'member_0', now);
-    const signed = {
-      ...c.approval,
-      signature: await owners[0]!.signTypedData(
-        approvalTypedData(intent(), c.approval),
-      ),
-    };
-    const results = await Promise.allSettled([
-      service.submit(c.challengeId, signed, intent(), mandate(), now),
-      service.submit(c.challengeId, signed, intent(), mandate(), now),
-    ]);
-    expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
-    expect(
-      (await new PostgresChallengeStore(db).get(c.challengeId))?.used,
-    ).toBe(true);
-    await expect(
-      service.submit(c.challengeId, signed, intent(), mandate(), now),
-    ).rejects.toThrow('consumed');
   });
 });

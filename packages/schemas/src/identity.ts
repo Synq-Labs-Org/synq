@@ -267,7 +267,7 @@ export const MandateViewSchema = z.strictObject({
   mandateId: HashSchema,
   version: AmountSchema,
   active: z.boolean(),
-  terms: z.record(z.string(), z.string()),
+  terms: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   source: z.literal('indexed-read-model'),
   currentHeadVerified: z.boolean(),
 });
