@@ -136,20 +136,8 @@ export function route<
     url: spec.url,
     handler: async (request: FastifyRequest, reply: FastifyReply) => {
       if (spec.admin) assertAdmin(request, ctx.adminToken);
-      else if (spec.method === 'POST') {
-        const principal =
-          request.body &&
-          typeof request.body === 'object' &&
-          'principalId' in request.body &&
-          typeof request.body.principalId === 'string'
-            ? request.body.principalId.slice(0, 160)
-            : null;
-        if (
-          !ctx.limiter.take(`ip:${request.ip}`) ||
-          (principal !== null && !ctx.limiter.take(`principal:${principal}`))
-        )
-          throw new IdentityError('RATE_LIMITED');
-      }
+      else if (spec.method === 'POST' && !ctx.limiter.take(`ip:${request.ip}`))
+        throw new IdentityError('RATE_LIMITED');
       const params = (spec.params ?? z.object({})).parse(
         request.params,
       ) as z.output<P>;

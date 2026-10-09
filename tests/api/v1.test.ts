@@ -361,6 +361,34 @@ describe('/v1 API (Fastify inject, in-memory store)', () => {
     expect(statuses).toEqual([201, 201, 201, 429, 429]);
   });
 
+  it('forged requests naming a victim principal cannot exhaust that principal', async () => {
+    const app = v1App(
+      new MemoryIdentityStore(),
+      { now: 1000 },
+      {
+        capacity: 2,
+        refillPerSecond: 0.001,
+      },
+    );
+    const victim = 'principal-victim-0001';
+    for (let i = 0; i < 6; i++)
+      await app.inject({
+        method: 'POST',
+        url: '/v1/approvals/challenges',
+        remoteAddress: `10.0.0.${i + 1}`,
+        payload: { principalId: victim },
+        headers: { 'idempotency-key': `forged-key-${i}0000` },
+      });
+    const fresh = await app.inject({
+      method: 'POST',
+      url: '/v1/approvals/challenges',
+      remoteAddress: '10.9.9.9',
+      payload: { principalId: victim },
+      headers: { 'idempotency-key': 'victim-key-00000' },
+    });
+    expect(fresh.statusCode).not.toBe(429);
+  });
+
   it('guards admin commands, enforces the admin credential length and maps typed errors to safe responses', async () => {
     const app = v1App();
     const { call, admin } = client(app);
