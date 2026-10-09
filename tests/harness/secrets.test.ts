@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { generateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { scanRepository } from '../../scripts/secrets.mjs';
 
 const git = (cwd: string, ...args: string[]) =>
@@ -55,7 +57,7 @@ describe('P00-003 repository secret scan', () => {
       expect(violations).toEqual(
         expect.arrayContaining([
           { file: 'docs/deep/nested/notes.md', rule: 'pem-private-key' },
-          { file: 'infra/config.yaml', rule: 'hex-private-key-assignment' },
+          { file: 'infra/config.yaml', rule: 'labelled-hex-key' },
           { file: '.env', rule: 'dotenv-file' },
           { file: 'deploy/operator.key', rule: 'key-file' },
           { file: 'reports/run.log', rule: 'bearer-token' },
@@ -64,6 +66,70 @@ describe('P00-003 repository secret scan', () => {
     } finally {
       rmSync(clean, { recursive: true, force: true });
       rmSync(dirty, { recursive: true, force: true });
+    }
+  });
+  it('P00-003 detects labelled, bare and mnemonic key material in any form', () => {
+    const hex = 'ab'.repeat(32);
+    const twelve = generateMnemonic(wordlist, 128);
+    const twentyFour = generateMnemonic(wordlist, 256);
+    const planted: Record<string, [string, string]> = {
+      'deploy/testnet.env.sh': [
+        `PRIVATE_KEY_TESTNET=0x${hex}\n`,
+        'labelled-hex-key',
+      ],
+      'deploy/config.yaml': [`deployer_pk: ${hex}\n`, 'labelled-hex-key'],
+      'src/wallet.ts': [
+        `const operatorKey = '0x${hex}';\n`,
+        'labelled-hex-key',
+      ],
+      'notes/backup.txt': [`0x${hex}\n`, 'bare-hex-secret'],
+      'notes/raw.md': [`keep safe:\n${hex}\n`, 'bare-hex-secret'],
+      'deploy/mnemonic.env.sh': [`MNEMONIC="${twelve}"\n`, 'bip39-mnemonic'],
+      'docs/recovery.md': [
+        `Write this down:\n${twentyFour}\n`,
+        'bip39-mnemonic',
+      ],
+      'reports/evidence/run.json': [
+        JSON.stringify({
+          txHash: `0x${'cd'.repeat(32)}`,
+          signerKey: `0x${hex}`,
+        }),
+        'labelled-hex-key',
+      ],
+    };
+    const dirty = repo(
+      Object.fromEntries(Object.entries(planted).map(([f, [c]]) => [f, c])),
+    );
+    try {
+      const { violations } = scanRepository(dirty);
+      for (const [file, [, rule]] of Object.entries(planted))
+        expect(violations, file).toContainEqual({ file, rule });
+    } finally {
+      rmSync(dirty, { recursive: true, force: true });
+    }
+  });
+  it('P00-003 legitimate 32-byte hashes in code and evidence are not flagged', () => {
+    const hash = `0x${'cd'.repeat(32)}`;
+    const clean = repo({
+      'contracts/src/Domain.sol': `bytes32 constant TYPEHASH = ${hash};\n`,
+      'src/hash.ts': `export const evidenceHash = '${hash}';\nexport const groupId = '${hash}';\n`,
+      'reports/evidence/deploy.json': JSON.stringify(
+        {
+          txHash: hash,
+          blockHash: hash,
+          mandateId: hash,
+          deploymentTransactions: [hash, hash],
+        },
+        null,
+        2,
+      ),
+      'docs/prose.md':
+        'Abandon ability able about above absent absorb abstract absurd abuse access accident account.\n',
+    });
+    try {
+      expect(scanRepository(clean).violations).toEqual([]);
+    } finally {
+      rmSync(clean, { recursive: true, force: true });
     }
   });
   it('P00-003 the application repository itself carries no tracked secret', () => {

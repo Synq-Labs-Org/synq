@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 const contentRules = [
   [
@@ -16,10 +18,6 @@ const contentRules = [
   ['aws-access-key', /\bAKIA[0-9A-Z]{16}\b/],
   ['slack-token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
   ['google-api-key', /\bAIza[0-9A-Za-z_-]{35}\b/],
-  [
-    'hex-private-key-assignment',
-    /(?:PRIVATE_KEY|private_?key|SECRET|secret_?key|MNEMONIC)["']?\s*[:=]\s*["']?(?:0x)?[0-9a-fA-F]{64}\b/i,
-  ],
   ['bearer-token', /\bBearer\s+[A-Za-z0-9._~+/-]{32,}=*/],
 ];
 const forbiddenPath = [
@@ -33,6 +31,68 @@ const forbiddenPath = [
   ['reference-pack', (f) => f.includes('Synq_Agent_Build_Pack')],
 ];
 const MAX_BYTES = 5 * 1024 * 1024;
+const BIP39 = new Set(wordlist);
+const MNEMONIC_LENGTHS = [24, 21, 18, 15, 12];
+const BARE_HASH_ALLOWED = [
+  /^reports\/(evidence|tests)\//,
+  /^contracts\/(evidence|abi|out|lib)\//,
+  /(^|\/)pnpm-lock\.yaml$/,
+];
+export function sensitiveName(name) {
+  const snake = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/-/g, '_');
+  return (
+    /(private_?key|privkey|secret|mnemonic|seed|passphrase|signer_?key)/.test(
+      snake,
+    ) || /(^|[_.])(pk|sk|key)$/.test(snake)
+  );
+}
+function labelledHexKeys(text) {
+  const found = [];
+  const pattern =
+    /([A-Za-z_][A-Za-z0-9_.-]*)["'`]?\s*[:=]\s*["'`]?(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])/g;
+  for (const match of text.matchAll(pattern))
+    if (sensitiveName(match[1])) found.push(match[1]);
+  return found;
+}
+function hasBareHexLine(text) {
+  return /^[ \t]*["'`]?(?:0x)?[0-9a-fA-F]{64}["'`]?[,;]?[ \t]*$/m.test(text);
+}
+export function findMnemonic(text) {
+  const words = text.toLowerCase().split(/[^a-z]+/);
+  let run = [];
+  const check = () => {
+    for (const size of MNEMONIC_LENGTHS)
+      for (let i = 0; i + size <= run.length; i++)
+        if (validateMnemonic(run.slice(i, i + size).join(' '), wordlist))
+          return true;
+    return false;
+  };
+  for (const word of [...words, '']) {
+    if (BIP39.has(word)) {
+      run.push(word);
+      continue;
+    }
+    if (run.length >= 12 && check()) return true;
+    run = [];
+  }
+  return false;
+}
+function labelledMnemonic(text) {
+  const pattern =
+    /(mnemonic|seed[_ -]?phrase|recovery[_ -]?phrase|seed)["'`]?\s*[:=]\s*["'`]?([a-z]+(?:[ \t]+[a-z]+){11,23})/gi;
+  for (const match of text.matchAll(pattern))
+    if (
+      match[2]
+        .toLowerCase()
+        .split(/\s+/)
+        .every((w) => BIP39.has(w))
+    )
+      return true;
+  return false;
+}
 
 export function trackedFiles(root) {
   return execFileSync('git', ['ls-files', '-z'], {
@@ -55,6 +115,12 @@ export function scanRepository(root) {
     const text = buffer.toString('utf8');
     for (const [rule, pattern] of contentRules)
       if (pattern.test(text)) violations.push({ file, rule });
+    if (labelledHexKeys(text).length)
+      violations.push({ file, rule: 'labelled-hex-key' });
+    if (!BARE_HASH_ALLOWED.some((p) => p.test(file)) && hasBareHexLine(text))
+      violations.push({ file, rule: 'bare-hex-secret' });
+    if (labelledMnemonic(text) || findMnemonic(text))
+      violations.push({ file, rule: 'bip39-mnemonic' });
   }
   return { scanned: files.length, violations };
 }
