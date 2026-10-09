@@ -185,6 +185,9 @@ importers:
       '@scure/bip39':
         specifier: 2.4.0
         version: 2.4.0
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../chain-registry
       '@synq/kernel':
         specifier: workspace:*
         version: link:../kernel
