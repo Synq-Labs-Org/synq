@@ -80,10 +80,18 @@ export const GroupStateSchema = z.strictObject({
 });
 export type GroupState = z.output<typeof GroupStateSchema>;
 
+export const BuildIdentitySchema = z.strictObject({
+  id: z.string().regex(/^0x[0-9a-f]{32}$/),
+  store: z.string().min(1),
+  configHash: bytes32,
+});
+export type BuildIdentity = z.output<typeof BuildIdentitySchema>;
+
 export const GroupSnapshotSchema = z.strictObject({
   schemaVersion: z.literal(1),
   sourceChainId: block.positive(),
   profile: z.string(),
+  build: BuildIdentitySchema,
   indexedThroughBlock: block,
   generation: block,
   groupRevision: block,
@@ -96,6 +104,7 @@ export const ProgressSchema = z.strictObject({
   schemaVersion: z.literal(1),
   sourceChainId: block.positive(),
   profile: z.string(),
+  build: BuildIdentitySchema,
   indexedThroughBlock: block,
   generation: block,
   frozenGroups: z.array(bytes32),
@@ -109,6 +118,15 @@ export const ProgressSchema = z.strictObject({
   ),
 });
 export type Progress = z.output<typeof ProgressSchema>;
+
+export const GroupStampSchema = z.strictObject({
+  build: BuildIdentitySchema,
+  generation: block,
+  indexedThroughBlock: block,
+  groupRevision: block,
+  accountingStatus: z.enum(['OPEN', 'FROZEN']),
+});
+export type GroupStamp = z.output<typeof GroupStampSchema>;
 
 export const FRESHNESS_STATUSES = [
   'FRESH',

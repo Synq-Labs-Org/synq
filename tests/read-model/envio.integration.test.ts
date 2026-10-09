@@ -406,6 +406,8 @@ describe.skipIf(!enabled)(
         let calls = 0;
         const counting: SnapshotSource = {
           chainId: CHAIN_ID,
+          scope: reader.scope,
+          stamp: (id) => reader.stamp(id),
           progress: () => (calls++, reader.progress()),
           groupSnapshot: (id) => (calls++, reader.groupSnapshot(id)),
         };

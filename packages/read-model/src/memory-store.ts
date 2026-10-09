@@ -44,7 +44,10 @@ export class MemoryProjectionStore implements ProjectionStore {
     artifacts: new Map(),
     seq: 0,
   };
-  constructor(readonly chainId: number) {}
+  constructor(
+    readonly chainId: number,
+    readonly namespace = 'memory',
+  ) {}
   snapshotTables(): Tables {
     return cloneTables(this.state.tables);
   }
@@ -234,8 +237,11 @@ class MemorySession implements ProjectionSession {
   async artifactHashes() {
     return new Set(this.s.artifacts.keys());
   }
-  async groupIndex() {
-    return structuredClone(this.s.tables.rows('group'));
+  async groupIndex(groupIds?: readonly Hex[]) {
+    const rows = this.s.tables.rows('group');
+    return structuredClone(
+      groupIds ? rows.filter((r) => groupIds.includes(r.group_id)) : rows,
+    );
   }
   async allTables() {
     return cloneTables(this.s.tables);

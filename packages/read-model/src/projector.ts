@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { configHash, type ProjectionConfig } from './config.js';
 import { ReadModelError, fail } from './errors.js';
 import {
@@ -75,7 +76,12 @@ export function initialCheckpoint(config: ProjectionConfig): Checkpoint {
     indexedThroughBlock: config.startBlock - 1,
     generation: 0,
     configHash: configHash(config),
+    buildId: newBuildId(),
   };
+}
+
+export function newBuildId(): Hex {
+  return `0x${randomBytes(16).toString('hex')}`;
 }
 
 export class Projector {

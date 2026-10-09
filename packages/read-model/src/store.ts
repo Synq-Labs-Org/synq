@@ -7,6 +7,7 @@ export interface Checkpoint {
   indexedThroughBlock: number;
   generation: number;
   configHash: Hex;
+  buildId: Hex;
 }
 export interface StoredEvent {
   event: ChainEvent;
@@ -61,7 +62,7 @@ export interface ProjectionSession {
     into: Tables,
     full?: boolean,
   ): Promise<void>;
-  groupIndex(): Promise<GroupRow[]>;
+  groupIndex(groupIds?: readonly Hex[]): Promise<GroupRow[]>;
   clearScope(scope: Scope2): Promise<void>;
   write(changes: TableChanges): Promise<void>;
   insertEvents(
@@ -78,6 +79,7 @@ export interface ProjectionSession {
 
 export interface ProjectionStore {
   readonly chainId: number;
+  readonly namespace: string;
   transaction<T>(fn: (session: ProjectionSession) => Promise<T>): Promise<T>;
   read<T>(fn: (session: ProjectionSession) => Promise<T>): Promise<T>;
 }

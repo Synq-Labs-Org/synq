@@ -4,6 +4,7 @@ import { ReadModelError, fail } from './errors.js';
 import { canonicalJson } from './events.js';
 import { initialCheckpoint } from './projector.js';
 import type {
+  Checkpoint,
   MandateArtifact,
   ProjectionSession,
   ProjectionStore,
@@ -11,18 +12,23 @@ import type {
 import { Tables, stateHash, type Hex } from './tables.js';
 import {
   GroupSnapshotSchema,
+  GroupStampSchema,
   ProgressSchema,
   groupState,
   groupStateHash,
+  type BuildIdentity,
   type GroupSnapshot,
+  type GroupStamp,
   type Progress,
 } from './views.js';
 import { configHash } from './config.js';
 
 export interface SnapshotSource {
   readonly chainId: number;
+  readonly scope: string;
   progress(): Promise<Progress>;
   groupSnapshot(groupId: Hex): Promise<GroupSnapshot | null>;
+  stamp(groupId: Hex): Promise<GroupStamp | null>;
 }
 
 export type ArtifactHasher = (artifact: unknown) => Hex;
@@ -31,11 +37,20 @@ export const defaultArtifactHasher: ArtifactHasher = (artifact) =>
 
 export class ProjectionReader implements SnapshotSource {
   readonly chainId: number;
+  readonly scope: string;
   constructor(
     readonly store: ProjectionStore,
     readonly config: ProjectionConfig,
   ) {
     this.chainId = config.chainId;
+    this.scope = `${store.namespace}:${configHash(config)}`;
+  }
+  private build(cp: Checkpoint): BuildIdentity {
+    return {
+      id: cp.buildId,
+      store: this.store.namespace,
+      configHash: cp.configHash,
+    };
   }
   private async checkpoint(s: ProjectionSession) {
     const cp = (await s.checkpoint()) ?? initialCheckpoint(this.config);
@@ -58,6 +73,7 @@ export class ProjectionReader implements SnapshotSource {
         schemaVersion: 1,
         sourceChainId: this.config.chainId,
         profile: this.config.profile,
+        build: this.build(cp),
         indexedThroughBlock: cp.indexedThroughBlock,
         generation: cp.generation,
         frozenGroups: groups
@@ -81,11 +97,27 @@ export class ProjectionReader implements SnapshotSource {
         schemaVersion: 1,
         sourceChainId: this.config.chainId,
         profile: this.config.profile,
+        build: this.build(cp),
         indexedThroughBlock: cp.indexedThroughBlock,
         generation: cp.generation,
         groupRevision: g.revision,
         stateHash: groupStateHash(state),
         group: state,
+      });
+    });
+  }
+  async stamp(groupId: Hex): Promise<GroupStamp | null> {
+    const id = groupId.toLowerCase() as Hex;
+    return this.store.read(async (s) => {
+      const cp = await this.checkpoint(s);
+      const [g] = await s.groupIndex([id]);
+      if (!g || g.group_id !== id) return null;
+      return GroupStampSchema.parse({
+        build: this.build(cp),
+        generation: cp.generation,
+        indexedThroughBlock: cp.indexedThroughBlock,
+        groupRevision: g.revision,
+        accountingStatus: g.accounting_status,
       });
     });
   }

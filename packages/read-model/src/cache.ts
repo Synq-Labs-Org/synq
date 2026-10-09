@@ -4,7 +4,9 @@ import type { Hex } from './tables.js';
 import {
   GroupSnapshotSchema,
   ProgressSchema,
+  type BuildIdentity,
   type GroupSnapshot,
+  type GroupStamp,
   type Progress,
 } from './views.js';
 
@@ -28,8 +30,13 @@ function parseJson(raw: string): unknown {
   }
 }
 
+function sameBuild(a: BuildIdentity, b: BuildIdentity): boolean {
+  return a.id === b.id && a.store === b.store && a.configHash === b.configHash;
+}
+
 export class RedisSnapshotCache implements SnapshotSource {
   readonly chainId: number;
+  readonly scope: string;
   readonly stats: CacheStats = {
     progressHits: 0,
     progressMisses: 0,
@@ -47,18 +54,22 @@ export class RedisSnapshotCache implements SnapshotSource {
     } = {},
   ) {
     this.chainId = source.chainId;
+    this.scope = source.scope;
     for (const ttl of [options.progressTtlSeconds, options.snapshotTtlSeconds])
       if (ttl !== undefined && (!Number.isSafeInteger(ttl) || ttl < 1))
         throw new ReadModelError('CONFIG_MISMATCH', 'invalid cache TTL');
   }
   private prefix() {
-    return `${this.options.namespace ?? 'synq:rm:v1'}:${this.chainId}`;
+    return `${this.options.namespace ?? 'synq:rm:v2'}:${this.chainId}:${this.scope}`;
   }
   progressKey(): string {
     return `${this.prefix()}:progress`;
   }
-  groupKey(groupId: string, revision: number): string {
-    return `${this.prefix()}:group:${groupId.toLowerCase()}:${revision}`;
+  groupKey(build: BuildIdentity, groupId: string, revision: number): string {
+    return `${this.prefix()}:build:${build.id}:group:${groupId.toLowerCase()}:${revision}`;
+  }
+  stamp(groupId: Hex): Promise<GroupStamp | null> {
+    return this.source.stamp(groupId);
   }
   async publishProgress(): Promise<Progress> {
     const progress = await this.source.progress();
@@ -71,7 +82,12 @@ export class RedisSnapshotCache implements SnapshotSource {
     const raw = await this.redis.get(this.progressKey());
     if (raw !== null) {
       const parsed = ProgressSchema.safeParse(parseJson(raw));
-      if (parsed.success && parsed.data.sourceChainId === this.chainId) {
+      if (
+        parsed.success &&
+        parsed.data.sourceChainId === this.chainId &&
+        `${parsed.data.build.store}:${parsed.data.build.configHash}` ===
+          this.scope
+      ) {
         this.stats.progressHits++;
         return parsed.data;
       }
@@ -82,35 +98,34 @@ export class RedisSnapshotCache implements SnapshotSource {
   }
   async groupSnapshot(groupId: Hex): Promise<GroupSnapshot | null> {
     const id = groupId.toLowerCase() as Hex;
-    const progress = await this.progress();
-    const entry = progress.groups.find((g) => g.groupId === id);
-    if (!entry) return null;
-    const raw = await this.redis.get(this.groupKey(id, entry.revision));
+    const stamp = await this.source.stamp(id);
+    if (!stamp) return null;
+    const raw = await this.redis.get(
+      this.groupKey(stamp.build, id, stamp.groupRevision),
+    );
     if (raw !== null) {
       const parsed = GroupSnapshotSchema.safeParse(parseJson(raw));
       if (
         parsed.success &&
         parsed.data.sourceChainId === this.chainId &&
         parsed.data.group.groupId === id &&
-        parsed.data.groupRevision === entry.revision &&
-        parsed.data.indexedThroughBlock <= progress.indexedThroughBlock &&
-        parsed.data.group.accountingStatus === entry.accountingStatus
+        sameBuild(parsed.data.build, stamp.build) &&
+        parsed.data.groupRevision === stamp.groupRevision &&
+        parsed.data.generation >= parsed.data.groupRevision &&
+        parsed.data.generation <= stamp.generation &&
+        parsed.data.indexedThroughBlock <= stamp.indexedThroughBlock &&
+        parsed.data.group.accountingStatus === stamp.accountingStatus
       ) {
         this.stats.groupHits++;
-        return {
-          ...parsed.data,
-          indexedThroughBlock: progress.indexedThroughBlock,
-          generation: progress.generation,
-        };
+        return parsed.data;
       }
       this.stats.invalid++;
     }
     this.stats.groupMisses++;
     const fresh = await this.source.groupSnapshot(id);
     if (!fresh) return null;
-    if (fresh.groupRevision !== entry.revision) await this.publishProgress();
     await this.redis.set(
-      this.groupKey(id, fresh.groupRevision),
+      this.groupKey(fresh.build, id, fresh.groupRevision),
       JSON.stringify(fresh),
       { EX: this.options.snapshotTtlSeconds ?? 3600 },
     );
