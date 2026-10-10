@@ -11,5 +11,12 @@ export default tseslint.config(
       ],
     },
   },
-  { ignores: ['**/generated/**', '**/dist/**', '**/node_modules/**'] },
+  {
+    ignores: [
+      '**/generated/**',
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/.cre_build_tmp.*',
+    ],
+  },
 );
