@@ -73,7 +73,7 @@ describe.skipIf(privyBlocked)(
         code: 'PROVIDER_ERROR',
       });
       expect(await transfer(20_000_000n)).toMatch(/^0x/);
-    });
+    }, 60_000);
   },
 );
 
@@ -84,6 +84,6 @@ describe.skipIf(dynamicBlocked)(
       expect((await dynamic.verifyEnvironment()).environmentId).toBe(
         process.env.DYNAMIC_ENVIRONMENT_ID,
       );
-    });
+    }, 30_000);
   },
 );
