@@ -20,6 +20,12 @@ const DIGEST = hex(0xd1);
 const GRANT = hex(0x91);
 const TX = hex(0x7a);
 
+import { ACTION_MACHINE } from '../../../packages/domain/src/index.js';
+
+const successorsOf = (
+  steps: StateStep<ActionState>[],
+  start: ActionState,
+): ActionState[] => [...ACTION_MACHINE.successors(steps.at(-1)?.to ?? start)];
 const KERNEL_PENDING: StateStep<ActionState>[] = [
   { from: 'PROPOSED', to: 'RISKED' },
   { from: 'RISKED', to: 'SIMULATED' },
@@ -110,6 +116,7 @@ export function fakeEconomic(options: FakeOptions = {}) {
     }
     const included = upto >= TX_PATH.indexOf('INCLUDED');
     return {
+      successors: successorsOf(actionHistory, 'PREPARED'),
       grantId: GRANT,
       transactionHash: TX,
       state: state.tx!,
@@ -170,6 +177,7 @@ export function fakeEconomic(options: FakeOptions = {}) {
           grant: {} as never,
           requiredApprovals: required,
           lifecycle: kernelLifecycle(),
+          successors: successorsOf(kernelLifecycle(), 'PROPOSED'),
         };
       }
       return {
@@ -180,6 +188,7 @@ export function fakeEconomic(options: FakeOptions = {}) {
         draft: draft(),
         requiredApprovals: required,
         lifecycle: kernelLifecycle(),
+        successors: successorsOf(kernelLifecycle(), 'PROPOSED'),
       };
     },
     async registerDraft() {
@@ -206,6 +215,7 @@ export function fakeEconomic(options: FakeOptions = {}) {
         preparedCallHash: hex(0x99),
         reservation: reservation(),
         lifecycle: kernelLifecycle(),
+        successors: successorsOf(kernelLifecycle(), 'PROPOSED'),
       };
     },
     async signAndSubmit() {

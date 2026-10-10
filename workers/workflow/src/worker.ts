@@ -25,14 +25,14 @@ type WebpackCompiler = {
 
 /**
  * Workspace packages import Node built-ins with the `node:` scheme (for example `@synq/domain`'s id
- * generator). The sandbox never calls them; the scheme is stripped so Temporal's ignore list applies,
- * and any runtime use inside a workflow throws.
+ * generator) and viem (schema refinements and hashing). Workflows never parse or hash, so both are
+ * replaced by empty modules: the bundle stays small and any runtime use inside a workflow throws.
  */
 export const WORKFLOW_BUNDLER_OPTIONS: Pick<
   BundleOptions,
   'ignoreModules' | 'webpackConfigHook'
 > = {
-  ignoreModules: ['crypto'],
+  ignoreModules: ['crypto', 'viem'],
   webpackConfigHook: (config) => ({
     ...config,
     plugins: [

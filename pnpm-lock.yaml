@@ -378,6 +378,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/demo':
+        specifier: workspace:*
+        version: link:../../apps/demo
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain

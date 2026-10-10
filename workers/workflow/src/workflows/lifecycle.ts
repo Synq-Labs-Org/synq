@@ -1,17 +1,15 @@
-import {
-  ACTION_MACHINE,
-  TX_MACHINE,
-  type ActionState,
-  type StateMachine,
-  type TxState,
-} from '@synq/domain';
+import type { ActionState, TxState } from '@synq/schemas';
 import type { StateStep } from '../activities/types.js';
 
-/** Mirrors an authoritative history (Kernel lifecycle or execution journal) and refuses any walk the canonical machine forbids. */
+/**
+ * Mirrors an authoritative history (Kernel lifecycle or execution journal). Those histories are built
+ * and verified against @synq/domain's ACTION_MACHINE and TX_MACHINE by the Kernel, the journal and the
+ * Activities; the workflow only refuses histories that regress, diverge or have gaps.
+ */
 export class MirroredHistory<S extends string> {
   private steps: StateStep<S>[] = [];
   constructor(
-    private readonly machine: StateMachine<S>,
+    private readonly name: string,
     private readonly start: S,
   ) {}
   get state(): S {
@@ -20,18 +18,15 @@ export class MirroredHistory<S extends string> {
   get history(): StateStep<S>[] {
     return this.steps.map((s) => ({ ...s }));
   }
-  /** Accepts a full authoritative history; it must extend what was already mirrored. */
   sync(full: readonly StateStep<S>[]): S {
     if (full.length < this.steps.length)
-      throw new Error(`${this.machine.name.toUpperCase()}_HISTORY_REGRESSED`);
+      throw new Error(`${this.name}_HISTORY_REGRESSED`);
     let current = this.start;
     full.forEach((step, i) => {
       const known = this.steps[i];
       if (known && (known.from !== step.from || known.to !== step.to))
-        throw new Error(`${this.machine.name.toUpperCase()}_HISTORY_DIVERGED`);
-      if (step.from !== current)
-        throw new Error(`${this.machine.name.toUpperCase()}_HISTORY_GAP`);
-      this.machine.assertTransition(step.from, step.to);
+        throw new Error(`${this.name}_HISTORY_DIVERGED`);
+      if (step.from !== current) throw new Error(`${this.name}_HISTORY_GAP`);
       current = step.to;
     });
     this.steps = full.map((s) => ({ from: s.from, to: s.to }));
@@ -45,15 +40,17 @@ export const KERNEL_SEGMENT_START: ActionState = 'PROPOSED';
 /** The intent's ACTION_MACHINE walk is the Kernel segment (PROPOSED..PREPARED) followed by the journal segment (PREPARED..). */
 export class ActionLifecycle {
   readonly kernel = new MirroredHistory<ActionState>(
-    ACTION_MACHINE,
+    'ACTION',
     KERNEL_SEGMENT_START,
   );
   readonly journalAction = new MirroredHistory<ActionState>(
-    ACTION_MACHINE,
+    'ACTION',
     'PREPARED',
   );
-  readonly tx = new MirroredHistory<TxState>(TX_MACHINE, TX_MACHINE.initial);
+  readonly tx = new MirroredHistory<TxState>('TRANSACTION', 'PREPARED');
   private terminal: ActionState | null = null;
+  /** Successors of the current state as ACTION_MACHINE reported them in the latest Activity result. */
+  successors: readonly ActionState[] = [];
   get actionState(): ActionState {
     if (this.terminal) return this.terminal;
     return this.journalAction.history.length
@@ -63,13 +60,13 @@ export class ActionLifecycle {
   get txState(): TxState | null {
     return this.tx.history.length ? this.tx.state : null;
   }
-  /** Workflow-level terminal outcomes (cancel, expiry) still follow the canonical edges. */
-  close(to: ActionState): ActionState {
-    ACTION_MACHINE.assertTransition(this.actionState, to);
-    this.terminal = to;
-    return to;
-  }
   canClose(to: ActionState): boolean {
-    return ACTION_MACHINE.canTransition(this.actionState, to);
+    return this.terminal === null && this.successors.includes(to);
+  }
+  /** Workflow-level terminal outcomes (cancel, expiry) only follow an edge the canonical machine offered. */
+  close(to: ActionState): boolean {
+    if (!this.canClose(to)) return false;
+    this.terminal = to;
+    return true;
   }
 }

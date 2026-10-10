@@ -25,6 +25,7 @@ export type DecisionView =
       grant: ExecutionGrant;
       requiredApprovals: number;
       lifecycle: StateStep<ActionState>[];
+      successors: ActionState[];
     }
   | {
       status: 'PENDING_APPROVAL';
@@ -34,6 +35,7 @@ export type DecisionView =
       draft: GrantDraft | null;
       requiredApprovals: number | null;
       lifecycle: StateStep<ActionState>[];
+      successors: ActionState[];
     }
   | {
       status: 'POLICY_REJECTED' | 'RISK_REJECTED' | 'EXPIRED';
@@ -41,6 +43,7 @@ export type DecisionView =
       intentId: string | null;
       intentHash: Hex | null;
       lifecycle: StateStep<ActionState>[];
+      successors: ActionState[];
     };
 
 export type QuorumSummary = {
@@ -70,6 +73,7 @@ export type PreparedView = {
   preparedCallHash: Hex;
   reservation: ReservationView;
   lifecycle: StateStep<ActionState>[];
+  successors: ActionState[];
 };
 
 export type TxView = {
@@ -80,6 +84,7 @@ export type TxView = {
   outcome: 'SUCCESS' | 'REVERTED' | null;
   txHistory: StateStep<TxState>[];
   actionHistory: StateStep<ActionState>[];
+  successors: ActionState[];
 };
 
 export type SubmissionCheck =
@@ -251,10 +256,7 @@ export type HedgeOrderView = {
 
 /** Hedge execution ports; the venue client fills these in. */
 export interface HedgeActivities {
-  hedgeRiskSnapshot(input: {
-    groupId: string;
-    hedgeId: string;
-  }): Promise<{
+  hedgeRiskSnapshot(input: { groupId: string; hedgeId: string }): Promise<{
     exposure: string;
     riskStatus: MarketEvidence['riskStatus'];
     observedAt: number;

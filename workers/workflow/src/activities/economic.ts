@@ -18,7 +18,14 @@ import {
   type QuorumView,
   type Simulation,
 } from '@synq/schemas';
-import { SynqError, type TransitionRecord } from '@synq/domain';
+import {
+  ACTION_MACHINE,
+  SynqError,
+  TX_MACHINE,
+  type ActionState as DomainActionState,
+  type StateMachine,
+  type TransitionRecord,
+} from '@synq/domain';
 import {
   KernelError,
   artifactHash,
@@ -127,9 +134,24 @@ const AFTER_AUTHORIZATION: readonly ActionState[] = [
 ];
 const CONFIRMED_OR_LATER = ['CONFIRMED', 'INDEXED', 'RECONCILED', 'SETTLED'];
 
-const steps = <S extends string>(
+/** Hands the workflow a history only after re-walking it on the canonical machine. */
+function canonical<S extends string>(
+  machine: StateMachine<S>,
+  start: S,
   history: readonly TransitionRecord<S>[],
-): StateStep<S>[] => history.map((t) => ({ from: t.from, to: t.to }));
+): StateStep<S>[] {
+  let current = start;
+  return history.map((t) => {
+    if (t.from !== current)
+      throw new Error(`${machine.name} history gap at ${t.from}`);
+    machine.assertTransition(t.from, t.to);
+    current = t.to;
+    return { from: t.from, to: t.to };
+  });
+}
+const successorsOf = (state: DomainActionState): DomainActionState[] => [
+  ...ACTION_MACHINE.successors(state),
+];
 
 function refused(code: string, detail?: string): never {
   throw ApplicationFailure.nonRetryable(
@@ -141,6 +163,24 @@ function invalid(detail: string): never {
   throw ApplicationFailure.nonRetryable(detail, 'INVALID_INPUT');
 }
 
+const REVERT_ERRORS = new Set([
+  'CallExecutionError',
+  'ContractFunctionRevertedError',
+  'ContractFunctionExecutionError',
+  'EstimateGasExecutionError',
+  'ExecutionRevertedError',
+]);
+/** A pre-broadcast simulation revert is a contract verdict, not a transport fault: never retry it blindly. */
+function isRevert(error: unknown): boolean {
+  for (
+    let e: unknown = error, depth = 0;
+    e instanceof Error && depth < 6;
+    e = e.cause, depth++
+  )
+    if (REVERT_ERRORS.has(e.name)) return true;
+  return false;
+}
+
 /** Maps deterministic refusals to non-retryable failures; anything else (RPC, IO) stays retryable. */
 async function classify<T>(run: () => Promise<T>): Promise<T> {
   try {
@@ -148,6 +188,13 @@ async function classify<T>(run: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (error instanceof ApplicationFailure) throw error;
     if (error instanceof KernelError) refused(error.code);
+    if (isRevert(error))
+      throw ApplicationFailure.nonRetryable(
+        error instanceof Error
+          ? error.message.split('\n')[0]!
+          : 'execution reverted',
+        'EXECUTION_SIMULATION_REVERTED',
+      );
     if (error instanceof SynqError) {
       if (error.code === 'GRANT_REPREPARATION_FORBIDDEN')
         throw ApplicationFailure.nonRetryable(
@@ -212,8 +259,19 @@ export function createEconomicActivities(
     state: entry.state,
     blockNumber: entry.blockNumber,
     outcome: entry.outcome ?? null,
-    txHistory: steps(journal.history(entry.grantId)),
-    actionHistory: steps(journal.actionHistory(entry.grantId)),
+    txHistory: canonical(
+      TX_MACHINE,
+      'PREPARED',
+      journal.history(entry.grantId),
+    ),
+    actionHistory: canonical(
+      ACTION_MACHINE,
+      'PREPARED',
+      journal.actionHistory(entry.grantId),
+    ),
+    successors: successorsOf(
+      journal.actionHistory(entry.grantId).at(-1)?.to ?? 'PREPARED',
+    ),
   });
   const entryOf = (grantId: Hex): JournalEntry => {
     const entry = journal.get(grantId);
@@ -236,8 +294,15 @@ export function createEconomicActivities(
       .grants.find((g) => g.grant.intentId === intentId)?.grant;
     return grant ? raw().grantState(grant.grantId).grant : null;
   };
-  const lifecycle = (intentId: string | null) =>
-    intentId ? steps(raw().lifecycle(intentId)) : [];
+  const lifecycle = (intentId: string | null) => {
+    const history = intentId
+      ? canonical(ACTION_MACHINE, 'PROPOSED', raw().lifecycle(intentId))
+      : [];
+    return {
+      lifecycle: history,
+      successors: successorsOf(history.at(-1)?.to ?? 'PROPOSED'),
+    };
+  };
 
   /** Re-sends the journaled bytes only when the node has never seen them; identical bytes cannot execute twice. */
   const reconcileJournaled = async (grantId: Hex): Promise<JournalEntry> => {
@@ -306,7 +371,7 @@ export function createEconomicActivities(
             draft: grant.draft,
             grant,
             requiredApprovals: grant.draft.requiredApprovals,
-            lifecycle: lifecycle(intentId),
+            ...lifecycle(intentId),
           };
         }
         const decision = await rt.kernel.authorize({
@@ -318,7 +383,7 @@ export function createEconomicActivities(
         const base = {
           intentId: decision.intentId,
           intentHash: decision.intentHash,
-          lifecycle: lifecycle(decision.intentId),
+          ...lifecycle(decision.intentId),
         };
         if (decision.status === 'AUTHORIZED')
           return {
@@ -401,7 +466,7 @@ export function createEconomicActivities(
           grantId,
           preparedCallHash: record.preparedCallHash ?? ('0x' as Hex),
           reservation: reservation(grantId),
-          lifecycle: lifecycle(record.grant.intentId),
+          ...lifecycle(record.grant.intentId),
         };
       });
     },

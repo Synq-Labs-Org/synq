@@ -6,3 +6,4 @@ export * from './strategy.js';
 export * from './freeze.js';
 export * from './operations.js';
 export * from './approval.js';
+export * from './unconfigured.js';

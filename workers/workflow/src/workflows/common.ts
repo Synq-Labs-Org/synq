@@ -9,6 +9,7 @@ export const NON_RETRYABLE = [
   'RECONCILIATION_MISMATCH',
   'INVALID_INPUT',
   'NOT_CONFIGURED',
+  'EXECUTION_SIMULATION_REVERTED',
 ] as const;
 export type NonRetryableType = (typeof NON_RETRYABLE)[number];
 

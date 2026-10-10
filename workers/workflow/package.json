@@ -17,6 +17,7 @@
   "dependencies": {
     "@synq/api": "workspace:*",
     "@synq/chain-registry": "workspace:*",
+    "@synq/demo": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/identity": "workspace:*",
