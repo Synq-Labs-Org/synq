@@ -49,7 +49,7 @@ describe.skipIf(!live)(
         'reference unavailable: UNAVAILABLE_ON_TESTNET',
       );
       expect(run.stdout).toMatch(/"status":"UNKNOWN"/);
-      expect(run.stdout).toContain('writeReport receiver=');
+      expect(run.stdout).toMatch(/"UNKNOWN:(none|0x[0-9a-f]{64})"/);
     }, 300_000);
 
     it('the Kernel gate reading the real testnet registry fails closed on the UNKNOWN attestation', async () => {

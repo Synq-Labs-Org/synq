@@ -49,7 +49,9 @@ export const configSchema = z
       .strict(),
     kuruQuote: z
       .object({
-        apiBaseUrl: z.string().regex(/^https:\/\/[a-z0-9.-]+(\/[A-Za-z0-9._~/-]*)?$/),
+        apiBaseUrl: z
+          .string()
+          .regex(/^https:\/\/[a-z0-9.-]+(\/[A-Za-z0-9._~/-]*)?$/),
         tokenInRegistryKey: z.string(),
         tokenOutRegistryKey: z.string(),
         amountIn: z.string().regex(/^[1-9][0-9]*$/),
@@ -295,7 +297,9 @@ export function onCron(runtime: Runtime<Config>, payload: CronPayload): string {
     `writeReport receiver=${receiver} txStatus=${TxStatus[write.txStatus]} receiverStatus=${write.receiverContractExecutionStatus ?? 'n/a'} txHash=${txHash} error=${write.errorMessage ?? ''}`,
   );
   if (write.txStatus !== TxStatus.SUCCESS)
-    throw new Error(`writeReport failed: ${write.errorMessage ?? write.txStatus}`);
+    throw new Error(
+      `writeReport failed: ${write.errorMessage ?? write.txStatus}`,
+    );
   return `${attestation.status}:${txHash}`;
 }
 
