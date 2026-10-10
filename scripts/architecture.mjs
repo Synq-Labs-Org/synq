@@ -506,7 +506,90 @@ export function checkArchitecture(root) {
       visit(dependency, [...path, node]);
   }
   for (const node of graph.keys()) visit(node, []);
+  errors.push(...checkWorkflowSandbox(root));
   return [...new Set(errors)];
+}
+
+// Temporal workflow sandbox: workflow code is replayed, so it may only reach deterministic modules.
+// Activities, RPC clients, databases, the Kernel runtime and the execution worker stay out (type-only
+// imports are fine). Kept as one block so other zone rules merge independently.
+const WORKFLOW_SANDBOX_DIR = /^workers\/[^/]+\/src\/workflows\//;
+const WORKFLOW_SANDBOX_ALLOWED =
+  /^(@temporalio\/(workflow|common)|@synq\/(schemas|domain))$/;
+const WORKFLOW_SANDBOX_GLOBALS = new Set([
+  'fetch',
+  'XMLHttpRequest',
+  'WebSocket',
+  'require',
+  'setInterval',
+  'setImmediate',
+]);
+function workflowSandboxViolations(file, text) {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true);
+  const found = [];
+  const visit = (node) => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      const clause = ts.isImportDeclaration(node) ? node.importClause : null;
+      const elements =
+        clause?.namedBindings && ts.isNamedImports(clause.namedBindings)
+          ? clause.namedBindings.elements
+          : ts.isExportDeclaration(node) &&
+              node.exportClause &&
+              ts.isNamedExports(node.exportClause)
+            ? node.exportClause.elements
+            : [];
+      const typeOnly =
+        (ts.isImportDeclaration(node)
+          ? (clause?.isTypeOnly ?? false)
+          : node.isTypeOnly) ||
+        (elements.length > 0 &&
+          !clause?.name &&
+          elements.every((el) => el.isTypeOnly));
+      const specifier = node.moduleSpecifier.text;
+      const local = specifier.startsWith('./');
+      if (!typeOnly && !local && !WORKFLOW_SANDBOX_ALLOWED.test(specifier))
+        found.push(`imports ${specifier}`);
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    )
+      found.push('dynamic import');
+    if (
+      ts.isIdentifier(node) &&
+      WORKFLOW_SANDBOX_GLOBALS.has(node.text) &&
+      !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
+    )
+      found.push(`uses ${node.text}`);
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'process'
+    )
+      found.push(`uses process.${node.name.text}`);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return [...new Set(found)];
+}
+export function checkWorkflowSandbox(root) {
+  const errors = [];
+  const base = join(root, 'workers');
+  for (const file of sourceFiles(base)) {
+    const name = posix(relative(root, file));
+    if (!WORKFLOW_SANDBOX_DIR.test(name)) continue;
+    for (const violation of workflowSandboxViolations(
+      name,
+      readFileSync(file, 'utf8'),
+    ))
+      errors.push(`${name}: workflow sandbox ${violation}`);
+  }
+  return errors;
 }
 if (
   process.argv[1] &&
