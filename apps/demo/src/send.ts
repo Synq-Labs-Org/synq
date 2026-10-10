@@ -41,26 +41,23 @@ import { PostgresProjectionStore } from '@synq/read-model/storage';
 import { loadJournalKey, loadKernelAuditKey } from '@synq/execution-worker';
 import { tokenAbi } from '@synq/execution-worker/abi';
 import { formatDecimal } from '@synq/domain';
-import {
-  GrantApprovalGateway,
-  PostgresIdentityStore,
-  StoreMembershipDirectory,
-} from '@synq/identity';
+import { PostgresIdentityStore } from '@synq/identity';
 import { grantPreview } from '@synq/identity/grant';
 import {
   approveGrantWithMera,
   signMeraIdentityChallenge,
   signMeraSafeTransaction,
+  signMeraSendAccess,
   signMeraSendConfirmation,
   signMeraTransaction,
+  SendAccessChallengeSchema,
 } from '@synq/identity/mera-browser';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import {
-  AusdGuard,
   DirectMonadAusdAdapter,
   FundingRouter,
-  MemoryFundingSessionStore,
-  MemorySendStore,
+  PostgresFundingSessionStore,
+  PostgresSendStore,
   PENDING_FUNDING_STATES,
   createFundingActivities,
   labelEvidenceHex,
@@ -76,11 +73,9 @@ import {
   kernelStateFromReadModel,
 } from '@synq/api/kernel-runtime';
 import { readModelRoutes } from '@synq/api/read-model-routes';
-import {
-  confirmationOf,
-  sendRoutes,
-  type SendProposal,
-} from '@synq/api/send-routes';
+import { confirmationOf, type SendProposal } from '@synq/api/send-routes';
+import { registerProductionSend } from '@synq/api/v1-server';
+import { productionSendPorts } from '@synq/api/send-runtime';
 import { registryDeploymentSettings } from '../../../scripts/envio-env.js';
 import { EnvioProcess } from '../../../scripts/envio-process.js';
 import {
@@ -110,7 +105,7 @@ import {
 import { enrollPrincipals } from './testnet-enrollment.js';
 
 /** Hard cap on this runner's MON spend (gas + member gas top-up). */
-export const MAX_SEND_RUN_MON = 450_000_000_000_000_000n;
+export const MAX_SEND_RUN_MON = 300_000_000_000_000_000n;
 export const SEND_UNITS = {
   memberAusd: 3_000_000n,
   memberMon: 30_000_000_000_000_000n,
@@ -470,7 +465,8 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       symbol: ausd.symbol,
       decimals: ausd.decimals,
     };
-    const funding = new MemoryFundingSessionStore();
+    const funding = new PostgresFundingSessionStore(pool);
+    await funding.migrate();
     const contributor = bob.record.signer as Address;
     const fundingActs = createFundingActivities({
       router: new FundingRouter({ adapters: [new DirectMonadAusdAdapter()] }),
@@ -510,10 +506,16 @@ export async function runSendE2E(options: SendRunOptions = {}) {
           (l) => l.address.toLowerCase() === ausd.address.toLowerCase(),
         ),
       });
-      if (!log0) throw new Error('CONTRIBUTION_LOG_MISSING');
+      if (
+        !log0 ||
+        log0.args.from.toLowerCase() !== contributor.toLowerCase() ||
+        log0.args.to.toLowerCase() !== group.account.toLowerCase()
+      )
+        throw new Error('CONTRIBUTION_LOG_MISSING');
       return {
         chainId: CHAIN_ID,
         token: ausd.address.toLowerCase() as Address,
+        from: log0.args.from.toLowerCase() as Address,
         to: (log0.args.to as Address).toLowerCase() as Address,
         amount: String(log0.args.value),
         transactionHash: hash,
@@ -613,11 +615,6 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     const contributionHash = await client.sendRawTransaction({
       serializedTransaction: raw,
     });
-    await fundingActs.recordSource(
-      session0.sessionId,
-      contributionHash,
-      Math.floor(Date.now() / 1000),
-    );
     const cr = await client.waitForTransactionReceipt({
       hash: contributionHash,
       confirmations: PROFILE.confirmationDepth,
@@ -634,6 +631,11 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       effectiveGasPrice: String(cr.effectiveGasPrice),
       explorer: `${EXPLORER_TX}${contributionHash}`,
     });
+    await fundingActs.recordSource(
+      session0.sessionId,
+      await readContributionLog(contributionHash),
+      Math.floor(Date.now() / 1000),
+    );
     contributionReceipt.set(
       session0.sessionId,
       await readContributionLog(contributionHash),
@@ -664,7 +666,8 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       Math.floor(Date.now() / 1000),
     );
 
-    const sendStore = new MemorySendStore();
+    const sendStore = new PostgresSendStore(pool);
+    await sendStore.migrate();
     const usdc = assetForRole(PROFILE, 'web2SettlementAsset');
     const treasuryView = async (): Promise<TreasuryView | null> => {
       const snapshot = await reader.groupSnapshot(group.chainGroupId);
@@ -837,7 +840,7 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     const clock = {
       t: Number(latest.timestamp),
       now() {
-        return this.t;
+        return Math.floor(Date.now() / 1000);
       },
     };
     const sync = async () => {
@@ -904,101 +907,84 @@ export async function runSendE2E(options: SendRunOptions = {}) {
         confirmations: PROFILE.confirmationDepth,
         journalKey,
       });
-    const gateway = new GrantApprovalGateway(store, identityConfig, {
-      executionModules: { [CHAIN_ID]: deployment.module },
-      localAssets: [],
-    });
-    const directory = new StoreMembershipDirectory(store);
-    const guard = new AusdGuard(client);
-
     await phase.app.close();
-    phase = await startApi(async (app) => {
-      await app.register(readModelRoutes, {
-        snapshots: reader,
-        head: new ChainHeadObserver(client, CHAIN_ID, { ttlMs: 1000 }),
-        maxLagBlocks: settings.maxLagBlocks,
-      });
-      await app.register(sendRoutes, {
-        store: sendStore,
-        adminToken,
-        now: () => clock.t,
-        groups: {
-          context: async (groupId) =>
-            groupId === group.chainGroupId.toLowerCase()
-              ? {
-                  groupId,
-                  mandate,
-                  members: principals.map((p) => ({
-                    memberId: memberId(p.label),
-                    principalId: p.record.principalId,
-                    signer: p.record.signer,
-                    label: p.label,
-                  })),
-                  contacts: [{ label: 'external contact', address: contact }],
-                }
-              : null,
-        },
-        members: {
-          activeSigner: async (groupId, member) =>
-            ((await directory.activeMember(groupId, member))?.signer as
-              | Address
-              | undefined) ?? null,
-        },
-        treasury: {
-          view: async (groupId) =>
-            groupId === group.chainGroupId.toLowerCase()
-              ? treasuryView()
-              : null,
-        },
-        guard: {
-          check: ({ mandate: m, recipient, amount }) =>
-            guard.check({
-              asset: m.inputAsset,
-              account: m.account,
-              recipient,
-              amount,
+    const startProductionApi = () =>
+      startApi(async (app) => {
+        await app.register(readModelRoutes, {
+          snapshots: reader,
+          head: new ChainHeadObserver(client, CHAIN_ID, { ttlMs: 1000 }),
+          maxLagBlocks: settings.maxLagBlocks,
+        });
+        await registerProductionSend({
+          app,
+          pool,
+          ports: ({ sends, funding }) =>
+            productionSendPorts({
+              identity: store,
+              identityConfig,
+              executionModule: deployment.module,
+              adminToken,
+              sends,
+              funding,
+              kernel,
+              authorizer: kernel,
+              readModel: {
+                reader,
+                snapshots: reader,
+                head: new ChainHeadObserver(client, CHAIN_ID, { ttlMs: 0 }),
+                maxLagBlocks: settings.maxLagBlocks,
+                projection: settings.projection,
+                client,
+                projectionStore,
+                close: async () => undefined,
+              },
             }),
-        },
-        proposer: {
-          propose: async ({ recipient, amount, nonce }) => {
-            await sync();
-            return (await verticalFor(recipient).propose(
-              amount,
-              nonce,
-            )) as unknown as SendProposal;
-          },
-        },
-        kernel,
-        drafts: {
-          register: (draft) => gateway.registerKernelDraft(draft),
-          verifiedApprovals: async (digest) => {
-            const q = await gateway.quorum(digest);
-            return { satisfied: q.satisfied, counted: q.counted };
-          },
-        },
-        index: {
-          executed: async (groupId, intentHash) => {
-            const snap = await reader.groupSnapshot(groupId as Hex);
-            const g = snap?.group.grantsExecuted.find(
-              (x) => x.intentHash === intentHash.toLowerCase(),
-            );
-            return {
-              indexedThroughBlock: snap?.indexedThroughBlock ?? 0,
-              transactionHash: g?.transactionHash ?? null,
-              tokenAmount: g?.tokenAmount ?? null,
-              recipient: g?.recipient ?? null,
-            };
-          },
-        },
+        });
       });
-    });
+    phase = await startProductionApi();
     api = phase.api;
 
     // B08.4 Synq Send through the API.
     const gid = group.chainGroupId;
+    /** Member reads/previews use a Mera-signed session, never the admin token. */
+    const memberSession = async (label: string) => {
+      const p = byLabel(label);
+      const challenge = SendAccessChallengeSchema.parse(
+        await api.post('/v1/send/access/challenges', {
+          groupId: gid,
+          principalId: p.record.principalId,
+        }),
+      );
+      const session = await api.post<{ token: string; memberId: string }>(
+        '/v1/send/access',
+        {
+          challengeId: challenge.challengeId,
+          signature: await signMeraSendAccess(
+            p.record,
+            challenge,
+            webAuthn(label),
+          ),
+        },
+      );
+      if (session.memberId !== memberId(label))
+        throw new Error('MEMBER_SESSION_MISMATCH');
+      return { bearer: session.token };
+    };
+    let member = await memberSession('alice');
+    const memberAccess: Record<string, unknown> = {
+      scheme: 'Mera passkey-signed SendAccess challenge -> 300 s session',
+      member: memberId('alice'),
+    };
+    try {
+      await api.get(`/v1/send/${gid}/recipients`);
+      throw new Error('ANONYMOUS_DIRECTORY_READ');
+    } catch (error) {
+      if (!(error instanceof ApiCallError) || error.status !== 401) throw error;
+      memberAccess.anonymousDirectory = error.status;
+    }
     const directoryView = await api.get<{
       recipients: { recipientId: string; address: string; sendable: boolean }[];
-    }>(`/v1/send/${gid}/recipients`);
+    }>(`/v1/send/${gid}/recipients`, member);
     const to = directoryView.recipients.find(
       (r) => r.address === carol.record.signer.toLowerCase(),
     )!;
@@ -1023,11 +1009,15 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     await expectApiError(
       'amountExceedsMandate',
       () =>
-        api.post('/v1/send/previews', {
-          groupId: gid,
-          recipientId: to.recipientId,
-          amount: SEND_UNITS.overCap,
-        }),
+        api.post(
+          '/v1/send/previews',
+          {
+            groupId: gid,
+            recipientId: to.recipientId,
+            amount: SEND_UNITS.overCap,
+          },
+          member,
+        ),
       'AMOUNT_EXCEEDS_MANDATE',
     );
     const notAllowlisted = directoryView.recipients.find((r) => !r.sendable);
@@ -1035,18 +1025,26 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       await expectApiError(
         'recipientNotOnMandate',
         () =>
-          api.post('/v1/send/previews', {
-            groupId: gid,
-            recipientId: notAllowlisted.recipientId,
-            amount: '1',
-          }),
+          api.post(
+            '/v1/send/previews',
+            {
+              groupId: gid,
+              recipientId: notAllowlisted.recipientId,
+              amount: '1',
+            },
+            member,
+          ),
         'RECIPIENT_UNKNOWN',
       );
-    const preview = await api.post<SendPreview>('/v1/send/previews', {
-      groupId: gid,
-      recipientId: to.recipientId,
-      amount: formatDecimal(SEND_UNITS.send, ausd.decimals),
-    });
+    const preview = await api.post<SendPreview>(
+      '/v1/send/previews',
+      {
+        groupId: gid,
+        recipientId: to.recipientId,
+        amount: formatDecimal(SEND_UNITS.send, ausd.decimals),
+      },
+      member,
+    );
     log(
       `preview ${preview.previewId}: ${preview.amountDecimal} AUSD -> ${preview.recipient.address} chain ${preview.chainId} expires ${preview.expiresAt} tier ${preview.policy.tier} (${preview.policy.requiredApprovals} approvals); guard ${preview.guard.status}`,
     );
@@ -1124,6 +1122,34 @@ export async function runSendE2E(options: SendRunOptions = {}) {
         }),
       );
     };
+    await phase.app.close();
+    phase = await startProductionApi();
+    api = phase.api;
+    // Member sessions are process-local: a restart forces a fresh passkey proof.
+    try {
+      await api.get(`/v1/send/${proposed.sendId}`, member);
+      throw new Error('MEMBER_SESSION_SURVIVED_RESTART');
+    } catch (error) {
+      if (!(error instanceof ApiCallError) || error.status !== 401) throw error;
+      memberAccess.sessionAfterRestart = error.status;
+    }
+    member = await memberSession('alice');
+    const restoredSend = await api.get<SendRecord>(
+      `/v1/send/${proposed.sendId}`,
+      member,
+    );
+    if (
+      restoredSend.state !== proposed.state ||
+      restoredSend.draftDigest !== proposed.draftDigest
+    )
+      throw new Error('PRODUCTION_SEND_RESTART_MISMATCH');
+    evidence.productionApi = {
+      registration: 'apps/api/src/v1-server.ts:registerProductionSend',
+      ports: 'apps/api/src/send-runtime.ts:productionSendPorts',
+      stores: ['PostgresSendStore', 'PostgresFundingSessionStore'],
+      restartRecoveredPendingApproval: true,
+      memberAccess,
+    };
     await approve('alice');
     const oneOfTwo = await api.post<{
       record: SendRecord;
@@ -1147,8 +1173,9 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     if (!authorized.grant) throw new Error('SEND_NOT_AUTHORIZED');
     log(`grant ${authorized.grant.grantId} authorized with 2 Mera approvals`);
 
-    const proposal = (await api.get<SendRecord>(`/v1/send/${proposed.sendId}`))
-      .proposal as SendProposal;
+    const proposal = (
+      await api.get<SendRecord>(`/v1/send/${proposed.sendId}`, true)
+    ).proposal as SendProposal;
     const recipient = preview.recipient.address;
     const recipientBefore = await chain.balanceOf(recipient);
     const vertical = verticalFor(recipient);
@@ -1204,7 +1231,11 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       await sleep(1000);
     }
     if (!indexed?.receipt) throw new Error('SEND_NOT_INDEXED');
-    const finalView = await api.get<TreasuryView>(`/v1/groups/${gid}/treasury`);
+    member = await memberSession('alice');
+    const finalView = await api.get<TreasuryView>(
+      `/v1/groups/${gid}/treasury`,
+      member,
+    );
     const safeAtIndexed = await chain.balanceOf(
       group.account,
       BigInt(finalView.indexedThroughBlock),
