@@ -272,6 +272,8 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
   const store = new MemorySendStore();
   const calls: { approvals: number }[] = [];
   let counted = 0;
+  let failNext = false;
+  let frozen = false;
   let indexed: { block: number; tx: string | null; amount: string } = {
     block: 0,
     tx: null,
@@ -312,15 +314,22 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
         >,
     },
     guard: {
-      check: async ({ recipient, amount }) => guardPass(recipient, amount),
+      check: async ({ recipient, amount }) =>
+        guardPass(recipient, amount, frozen ? 'BLOCKED' : 'PASS'),
     },
     proposer: {
-      propose: async ({ nonce }) => ({
-        intent: { intentId: `send_${nonce}` },
-        risk: {},
-        simulation: {},
-        data: '0xa9059cbb',
-      }),
+      propose: async ({ nonce }) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error('RPC_DOWN');
+        }
+        return {
+          intent: { intentId: `send_${nonce}` },
+          risk: {},
+          simulation: {},
+          data: '0xa9059cbb',
+        };
+      },
     },
     kernel: {
       authorize: async (request) => {
@@ -406,6 +415,31 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     };
   }
 
+  it('AUSD-007 a confirmation whose proposal failed stays PREVIEWED and a retry proposes exactly once', async () => {
+    const recipients = (
+      await req('GET', `/v1/send/${GROUP}/recipients`)
+    ).json();
+    const contact = recipients.recipients.find(
+      (r: { address: string }) => r.address === CONTACT,
+    );
+    const p = (
+      await req('POST', '/v1/send/previews', {
+        groupId: GROUP,
+        recipientId: contact.recipientId,
+        amount: '0.5',
+      })
+    ).json() as SendPreview;
+    const body = await confirmBody(p);
+    failNext = true;
+    const before = calls.length;
+    expect((await req('POST', '/v1/send', body)).statusCode).toBe(500);
+    const retried = (await req('POST', '/v1/send', body)).json() as SendRecord;
+    expect(retried.state).toBe('PENDING_APPROVAL');
+    const again = (await req('POST', '/v1/send', body)).json() as SendRecord;
+    expect(again.sendId).toBe(retried.sendId);
+    expect(calls.length - before).toBe(1);
+  });
+
   it('end to end: preview → passkey-signed confirm (idempotent) → quorum insufficient stays pending → authorize → execution → indexer delayed → INDEXED with latency', async () => {
     const recipients = (
       await req('GET', `/v1/send/${GROUP}/recipients`)
@@ -443,11 +477,13 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     expect(mismatch.json().error).toBe('RECIPIENT_MISMATCH');
 
     const body = await confirmBody(p);
+    const proposedBefore = calls.length;
     const first = (await req('POST', '/v1/send', body)).json() as SendRecord;
     const again = (await req('POST', '/v1/send', body)).json() as SendRecord;
     expect(first.state).toBe('PENDING_APPROVAL');
     expect(again.sendId).toBe(first.sendId);
-    expect(calls).toHaveLength(1);
+    expect(calls.length - proposedBefore).toBe(1);
+    expect(again.state).toBe(first.state);
 
     expect(
       (await req('POST', `/v1/send/${first.sendId}/authorize`, {})).statusCode,
@@ -460,6 +496,16 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     expect(one.record.state).toBe('PENDING_APPROVAL');
     expect(one.record.kernelCode).toBe('MISSING_QUORUM');
     counted = 2;
+    frozen = true;
+    const blocked = await req(
+      'POST',
+      `/v1/send/${first.sendId}/authorize`,
+      {},
+      true,
+    );
+    expect(blocked.statusCode).toBe(423);
+    expect(blocked.json().error).toBe('AUSD_GUARD_BLOCKED');
+    frozen = false;
     const two = (
       await req('POST', `/v1/send/${first.sendId}/authorize`, {}, true)
     ).json();

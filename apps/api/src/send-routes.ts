@@ -214,6 +214,17 @@ export async function sendRoutes(
     if (!r) throw new HttpError(404, 'SEND_NOT_FOUND');
     return r;
   };
+  /** AusdGuard runs again before every Kernel call: pause/freeze can change after the preview. */
+  const requireGuard = async (preview: SendRecord['preview']) => {
+    const c = await context(preview.groupId);
+    const result = await deps.guard.check({
+      mandate: c.mandate,
+      recipient: preview.recipient.address,
+      amount: BigInt(preview.amount),
+    });
+    if (result.status !== 'PASS')
+      throw new FundingError('AUSD_GUARD_BLOCKED', result.reasons.join(','));
+  };
   const context = async (groupId: string) => {
     const c = await deps.groups.context(groupId.toLowerCase());
     if (!c) throw new HttpError(404, 'GROUP_NOT_FOUND');
@@ -307,10 +318,12 @@ export async function sendRoutes(
           ))
         )
           throw new HttpError(401, 'SENDER_SIGNATURE_INVALID');
+        await requireGuard(preview);
         const created = await deps.store.createOnce(
           newSendRecord(preview, now),
         );
-        if (!created.created) return created.record;
+        if (!created.created && created.record.state !== 'PREVIEWED')
+          return created.record;
         const c = await context(preview.groupId);
         if (
           c.mandate.mandateId !== preview.mandateId ||
@@ -392,6 +405,7 @@ export async function sendRoutes(
           'INVALID_TRANSITION',
           `authorize from ${record.state}`,
         );
+      await requireGuard(record.preview);
       const quorum = await deps.drafts.verifiedApprovals(record.draftDigest);
       const proposal = record.proposal as SendProposal;
       const decision = await deps.kernel.authorize({
