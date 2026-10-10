@@ -14,6 +14,8 @@ import { trackedFiles } from '../../scripts/secrets.mjs';
 
 const ALLOWED_PATHS = [
   /^sources\/chain_registry\.json$/,
+  /^sources\/research\//,
+  /^bounty-evidence\//,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
   /^adrs\//,

@@ -60,7 +60,21 @@ const ContractEntrySchema = z
       'SAFE_PROXY_FACTORY',
       'SAFE_COMPATIBILITY_FALLBACK_HANDLER',
       'SAFE_MULTI_SEND_CALL_ONLY',
+      'KURU_FLOW_ENTRYPOINT',
+      'KURU_FLOW_ROUTER',
+      'KURU_FLOW_EXECUTOR',
+      'KURU_ROUTER',
+      'KURU_MARGIN_ACCOUNT',
+      'KURU_FORWARDER',
+      'KURU_MARKET',
+      'CHAINLINK_PRICE_FEED',
+      'CRE_FORWARDER',
+      'CRE_MOCK_FORWARDER',
     ]),
+    pair: z
+      .string()
+      .regex(/^[A-Z0-9]+[-/][A-Z0-9]+$/)
+      .optional(),
     version: z.string().optional(),
     codeHash: HashSchema.optional(),
     verifiedAt: IsoTimestampSchema,
@@ -149,6 +163,16 @@ export const ChainRegistrySchema = z
     );
     if (new Set(assetIds).size !== assetIds.length)
       fail(['assets'], 'duplicate asset identity');
+    const pairs = new Set<string>();
+    for (const [key, entry] of Object.entries(v.contracts)) {
+      const paired =
+        entry.kind === 'KURU_MARKET' || entry.kind === 'CHAINLINK_PRICE_FEED';
+      if (paired !== (entry.pair !== undefined))
+        fail(['contracts', key], 'pair is required exactly for markets/feeds');
+      const id = `${entry.chainId}:${entry.kind}:${entry.pair ?? ''}`;
+      if (paired && pairs.has(id)) fail(['contracts', key], 'duplicate pair');
+      pairs.add(id);
+    }
     for (const [name, profile] of Object.entries(v.profiles)) {
       if (profile.network.profile !== name)
         fail(['profiles', name], 'profile key mismatch');
@@ -368,6 +392,25 @@ export function contractAddress(
   );
   if (!match) throw new RegistryError('ASSET_ROLE_UNCONFIGURED', kind);
   return match.address;
+}
+export type ContractKind = ChainRegistry['contracts'][string]['kind'];
+export type ContractEntry = ChainRegistry['contracts'][string];
+export function contractEntries(
+  chainId: number,
+  kind: ContractKind,
+): readonly ContractEntry[] {
+  return Object.values(chainRegistry.contracts).filter(
+    (c) => c.chainId === chainId && c.kind === kind,
+  );
+}
+export function contractForPair(
+  chainId: number,
+  kind: ContractKind,
+  pair: string,
+): ContractEntry | null {
+  const matches = contractEntries(chainId, kind).filter((c) => c.pair === pair);
+  if (matches.length > 1) throw new RegistryError('REGISTRY_INVALID', pair);
+  return matches[0] ?? null;
 }
 export function verifiedAsset(
   candidate: unknown,
