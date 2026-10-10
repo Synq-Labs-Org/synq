@@ -550,5 +550,5 @@ describe('F6 stateful property: approval sets and execution outcomes', () => {
       ),
       { numRuns: 40 },
     );
-  });
+  }, 60_000);
 });

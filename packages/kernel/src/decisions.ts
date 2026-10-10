@@ -66,6 +66,10 @@ export type AuthorizationDecision =
   | PendingDecision
   | RejectedDecision;
 
+export type AuthorizationRecovery =
+  | { status: 'ABSENT' | 'UNKNOWN' }
+  | { status: 'RECOVERED'; decision: AuthorizationDecision };
+
 export const RequestSchema = z.strictObject({
   intent: z.unknown(),
   risk: z.unknown(),
