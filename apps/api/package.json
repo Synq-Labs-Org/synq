@@ -8,7 +8,8 @@
     "./v1-server": "./src/v1-server.ts",
     "./read-model-routes": "./src/read-model-routes.ts",
     "./kernel-runtime": "./src/kernel-runtime.ts",
-    "./send-routes": "./src/send-routes.ts"
+    "./send-routes": "./src/send-routes.ts",
+    "./send-runtime": "./src/send-runtime.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

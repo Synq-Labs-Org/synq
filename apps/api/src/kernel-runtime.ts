@@ -272,6 +272,15 @@ export class DurableKernel {
   authorize(request: unknown): Promise<AuthorizationDecision> {
     return this.mutate((kernel) => kernel.authorize(request));
   }
+  async recoverAuthorization(request: {
+    intent: unknown;
+    risk: unknown;
+    simulation: unknown;
+  }) {
+    await this.chain;
+    if (this.failed) return { status: 'UNKNOWN' as const };
+    return this.kernel.recoverAuthorization(request);
+  }
 }
 
 export async function openDurableKernel(

@@ -267,6 +267,24 @@ describe('Synq Send preview and confirmation (B08.4)', () => {
   });
 });
 
+it('guard evidence with wrong chain or token cannot create a preview', () => {
+  const recipient = directory().find((r) => r.sendable)!;
+  for (const patch of [{ chainId: 143 }, { token: CONTACT }])
+    expect(() =>
+      buildSendPreview({
+        groupId: GROUP,
+        mandate: mandate(),
+        recipient,
+        amountDecimal: '1',
+        freeBalance: 3000000n,
+        guard: { ...guardPass(recipient.address, 1000000n), ...patch },
+        now: NOW,
+        ttlSeconds: 300,
+        nonce: 'bound',
+      }),
+    ).toThrow('AUSD_GUARD_BLOCKED');
+});
+
 describe('Synq Send API routes with fake Kernel/index ports', () => {
   const app = Fastify();
   const store = new MemorySendStore();
@@ -385,7 +403,7 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     method: 'GET' | 'POST',
     url: string,
     body?: unknown,
-    admin = false,
+    admin = method === 'GET' || url === '/v1/send/previews',
   ) =>
     app.inject({
       method,
@@ -513,14 +531,36 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     expect(two.grant.grantId).toBe(hex('9a', 32));
 
     const tx = hex('7e', 32);
+    const execution = {
+      transactionHash: tx,
+      blockNumber: '100',
+      recipientBalanceBefore: '0',
+      recipientBalanceAfter: '1000000',
+      explorer: null,
+    };
+    // Single time unit: second-resolution or reversed timestamps are refused.
+    for (const times of [
+      { submittedAt: NOW + 1, confirmedAt: NOW + 2 },
+      { submittedAt: NOW * 1000 + 2_500, confirmedAt: NOW * 1000 + 1_000 },
+      { submittedAt: NOW * 1000, confirmedAt: (NOW + 3_600) * 1000 },
+    ]) {
+      const bad = await req(
+        'POST',
+        `/v1/send/${first.sendId}/execution`,
+        { ...execution, ...times },
+        true,
+      );
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error).toBe('EXECUTION_TIME_INVALID');
+    }
     await req(
       'POST',
       `/v1/send/${first.sendId}/execution`,
       {
         transactionHash: tx,
         blockNumber: '100',
-        submittedAt: 1_000,
-        confirmedAt: 2_500,
+        submittedAt: NOW * 1000 + 1_000,
+        confirmedAt: NOW * 1000 + 2_500,
         recipientBalanceBefore: '0',
         recipientBalanceAfter: '1000000',
         explorer: null,
@@ -546,14 +586,57 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
     expect(done.state).toBe('INDEXED');
     expect(done.receipt?.recipientDelta).toBe('1000000');
     expect(done.receipt?.latencyMs.submitToConfirmed).toBe(1_500);
-    expect(done.receipt?.latencyMs.submitToIndexed).toBeGreaterThan(0);
+    expect(done.receipt?.latencyMs.submitToIndexed).toBeGreaterThanOrEqual(
+      1_500,
+    );
     expect(done.history.map((h) => h.state)).toEqual([
       'PREVIEWED',
+      'CONFIRMING',
       'PENDING_APPROVAL',
       'AUTHORIZED',
       'SUBMITTED',
       'CONFIRMED',
       'INDEXED',
     ]);
+    const times = done.history.map((h) => h.at);
+    expect(times.every((t) => t >= NOW * 1000)).toBe(true);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+  });
+
+  it('concurrent signed confirmations run one proposal and Kernel decision', async () => {
+    const p = (
+      await req('POST', '/v1/send/previews', {
+        groupId: GROUP,
+        recipientId: `contact:${CONTACT}`,
+        amount: '0.25',
+      })
+    ).json() as SendPreview;
+    const body = await confirmBody(p);
+    const before = calls.length;
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => req('POST', '/v1/send', body)),
+    );
+    expect(results.every((r) => r.statusCode === 201)).toBe(true);
+    expect(calls.length - before).toBe(1);
+    expect(new Set(results.map((r) => r.json().sendId)).size).toBe(1);
+  });
+
+  it('treasury, status, directory and preview requests require authentication', async () => {
+    for (const url of [
+      `/v1/groups/${GROUP}/treasury`,
+      `/v1/send/${GROUP}/recipients`,
+      `/v1/send/${hex('ab', 32)}`,
+    ])
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
+    expect(
+      (
+        await req(
+          'POST',
+          '/v1/send/previews',
+          { groupId: GROUP, recipientId: `contact:${CONTACT}`, amount: '1' },
+          false,
+        )
+      ).statusCode,
+    ).toBe(401);
   });
 });

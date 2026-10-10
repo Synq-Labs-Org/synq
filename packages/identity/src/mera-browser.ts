@@ -22,6 +22,10 @@ import type {
   GrantPreview,
   IdentityChallenge,
 } from '@synq/schemas';
+import {
+  sendAccessTypedData,
+  type SendAccessChallenge,
+} from './send-access.js';
 import { identityChallengeTypedData, meraPrincipalId } from './challenge.js';
 import {
   approvalAttestationTypedData,
@@ -412,3 +416,22 @@ export async function signMeraTransaction(
     account.signTransaction({ ...transaction, type: 'eip1559' }),
   );
 }
+
+export async function signMeraSendAccess(
+  record: MeraCredential,
+  challenge: SendAccessChallenge,
+  options: MeraOptions = {},
+): Promise<Hex> {
+  if (
+    challenge.principalId !== record.principalId ||
+    !same(challenge.signer, record.signer)
+  )
+    throw new MeraAdapterError(
+      'CHALLENGE_MISMATCH',
+      'access challenge is for another principal',
+    );
+  return withRecordAccount(record, options, (account) =>
+    account.signTypedData(sendAccessTypedData(challenge)),
+  );
+}
+export { SendAccessChallengeSchema } from './send-access.js';

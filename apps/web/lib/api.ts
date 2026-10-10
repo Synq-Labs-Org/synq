@@ -17,16 +17,19 @@ async function call<S extends z.ZodType>(
   path: string,
   schema: S,
   body?: unknown,
+  token?: string,
 ): Promise<z.output<S>> {
   const response = await fetch(`/api${path}`, {
     method,
-    headers:
-      method === 'POST'
+    headers: {
+      ...(method === 'POST'
         ? {
             'content-type': 'application/json',
             'idempotency-key': crypto.randomUUID(),
           }
-        : {},
+        : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     cache: 'no-store',
   });
@@ -45,10 +48,14 @@ async function call<S extends z.ZodType>(
 }
 
 export const api = {
-  get: <S extends z.ZodType>(path: string, schema: S) =>
-    call('GET', path, schema),
-  post: <S extends z.ZodType>(path: string, schema: S, body: unknown) =>
-    call('POST', path, schema, body),
+  get: <S extends z.ZodType>(path: string, schema: S, token?: string) =>
+    call('GET', path, schema, undefined, token),
+  post: <S extends z.ZodType>(
+    path: string,
+    schema: S,
+    body: unknown,
+    token?: string,
+  ) => call('POST', path, schema, body, token),
 };
 
 export function describeError(error: unknown): string {

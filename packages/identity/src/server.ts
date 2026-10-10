@@ -15,3 +15,4 @@ export * from './providers/dynamic.js';
 export * from './providers/enroll.js';
 export * from './directory.js';
 export * from './send-confirmation.js';
+export * from './send-access.js';

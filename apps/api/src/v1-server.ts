@@ -33,6 +33,126 @@ import {
   openDurableKernel,
 } from './kernel-runtime.js';
 import { PostgresKernelStateStore, type SqlPool } from './kernel-store.js';
+import type { FastifyInstance } from 'fastify';
+import {
+  PostgresFundingSessionStore,
+  PostgresSendStore,
+  DirectMonadAusdAdapter,
+  FundingRouter,
+  createFundingActivities,
+  FundingRequestSchema,
+  type FundingSqlPool,
+  type FundingActivities,
+} from '@synq/funding';
+import { sendRoutes, type SendRouteDeps } from './send-routes.js';
+import { fundingReceipt, productionSendPorts } from './send-runtime.js';
+import { DurableKernel } from './kernel-runtime.js';
+import { indexedContributions } from '@synq/read-model';
+import { createHash, timingSafeEqual } from 'node:crypto';
+
+export async function registerProductionSend(input: {
+  app: FastifyInstance;
+  pool: FundingSqlPool;
+  ports: (stores: {
+    sends: PostgresSendStore;
+    funding: PostgresFundingSessionStore;
+  }) => Promise<Omit<SendRouteDeps, 'store'>> | Omit<SendRouteDeps, 'store'>;
+}) {
+  const sends = new PostgresSendStore(input.pool);
+  const funding = new PostgresFundingSessionStore(input.pool);
+  await sends.migrate();
+  await funding.migrate();
+  const ports = await input.ports({ sends, funding });
+  await input.app.register(sendRoutes, { ...ports, store: sends });
+  return { sends, funding, ports };
+}
+
+async function registerFundingApi(
+  app: FastifyInstance,
+  input: {
+    activities: FundingActivities;
+    store: PostgresFundingSessionStore;
+    ports: Omit<SendRouteDeps, 'store'>;
+    readModel: ReadModelRuntime;
+  },
+) {
+  const authorized = (header: string | undefined) => {
+    const digest = (v: string) => createHash('sha256').update(v).digest();
+    return (
+      !!input.ports.adminToken &&
+      timingSafeEqual(
+        digest(header ?? ''),
+        digest(`Bearer ${input.ports.adminToken}`),
+      )
+    );
+  };
+  const id = z.string().regex(/^0x[0-9a-f]{64}$/);
+  app.post('/v1/funding/quotes', async (req, reply) => {
+    if (!authorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    const request = FundingRequestSchema.parse(req.body);
+    const context = await input.ports.groups.context(request.groupId);
+    if (
+      !context ||
+      context.mandate.account !== request.destination.account ||
+      !context.members.some(
+        (m) => m.signer.toLowerCase() === request.source.sender.toLowerCase(),
+      )
+    )
+      return reply.code(403).send({ error: 'FUNDING_BINDING_INVALID' });
+    const now = input.ports.now();
+    const plan = await input.activities.planRoute({ ...request, now });
+    if (plan.status !== 'ROUTED') return reply.code(422).send(plan);
+    return input.activities.openFromPlan({
+      groupId: request.groupId,
+      plan,
+      now,
+    });
+  });
+  app.get('/v1/funding/:sessionId', async (req, reply) => {
+    if (!authorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
+    const s = await input.store.get(sessionId);
+    return s ?? reply.code(404).send({ error: 'FUNDING_NOT_FOUND' });
+  });
+  app.post('/v1/funding/:sessionId/authorize', async (req, reply) => {
+    if (!authorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
+    return input.activities.authorize(sessionId, input.ports.now());
+  });
+  app.post('/v1/funding/:sessionId/source', async (req, reply) => {
+    if (!authorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
+    const { transactionHash } = z
+      .strictObject({ transactionHash: id })
+      .parse(req.body);
+    const s = await input.store.get(sessionId);
+    if (!s) return reply.code(404).send({ error: 'FUNDING_NOT_FOUND' });
+    return input.activities.recordSource(
+      sessionId,
+      await fundingReceipt(
+        input.readModel.client,
+        s,
+        transactionHash as `0x${string}`,
+      ),
+      input.ports.now(),
+    );
+  });
+  app.post('/v1/funding/:sessionId/reconcile', async (req, reply) => {
+    if (!authorized(req.headers.authorization))
+      return reply.code(401).send({ error: 'UNAUTHORIZED' });
+    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
+    const now = input.ports.now();
+    await input.activities.observeDestination(sessionId, now);
+    const s = await input.activities.confirmIndexed(sessionId, now);
+    return s.state === 'INDEXED' || s.state === 'CREDITED'
+      ? input.activities.credit(sessionId, now)
+      : s;
+  });
+}
 
 const LOCAL_PROFILE = 'local/anvil';
 const KERNEL_ENV = [
@@ -230,6 +350,65 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       ],
     },
   });
+  if (readModel && intents) {
+    const kernel = intents instanceof DurableKernel ? intents.kernel : intents;
+    const registered = await registerProductionSend({
+      app,
+      pool,
+      ports: ({ sends, funding }) =>
+        productionSendPorts({
+          identity: store,
+          identityConfig: {
+            profile: config.SYNQ_PROFILE,
+            rpId: config.SYNQ_RP_ID,
+            origin: config.SYNQ_ORIGIN,
+          },
+          readModel,
+          kernel,
+          authorizer: intents,
+          executionModule: AddressSchema.parse(executionModules[chainId]),
+          adminToken: config.SYNQ_API_ADMIN_TOKEN,
+          sends,
+          funding,
+        }),
+    });
+    const activities = createFundingActivities({
+      router: new FundingRouter({ adapters: [new DirectMonadAusdAdapter()] }),
+      store: registered.funding,
+      destination: {
+        find: async (s) =>
+          s.sourceTransactionHash
+            ? fundingReceipt(readModel.client, s, s.sourceTransactionHash)
+            : null,
+      },
+      indexed: {
+        indexed: async (r) => {
+          const seen = await indexedContributions(
+            readModel.projectionStore,
+            readModel.projection,
+            r.to,
+            r.token,
+          );
+          return {
+            indexedThroughBlock: seen.indexedThroughBlock,
+            eventPresent: seen.contributions.some(
+              (c) =>
+                c.transactionHash === r.transactionHash &&
+                c.logIndex === r.logIndex &&
+                c.from === r.from &&
+                c.amount === r.amount,
+            ),
+          };
+        },
+      },
+    });
+    await registerFundingApi(app, {
+      activities,
+      store: registered.funding,
+      ports: registered.ports,
+      readModel,
+    });
+  }
   app.addHook('onClose', async () => {
     await readModel?.close();
     await pool.end();

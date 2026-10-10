@@ -4,12 +4,21 @@ import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import {
   signMeraSendConfirmation,
+  signMeraSendAccess,
+  SendAccessChallengeSchema,
   type MeraCredential,
 } from '@synq/identity/mera-browser';
-import { GroupViewSchema } from '@synq/schemas';
 import { api, describeError } from '../../lib/api';
 import { loadCredential } from '../../lib/session';
 
+const AccessSessionSchema = z.strictObject({
+  token: z.string(),
+  expiresAt: z.number(),
+  memberId: z.string(),
+  principalId: z.string(),
+  groupId: z.string(),
+  scope: z.literal('SEND_READ_PREVIEW'),
+});
 const Hex = z.string().regex(/^0x[0-9a-fA-F]+$/);
 const RecipientSchema = z.looseObject({
   recipientId: z.string(),
@@ -74,6 +83,9 @@ const units = (amount: string, decimals: number) => {
 
 export default function SendPage() {
   const [record, setRecord] = useState<MeraCredential | null>(null);
+  const [access, setAccess] = useState<z.output<
+    typeof AccessSessionSchema
+  > | null>(null);
   const [groupId, setGroupId] = useState('');
   const [memberId, setMemberId] = useState<string | null>(null);
   const [directory, setDirectory] = useState<z.output<
@@ -92,27 +104,35 @@ export default function SendPage() {
     if (!send || send.state === 'INDEXED' || send.state === 'REJECTED') return;
     const t = setInterval(() => {
       api
-        .get(`/v1/send/${send.sendId}`, SendSchema)
+        .get(`/v1/send/${send.sendId}`, SendSchema, access?.token)
         .then(setSend)
         .catch(() => undefined);
     }, 3000);
     return () => clearInterval(t);
-  }, [send]);
+  }, [send, access]);
 
   async function load() {
     setError(null);
     try {
+      if (!record) throw new Error('Create or recover your passkey first.');
+      const challenge = await api.post(
+        '/v1/send/access/challenges',
+        SendAccessChallengeSchema,
+        { groupId, principalId: record.principalId },
+      );
+      const signature = await signMeraSendAccess(record, challenge);
+      const session = await api.post('/v1/send/access', AccessSessionSchema, {
+        challengeId: challenge.challengeId,
+        signature,
+      });
+      setAccess(session);
+      setMemberId(session.memberId);
       const d = await api.get(
         `/v1/send/${groupId}/recipients`,
         DirectorySchema,
+        session.token,
       );
       setDirectory(d);
-      const group = await api.get(`/v1/groups/${groupId}`, GroupViewSchema);
-      setMemberId(
-        group.memberships.find(
-          (m) => m.status === 'ACTIVE' && m.principalId === record?.principalId,
-        )?.memberId ?? null,
-      );
     } catch (e) {
       setError(describeError(e));
     }
@@ -123,11 +143,16 @@ export default function SendPage() {
     setConfirmed(false);
     try {
       setPreview(
-        await api.post('/v1/send/previews', PreviewSchema, {
-          groupId,
-          recipientId,
-          amount,
-        }),
+        await api.post(
+          '/v1/send/previews',
+          PreviewSchema,
+          {
+            groupId,
+            recipientId,
+            amount,
+          },
+          access?.token,
+        ),
       );
     } catch (e) {
       setError(describeError(e));
@@ -184,11 +209,18 @@ export default function SendPage() {
         <input
           data-testid="send-group"
           value={groupId}
-          onChange={(e) => setGroupId(e.target.value.trim())}
+          onChange={(e) => {
+            setGroupId(e.target.value.trim());
+            setAccess(null);
+            setDirectory(null);
+            setPreview(null);
+            setSend(null);
+            setMemberId(null);
+          }}
           placeholder="0x…"
         />
       </label>
-      <button onClick={load} disabled={!groupId}>
+      <button onClick={load} disabled={!groupId || !record}>
         Load recipients
       </button>
       {directory && (
@@ -224,7 +256,7 @@ export default function SendPage() {
           </label>
           <button
             onClick={makePreview}
-            disabled={!recipientId || !amount}
+            disabled={!recipientId || !amount || !access}
             data-testid="send-preview"
           >
             Preview
