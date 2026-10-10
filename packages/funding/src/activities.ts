@@ -46,7 +46,7 @@ export interface FundingActivities {
   authorize(sessionId: string, now: number): Promise<FundingSession>;
   recordSource(
     sessionId: string,
-    transactionHash: `0x${string}`,
+    receipt: DestinationReceipt,
     now: number,
   ): Promise<FundingSession>;
   pollProvider(sessionId: string, now: number): Promise<FundingSession>;
@@ -86,8 +86,8 @@ export function createFundingActivities(deps: {
       return deps.store.open(openSession({ groupId, quote: plan.quote, now }));
     },
     authorize: (id, now) => update(id, (s) => authorizeSession(s, now)),
-    recordSource: (id, hash, now) =>
-      update(id, (s) => recordSourceSubmission(s, hash, now)),
+    recordSource: (id, receipt, now) =>
+      update(id, (s) => recordSourceSubmission(s, receipt, now)),
     pollProvider: (id, now) =>
       update(id, async (s) => {
         const status = deps.provider ? await deps.provider.status(s) : null;

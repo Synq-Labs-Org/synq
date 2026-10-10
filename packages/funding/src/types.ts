@@ -80,6 +80,8 @@ export type NormalizedQuote = {
   source: TokenRef;
   destination: TokenRef;
   recipient: string;
+  sourceSender?: string;
+  destinationSender?: string;
   amountIn: string;
   amountOut: string;
   minAmountOut: string;

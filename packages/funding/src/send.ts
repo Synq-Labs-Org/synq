@@ -179,6 +179,8 @@ export function buildSendPreview(input: {
     );
   if (
     input.guard.status !== 'PASS' ||
+    input.guard.chainId !== asset.chainId ||
+    input.guard.token.toLowerCase() !== asset.address.toLowerCase() ||
     input.guard.recipient.toLowerCase() !== recipient.address ||
     input.guard.amount !== String(amount) ||
     input.guard.account.toLowerCase() !== mandate.account.toLowerCase()
@@ -251,6 +253,7 @@ export function confirmSendPreview(
 
 export const SEND_STATES = [
   'PREVIEWED',
+  'CONFIRMING',
   'PENDING_APPROVAL',
   'AUTHORIZED',
   'SUBMITTED',
@@ -294,11 +297,14 @@ export type SendRecord = {
   } | null;
   /** Kernel proposal (intent, risk packet, simulation, calldata) as JSON. */
   proposal: unknown;
+  /** Version 2 commits proposal before any Kernel call; legacy claims require manual reconciliation. */
+  confirmationProtocol: 2 | null;
   history: { state: SendState; at: number; note: string }[];
 };
 
 const SEND_NEXT: Record<SendState, readonly SendState[]> = {
-  PREVIEWED: ['PENDING_APPROVAL', 'AUTHORIZED', 'REJECTED'],
+  PREVIEWED: ['CONFIRMING', 'PENDING_APPROVAL', 'AUTHORIZED', 'REJECTED'],
+  CONFIRMING: ['PREVIEWED', 'PENDING_APPROVAL', 'AUTHORIZED', 'REJECTED'],
   PENDING_APPROVAL: ['AUTHORIZED', 'REJECTED'],
   AUTHORIZED: ['SUBMITTED', 'REJECTED'],
   SUBMITTED: ['CONFIRMED', 'REJECTED'],
@@ -341,23 +347,40 @@ export function newSendRecord(preview: SendPreview, at: number): SendRecord {
     receipt: null,
     sender: null,
     proposal: null,
+    confirmationProtocol: null,
     history: [{ state: 'PREVIEWED', at, note: 'preview created' }],
   };
 }
 
 export interface SendStore {
+  withConfirmationLock<T>(sendId: string, run: () => Promise<T>): Promise<T>;
   savePreview(preview: SendPreview): Promise<void>;
   preview(previewId: string): Promise<SendPreview | null>;
   /** Creates the record once per preview; a second confirmation returns the existing record. */
   createOnce(
     record: SendRecord,
   ): Promise<{ record: SendRecord; created: boolean }>;
+  claimConfirmation(sendId: string, at: number): Promise<SendRecord | null>;
+  releaseConfirmation(sendId: string, at: number): Promise<void>;
   get(sendId: string): Promise<SendRecord | null>;
   byIntentHash(intentHash: string): Promise<SendRecord | null>;
+  /** Records currently in `state`, oldest first; used by the restart recovery sweep. */
+  inState(state: SendState): Promise<SendRecord[]>;
   save(record: SendRecord): Promise<void>;
 }
 
 export class MemorySendStore implements SendStore {
+  private readonly locks = new Map<string, Promise<unknown>>();
+  async withConfirmationLock<T>(id: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.locks.get(id) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(run);
+    this.locks.set(id, current);
+    try {
+      return await current;
+    } finally {
+      if (this.locks.get(id) === current) this.locks.delete(id);
+    }
+  }
   private readonly previews = new Map<string, SendPreview>();
   private readonly records = new Map<string, SendRecord>();
   async savePreview(p: SendPreview) {
@@ -373,9 +396,44 @@ export class MemorySendStore implements SendStore {
     this.records.set(record.sendId, structuredClone(record));
     return { record: structuredClone(record), created: true };
   }
+  async claimConfirmation(id: string, at: number) {
+    const record = this.records.get(id);
+    if (!record || record.state !== 'PREVIEWED') return null;
+    const claimed = advanceSend(
+      record,
+      'CONFIRMING',
+      at,
+      'confirmation claimed',
+      { confirmationProtocol: 2 },
+    );
+    this.records.set(id, structuredClone(claimed));
+    return structuredClone(claimed);
+  }
   async get(id: string) {
     const r = this.records.get(id);
     return r ? structuredClone(r) : null;
+  }
+  async releaseConfirmation(id: string, at: number) {
+    const record = this.records.get(id);
+    if (
+      record?.state === 'CONFIRMING' &&
+      record.confirmationProtocol === 2 &&
+      record.proposal === null
+    )
+      this.records.set(
+        id,
+        advanceSend(
+          record,
+          'PREVIEWED',
+          at,
+          'proposal failed before Kernel authorization',
+        ),
+      );
+  }
+  async inState(state: SendState) {
+    return [...this.records.values()]
+      .filter((r) => r.state === state)
+      .map((r) => structuredClone(r));
   }
   async byIntentHash(h: string) {
     for (const r of this.records.values())

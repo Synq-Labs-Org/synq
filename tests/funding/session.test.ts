@@ -19,7 +19,7 @@ import {
   type FundingSession,
   type NormalizedQuote,
 } from '@synq/funding';
-import { MAINNET, NOW, SAFE, TESTNET, request } from './helpers.js';
+import { MAINNET, NOW, SAFE, MEMBER, TESTNET, request } from './helpers.js';
 
 const TX = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as const;
 function intentQuote(
@@ -39,6 +39,8 @@ function intentQuote(
     },
     destination: tokenRefOf(officialAssets.mainnetUSDC),
     recipient: SAFE,
+    sourceSender: MEMBER,
+    destinationSender: MEMBER,
     amountIn: '5000000',
     amountOut: '4988795',
     minAmountOut: '4963851',
@@ -55,6 +57,7 @@ function intentQuote(
 const receipt = (o: Partial<DestinationReceipt> = {}): DestinationReceipt => ({
   chainId: MAINNET,
   token: officialAssets.mainnetUSDC.address.toLowerCase() as `0x${string}`,
+  from: MEMBER,
   to: SAFE,
   amount: '4988795',
   transactionHash: TX(7),
@@ -62,13 +65,25 @@ const receipt = (o: Partial<DestinationReceipt> = {}): DestinationReceipt => ({
   blockNumber: 500,
   ...o,
 });
+const sourceReceipt = (
+  q = intentQuote(),
+  transactionHash = TX(9),
+): DestinationReceipt => ({
+  ...receipt(),
+  chainId: q.source.chainId,
+  token: q.source.address as `0x${string}`,
+  from: MEMBER,
+  to: q.depositAddress as `0x${string}`,
+  amount: q.amountIn,
+  transactionHash,
+});
 const submitted = (q = intentQuote()): FundingSession =>
   recordSourceSubmission(
     authorizeSession(
       openSession({ groupId: 'g', quote: q, now: NOW }),
       NOW + 1,
     ),
-    TX(9),
+    sourceReceipt(q),
     NOW + 2,
   );
 
@@ -77,13 +92,13 @@ describe('Funding state machine (Bible §19)', () => {
     const s = openSession({ groupId: 'g', quote: intentQuote(), now: NOW });
     const late = authorizeSession(s, NOW + 121);
     expect(late.state).toBe('EXPIRED');
-    expect(() => recordSourceSubmission(late, TX(9), NOW + 122)).toThrow(
-      'INVALID_TRANSITION',
-    );
+    expect(() =>
+      recordSourceSubmission(late, sourceReceipt(), NOW + 122),
+    ).toThrow('INVALID_TRANSITION');
     const authorized = authorizeSession(s, NOW + 10);
-    expect(recordSourceSubmission(authorized, TX(9), NOW + 200).state).toBe(
-      'EXPIRED',
-    );
+    expect(
+      recordSourceSubmission(authorized, sourceReceipt(), NOW + 200).state,
+    ).toBe('EXPIRED');
     expect(() =>
       openSession({ groupId: 'g', quote: intentQuote(), now: NOW + 500 }),
     ).toThrow('QUOTE_EXPIRED');
@@ -181,6 +196,7 @@ describe('Funding state machine (Bible §19)', () => {
     const s = submitted();
     for (const bad of [
       receipt({ chainId: TESTNET }),
+      receipt({ from: SAFE }),
       receipt({ token: officialAssets.mainnetAUSD.address }),
       receipt({ to: `0x${'99'.repeat(20)}` }),
     ])
@@ -210,10 +226,10 @@ describe('Funding state machine (Bible §19)', () => {
   it('timeout after source submission reconciles instead of re-debiting; a second source tx is a conflict', () => {
     const s = submitted();
     expect(timeoutSession(s, NOW + 999).state).toBe('RECONCILIATION_REQUIRED');
-    expect(recordSourceSubmission(s, TX(9), NOW + 3)).toBe(s);
-    expect(() => recordSourceSubmission(s, TX(10), NOW + 3)).toThrow(
-      'IDEMPOTENCY_CONFLICT',
-    );
+    expect(recordSourceSubmission(s, sourceReceipt(), NOW + 3)).toBe(s);
+    expect(() =>
+      recordSourceSubmission(s, sourceReceipt(intentQuote(), TX(10)), NOW + 3),
+    ).toThrow('IDEMPOTENCY_CONFLICT');
   });
 
   it('idempotency by deposit address: the same quote returns the same session, another quote conflicts', async () => {
@@ -246,6 +262,7 @@ describe('Funding state machine (Bible §19)', () => {
     const seen: DestinationReceipt = {
       chainId: TESTNET,
       token: parsed.destination.token.address as `0x${string}`,
+      from: MEMBER,
       to: SAFE,
       amount: parsed.source.amount,
       transactionHash: TX(11),
@@ -267,8 +284,8 @@ describe('Funding state machine (Bible §19)', () => {
     const plan = await acts.planRoute(req);
     const s0 = await acts.openFromPlan({ groupId: 'g', plan, now: NOW });
     await acts.authorize(s0.sessionId, NOW + 1);
-    await acts.recordSource(s0.sessionId, TX(11), NOW + 2);
-    await acts.recordSource(s0.sessionId, TX(11), NOW + 2);
+    await acts.recordSource(s0.sessionId, seen, NOW + 2);
+    await acts.recordSource(s0.sessionId, seen, NOW + 2);
     await acts.observeDestination(s0.sessionId, NOW + 3);
     expect((await acts.confirmIndexed(s0.sessionId, NOW + 4)).state).toBe(
       'DESTINATION_RECEIVED',

@@ -6,7 +6,7 @@ export const P08_DATABASE_URL =
 
 export async function ensureP08Database(url = P08_DATABASE_URL) {
   const name = new URL(url).pathname.slice(1);
-  if (!/^synq_p08_[a-z0-9_]+$/.test(name))
+  if (!/^synq_p08[a-z]?_[a-z0-9_]+$/.test(name))
     throw new Error('P08 test database must be named synq_p08_*');
   const admin = new pg.Client({
     connectionString: url.replace(/\/[^/]+$/, '/postgres'),

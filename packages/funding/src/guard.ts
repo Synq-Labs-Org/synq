@@ -16,6 +16,7 @@ export const AUSD_GUARD_REASONS = [
   'RECIPIENT_FROZEN',
   'CONTROL_READ_FAILED',
   'TRANSFER_SIMULATION_REVERTED',
+  'TRANSFER_SIMULATION_UNSUCCESSFUL',
 ] as const;
 export type AusdGuardReason = (typeof AUSD_GUARD_REASONS)[number];
 
@@ -142,7 +143,7 @@ export class AusdGuard {
       'RECIPIENT_FROZEN',
     );
     try {
-      await this.client.call({
+      const result = await this.client.call({
         account: input.account,
         to: token,
         data: encodeFunctionData({
@@ -152,7 +153,13 @@ export class AusdGuard {
         }),
         blockNumber,
       });
-      checks.push({ name: 'transferSimulation', value: true, error: null });
+      const succeeded = result.data === `0x${'0'.repeat(63)}1`;
+      checks.push({
+        name: 'transferSimulation',
+        value: succeeded,
+        error: succeeded ? null : 'ERC20 transfer did not return true',
+      });
+      if (!succeeded) reasons.add('TRANSFER_SIMULATION_UNSUCCESSFUL');
     } catch (error) {
       checks.push({
         name: 'transferSimulation',

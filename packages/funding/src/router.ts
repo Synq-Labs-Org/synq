@@ -1,6 +1,7 @@
 import {
   assetForRole,
   isMutationEnabledChain,
+  isLocalChain,
   profileForChainId,
 } from '@synq/chain-registry';
 import type { Asset } from '@synq/domain';
@@ -39,7 +40,11 @@ export function tokenRefOf(asset: Asset): TokenRef {
 }
 
 export function modeForChain(chainId: number): ExecutionMode {
-  return isMutationEnabledChain(chainId) ? 'REAL_TESTNET' : 'MAINNET_READ_ONLY';
+  return isLocalChain(chainId)
+    ? 'SIMULATION'
+    : isMutationEnabledChain(chainId)
+      ? 'REAL_TESTNET'
+      : 'MAINNET_READ_ONLY';
 }
 
 /** Rejects any quote whose destination, amounts or expiry differ from the request. */
@@ -116,6 +121,8 @@ export class DirectMonadAusdAdapter implements FundingRouteAdapter {
       source: request.source.token,
       destination: request.destination.token,
       recipient: request.destination.account,
+      sourceSender: request.source.sender.toLowerCase(),
+      destinationSender: request.source.sender.toLowerCase(),
       amountIn: request.source.amount,
       amountOut: request.source.amount,
       minAmountOut: request.source.amount,
@@ -212,6 +219,7 @@ export class FundingRouter {
       )!;
       try {
         const quote = await adapter.quote(request);
+        quote.sourceSender = request.source.sender.toLowerCase();
         assertQuoteMatches(request, quote, destination, request.now);
         return {
           requestId: request.requestId,

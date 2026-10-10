@@ -9,3 +9,5 @@ export * from './session.js';
 export * from './activities.js';
 export * from './send.js';
 export * from './evidence.js';
+export * from './postgres.js';
+export * from './storage-schema.js';

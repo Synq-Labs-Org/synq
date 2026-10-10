@@ -84,6 +84,7 @@ export type ProviderStatus =
 export type DestinationReceipt = {
   chainId: number;
   token: `0x${string}`;
+  from: `0x${string}`;
   to: `0x${string}`;
   amount: string;
   transactionHash: `0x${string}`;
@@ -107,6 +108,7 @@ export type FundingSession = {
   quote: NormalizedQuote;
   state: FundingState;
   sourceTransactionHash: `0x${string}` | null;
+  sourceReceipt: DestinationReceipt | null;
   providerStatus: ProviderStatus | null;
   providerUpdates: string[];
   receipt: DestinationReceipt | null;
@@ -119,7 +121,7 @@ export type FundingSession = {
 };
 
 export const idempotencyKeyFor = (quote: NormalizedQuote): string =>
-  quote.depositAddress
+  quote.route !== 'DIRECT_MONAD_AUSD' && quote.depositAddress
     ? `deposit:${quote.depositAddress.toLowerCase()}`
     : `correlation:${quote.correlationId ?? quote.quoteId}`;
 
@@ -148,6 +150,15 @@ export function openSession(input: {
 }): FundingSession {
   if (input.quote.expiresAt <= input.now)
     throw new FundingError('QUOTE_EXPIRED');
+  if (
+    !input.quote.sourceSender ||
+    !input.quote.destinationSender ||
+    !input.quote.depositAddress
+  )
+    throw new FundingError(
+      'QUOTE_INVALID',
+      'verified route sender/recipient binding required',
+    );
   const idempotencyKey = idempotencyKeyFor(input.quote);
   return {
     sessionId: contentHash({
@@ -162,6 +173,7 @@ export function openSession(input: {
     quote: input.quote,
     state: 'QUOTED',
     sourceTransactionHash: null,
+    sourceReceipt: null,
     providerStatus: null,
     providerUpdates: [],
     receipt: null,
@@ -185,9 +197,23 @@ export function authorizeSession(
 
 export function recordSourceSubmission(
   s: FundingSession,
-  transactionHash: `0x${string}`,
+  receipt: DestinationReceipt,
   now: number,
 ): FundingSession {
+  const transactionHash =
+    receipt.transactionHash.toLowerCase() as `0x${string}`;
+  if (
+    receipt.chainId !== s.quote.source.chainId ||
+    !same(receipt.token, s.quote.source.address) ||
+    !same(receipt.from, s.quote.sourceSender ?? '') ||
+    !same(receipt.to, s.quote.depositAddress ?? '') ||
+    receipt.amount !== s.quote.amountIn ||
+    BigInt(receipt.amount) <= 0n
+  )
+    throw new FundingError(
+      'DESTINATION_MISMATCH',
+      'source receipt differs from authorized route',
+    );
   if (s.sourceTransactionHash !== null) {
     if (same(s.sourceTransactionHash, transactionHash)) return s;
     throw new FundingError(
@@ -200,7 +226,7 @@ export function recordSourceSubmission(
   if (now >= s.quote.expiresAt)
     return move(s, 'EXPIRED', now, 'quote expired before source submission');
   const submitted = move(
-    { ...s, sourceTransactionHash: transactionHash },
+    { ...s, sourceTransactionHash: transactionHash, sourceReceipt: receipt },
     'SOURCE_SUBMITTED',
     now,
     `source ${transactionHash}`,
@@ -259,28 +285,31 @@ export function observeDestination(
   receipt: DestinationReceipt,
   now: number,
 ): FundingSession {
+  const destination = s.quote.destination;
+  if (
+    !s.sourceReceipt ||
+    receipt.chainId !== destination.chainId ||
+    destination.address === 'native' ||
+    !same(receipt.token, destination.address) ||
+    !same(receipt.from, s.quote.destinationSender ?? '') ||
+    !same(receipt.to, s.quote.recipient) ||
+    !/^[1-9][0-9]{0,77}$/.test(receipt.amount) ||
+    (s.route === 'DIRECT_MONAD_AUSD' &&
+      (receipt.amount !== s.quote.amountIn ||
+        !same(receipt.transactionHash, s.sourceTransactionHash ?? '') ||
+        receipt.logIndex !== s.sourceReceipt.logIndex))
+  )
+    throw new FundingError(
+      'DESTINATION_MISMATCH',
+      'destination receipt differs from authorized route',
+    );
   if (s.receipt) {
-    if (
-      s.receipt.transactionHash === receipt.transactionHash &&
-      s.receipt.logIndex === receipt.logIndex
-    )
-      return s;
+    if (contentHash(s.receipt) === contentHash(receipt)) return s;
     throw new FundingError(
       'IDEMPOTENCY_CONFLICT',
       'second destination receipt',
     );
   }
-  const destination = s.quote.destination;
-  if (
-    receipt.chainId !== destination.chainId ||
-    destination.address === 'native' ||
-    !same(receipt.token, destination.address) ||
-    !same(receipt.to, s.quote.recipient)
-  )
-    throw new FundingError(
-      'DESTINATION_MISMATCH',
-      `${receipt.chainId}:${receipt.token}->${receipt.to}`,
-    );
   const amount = BigInt(receipt.amount);
   const min = BigInt(s.quote.minAmountOut);
   return move(
@@ -324,7 +353,7 @@ export function creditSession(s: FundingSession, now: number): FundingSession {
   return move(
     {
       ...s,
-      creditId: `${s.receipt.chainId}:${s.receipt.transactionHash}:${s.receipt.logIndex}`,
+      creditId: `${s.receipt.chainId}:${s.receipt.transactionHash.toLowerCase()}:${s.receipt.logIndex}`,
       creditedAmount: s.receivedAmount,
     },
     'CREDITED',
@@ -354,9 +383,14 @@ export class MemoryFundingSessionStore implements FundingSessionStore {
     return s ? structuredClone(s) : null;
   }
   async open(session: FundingSession) {
-    const existing = await this.byKey(session.idempotencyKey);
+    const existing = [...this.sessions.values()].find(
+      (s) => s.idempotencyKey === session.idempotencyKey,
+    );
     if (existing) {
-      if (existing.quote.quoteId !== session.quote.quoteId)
+      if (
+        existing.groupId !== session.groupId ||
+        contentHash(existing.quote) !== contentHash(session.quote)
+      )
         throw new FundingError(
           'IDEMPOTENCY_CONFLICT',
           `${session.idempotencyKey} bound to another quote`,
@@ -370,8 +404,28 @@ export class MemoryFundingSessionStore implements FundingSessionStore {
     const existing = this.sessions.get(session.sessionId);
     if (!existing)
       throw new FundingError('INVALID_TRANSITION', 'unknown session');
-    if (existing.history.length > session.history.length)
-      throw new FundingError('IDEMPOTENCY_CONFLICT', 'stale session write');
+    if (
+      contentHash(existing.quote) !== contentHash(session.quote) ||
+      existing.groupId !== session.groupId ||
+      existing.history.length > session.history.length ||
+      contentHash(session.history.slice(0, existing.history.length)) !==
+        contentHash(existing.history)
+    )
+      throw new FundingError(
+        'IDEMPOTENCY_CONFLICT',
+        'stale or changed session write',
+      );
+    if (
+      session.creditId &&
+      [...this.sessions.values()].some(
+        (s) =>
+          s.sessionId !== session.sessionId && s.creditId === session.creditId,
+      )
+    )
+      throw new FundingError(
+        'IDEMPOTENCY_CONFLICT',
+        'chain event already credited',
+      );
     this.sessions.set(session.sessionId, structuredClone(session));
   }
   async list(groupId: string) {
