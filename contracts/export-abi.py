@@ -10,6 +10,7 @@ contracts = (
     "LocalTestToken",
     "SafeL2",
     "SafeProxyFactory",
+    "RiskAttestationRegistry",
 )
 for name in contracts:
     artifact = json.loads((root / "out" / f"{name}.sol" / f"{name}.json").read_text())
