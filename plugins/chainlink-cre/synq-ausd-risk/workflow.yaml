@@ -1,0 +1,18 @@
+# SynqAUSDRiskWorkflow: reads Chainlink reference feeds (and optionally a Kuru AUSD->USDC quote), computes an
+# AUSDRiskAttestation and writes it as a CRE report to RiskAttestationRegistry. Simulation only in this repository;
+# no production workflow is deployed.
+monad-testnet-simulation:
+  user-workflow:
+    workflow-name: "synq-ausd-risk-testnet"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.testnet.json"
+    secrets-path: ""
+
+monad-mainnet-simulation:
+  user-workflow:
+    workflow-name: "synq-ausd-risk-mainnet"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.mainnet.json"
+    secrets-path: ""

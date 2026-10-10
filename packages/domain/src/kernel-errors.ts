@@ -35,6 +35,8 @@ export const KERNEL_FAILURE_MESSAGES = {
   QUOTE_REQUIRED: 'A trade needs a quoted output and allocation.',
   MIN_OUTPUT_TOO_LOW: 'Minimum output is below the slippage-bounded quote.',
   ALLOCATION_CAP: 'Post-trade allocation exceeds the mandate maximum.',
+  STABLE_RISK_UNAVAILABLE:
+    'Stablecoin risk attestation is missing, unknown, stale or unreadable.',
   BUDGET_EXHAUSTED: 'Cumulative token budget is exhausted.',
   NATIVE_BUDGET_EXHAUSTED: 'Cumulative native budget is exhausted.',
   INSUFFICIENT_BALANCE: 'Treasury balance cannot cover the reservation.',

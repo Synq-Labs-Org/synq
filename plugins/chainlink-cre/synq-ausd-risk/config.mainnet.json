@@ -1,0 +1,22 @@
+{
+  "schedule": "0 */10 * * * *",
+  "chainSelectorName": "monad-mainnet",
+  "isTestnet": false,
+  "assetRegistryKey": "mainnetAUSD",
+  "referenceFeedRegistryKey": "mainnetChainlinkAusdUsd",
+  "auxiliaryFeedRegistryKeys": ["mainnetChainlinkUsdcUsd", "mainnetChainlinkMonUsd"],
+  "thresholds": {
+    "maxStalenessSec": 3900,
+    "degradedDeviationBps": 50,
+    "maxVenueDeviationBps": 100
+  },
+  "kuruQuote": {
+    "apiBaseUrl": "https://ws.kuru.io/api",
+    "tokenInRegistryKey": "mainnetAUSD",
+    "tokenOutRegistryKey": "mainnetUSDC",
+    "amountIn": "1000000",
+    "quoteIdentity": "0x000000000000000000000000000000000000dEaD"
+  },
+  "receiverDeployment": null,
+  "gasLimit": "400000"
+}

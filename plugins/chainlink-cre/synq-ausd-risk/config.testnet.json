@@ -1,0 +1,17 @@
+{
+  "schedule": "0 */10 * * * *",
+  "chainSelectorName": "monad-testnet",
+  "isTestnet": true,
+  "assetRegistryKey": "testnetAUSD",
+  "referenceFeedRegistryKey": null,
+  "referenceUnavailableReason": "UNAVAILABLE_ON_TESTNET",
+  "auxiliaryFeedRegistryKeys": ["testnetChainlinkUsdcUsd"],
+  "thresholds": {
+    "maxStalenessSec": 3900,
+    "degradedDeviationBps": 50,
+    "maxVenueDeviationBps": 100
+  },
+  "kuruQuote": null,
+  "receiverDeployment": "monad-testnet",
+  "gasLimit": "400000"
+}

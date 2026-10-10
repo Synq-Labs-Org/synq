@@ -57,6 +57,12 @@ import {
 import { readNonceStatus, type NonceStatusReader } from './nonce-status.js';
 import { RiskGate, SimulationGate } from './risk.js';
 import {
+  RiskAttestationGate,
+  escalateForStableRisk,
+  type RiskAttestationGateConfig,
+  type StableRiskAssessment,
+} from './risk-attestation.js';
+import {
   restoreState,
   snapshotState,
   stateHash,
@@ -73,6 +79,7 @@ export type KernelDependencies = {
   plugins: readonly unknown[];
   auditSink?: AuditSink;
   auditKey?: Uint8Array;
+  stableRisk?: RiskAttestationGateConfig;
 };
 export type KernelOptions = KernelDependencies & {
   network: NetworkProfile;
@@ -107,6 +114,7 @@ export class Kernel {
   private readonly directory: MembershipDirectory;
   private readonly delegationEvaluator: DelegationEvaluator;
   private readonly nonceStatus: NonceStatusReader | undefined;
+  private readonly stableRisk: RiskAttestationGate | null;
   private lastNow: number | null = null;
   private claimSequence = 0;
   private queue: Promise<unknown> = Promise.resolve();
@@ -127,6 +135,9 @@ export class Kernel {
     this.directory = options.membershipDirectory;
     this.delegationEvaluator = options.delegations ?? NO_DELEGATIONS;
     this.nonceStatus = options.nonceStatus;
+    this.stableRisk = options.stableRisk
+      ? new RiskAttestationGate(options.stableRisk)
+      : null;
     this.freshness = new FreshnessGate(options.freshness);
     requireRule(
       this.network.profile === 'local/anvil' || options.auditKey !== undefined,
@@ -241,7 +252,7 @@ export class Kernel {
         intent.groupId,
         intent.mandateId,
       );
-      const policy = this.policyEngine.evaluate({
+      let policy = this.policyEngine.evaluate({
         canonical,
         mandate,
         network: this.network,
@@ -257,6 +268,13 @@ export class Kernel {
         'PLUGIN_FORBIDDEN',
       );
       this.ledger.gate({ intent, mandate, now, verifiedBalances: null });
+      const stable: StableRiskAssessment = this.stableRisk
+        ? await this.stableRisk.assess(intent, now)
+        : { applies: false };
+      if (stable.applies) {
+        policy = escalateForStableRisk(policy, mandate, stable);
+        ctx.policy = policy;
+      }
       const assets = [
         ...(BigInt(intent.maxInputAmount) > 0n ? [mandate.inputAsset] : []),
         ...(BigInt(intent.nativeValue) > 0n
@@ -319,7 +337,10 @@ export class Kernel {
         ports: {
           ledger: this.approvalLedger,
           directory: this.directory,
-          delegations: this.delegationEvaluator,
+          delegations:
+            stable.applies && stable.effect === 'ESCALATE'
+              ? NO_DELEGATIONS
+              : this.delegationEvaluator,
           usage: this.delegationUsage,
         },
         now,
