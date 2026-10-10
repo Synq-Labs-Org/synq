@@ -41,6 +41,24 @@ export type SwapSimulation = {
 };
 
 /**
+ * Custom errors of the deployed KuruFlowEntrypoint (not source-verified), identified from its bytecode and confirmed by
+ * eth_simulateV1 on Monad mainnet (2026-10-10): 0x5264a63f is raised when the routed output is below the calldata's
+ * minAmountOut; 0x7939f424 is TransferFromFailed() when it cannot pull tokenIn.
+ */
+export const FLOW_REVERTS: Readonly<Record<string, string>> = {
+  '0x5264a63f': 'OUTPUT_BELOW_MIN_AMOUNT_OUT',
+  '0x7939f424': 'TRANSFER_FROM_FAILED',
+  '0xfb8f41b2': 'ERC20_INSUFFICIENT_ALLOWANCE',
+  '0xe450d38c': 'ERC20_INSUFFICIENT_BALANCE',
+};
+
+export function describeFlowRevert(data: Hex | undefined): string | null {
+  if (!data || data.length < 10) return null;
+  const selector = data.slice(0, 10).toLowerCase();
+  return `${FLOW_REVERTS[selector] ?? 'UNKNOWN_REVERT'} (${selector})`;
+}
+
+/**
  * Finds the storage slot that holds `owner`'s balance by tracing `balanceOf(owner)` with the prestate tracer and
  * probing each slot the token reads. Tokens that pack flags next to the balance (AUSD keeps a frozen flag in the
  * low byte) are handled by probing bit offsets until the overridden value reads back exactly.
@@ -200,7 +218,7 @@ export async function simulateSwap(
     calls,
     succeeded: failed === undefined,
     failure: failed
-      ? `${failed.label}: ${swapResult && swapResult.status !== 'success' ? String(swapResult.error?.message ?? 'reverted').slice(0, 200) : 'failed'}`
+      ? `${failed.label}: ${swapResult && swapResult.status !== 'success' ? (describeFlowRevert(swapResult.data) ?? String(swapResult.error?.message ?? 'reverted').slice(0, 200)) : 'failed'}`
       : null,
   };
 }
