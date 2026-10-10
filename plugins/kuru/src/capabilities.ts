@@ -39,7 +39,7 @@ export type KuruCapabilityReport = {
 };
 
 export const EXECUTION_PATH_REASON =
-  'ExecutionModule executes only exact ERC20 transfers and native transfers; the bounded swap action (ADR-0013) is a proposal, so swaps are prepared and simulated only';
+  'ExecutionModule executes only exact ERC20 transfers and native transfers; the bounded swap action (ADR-0017) is a proposal, so swaps are prepared and simulated only';
 export const TESTNET_FLOW_REASON =
   'Kuru Flow quotes on Monad testnet return no candidate paths (observed 2026-10-10); no testnet entrypoint is registered';
 

@@ -17,7 +17,7 @@ export function usdCents(value: string | undefined): bigint {
 /**
  * Mainnet canary gate. Broadcasting would need SYNQ_ALLOW_MAINNET_BROADCAST=true, a positive
  * SYNQ_MAINNET_CANARY_MAX_USD covering the trade notional and an on-chain execution path for swaps. The swap path is
- * not deployed (ADR-0013 is a proposal), so the decision type itself cannot express a broadcast here.
+ * not deployed (ADR-0017 is a proposal), so the decision type itself cannot express a broadcast here.
  */
 export function canaryGate(input: {
   env: CanaryEnvironment;
@@ -34,7 +34,7 @@ export function canaryGate(input: {
     reasons.push('trade notional exceeds SYNQ_MAINNET_CANARY_MAX_USD');
   if (!input.executionPathAvailable)
     reasons.push(
-      'no on-chain swap execution path: ExecutionModule executes only exact transfers (ADR-0013 bounded swap action not deployed)',
+      'no on-chain swap execution path: ExecutionModule executes only exact transfers (ADR-0017 bounded swap action not deployed)',
     );
   return { broadcast: false, mode: 'CANARY_READY', reasons };
 }

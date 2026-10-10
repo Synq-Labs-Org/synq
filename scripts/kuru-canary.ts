@@ -22,7 +22,7 @@ import {
 /**
  * Prepares the tiny AUSD->WMON Kuru canary from the group account and writes a CANARY_READY packet. It never signs:
  * no key is loaded, and the canary gate cannot return a broadcast decision while the ExecutionModule has no bounded
- * swap action (ADR-0013). The group account defaults to a deterministic group-like address with no funds; set
+ * swap action (ADR-0017). The group account defaults to a deterministic group-like address with no funds; set
  * SYNQ_CANARY_GROUP_SAFE to the Safe that will hold the canary AUSD.
  *
  *   node --import tsx scripts/kuru-canary.ts [outFile]
@@ -103,7 +103,7 @@ const simulation =
   code && code !== '0x'
     ? {
         skipped:
-          'the group account is a contract; Monad eth_simulateV1 refuses non-EOA senders ("sender not eoa"), so the module path must be simulated through the module (ADR-0013)',
+          'the group account is a contract; Monad eth_simulateV1 refuses non-EOA senders ("sender not eoa"), so the module path must be simulated through the module (ADR-0017)',
       }
     : await simulateSwap(client, {
         account,
@@ -148,7 +148,7 @@ const packet = {
     maxSlippageBps: MAX_SLIPPAGE_BPS,
   },
   nextStep:
-    'Deploy and audit the bounded swap action (ADR-0013), configure a mandate binding (kuru-flow, SPOT_TRADE, entrypoint, selector), fund the Safe with the canary AUSD, re-quote within the grant TTL, collect owner approvals and only then run a broadcast with SYNQ_ALLOW_MAINNET_BROADCAST=true and a cap.',
+    'Deploy and audit the bounded swap action (ADR-0017), configure a mandate binding (kuru-flow, SPOT_TRADE, entrypoint, selector), fund the Safe with the canary AUSD, re-quote within the grant TTL, collect owner approvals and only then run a broadcast with SYNQ_ALLOW_MAINNET_BROADCAST=true and a cap.',
 };
 mkdirSync(outFile.replace(/\/[^/]+$/, ''), { recursive: true });
 writeFileSync(
