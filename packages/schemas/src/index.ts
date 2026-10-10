@@ -450,3 +450,5 @@ export type Group = z.output<typeof GroupSchema>;
 export type Proposal = z.output<typeof ProposalSchema>;
 export * from './identity.js';
 export * from './workflow.js';
+export * from './world.js';
+export * from './evidence.js';

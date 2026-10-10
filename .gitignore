@@ -17,3 +17,4 @@ artifacts/testnet-e2e/
 test-results/
 playwright-report/
 .synq-dev/
+artifacts/brain-demo/

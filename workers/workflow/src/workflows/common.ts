@@ -1,3 +1,4 @@
+import type { Duration } from '@temporalio/common';
 import { ActivityFailure, ApplicationFailure } from '@temporalio/workflow';
 
 /** Activity failure types that must never be retried by the workflow. */
@@ -31,4 +32,4 @@ export function errorMessage(error: unknown): string {
     : String(error).slice(0, 300);
 }
 
-export const seconds = (n: number): string => `${n}s`;
+export const seconds = (n: number): Duration => `${n}s`;

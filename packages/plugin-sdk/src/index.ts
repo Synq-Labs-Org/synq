@@ -138,6 +138,10 @@ export class PluginRegistry {
     this.health.set(healthKey(id, context.network), result);
     return result.available;
   }
+  healthStatus(id: string, network: NetworkProfile): PluginHealth | null {
+    const health = this.health.get(healthKey(id, network));
+    return health ? { ...health } : null;
+  }
   get(id: string, network: NetworkProfile, now: number): RegisteredPlugin {
     const plugin = this.supported(id, network);
     const health = this.health.get(healthKey(id, network));

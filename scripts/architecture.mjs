@@ -85,6 +85,13 @@ const CHAIN_COMPARISON = new Set([
   ts.SyntaxKind.EqualsEqualsToken,
   ts.SyntaxKind.ExclamationEqualsToken,
 ]);
+const KEY_LOADER = /^load[A-Za-z]*Key$/;
+const SECRET_MATERIAL =
+  /(PRIVATE_KEY|MNEMONIC|SEED_PHRASE|_KEY_FILE|AUDIT_KEY|JOURNAL_KEY|OWNER_KEY|DEPLOYER_KEY|secrets\.env)/;
+const PLANNER_FORBIDDEN_MODULES =
+  /^(@synq\/(execution-worker|wallet-core|identity)(\/.*)?|.*\/(workers\/execution|contracts)(\/.*)?)$/;
+const BRAIN_ZONE =
+  /^(packages\/(agent-runtime|brain|world-model)|plugins\/(qwen|kimi))$/;
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 
@@ -140,6 +147,8 @@ function analyze(file, text) {
   const dynamic = [];
   const cryptoNamespaces = new Set();
   const rawChainIds = [];
+  const keyLoaders = new Set();
+  const secretLiterals = new Set();
   const reportedChainLiterals = new WeakSet();
   let anyCount = 0;
   const visitType = (node) => {
@@ -362,12 +371,19 @@ function analyze(file, text) {
       dynamic.push('createRequire');
     if (ts.isIdentifier(node) && isSigningName(node.text))
       identifiers.add(node.text);
+    if (ts.isIdentifier(node) && KEY_LOADER.test(node.text))
+      keyLoaders.add(node.text);
+    const text = literal(node);
+    if (text !== null && SECRET_MATERIAL.test(text))
+      secretLiterals.add(text.slice(0, 60));
     ts.forEachChild(node, visit);
   };
   visit(source);
   return {
     imports,
     identifiers,
+    keyLoaders,
+    secretLiterals,
     anyCount,
     rawChainIds,
     dynamic: [...new Set(dynamic)],
@@ -393,10 +409,15 @@ export function checkArchitecture(root) {
   for (const pkg of packages)
     for (const file of sourceFiles(join(root, pkg.dir))) {
       const name = posix(relative(root, file));
-      const { imports, identifiers, anyCount, rawChainIds, dynamic } = analyze(
-        name,
-        readFileSync(file, 'utf8'),
-      );
+      const {
+        imports,
+        identifiers,
+        keyLoaders,
+        secretLiterals,
+        anyCount,
+        rawChainIds,
+        dynamic,
+      } = analyze(name, readFileSync(file, 'utf8'));
       const ui = UI.test(pkg.dir);
       const planner = PLANNER.test(pkg.dir) || ui;
       const deterministic = DETERMINISTIC.test(pkg.dir);
@@ -408,6 +429,14 @@ export function checkArchitecture(root) {
         if (deterministic)
           errors.push(`${name}: signing inside deterministic authority`);
       }
+      if (PLANNER.test(pkg.dir) && keyLoaders.size)
+        errors.push(
+          `${name}: planner references key loader ${[...keyLoaders].join(', ')}`,
+        );
+      if (PLANNER.test(pkg.dir) && secretLiterals.size)
+        errors.push(
+          `${name}: planner references secret key material ${[...secretLiterals].join(', ')}`,
+        );
       if (
         (planner || deterministic) &&
         dynamic.length &&
@@ -447,6 +476,17 @@ export function checkArchitecture(root) {
         if (planner && signs)
           errors.push(
             `${name}: planner imports signing authority ${specifier}`,
+          );
+        if (
+          BRAIN_ZONE.test(pkg.dir) &&
+          (PLANNER_FORBIDDEN_MODULES.test(specifier) ||
+            (target !== null &&
+              /^(workers\/execution|packages\/(identity|wallet-core)|contracts)$/.test(
+                target,
+              )))
+        )
+          errors.push(
+            `${name}: Brain zone imports signer, identity or execution-secret module ${specifier}`,
           );
         if (
           deterministic &&

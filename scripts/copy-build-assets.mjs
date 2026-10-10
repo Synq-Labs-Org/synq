@@ -18,7 +18,7 @@ cpSync('packages/identity/sql', 'dist/packages/identity/sql', {
   recursive: true,
 });
 const toJs = (target) => target.replace(/\.ts$/, '.js');
-for (const group of ['packages', 'workers', 'apps']) {
+for (const group of ['packages', 'workers', 'apps', 'plugins']) {
   for (const entry of readdirSync(group, { withFileTypes: true })) {
     const manifestPath = join(group, entry.name, 'package.json');
     if (!entry.isDirectory() || !existsSync(manifestPath)) continue;

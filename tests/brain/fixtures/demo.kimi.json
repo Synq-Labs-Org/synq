@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "label": "HAND_AUTHORED_FIXTURE",
+  "provider": "kimi",
+  "description": "Hand-authored Kimi critic response for pnpm brain:demo. Not recorded from a live provider; it contains no market data.",
+  "recordedAt": null,
+  "interactions": [
+    {
+      "fixtureKey": "brain-demo:critic",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "requestBodyHash": null,
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "fixture-demo-critic",
+          "object": "chat.completion",
+          "created": 1791600000,
+          "model": "kimi-k3",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "{\"verdict\": \"SUPPORT\", \"issues\": [\"The local transfer mandate needs human approval; Kuru is unavailable on local Anvil.\", \"Trusted AUSD and MON risk evidence is missing; pause and hedge guards must be integrated before execution.\"], \"disagreements\": [], \"uncertainty\": 0.2}"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 3100,
+            "completion_tokens": 140,
+            "total_tokens": 3240
+          }
+        }
+      }
+    }
+  ]
+}

@@ -248,6 +248,8 @@ export async function startLocalVertical() {
     return {
       node,
       close,
+      identity,
+      plugins,
       releaseIdentity: async () => {
         for (const c of closers.splice(0)) await c().catch(() => undefined);
       },

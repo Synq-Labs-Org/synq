@@ -1,0 +1,27 @@
+{
+  "id": "kuru-clob",
+  "version": "0.1.0",
+  "capabilities": [
+    "READ_MARKET"
+  ],
+  "chains": [
+    10143,
+    143
+  ],
+  "riskClass": "READ_ONLY",
+  "requiresSimulation": false,
+  "maxGrantTtlSeconds": 120,
+  "dependencies": {},
+  "sourceDocs": [
+    "https://docs.kuru.io/contracts/Contract-addresses"
+  ],
+  "sourceIds": [
+    "S025"
+  ],
+  "health": {
+    "maxStalenessSeconds": 60,
+    "checks": [
+      "RPC"
+    ]
+  }
+}

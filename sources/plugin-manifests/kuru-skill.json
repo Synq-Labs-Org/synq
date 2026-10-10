@@ -1,0 +1,28 @@
+{
+  "id": "kuru-skill",
+  "version": "0.1.0",
+  "capabilities": [
+    "QUOTE",
+    "SPOT_TRADE"
+  ],
+  "chains": [
+    143
+  ],
+  "riskClass": "FINANCIAL_EXECUTION",
+  "requiresSimulation": true,
+  "maxGrantTtlSeconds": 120,
+  "dependencies": {},
+  "sourceDocs": [
+    "https://github.com/Kuru-Labs/kuru-trading-skills"
+  ],
+  "sourceIds": [
+    "S025"
+  ],
+  "health": {
+    "maxStalenessSeconds": 60,
+    "checks": [
+      "RPC",
+      "QUOTE_SOURCE"
+    ]
+  }
+}

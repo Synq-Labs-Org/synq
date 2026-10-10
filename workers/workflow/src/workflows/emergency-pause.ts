@@ -1,3 +1,4 @@
+import type { ActivityOptions } from '@temporalio/common';
 import { createControlAuthorizer } from './control.js';
 import {
   allHandlersFinished,
@@ -52,7 +53,7 @@ export async function EmergencyPauseWorkflow(
 ): Promise<EmergencyPauseState> {
   const authorize = createControlAuthorizer(input.groupId);
   const poll = input.pollSeconds ?? 15;
-  const options = {
+  const options: ActivityOptions = {
     startToCloseTimeout: seconds(input.activityTimeoutSeconds ?? 30),
     retry: {
       initialInterval: '500ms',

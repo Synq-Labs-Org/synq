@@ -19,7 +19,7 @@ it('CI pins third-party actions by commit SHA, needs no secrets and runs every s
   expect(workflow).toContain('queries: security-extended');
   for (const gate of [
     'pnpm format:check',
-    'eslint packages apps workers scripts tests',
+    'eslint packages apps workers plugins scripts tests',
     'pnpm typecheck',
     'pnpm architecture',
     'pnpm secrets',
