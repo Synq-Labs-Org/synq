@@ -1,1 +1,1 @@
-{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"outDir":"dist","rootDir":".","declaration":true},"include":["packages/**/*.ts","apps/**/*.ts","workers/**/*.ts"],"exclude":["node_modules","apps/web","**/dist/**","**/*.test.ts","indexer/envio/generated"]}
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"outDir":"dist","rootDir":".","declaration":true},"include":["packages/**/*.ts","apps/**/*.ts","workers/**/*.ts","plugins/**/*.ts"],"exclude":["node_modules","apps/web","**/dist/**","**/*.test.ts","indexer/envio/generated"]}
