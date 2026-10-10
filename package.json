@@ -37,7 +37,9 @@
     "sources:resolve": "node scripts/resolve-sources.mjs",
     "registry:probe": "node --import tsx scripts/testnet-probe.ts",
     "indexer:env": "node --import tsx scripts/envio-env.ts",
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:workflow": "vitest run --config tests/workflow/vitest.workflow.config.ts",
+    "workflow:dev": "node --import tsx workers/workflow/src/dev.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
@@ -59,6 +61,13 @@
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
+    "@synq/workflow-worker": "workspace:*",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/common": "1.24.0",
+    "@temporalio/testing": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0",
     "@types/node": "22.19.7",
     "@types/pg": "8.16.0",
     "eslint": "10.12.0",
