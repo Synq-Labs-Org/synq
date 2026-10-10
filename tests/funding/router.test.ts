@@ -187,6 +187,15 @@ describe('FundingRouter (B08.5)', () => {
     const cap = await aurora.capability(FundingRequestSchema.parse(request()));
     expect(cap.availability).toBe('PENDING_CREDENTIALS');
     expect(f.calls).toHaveLength(0);
+    const keyless = new IntentsApiClient({
+      provider: 'AURORA_INTENTS',
+      fetch: f.fetch,
+    });
+    expect(keyless.endpoint('tokens')).toBe(
+      'https://intents-api.aurora.dev/api/tokens/{apiKey}',
+    );
+    await expect(keyless.tokens()).rejects.toThrow('CREDENTIALS_MISSING');
+    expect(f.calls).toHaveLength(0);
     const keyed = new IntentsApiClient({
       provider: 'AURORA_INTENTS',
       apiKey: 'studio-key',

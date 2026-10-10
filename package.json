@@ -40,7 +40,7 @@
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "demo:send": "node --import tsx apps/demo/src/send.ts",
     "test:live:p08": "SYNQ_LIVE_P08=1 vitest run tests/funding/p08.live.test.ts",
-    "ausd:revalidate": "node --import tsx scripts/ausd-revalidate.ts"
+    "funding:evidence": "node --import tsx scripts/funding-evidence.ts"
   },
   "dependencies": {
     "zod": "4.6.5",

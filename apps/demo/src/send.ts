@@ -63,6 +63,7 @@ import {
   MemorySendStore,
   PENDING_FUNDING_STATES,
   createFundingActivities,
+  labelEvidenceHex,
   tokenRefOf,
   type SendPreview,
   type SendRecord,
@@ -1296,11 +1297,7 @@ export async function runSendE2E(options: SendRunOptions = {}) {
   } finally {
     writeFileSync(
       join(evidenceDirectory, `${runId}.json`),
-      JSON.stringify(
-        evidence,
-        (_, v: unknown) => (typeof v === 'bigint' ? v.toString() : v),
-        2,
-      ) + '\n',
+      JSON.stringify(labelEvidenceHex(evidence), null, 2) + '\n',
     );
     for (const c of closers.splice(0).reverse())
       await c().catch(() => undefined);

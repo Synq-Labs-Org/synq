@@ -439,7 +439,7 @@ export async function sendRoutes(
         record,
         'SUBMITTED',
         body.submittedAt,
-        body.transactionHash,
+        `tx ${body.transactionHash}`,
       );
       const next = advanceSend(
         submitted,

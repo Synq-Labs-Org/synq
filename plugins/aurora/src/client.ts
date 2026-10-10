@@ -146,9 +146,9 @@ export class IntentsApiClient {
   ): string {
     if (this.provider === 'NEAR_1CLICK')
       return `${this.base}/v0/${kind === 'deposit' ? 'deposit/submit' : kind}`;
-    if (!this.config.apiKey)
+    if (!redact && !this.config.apiKey)
       throw new FundingError('CREDENTIALS_MISSING', 'Aurora Intents API key');
-    const key = redact ? '{apiKey}' : encodeURIComponent(this.config.apiKey);
+    const key = redact ? '{apiKey}' : encodeURIComponent(this.config.apiKey!);
     return `${this.base}/api/${kind === 'deposit' ? 'deposit/submit' : kind}/${key}`;
   }
 
