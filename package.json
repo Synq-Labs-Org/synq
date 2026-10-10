@@ -15,7 +15,7 @@
     "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'plugins/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
     "test": "vitest run --exclude '**/*.integration.test.ts'",
     "test:contracts": "forge build --root contracts --offline && forge test --root contracts --offline",
-    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts tests/identity/services.integration.test.ts tests/api/v1.integration.test.ts tests/execution/reorg.integration.test.ts",
+    "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts tests/identity/services.integration.test.ts tests/api/v1.integration.test.ts tests/execution/reorg.integration.test.ts tests/world-model/world.integration.test.ts",
     "demo": "node --import tsx apps/demo/src/local.ts",
     "demo:testnet": "node --import tsx apps/demo/src/testnet.ts",
     "test:testnet": "vitest run --config tests/e2e/vitest.testnet.config.ts",

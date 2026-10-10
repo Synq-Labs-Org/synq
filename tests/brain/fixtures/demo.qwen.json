@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "label": "HAND_AUTHORED_FIXTURE",
+  "provider": "qwen",
+  "description": "Hand-authored Qwen intent-compiler response for pnpm brain:demo. Not recorded from a live provider. {{PLACEHOLDERS}} are bound to the local deployment's world snapshot before replay.",
+  "recordedAt": null,
+  "interactions": [
+    {
+      "fixtureKey": "brain-demo:intent",
+      "method": "POST",
+      "path": "/compatible-mode/v1/chat/completions",
+      "requestBodyHash": null,
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "fixture-demo-intent",
+          "object": "chat.completion",
+          "created": 1791600000,
+          "model": "qwen3.8-max",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "{\"items\":[{\"kind\":\"MANDATE\",\"requestedBy\":[\"member_0\",\"member_1\"],\"change\":\"NEW\",\"baseMandateId\":\"local_mandate\",\"newMandateId\":\"gift_reserve\",\"goal\":\"Keep 150 aside for Sarah's gift; Ben may withdraw it to buy the gift\",\"action\":\"TRANSFER\",\"providerId\":\"LOCAL_TRANSFER\",\"network\":\"local/anvil\",\"inputToken\":\"{{TOKEN}}\",\"outputToken\":null,\"perActionCap\":{\"display\":\"150\",\"baseUnits\":\"{{UNITS_150}}\",\"decimals\":{{DECIMALS}}},\"cumulativeBudget\":{\"display\":\"150\",\"baseUnits\":\"{{UNITS_150}}\",\"decimals\":{{DECIMALS}}},\"recipients\":[\"{{MEMBER_1}}\"],\"cadenceSeconds\":null,\"maxSlippageBps\":0,\"durationDays\":30,\"rationale\":\"Alice asked to ring-fence 150 for Sarah's gift and Ben offered to buy it, so the only recipient is Ben's member address under a member-withdrawal mandate that all members must approve.\",\"ambiguities\":[],\"uncertainty\":0.15},{\"kind\":\"MANDATE\",\"requestedBy\":[\"member_1\"],\"change\":\"NEW\",\"baseMandateId\":\"local_mandate\",\"newMandateId\":\"mon_dca\",\"goal\":\"Accumulate MON with 200 over eight weeks, skipping spikes\",\"action\":\"SPOT_TRADE\",\"providerId\":\"KURU_FLOW\",\"network\":\"local/anvil\",\"inputToken\":\"{{TOKEN}}\",\"outputToken\":null,\"perActionCap\":{\"display\":\"25\",\"baseUnits\":\"{{UNITS_25}}\",\"decimals\":{{DECIMALS}}},\"cumulativeBudget\":{\"display\":\"200\",\"baseUnits\":\"{{UNITS_200}}\",\"decimals\":{{DECIMALS}}},\"recipients\":[\"{{ACCOUNT}}\"],\"cadenceSeconds\":604800,\"maxSlippageBps\":75,\"durationDays\":60,\"rationale\":\"Ben asked to invest 200 gradually into MON over two months without chasing spikes: 25 per weekly tranche, 75 bps slippage.\",\"ambiguities\":[\"spike threshold not stated; default to skipping tranches after a large 24h move\"],\"uncertainty\":0.2}]}"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": { "prompt_tokens": 2400, "completion_tokens": 520, "total_tokens": 2920 }
+        }
+      }
+    }
+  ]
+}
