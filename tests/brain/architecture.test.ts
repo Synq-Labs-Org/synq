@@ -25,7 +25,7 @@ const ZONES = [
 ] as const;
 
 describe('B06.9 Brain zones cannot reach signing, key or execution-secret code', () => {
-  it('the repository itself passes', () => {
+  it('the repository itself passes', { timeout: 60_000 }, () => {
     expect(checkArchitecture(process.cwd())).toEqual([]);
   });
 

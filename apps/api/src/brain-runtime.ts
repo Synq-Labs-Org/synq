@@ -64,7 +64,18 @@ export type GatewayOptions = {
  * approvals are ever forwarded.
  */
 export class KernelProposalGateway implements ProposalPortLike {
-  constructor(private readonly options: GatewayOptions) {}
+  constructor(private readonly options: GatewayOptions) {
+    if (
+      options.simulations instanceof DeclaredSimulation &&
+      options.executionMode !== 'SIMULATION'
+    )
+      throw new KernelError('INVALID_REQUEST', [
+        {
+          path: 'simulations',
+          message: 'a declared simulation is only allowed in SIMULATION mode',
+        },
+      ]);
+  }
 
   private decision(
     proposalId: string,
@@ -110,6 +121,13 @@ export class KernelProposalGateway implements ProposalPortLike {
         'ACTION',
         'REJECTED',
         'EVIDENCE_MISMATCH',
+      );
+    if (p.intent.action !== 'TRANSFER' || p.intent.outputToken !== undefined)
+      return this.decision(
+        p.proposalId,
+        'ACTION',
+        'REJECTED',
+        'PREPARE_REQUIRED',
       );
     const mandate = this.options.kernel
       .listMandates()
