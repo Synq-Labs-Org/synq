@@ -11,6 +11,8 @@ const ACTIONS = [
   'SPOT_TRADE',
   'PERP_HEDGE',
   'CROSS_CHAIN_FUND',
+  'CARD_PAYMENT',
+  'X402_PAYMENT',
 ] as const;
 const common = {
   rationale: Text(1000),
@@ -99,6 +101,20 @@ export const CriticOutputSchema = z.strictObject({
   uncertainty: z.number().min(0).max(1),
 });
 export type CriticOutput = z.output<typeof CriticOutputSchema>;
+
+export const RoleReviewOutputSchema = z.strictObject({
+  reviews: z
+    .array(
+      z.strictObject({
+        itemIndex: z.number().int().min(0).max(16),
+        verdict: z.enum(['PROCEED', 'ADJUST', 'BLOCK']),
+        notes: Text(500),
+      }),
+    )
+    .max(8),
+  uncertainty: z.number().min(0).max(1),
+});
+export type RoleReviewOutput = z.output<typeof RoleReviewOutputSchema>;
 
 export type StrictParse<T> =
   | { ok: true; value: T }

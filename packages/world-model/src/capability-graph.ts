@@ -127,15 +127,27 @@ export class CapabilityGraph {
         ? null
         : 'plugin is not registered in this runtime';
       if (isInstalled && input.plugins) {
+        const recorded = input.plugins.healthStatus(pluginId, input.network);
         try {
           input.plugins.get(pluginId, input.network, input.now);
-          health = { available: true, checkedAt: input.now, reason: null };
+          health = {
+            available: true,
+            checkedAt: recorded?.checkedAt ?? input.now,
+            reason: null,
+          };
         } catch (error) {
           const code = errorCode(error);
-          if (code !== 'PLUGIN_UNAVAILABLE') {
+          if (code === 'PLUGIN_UNAVAILABLE') {
+            status = 'UNAVAILABLE_IN_PROFILE';
+            statusReason = `${pluginId} is not deployed for ${input.network.profile}`;
+          } else {
             status = 'UNHEALTHY';
-            statusReason = code;
-            health = { available: false, checkedAt: input.now, reason: code };
+            statusReason = recorded?.reason ?? code;
+            health = {
+              available: false,
+              checkedAt: recorded?.checkedAt ?? input.now,
+              reason: (recorded?.reason ?? code).slice(0, 200),
+            };
           }
         }
       }
@@ -230,6 +242,11 @@ export class CapabilityGraph {
       return result(
         'UNHEALTHY',
         `BLOCKED_NO_CREDENTIALS: ${node.statusReason}`,
+      );
+    if (node.status === 'UNAVAILABLE_IN_PROFILE')
+      return result(
+        'UNAVAILABLE_IN_NETWORK_PROFILE',
+        node.statusReason ?? 'plugin not deployed for this profile',
       );
     if (node.status === 'UNHEALTHY')
       return result('UNHEALTHY', node.statusReason ?? 'health check failed');

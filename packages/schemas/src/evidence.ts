@@ -114,6 +114,29 @@ export const CriticResultSchema = z.strictObject({
   uncertainty: z.number().min(0).max(1),
 });
 export type CriticResult = z.output<typeof CriticResultSchema>;
+export const RoleReviewSchema = z.strictObject({
+  role: ModelRoleSchema,
+  agentId: IdSchema.nullable(),
+  itemIndexes: z.array(z.number().int().nonnegative()),
+  outcome: z.enum(['OK', 'NOT_RUN', 'UNAVAILABLE_IN_PHASE']),
+  checks: z.array(
+    z.strictObject({
+      itemIndex: z.number().int().nonnegative(),
+      name: z.string().min(1).max(64),
+      ok: z.boolean(),
+      detail: z.string().max(300),
+    }),
+  ),
+  verdicts: z.array(
+    z.strictObject({
+      itemIndex: z.number().int().nonnegative(),
+      verdict: z.enum(['PROCEED', 'ADJUST', 'BLOCK']),
+      notes: z.string().max(500),
+    }),
+  ),
+  uncertainty: z.number().min(0).max(1),
+});
+export type RoleReview = z.output<typeof RoleReviewSchema>;
 export const RunCostsSchema = z.strictObject({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
@@ -141,6 +164,9 @@ export const FINDING_KINDS = [
   'PROVIDER_UNAVAILABLE',
   'MEMBER_POLICY_OVERRIDE',
   'CANCELLED',
+  'CRITIC_GATE',
+  'ROLE_REVIEW_BLOCKED',
+  'DUPLICATE_PROPOSAL',
 ] as const;
 export const FindingKindSchema = z.enum(FINDING_KINDS);
 export type FindingKind = z.output<typeof FindingKindSchema>;
@@ -173,6 +199,7 @@ export const EvidenceArtifactSchema = z.strictObject({
   uncertainties: z.array(UncertaintySchema),
   contradictions: z.array(ContradictionSchema),
   critic: CriticResultSchema,
+  roleReviews: z.array(RoleReviewSchema),
   untrustedEvidence: z.array(UntrustedEvidenceSchema),
   costs: RunCostsSchema,
   findings: z.array(AgentFindingSchema),

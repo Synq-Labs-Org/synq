@@ -188,7 +188,7 @@ export class WorldSnapshotBuilder {
       ...(s.modelProviders ? { modelProviders: s.modelProviders } : {}),
       mainnetBroadcastAllowed: s.mainnetBroadcastAllowed,
     });
-    note('capability-graph', 'PLUGIN', 'FRESH', now);
+
 
     const rmMeta = (source: string) =>
       rm?.snapshot
@@ -272,7 +272,25 @@ export class WorldSnapshotBuilder {
           accountThreshold: mandate.approvalPolicy.accountThreshold,
         })),
       },
-      kernelMeta(),
+      (() => {
+        const threshold = rm?.snapshot?.group.threshold ?? null;
+        if (threshold === null || !kernel)
+          return fieldMeta({
+            provenance: 'KERNEL',
+            source: 'kernel-state+envio-read-model',
+            observedAt: null,
+            freshness: 'UNKNOWN',
+            reason: !kernel
+              ? (kernelError ?? 'kernel unavailable')
+              : 'account threshold not indexed',
+          });
+        return fieldMeta({
+          provenance: 'KERNEL',
+          source: 'kernel-state+envio-read-model',
+          observedAt: now,
+          freshness: rm!.freshness,
+        });
+      })(),
     );
 
     const worldMandates: WorldMandate[] = mandates.map(
@@ -413,14 +431,31 @@ export class WorldSnapshotBuilder {
         ...(s.plugins ? {} : { reason: 'plugin registry not configured' }),
       }),
     );
+    const checks = graphView.nodes
+      .filter((n) => n.kind === 'PLUGIN' && n.installed)
+      .map((n) => n.health?.checkedAt ?? null);
+    const oldestCheck =
+      checks.length && checks.every((c) => c !== null)
+        ? Math.min(...(checks as number[]))
+        : null;
     const capabilities = observed(
       graphView,
       fieldMeta({
         provenance: 'PLUGIN',
         source: 'capability-graph',
-        observedAt: now,
-        freshness: 'FRESH',
+        observedAt: oldestCheck,
+        freshness: ageFreshness(oldestCheck, now, 60),
+        ...(oldestCheck === null
+          ? { reason: 'no completed health check for an installed plugin' }
+          : {}),
       }),
+    );
+    note(
+      'capability-graph',
+      'PLUGIN',
+      capabilities.meta.freshness,
+      oldestCheck,
+      capabilities.meta.reason ?? null,
     );
 
     const workflows = await this.workflows(target.groupId, now, note);
@@ -452,10 +487,12 @@ export class WorldSnapshotBuilder {
       network: observed(
         s.network,
         fieldMeta({
-          provenance: 'CHAIN',
+          provenance: 'CONFIG',
           source: 'chain-registry',
-          observedAt: now,
-          freshness: 'FRESH',
+          observedAt: null,
+          freshness: 'UNKNOWN',
+          confidence: 1,
+          reason: 'static chain registry profile, not an observation',
         }),
       ),
       readModel,
@@ -671,7 +708,12 @@ export class WorldSnapshotBuilder {
     const unknown = (reason: string) => {
       note('risk-state', 'MARKET', 'UNKNOWN', null, reason);
       return unknownField(
-        { status: 'UNKNOWN' as const, reasons: [reason], attestationRef: null },
+        {
+          status: 'UNKNOWN' as const,
+          reasons: [reason],
+          attestationRef: null,
+          referenceDeviationBps: null,
+        },
         'MARKET',
         'risk-state',
         reason,

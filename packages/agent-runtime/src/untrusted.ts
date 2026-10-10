@@ -7,11 +7,11 @@ import {
 const SIGNALS: [string, RegExp][] = [
   [
     'IGNORE_INSTRUCTIONS',
-    /\bignore\b[^.\n]{0,40}\b(polic|instruction|rule|quorum|mandate|limit)/i,
+    /\b(ignore|disregard|override|bypass|forget)\b[^.\n]{0,40}\b(polic|instruction|guidance|rule|quorum|mandate|limit|approval)/i,
   ],
   [
     'SEND_FUNDS',
-    /\b(send|transfer|move|withdraw|wire)\b[^.\n]{0,40}\b(all\s+)?(funds?|money|treasury|balance|tokens?|ausd|usdc|mon)\b/i,
+    /\b(send|transfer|move|withdraw|wire|pay|paying)\b[^.\n]{0,40}\b(all\s+)?(funds?|money|treasury|balance|tokens?|ausd|usdc|mon)\b/i,
   ],
   ['ADDRESS_LITERAL', /0x[0-9a-fA-F]{40}/],
   [
@@ -21,6 +21,14 @@ const SIGNALS: [string, RegExp][] = [
   [
     'SECRET_PROBE',
     /\b(private key|seed phrase|mnemonic|api[_ ]?key|secret)\b/i,
+  ],
+  [
+    'AUTHORITY_CLAIM',
+    /\b(authori[sz]ed|approved by|on behalf of the (group|treasurer))\b/i,
+  ],
+  [
+    'MARKUP_BREAKOUT',
+    /<\s*\/?\s*(untrusted_evidence|system|assistant|tool)\b/i,
   ],
   [
     'TOOL_COERCION',
@@ -59,7 +67,7 @@ export function renderUntrusted(
   return evidence
     .map(
       (e) =>
-        `<untrusted_evidence id="${e.evidenceId}" kind="${e.kind}" origin="${e.origin.replace(/"/g, "'")}">\n${e.excerpt.replace(/<\/?untrusted_evidence[^>]*>/gi, '')}\n</untrusted_evidence>`,
+        `<untrusted_evidence id="${e.evidenceId}" kind="${e.kind}" origin="${e.origin.replace(/"/g, "'")}">\n${e.excerpt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}\n</untrusted_evidence>`,
     )
     .join('\n');
 }

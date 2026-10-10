@@ -1,4 +1,5 @@
 import type {
+  ExecutionMode,
   BrainActionProposal,
   BrainMandateProposal,
   FixtureLabel,
@@ -74,6 +75,7 @@ export interface CriticReasoner extends ReasonerBase {
 }
 
 export interface ProposalPort {
+  readonly executionMode: ExecutionMode;
   proposeAction(proposal: BrainActionProposal): Promise<ProposalDecision>;
   proposeMandate(proposal: BrainMandateProposal): Promise<ProposalDecision>;
 }

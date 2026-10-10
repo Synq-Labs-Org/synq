@@ -34,6 +34,8 @@ export const VALIDATION_CODES = [
   'UNKNOWN_PRINCIPAL',
   'INVALID_MANDATE',
   'PREPARE_REQUIRED',
+  'UNAVAILABLE_IN_PHASE',
+  'DUPLICATE_PROPOSAL',
   'INVALID_PROPOSAL',
 ] as const;
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
@@ -65,7 +67,13 @@ const ACTION_CAPABILITY: Record<ActionDraft['action'], CapabilityAction> = {
   SPOT_TRADE: 'TRADE',
   PERP_HEDGE: 'TRADE',
   CROSS_CHAIN_FUND: 'FUND',
+  CARD_PAYMENT: 'TRANSFER',
+  X402_PAYMENT: 'TRANSFER',
 };
+export const COMMERCE_ACTIONS: readonly ActionDraft['action'][] = [
+  'CARD_PAYMENT',
+  'X402_PAYMENT',
+];
 const ERC20_TRANSFER = [
   {
     type: 'function',
@@ -86,11 +94,26 @@ export class SemanticValidator {
   constructor(
     private readonly world: WorldModelSnapshot,
     private readonly now: number,
+    private readonly speakers: ReadonlySet<string>,
   ) {
     this.graph = CapabilityGraph.fromView(world.capabilities.value);
   }
 
   validate(item: IntentItem): ValidationResult {
+    if (
+      (item.kind === 'ACTION' || item.kind === 'MANDATE') &&
+      COMMERCE_ACTIONS.includes(item.action)
+    )
+      return {
+        ok: false,
+        issues: [
+          {
+            code: 'UNAVAILABLE_IN_PHASE',
+            path: 'action',
+            message: `${item.action} rails arrive with the commerce phase`,
+          },
+        ],
+      };
     if (item.kind === 'ACTION') return this.action(item);
     if (item.kind === 'MANDATE') return this.mandate(item);
     return {
@@ -216,6 +239,12 @@ export class SemanticValidator {
           code: 'UNKNOWN_PRINCIPAL',
           path: 'requestedBy',
           message: `${id.slice(0, 64)} is not an active member`,
+        });
+      else if (!this.speakers.has(id))
+        issues.push({
+          code: 'UNKNOWN_PRINCIPAL',
+          path: 'requestedBy',
+          message: `${id.slice(0, 64)} did not speak in this conversation`,
         });
   }
   private capability(

@@ -27,6 +27,7 @@ export const PROVENANCES = [
   'TEMPORAL',
   'MARKET',
   'KERNEL',
+  'CONFIG',
 ] as const;
 export const ProvenanceSchema = z.enum(PROVENANCES);
 export type Provenance = z.output<typeof ProvenanceSchema>;
@@ -95,6 +96,7 @@ export const PROVIDER_STATUSES = [
   'READY',
   'UNHEALTHY',
   'NOT_INSTALLED',
+  'UNAVAILABLE_IN_PROFILE',
   'BLOCKED_NO_CREDENTIALS',
 ] as const;
 export const ProviderStatusSchema = z.enum(PROVIDER_STATUSES);
@@ -260,6 +262,7 @@ export const RiskStateSchema = z.strictObject({
   status: z.enum(['HEALTHY', 'DEGRADED', 'UNKNOWN', 'STALE']),
   reasons: z.array(z.string().max(200)),
   attestationRef: z.string().max(128).nullable(),
+  referenceDeviationBps: z.number().int().min(0).max(10_000).nullable(),
 });
 export type RiskState = z.output<typeof RiskStateSchema>;
 export const PluginHealthEntrySchema = z.strictObject({

@@ -165,7 +165,12 @@ describe('WorldSnapshot builder', () => {
         now - 300,
       ),
       risk: new InMemoryRiskStateSource({
-        state: { status: 'HEALTHY', reasons: [], attestationRef: 'cre:1' },
+        state: {
+          status: 'HEALTHY',
+          reasons: [],
+          attestationRef: 'cre:1',
+          referenceDeviationBps: 5,
+        },
         observedAt: 0,
         maxAgeSeconds: 600,
       }),

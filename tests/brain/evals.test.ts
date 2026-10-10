@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { officialAssets } from '@synq/chain-registry';
-import type { FixtureFile } from '@synq/agent-runtime';
+import type { InteractionInput } from '@synq/agent-runtime';
 import {
   RECIPIENT,
   TOKEN,
@@ -29,7 +29,7 @@ const MESSAGES = [
 type Scenario = {
   qwen: ChatEntry[];
   kimi?: ChatEntry[];
-  kimiExtra?: FixtureFile['interactions'];
+  kimiExtra?: InteractionInput[];
   messages?: { memberId: string; text: string }[];
   external?: { kind: 'WEB_PAGE'; origin: string; content: string }[];
   researchQueries?: string[];

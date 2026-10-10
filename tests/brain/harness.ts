@@ -10,6 +10,7 @@ import {
   SynqBrain,
   type BrainDependencies,
   type FixtureFile,
+  type InteractionInput,
 } from '@synq/agent-runtime';
 import {
   InMemoryMarketDataSource,
@@ -215,7 +216,7 @@ export type ChatEntry = {
 export function chatFixture(
   provider: 'qwen' | 'kimi',
   entries: readonly ChatEntry[],
-  extra: FixtureFile['interactions'] = [],
+  extra: InteractionInput[] = [],
 ): FixtureFile {
   const path =
     provider === 'qwen'
