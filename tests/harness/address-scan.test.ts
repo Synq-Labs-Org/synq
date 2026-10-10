@@ -16,6 +16,7 @@ const ALLOWED_PATHS = [
   /^sources\/chain_registry\.json$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
+  /^sources\/research\//,
   /^adrs\//,
   /^docs\//,
   /(^|\/)README\.md$/,

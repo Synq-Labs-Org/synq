@@ -10,9 +10,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
-    "lint": "eslint packages apps workers scripts tests --no-warn-ignored && node scripts/architecture.mjs",
-    "format": "prettier --write 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
-    "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "lint": "eslint packages apps workers plugins scripts tests --no-warn-ignored && node scripts/architecture.mjs",
+    "format": "prettier --write 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'plugins/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
+    "format:check": "prettier --check 'packages/**/*.ts' 'apps/**/*.{ts,tsx}' 'workers/**/*.ts' 'plugins/**/*.ts' 'tests/**/*.ts' 'scripts/*.{ts,mjs}'",
     "test": "vitest run --exclude '**/*.integration.test.ts'",
     "test:contracts": "forge build --root contracts --offline && forge test --root contracts --offline",
     "test:integration": "vitest run tests/integration tests/read-model/storage.integration.test.ts tests/identity/services.integration.test.ts tests/api/v1.integration.test.ts tests/execution/reorg.integration.test.ts",
@@ -37,7 +37,9 @@
     "sources:resolve": "node scripts/resolve-sources.mjs",
     "registry:probe": "node --import tsx scripts/testnet-probe.ts",
     "indexer:env": "node --import tsx scripts/envio-env.ts",
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts"
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:brain": "vitest run tests/brain tests/world-model",
+    "brain:demo": "node --import tsx scripts/brain-demo.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
@@ -51,14 +53,18 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@synq/agent-runtime": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/plugin-kimi": "workspace:*",
+    "@synq/plugin-qwen": "workspace:*",
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
+    "@synq/world-model": "workspace:*",
     "@types/node": "22.19.7",
     "@types/pg": "8.16.0",
     "eslint": "10.12.0",

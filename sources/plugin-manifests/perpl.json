@@ -1,0 +1,30 @@
+{
+  "id": "perpl",
+  "version": "0.1.0",
+  "capabilities": [
+    "READ_MARKET",
+    "PERP_HEDGE"
+  ],
+  "chains": [
+    10143,
+    143
+  ],
+  "riskClass": "FINANCIAL_EXECUTION",
+  "requiresSimulation": true,
+  "maxGrantTtlSeconds": 120,
+  "dependencies": {},
+  "sourceDocs": [
+    "https://docs.perpl.xyz/resources/for-developers/networks-and-configuration"
+  ],
+  "sourceIds": [
+    "S027",
+    "S101"
+  ],
+  "health": {
+    "maxStalenessSeconds": 60,
+    "checks": [
+      "PROVIDER_API",
+      "CREDENTIALS"
+    ]
+  }
+}
