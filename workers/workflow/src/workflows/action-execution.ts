@@ -23,6 +23,7 @@ import type {
   TxView,
 } from '../activities/types.js';
 import { ActionLifecycle } from './lifecycle.js';
+import { settlementRecheck } from './versions.js';
 import {
   approvalRecordedSignal,
   approveUpdate,
@@ -222,6 +223,7 @@ export async function ActionExecutionWorkflow(
   };
   const syncDecision = (decision: DecisionView) => {
     lifecycle.kernel.sync(decision.lifecycle);
+    lifecycle.successors = decision.successors;
     if (decision.intentId) s.intentId = decision.intentId;
     s.decisionCode = decision.status === 'AUTHORIZED' ? null : decision.code;
     refresh();
@@ -229,6 +231,7 @@ export async function ActionExecutionWorkflow(
   const syncTx = (tx: TxView) => {
     lifecycle.tx.sync(tx.txHistory);
     lifecycle.journalAction.sync(tx.actionHistory);
+    lifecycle.successors = tx.successors;
     s.execution = {
       transactionHash: tx.transactionHash,
       state: tx.state,
@@ -598,6 +601,7 @@ export async function ActionExecutionWorkflow(
         econ.claimAndPrepare({ grantId, intent, calldata }),
       );
       lifecycle.kernel.sync(prepared.lifecycle);
+      lifecycle.successors = prepared.successors;
       s.reservation = prepared.reservation;
       refresh();
       await gate();
@@ -634,6 +638,13 @@ export async function ActionExecutionWorkflow(
         const settled = await econ.settle({ grantId });
         syncTx(settled.tx);
         s.reservation = settled.reservation;
+        if (settlementRecheck()) {
+          s.reservation = await econ.reservationStatus({ grantId });
+          if (s.reservation.state !== 'RECONCILED') {
+            await escalate(`RESERVATION_NOT_SETTLED: ${s.reservation.state}`);
+            continue;
+          }
+        }
         return await finish('SETTLED');
       } catch (error) {
         if (error instanceof Abort) throw error;
