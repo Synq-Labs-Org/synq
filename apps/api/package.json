@@ -7,7 +7,8 @@
     "./v1": "./src/v1/app.ts",
     "./v1-server": "./src/v1-server.ts",
     "./read-model-routes": "./src/read-model-routes.ts",
-    "./kernel-runtime": "./src/kernel-runtime.ts"
+    "./kernel-runtime": "./src/kernel-runtime.ts",
+    "./brain-runtime": "./src/brain-runtime.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -19,6 +20,7 @@
     "@synq/kernel": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
+    "@synq/world-model": "workspace:*",
     "fastify": "5.12.5",
     "pg": "8.18.0",
     "redis": "5.11.0",
