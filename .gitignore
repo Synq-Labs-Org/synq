@@ -16,3 +16,4 @@ artifacts/testnet-e2e/
 .claude/
 test-results/
 playwright-report/
+artifacts/synq-send/

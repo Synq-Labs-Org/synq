@@ -73,20 +73,34 @@ export type SendPolicy = {
 };
 
 /** Preview estimate of the Kernel tier; the Kernel's own decision is authoritative. */
-export function sendPolicy(mandate: Mandate, amount: bigint): SendPolicy {
+export function sendPolicy(
+  mandate: Mandate,
+  amount: bigint,
+  recipient?: string,
+): SendPolicy {
   const t = mandate.tierPolicy.tokenSpend;
-  const kernelTier =
+  const band =
     amount <= BigInt(t.autoMax)
       ? 'AUTO'
       : amount <= BigInt(t.reviewMax)
         ? 'REVIEW'
         : 'CONSENSUS';
+  const withdrawal =
+    recipient !== undefined &&
+    mandate.recipients.some(
+      (r) =>
+        r.address.toLowerCase() === recipient.toLowerCase() &&
+        r.purpose === 'MEMBER_WITHDRAWAL',
+    );
+  const kernelTier = withdrawal ? 'CONSENSUS' : band;
   const policyApprovals =
     kernelTier === 'AUTO'
       ? 0
       : kernelTier === 'REVIEW'
         ? mandate.approvalPolicy.reviewApprovals
-        : mandate.approvalPolicy.quorum;
+        : withdrawal && mandate.tierPolicy.withdrawal === 'UNANIMOUS'
+          ? mandate.members.filter((m) => m.active).length
+          : mandate.approvalPolicy.quorum;
   return {
     tier:
       kernelTier === 'AUTO'
@@ -189,7 +203,7 @@ export function buildSendPreview(input: {
       mandate.network.profile,
     createdAt: input.now,
     expiresAt: Math.min(input.now + input.ttlSeconds, mandate.validUntil),
-    policy: sendPolicy(mandate, amount),
+    policy: sendPolicy(mandate, amount, recipient.address),
     treasury: {
       free: String(input.freeBalance),
       freeAfter: String(input.freeBalance - amount),
@@ -272,6 +286,14 @@ export type SendRecord = {
   kernelTier: string | null;
   grantId: string | null;
   receipt: SendReceipt | null;
+  /** Sender member whose passkey signed the preview confirmation. */
+  sender: {
+    memberId: string;
+    signer: `0x${string}`;
+    signature: `0x${string}`;
+  } | null;
+  /** Kernel proposal (intent, risk packet, simulation, calldata) as JSON. */
+  proposal: unknown;
   history: { state: SendState; at: number; note: string }[];
 };
 
@@ -317,6 +339,8 @@ export function newSendRecord(preview: SendPreview, at: number): SendRecord {
     kernelTier: null,
     grantId: null,
     receipt: null,
+    sender: null,
+    proposal: null,
     history: [{ state: 'PREVIEWED', at, note: 'preview created' }],
   };
 }

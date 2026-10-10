@@ -112,9 +112,15 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:../../workers/execution
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
@@ -160,6 +166,9 @@ importers:
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:../../workers/execution
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
