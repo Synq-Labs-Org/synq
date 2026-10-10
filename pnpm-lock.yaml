@@ -52,15 +52,27 @@ importers:
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:workers/execution
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:packages/funding
       '@synq/identity':
         specifier: workspace:*
         version: link:packages/identity
       '@synq/kernel':
         specifier: workspace:*
         version: link:packages/kernel
+      '@synq/plugin-agora':
+        specifier: workspace:*
+        version: link:plugins/agora
+      '@synq/plugin-aurora':
+        specifier: workspace:*
+        version: link:plugins/aurora
       '@synq/plugin-kimi':
         specifier: workspace:*
         version: link:plugins/kimi
+      '@synq/plugin-layerzero':
+        specifier: workspace:*
+        version: link:plugins/layerzero
       '@synq/plugin-qwen':
         specifier: workspace:*
         version: link:plugins/qwen
@@ -133,9 +145,15 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:../../workers/execution
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
@@ -184,6 +202,9 @@ importers:
       '@synq/execution-worker':
         specifier: workspace:*
         version: link:../../workers/execution
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
@@ -307,6 +328,24 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  packages/funding:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   packages/identity:
     dependencies:
       '@category-labs/mera':
@@ -412,6 +451,30 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  plugins/agora:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  plugins/aurora:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   plugins/kimi:
     dependencies:
       '@ai-sdk/openai-compatible':
@@ -426,6 +489,21 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  plugins/layerzero:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../../packages/funding
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
 
   plugins/qwen:
     dependencies:

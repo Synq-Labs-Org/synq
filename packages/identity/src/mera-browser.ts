@@ -10,7 +10,11 @@ import { toViemAccount } from '@category-labs/mera/viem';
 import { HDKey } from '@scure/bip32';
 import { entropyToMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
-import type { Address, Hex } from 'viem';
+import type { Address, Hex, TransactionSerializableEIP1559 } from 'viem';
+import {
+  sendConfirmationTypedData,
+  type SendConfirmation,
+} from './send-confirmation.js';
 import type {
   Asset,
   GrantApprovalChallenge,
@@ -18,6 +22,10 @@ import type {
   GrantPreview,
   IdentityChallenge,
 } from '@synq/schemas';
+import {
+  sendAccessTypedData,
+  type SendAccessChallenge,
+} from './send-access.js';
 import { identityChallengeTypedData, meraPrincipalId } from './challenge.js';
 import {
   approvalAttestationTypedData,
@@ -380,3 +388,50 @@ export async function signMeraSafeTransaction(
     account.signTypedData(typed),
   );
 }
+
+/** Synq Send sender confirmation of the exact previewed recipient, amount, chain and expiry. */
+export async function signMeraSendConfirmation(
+  record: MeraCredential,
+  confirmation: SendConfirmation,
+  options: MeraOptions = {},
+): Promise<Hex> {
+  const typed = sendConfirmationTypedData(confirmation);
+  return withRecordAccount(record, options, (account) =>
+    account.signTypedData(typed),
+  );
+}
+
+/**
+ * The member's own wallet transaction (e.g. a direct AUSD contribution to the
+ * group Safe). The passkey ceremony gates it; the chain id must be present.
+ */
+export async function signMeraTransaction(
+  record: MeraCredential,
+  transaction: TransactionSerializableEIP1559 & { chainId: number },
+  options: MeraOptions = {},
+): Promise<Hex> {
+  if (!transaction.chainId)
+    throw new MeraAdapterError('CHALLENGE_MISMATCH', 'chainId required');
+  return withRecordAccount(record, options, (account) =>
+    account.signTransaction({ ...transaction, type: 'eip1559' }),
+  );
+}
+
+export async function signMeraSendAccess(
+  record: MeraCredential,
+  challenge: SendAccessChallenge,
+  options: MeraOptions = {},
+): Promise<Hex> {
+  if (
+    challenge.principalId !== record.principalId ||
+    !same(challenge.signer, record.signer)
+  )
+    throw new MeraAdapterError(
+      'CHALLENGE_MISMATCH',
+      'access challenge is for another principal',
+    );
+  return withRecordAccount(record, options, (account) =>
+    account.signTypedData(sendAccessTypedData(challenge)),
+  );
+}
+export { SendAccessChallengeSchema } from './send-access.js';

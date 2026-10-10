@@ -107,6 +107,79 @@ const ProfileEntrySchema = z.strictObject({
     },
   ),
 });
+const anyTagged = {
+  network: z.string().regex(/^eip155:[0-9]+$/),
+  chainId: z.number().int().positive(),
+  source: SourceIdSchema,
+  verifiedAt: IsoTimestampSchema,
+};
+const OftPeerSchema = z
+  .strictObject({
+    ...anyTagged,
+    eid: z.number().int().positive(),
+    name: z.string().min(1),
+    peer: AddressSchema,
+  })
+  .refine(networkMatches, 'network tag must match chainId');
+const OftNetworkSchema = z.discriminatedUnion('status', [
+  z
+    .strictObject({
+      ...tagged,
+      verifiedAt: IsoTimestampSchema,
+      status: z.literal('CONFIGURED'),
+      eid: z.number().int().positive(),
+      endpoint: AddressSchema,
+      bridge: AddressSchema,
+      asset: keySchema,
+      sharedDecimals: z.number().int().min(0).max(18),
+      approvalRequired: z.boolean(),
+      oftVersion: z.strictObject({
+        interfaceId: z.string().regex(/^0x[0-9a-f]{8}$/),
+        version: z.number().int().positive(),
+      }),
+      peers: z.array(OftPeerSchema).min(1),
+    })
+    .refine(networkMatches, 'network tag must match chainId'),
+  z
+    .strictObject({
+      ...tagged,
+      verifiedAt: IsoTimestampSchema,
+      status: z.literal('NO_AUSD_OFT'),
+      eid: z.number().int().positive(),
+      endpoint: AddressSchema,
+      bridge: z.null(),
+      asset: keySchema,
+      reason: z.string().min(20),
+    })
+    .refine(networkMatches, 'network tag must match chainId'),
+]);
+export const AusdRegistrySchema = z.strictObject({
+  verifiedAt: IsoTimestampSchema,
+  canonicalSymbol: z.literal('AUSD'),
+  decimals: z.number().int().min(0).max(36),
+  deployments: z
+    .array(
+      z
+        .strictObject({
+          ...tagged,
+          verifiedAt: IsoTimestampSchema,
+          asset: keySchema,
+          implementation: AddressSchema,
+          proxy: z.literal('EIP1967'),
+          faucet: keySchema.nullable(),
+        })
+        .refine(networkMatches, 'network tag must match chainId'),
+    )
+    .min(1),
+  controls: z.strictObject({
+    pauseReaders: z.array(z.string().regex(/^is[A-Za-z]+Paused$/)).min(1),
+    freezeReader: z.literal('isAccountFrozen'),
+    absentFunctions: z.array(z.string().min(1)),
+    source: SourceIdSchema,
+  }),
+  oft: z.array(OftNetworkSchema).min(1),
+});
+export type AusdRegistry = z.output<typeof AusdRegistrySchema>;
 export const ChainRegistrySchema = z
   .strictObject({
     schemaVersion: z.literal(2),
@@ -129,6 +202,7 @@ export const ChainRegistrySchema = z
         [K in ProfileName]: typeof ProfileEntrySchema;
       },
     ),
+    ausd: AusdRegistrySchema,
   })
   .superRefine((v, ctx) => {
     const fail = (path: (string | number)[], message: string) =>
@@ -180,6 +254,41 @@ export const ChainRegistrySchema = z
     }
     if (v.profiles['proof/monad-mainnet'].mutationEnabled)
       fail(['profiles', 'proof/monad-mainnet'], 'mainnet must stay disabled');
+    const ausdAsset = (
+      key: string,
+      chainId: number,
+      path: (string | number)[],
+    ) => {
+      const asset = v.assets[key];
+      if (
+        !asset ||
+        asset.chainId !== chainId ||
+        asset.symbol !== v.ausd.canonicalSymbol ||
+        asset.decimals !== v.ausd.decimals
+      )
+        fail(path, 'AUSD entry does not resolve to a registered AUSD asset');
+    };
+    v.ausd.deployments.forEach((d, i) => {
+      ausdAsset(d.asset, d.chainId, ['ausd', 'deployments', i]);
+      if (d.faucet !== null && v.contracts[d.faucet]?.chainId !== d.chainId)
+        fail(['ausd', 'deployments', i, 'faucet'], 'faucet not on chain');
+    });
+    v.ausd.oft.forEach((o, i) => {
+      ausdAsset(o.asset, o.chainId, ['ausd', 'oft', i]);
+      if (o.status === 'CONFIGURED' && o.peers.some((p) => p.eid === o.eid))
+        fail(['ausd', 'oft', i, 'peers'], 'bridge cannot peer with itself');
+    });
+    const oftChains = v.ausd.oft.map((o) => o.chainId);
+    if (new Set(oftChains).size !== oftChains.length)
+      fail(['ausd', 'oft'], 'duplicate OFT network');
+    if (
+      v.ausd.oft.some(
+        (o) =>
+          o.status === 'CONFIGURED' &&
+          v.profiles['sandbox/monad-testnet'].network.chainId === o.chainId,
+      )
+    )
+      fail(['ausd', 'oft'], 'no AUSD OFT exists on Monad testnet');
   });
 export type ChainRegistry = z.output<typeof ChainRegistrySchema>;
 
@@ -419,3 +528,59 @@ export const DeploymentManifestSchema = z.strictObject({
   deploymentBlock: z.string().regex(/^[0-9]+$/),
   sandboxOnly: z.literal(true),
 });
+
+export type AusdDeployment = {
+  chainId: number;
+  asset: Asset;
+  implementation: `0x${string}`;
+  proxy: 'EIP1967';
+  faucetAddress: `0x${string}` | null;
+  source: string;
+  verifiedAt: string;
+};
+type OftEntry = AusdRegistry['oft'][number];
+export type AusdOftConfigured = Extract<OftEntry, { status: 'CONFIGURED' }> & {
+  ausd: Asset;
+};
+export type AusdOftAbsent = Extract<OftEntry, { status: 'NO_AUSD_OFT' }> & {
+  ausd: Asset;
+};
+export type AusdOftNetwork = AusdOftConfigured | AusdOftAbsent;
+export type AusdOftPeer = AusdOftConfigured['peers'][number];
+export const ausdRegistry: Readonly<AusdRegistry> = Object.freeze(
+  structuredClone(chainRegistry.ausd),
+);
+export const AUSD_PAUSE_READERS: readonly string[] = Object.freeze([
+  ...chainRegistry.ausd.controls.pauseReaders,
+]);
+export function ausdDeployment(chainId: number): AusdDeployment | null {
+  const d = chainRegistry.ausd.deployments.find((x) => x.chainId === chainId);
+  if (!d) return null;
+  return {
+    chainId: d.chainId,
+    asset: officialAsset(d.asset),
+    implementation: d.implementation,
+    proxy: d.proxy,
+    faucetAddress:
+      d.faucet === null
+        ? null
+        : (chainRegistry.contracts[d.faucet]?.address ?? null),
+    source: d.source,
+    verifiedAt: d.verifiedAt,
+  };
+}
+export function ausdOftNetwork(chainId: number): AusdOftNetwork | null {
+  const o = chainRegistry.ausd.oft.find((x) => x.chainId === chainId);
+  return o
+    ? ({
+        ...structuredClone(o),
+        ausd: officialAsset(o.asset),
+      } as AusdOftNetwork)
+    : null;
+}
+/** Every registered AUSD asset across Monad and OFT peer chains. */
+export function ausdAssets(): Asset[] {
+  return Object.values(officialAssets).filter(
+    (a) => a.symbol === chainRegistry.ausd.canonicalSymbol,
+  );
+}

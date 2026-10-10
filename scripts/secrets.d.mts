@@ -3,3 +3,4 @@ export function scanRepository(root: string): {
   scanned: number;
   violations: { file: string; rule: string }[];
 };
+export function hashName(name: string): boolean;

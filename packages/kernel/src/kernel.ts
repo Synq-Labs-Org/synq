@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AddressSchema,
+  MandateSchema,
   NetworkProfileSchema,
   PluginManifestSchema,
   RiskPacketSchema,
@@ -471,6 +472,129 @@ export class Kernel {
       transitions,
       audit,
     });
+  }
+
+  /** Reads durable authorization evidence without issuing another grant or reservation. */
+  recoverAuthorization(request: {
+    intent: unknown;
+    risk: unknown;
+    simulation: unknown;
+  }): import('./decisions.js').AuthorizationRecovery {
+    try {
+      const canonical = this.canonicalizer.canonicalize(request.intent);
+      const hash = canonical.intentHash;
+      const saved = this.state([]);
+      const issued = structuredClone(
+        [...this.ledger.grants.values()].find(
+          (r) => r.grant.intentHash === hash,
+        ),
+      );
+      const audit = [...this.audit.records()]
+        .reverse()
+        .find(
+          (a) =>
+            a.kind === 'AUTHORIZATION' &&
+            (a.payload as { intentHash?: string }).intentHash === hash,
+        );
+      const history = this.lifecycles.history(canonical.intentId);
+      if (issued) {
+        if (
+          issued.grant.simulationHash !== artifactHash(request.simulation) ||
+          issued.grant.riskPacketHash !== artifactHash(request.risk)
+        )
+          return { status: 'UNKNOWN' };
+        return {
+          status: 'RECOVERED',
+          decision: {
+            status: 'AUTHORIZED',
+            intentId: canonical.intentId,
+            intentHash: hash,
+            state: history.at(-1)?.to ?? null,
+            tier: issued.grant.tier,
+            policy: null,
+            requiredApprovals: issued.grant.requiredApprovals,
+            draft: issued.grant.draft,
+            grant: issued.grant,
+            transitions: [],
+            audit: audit
+              ? { sequence: audit.sequence, hash: audit.hash }
+              : null,
+          },
+        };
+      }
+      if (!audit)
+        return { status: history.length === 0 ? 'ABSENT' : 'UNKNOWN' };
+      const payload = audit.payload as unknown as {
+        status: AuthorizationDecision['status'];
+        code: import('./errors.js').Failure;
+        tier: import('@synq/schemas').Tier | null;
+        policy: import('./policy.js').PolicyResult | null;
+        draftDigest: string | null;
+        issues: import('./errors.js').Issue[];
+      };
+      const common = {
+        intentId: canonical.intentId,
+        intentHash: hash,
+        state: history.at(-1)?.to ?? null,
+        tier: payload.tier,
+        policy: payload.policy,
+        transitions: [],
+        audit: { sequence: audit.sequence, hash: audit.hash },
+        code: payload.code,
+        issues: payload.issues,
+      };
+      if (payload.status === 'PENDING_APPROVAL') {
+        const mandate = saved.mandates
+          .flatMap((m) => m.versions)
+          .find(
+            (m) =>
+              m.groupId === canonical.intent.groupId &&
+              m.mandateId === canonical.intent.mandateId &&
+              m.version === canonical.intent.mandateVersion,
+          );
+        const manifest = this.plugins.get(canonical.intent.pluginId);
+        if (!mandate || !manifest || !payload.policy || !payload.draftDigest)
+          return { status: 'UNKNOWN' };
+        const required = Math.max(
+          payload.policy.requiredApprovals,
+          mandate.approvalPolicy.accountThreshold,
+        );
+        const draft = this.issuer.draft({
+          canonical,
+          mandate: MandateSchema.parse(mandate),
+          network: this.network,
+          executionModule: this.executionModule,
+          manifest,
+          risk: RiskPacketSchema.parse(request.risk),
+          simulation: SimulationSchema.parse(request.simulation),
+          requiredApprovals: required,
+        });
+        if (draft.digest !== payload.draftDigest) return { status: 'UNKNOWN' };
+        return {
+          status: 'RECOVERED',
+          decision: {
+            ...common,
+            status: 'PENDING_APPROVAL',
+            draft,
+            requiredApprovals: required,
+            countedApprovals: 0,
+            rejectedApprovals: [],
+          },
+        };
+      }
+      if (
+        payload.status === 'POLICY_REJECTED' ||
+        payload.status === 'RISK_REJECTED' ||
+        payload.status === 'EXPIRED'
+      )
+        return {
+          status: 'RECOVERED',
+          decision: { ...common, status: payload.status },
+        };
+      return { status: 'UNKNOWN' };
+    } catch {
+      return { status: 'UNKNOWN' };
+    }
   }
 
   verify(grant: unknown, intent: unknown): ExecutionGrant {
