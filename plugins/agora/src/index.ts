@@ -237,15 +237,14 @@ export class AgoraClient implements AgoraApi {
       return this.session.token;
     const body = z
       .looseObject({
-        token: z.string().min(1),
-        expiresIn: z.number().optional(),
+        sessionJwt: z.string().min(1),
       })
       .safeParse(await this.get('/v0/auth/token', this.config.apiKey));
     if (!body.success)
       throw new AgoraError('PROVIDER_RESPONSE_INVALID', 'auth token');
     this.session = {
-      token: body.data.token,
-      expiresAt: now + (body.data.expiresIn ?? 900) * 1000,
+      token: body.data.sessionJwt,
+      expiresAt: now + 15 * 60_000,
     };
     return this.session.token;
   }
