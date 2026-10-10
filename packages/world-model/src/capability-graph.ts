@@ -130,11 +130,9 @@ export class CapabilityGraph {
         const recorded = input.plugins.healthStatus(pluginId, input.network);
         try {
           input.plugins.get(pluginId, input.network, input.now);
-          health = {
-            available: true,
-            checkedAt: recorded?.checkedAt ?? input.now,
-            reason: null,
-          };
+          health = recorded
+            ? { available: true, checkedAt: recorded.checkedAt, reason: null }
+            : null;
         } catch (error) {
           const code = errorCode(error);
           if (code === 'PLUGIN_UNAVAILABLE') {
@@ -143,11 +141,13 @@ export class CapabilityGraph {
           } else {
             status = 'UNHEALTHY';
             statusReason = recorded?.reason ?? code;
-            health = {
-              available: false,
-              checkedAt: recorded?.checkedAt ?? input.now,
-              reason: (recorded?.reason ?? code).slice(0, 200),
-            };
+            health = recorded
+              ? {
+                  available: false,
+                  checkedAt: recorded.checkedAt,
+                  reason: (recorded.reason ?? code).slice(0, 200),
+                }
+              : null;
           }
         }
       }

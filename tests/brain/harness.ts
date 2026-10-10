@@ -11,6 +11,7 @@ import {
   type BrainDependencies,
   type FixtureFile,
   type InteractionInput,
+  routeDrafts,
 } from '@synq/agent-runtime';
 import {
   InMemoryMarketDataSource,
@@ -222,6 +223,28 @@ export function chatFixture(
     provider === 'qwen'
       ? '/compatible-mode/v1/chat/completions'
       : '/v1/chat/completions';
+  const specialists: ChatEntry[] =
+    provider === 'qwen'
+      ? entries.flatMap((e) => {
+          const data = e.content as
+            | { items?: import('@synq/agent-runtime').IntentItem[] }
+            | undefined;
+          if (!data?.items) return [];
+          return [...routeDrafts(data.items)]
+            .filter(([role]) => role !== 'COMMERCE')
+            .map(([role, indexes]) => ({
+              key: `${e.key.replace(/:intent$/, '')}:${role.toLowerCase()}`,
+              content: {
+                reviews: indexes.map((itemIndex) => ({
+                  itemIndex,
+                  verdict: 'PROCEED',
+                  notes: 'hand-authored local fixture specialist review',
+                })),
+                uncertainty: 0.1,
+              },
+            }));
+        })
+      : [];
   return FixtureFileSchema.parse({
     schemaVersion: 1,
     label: 'HAND_AUTHORED_FIXTURE',
@@ -229,7 +252,7 @@ export function chatFixture(
     description: `Hand-authored ${provider} responses for Brain evals; not recorded from a live provider.`,
     recordedAt: null,
     interactions: [
-      ...entries.map((e) => ({
+      ...[...entries, ...specialists].map((e) => ({
         fixtureKey: e.key,
         method: 'POST',
         path,
@@ -349,6 +372,19 @@ export async function evalWorld(
   const gateway = new KernelProposalGateway({
     kernel: kernel.kernel,
     market,
+    network,
+    risk: {
+      current: async () => ({
+        state: {
+          status: 'HEALTHY',
+          reasons: [],
+          attestationRef: null,
+          referenceDeviationBps: 0,
+        },
+        observedAt: kernel.clock.t,
+        maxAgeSeconds: 30,
+      }),
+    },
     simulations: new DeclaredSimulation(
       kernel.clock,
       'eval-declared-simulation',
@@ -377,6 +413,13 @@ export function brainFor(
     research: kimi,
     critic: kimi,
     proposals: world.gateway,
+    authenticateMessage: async ({ groupId, memberId }) =>
+      groupId === GROUP && MEMBERS.some((m) => m.memberId === memberId)
+        ? {
+            memberId,
+            principalId: `principal_${memberId.replace('member_', '')}`,
+          }
+        : null,
     executionMode: 'SIMULATION',
     nowSeconds: () => world.kernel.clock.t,
     ...extra,

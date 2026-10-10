@@ -1,7 +1,12 @@
+import { encodeFunctionData, keccak256, type PublicClient } from 'viem';
 import {
   BrainActionProposalSchema,
   BrainMandateProposalSchema,
   MandateSchema,
+  MarketQuoteSchema,
+  NetworkProfileSchema,
+  RiskStateSchema,
+  type NetworkProfile,
   ProposalDecisionSchema,
   PublicApprovalSchema,
   evidenceArtifactHash,
@@ -33,9 +38,11 @@ import type {
   IdentityDirectoryReader,
   IdentityGroupView,
   MarketDataSource,
+  RiskStateSource,
 } from '@synq/world-model';
 
 export type ProposalPortLike = {
+  readonly executionMode: ExecutionMode;
   proposeAction(proposal: BrainActionProposal): Promise<ProposalDecision>;
   proposeMandate(proposal: BrainMandateProposal): Promise<ProposalDecision>;
 };
@@ -52,9 +59,12 @@ export interface KernelAuthorizer {
 export type GatewayOptions = {
   kernel: KernelAuthorizer;
   market: MarketDataSource;
+  risk?: RiskStateSource;
+  network: NetworkProfile;
+  mainnetBroadcastAllowed?: boolean;
   simulations: SimulationSource;
   clock: Clock;
-  executionMode: ExecutionMode;
+  executionMode?: ExecutionMode;
   onPendingDraft?: (draft: GrantDraft) => Promise<void>;
 };
 
@@ -64,15 +74,45 @@ export type GatewayOptions = {
  * approvals are ever forwarded.
  */
 export class KernelProposalGateway implements ProposalPortLike {
+  readonly executionMode: ExecutionMode;
+  private readonly simulate: SimulationSource['simulate'];
   constructor(private readonly options: GatewayOptions) {
+    const registered = simulationSources.get(options.simulations);
+    if (!registered)
+      throw new KernelError('INVALID_REQUEST', [
+        { path: 'simulations', message: 'unregistered simulation source' },
+      ]);
+    this.options = {
+      ...options,
+      network: Object.freeze(NetworkProfileSchema.parse(options.network)),
+    };
     if (
-      options.simulations instanceof DeclaredSimulation &&
-      options.executionMode !== 'SIMULATION'
+      registered.declared &&
+      options.network.profile === 'proof/monad-mainnet'
     )
       throw new KernelError('INVALID_REQUEST', [
         {
           path: 'simulations',
-          message: 'a declared simulation is only allowed in SIMULATION mode',
+          message: 'declared outcomes cannot attest mainnet simulation',
+        },
+      ]);
+    this.simulate = registered.simulate;
+    this.executionMode =
+      options.network.profile === 'proof/monad-mainnet'
+        ? options.mainnetBroadcastAllowed
+          ? 'CANARY_READY'
+          : 'MAINNET_SIMULATION'
+        : options.network.profile === 'local/anvil' || registered.declared
+          ? 'SIMULATION'
+          : 'REAL_TESTNET';
+    if (
+      options.executionMode !== undefined &&
+      options.executionMode !== this.executionMode
+    )
+      throw new KernelError('INVALID_REQUEST', [
+        {
+          path: 'executionMode',
+          message: 'mode does not match trusted network and simulation source',
         },
       ]);
   }
@@ -95,7 +135,7 @@ export class KernelProposalGateway implements ProposalPortLike {
       evidenceHash: null,
       mandateHash: null,
       narrowedFields: [],
-      executionMode: this.options.executionMode,
+      executionMode: this.executionMode,
       ...extra,
     });
   }
@@ -110,6 +150,13 @@ export class KernelProposalGateway implements ProposalPortLike {
         'INVALID_PROPOSAL',
       );
     const p = parsed.data;
+    if (p.evidenceArtifact.executionMode !== this.executionMode)
+      return this.decision(
+        p.proposalId,
+        p.kind,
+        'REJECTED',
+        'EXECUTION_MODE_MISMATCH',
+      );
     if (
       evidenceArtifactHash(p.evidenceArtifact) !== p.evidenceArtifactHash ||
       p.evidenceArtifact.proposalId !== p.proposalId ||
@@ -143,6 +190,17 @@ export class KernelProposalGateway implements ProposalPortLike {
         'MANDATE_NOT_FOUND',
       );
     const network = mandate.network;
+    if (
+      network.profile !== this.options.network.profile ||
+      network.chainId !== this.options.network.chainId ||
+      p.intent.chainId !== this.options.network.chainId
+    )
+      return this.decision(
+        p.proposalId,
+        'ACTION',
+        'REJECTED',
+        'NETWORK_MISMATCH',
+      );
     let quote: MarketQuote | undefined;
     try {
       quote = (await this.options.market.quotes(network)).find(
@@ -159,7 +217,50 @@ export class KernelProposalGateway implements ProposalPortLike {
         'NO_TRUSTED_MARKET_DATA',
       );
     const now = this.options.clock.now();
+    const parsedQuote = MarketQuoteSchema.safeParse(quote);
+    if (
+      !parsedQuote.success ||
+      quote.chainId !== network.chainId ||
+      quote.observedAt > now
+    )
+      return this.decision(
+        p.proposalId,
+        'ACTION',
+        'REJECTED',
+        'STALE_MARKET_DATA',
+      );
+    let riskObservation;
+    try {
+      riskObservation = await this.options.risk?.current(p.groupId);
+    } catch {
+      riskObservation = undefined;
+    }
+    const state = RiskStateSchema.safeParse(riskObservation?.state);
+    if (
+      !riskObservation ||
+      !state.success ||
+      state.data.status !== 'HEALTHY' ||
+      state.data.referenceDeviationBps === null ||
+      !Number.isFinite(riskObservation.observedAt) ||
+      !Number.isFinite(riskObservation.maxAgeSeconds) ||
+      riskObservation.maxAgeSeconds <= 0 ||
+      riskObservation.observedAt > now ||
+      now - riskObservation.observedAt > riskObservation.maxAgeSeconds
+    )
+      return this.decision(
+        p.proposalId,
+        'ACTION',
+        'RISK_REJECTED',
+        'RISK_UNKNOWN_OR_STALE',
+      );
     const evidence = [
+      {
+        source: 'trusted-risk-state',
+        retrievedAt: riskObservation.observedAt,
+        chainId: network.chainId,
+        artifactHash: artifactHash(riskObservation),
+        untrusted: false,
+      },
       {
         source: quote.source,
         retrievedAt: quote.observedAt,
@@ -182,9 +283,10 @@ export class KernelProposalGateway implements ProposalPortLike {
       quoteAt: quote.observedAt,
       quoteExpiresAt: quote.observedAt + quote.maxAgeSeconds,
       slippageBps: 0,
-      referenceDeviationBps: 0,
+      referenceDeviationBps: state.data.referenceDeviationBps,
       maxReferenceDeviationBps: mandate.maxReferenceDeviationBps,
-      blocked: false,
+      blocked:
+        state.data.referenceDeviationBps > mandate.maxReferenceDeviationBps,
       evidence,
     };
     const intent: BoundActionIntent = {
@@ -194,7 +296,7 @@ export class KernelProposalGateway implements ProposalPortLike {
     };
     let simulation: Simulation;
     try {
-      simulation = await this.options.simulations.simulate(intent);
+      simulation = await this.simulate(intent);
     } catch {
       return this.decision(
         p.proposalId,
@@ -253,6 +355,13 @@ export class KernelProposalGateway implements ProposalPortLike {
         'INVALID_PROPOSAL',
       );
     const p = parsed.data;
+    if (p.evidenceArtifact.executionMode !== this.executionMode)
+      return this.decision(
+        p.proposalId,
+        p.kind,
+        'REJECTED',
+        'EXECUTION_MODE_MISMATCH',
+      );
     if (
       evidenceArtifactHash(p.evidenceArtifact) !== p.evidenceArtifactHash ||
       p.evidenceArtifact.proposalId !== p.proposalId
@@ -272,6 +381,16 @@ export class KernelProposalGateway implements ProposalPortLike {
         'INVALID_MANDATE',
       );
     const next = mandate.data;
+    if (
+      next.network.profile !== this.options.network.profile ||
+      next.network.chainId !== this.options.network.chainId
+    )
+      return this.decision(
+        p.proposalId,
+        'MANDATE',
+        'REJECTED',
+        'NETWORK_MISMATCH',
+      );
     const mandateHash = artifactHash(next);
     const current = this.options.kernel
       .listMandates()
@@ -334,27 +453,98 @@ export class KernelProposalGateway implements ProposalPortLike {
   }
 }
 
-/** Fixed-outcome simulator for runs without a chain; its artifact says so. */
+const simulationSources = new WeakMap<
+  SimulationSource,
+  { declared: boolean; simulate: SimulationSource['simulate'] }
+>();
+
 export class DeclaredSimulation implements SimulationSource {
-  constructor(
-    private readonly clock: Clock,
-    private readonly label: string,
-  ) {}
-  async simulate(intent: BoundActionIntent): Promise<Simulation> {
-    return {
+  constructor(clock: Clock, label: string) {
+    const simulate = async (
+      intent: BoundActionIntent,
+    ): Promise<Simulation> => ({
       intentHash: intentHash(intent),
       calldataHash: intent.calldataHash,
       chainId: intent.chainId,
       account: intent.account,
       target: intent.target,
       succeeded: true,
-      simulatedAt: this.clock.now(),
+      simulatedAt: clock.now(),
       blockNumber: '0',
       artifactHash: artifactHash({
-        simulator: this.label,
+        simulator: label,
         intent: intentHash(intent),
       }),
+    });
+    simulationSources.set(this, { declared: true, simulate });
+  }
+  simulate(intent: BoundActionIntent): Promise<Simulation> {
+    return simulationSources.get(this)!.simulate(intent);
+  }
+}
+
+export class ChainSimulation implements SimulationSource {
+  constructor(client: PublicClient, clock: Clock, network: NetworkProfile) {
+    const simulate = async (intent: BoundActionIntent): Promise<Simulation> => {
+      if (
+        intent.chainId !== network.chainId ||
+        (await client.getChainId()) !== network.chainId
+      )
+        throw new Error('SIMULATION_CHAIN_MISMATCH');
+      const blockNumber = await client.getBlockNumber();
+      if (intent.action !== 'TRANSFER')
+        throw new Error('SIMULATION_PREPARE_REQUIRED');
+      const data = encodeFunctionData({
+        abi: [
+          {
+            type: 'function',
+            name: 'transfer',
+            stateMutability: 'nonpayable',
+            inputs: [
+              { name: 'to', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+            outputs: [{ name: '', type: 'bool' }],
+          },
+        ],
+        functionName: 'transfer',
+        args: [
+          intent.recipient as `0x${string}`,
+          BigInt(intent.maxInputAmount),
+        ],
+      });
+      if (
+        keccak256(data) !== intent.calldataHash ||
+        data.slice(0, 10) !== intent.selector
+      )
+        throw new Error('SIMULATION_CALLDATA_MISMATCH');
+      const response = await client.call({
+        account: intent.account as `0x${string}`,
+        to: intent.target as `0x${string}`,
+        data,
+        value: BigInt(intent.nativeValue),
+        blockNumber,
+      });
+      return {
+        intentHash: intentHash(intent),
+        calldataHash: intent.calldataHash,
+        chainId: intent.chainId,
+        account: intent.account,
+        target: intent.target,
+        succeeded: response.data === `0x${'0'.repeat(63)}1`,
+        simulatedAt: clock.now(),
+        blockNumber: blockNumber.toString(),
+        artifactHash: artifactHash({
+          source: 'eth_call',
+          blockNumber: blockNumber.toString(),
+          response: response.data ?? '0x',
+        }),
+      };
     };
+    simulationSources.set(this, { declared: false, simulate });
+  }
+  simulate(intent: BoundActionIntent): Promise<Simulation> {
+    return simulationSources.get(this)!.simulate(intent);
   }
 }
 

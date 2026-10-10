@@ -7,7 +7,7 @@ import {
 const SIGNALS: [string, RegExp][] = [
   [
     'IGNORE_INSTRUCTIONS',
-    /\b(ignore|disregard|override|bypass|forget)\b[^.\n]{0,40}\b(polic|instruction|guidance|rule|quorum|mandate|limit|approval)/i,
+    /\b(ignore|disregard|override|bypass|forget)\b[^.\n]{0,40}\b(polic|instruction|guidance|rule|quorum|mandate|limit|approval)|\b(policies|policy|instructions?|rules?|quorum|mandates?|limits?|approvals?)\b[^.\n]{0,80}\b(ignored|disregarded|overridden|waived|bypassed|suspended)\b/i,
   ],
   [
     'SEND_FUNDS',

@@ -23,10 +23,26 @@ describe('SEC-002/SEC-014 secrets never enter model context', () => {
     const respond =
       (content: unknown, model: string): typeof fetch =>
       async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        const responseContent =
+          body.response_format?.json_schema?.name === 'RoleReviewOutput'
+            ? {
+                reviews: [
+                  {
+                    itemIndex: 0,
+                    verdict: 'PROCEED',
+                    notes: 'stub provider role review',
+                  },
+                ],
+                uncertainty: 0.1,
+              }
+            : content;
         bodies.push(String(init?.body));
         headers.push(new Headers(init?.headers));
         return new Response(
-          JSON.stringify(chatCompletion(JSON.stringify(content), { model })),
+          JSON.stringify(
+            chatCompletion(JSON.stringify(responseContent), { model }),
+          ),
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       };
@@ -44,6 +60,10 @@ describe('SEC-002/SEC-014 secrets never enter model context', () => {
       }),
       critic: kimi,
       proposals: world.gateway,
+      authenticateMessage: async ({ memberId }) => ({
+        memberId,
+        principalId: `principal_${memberId.replace('member_', '')}`,
+      }),
       executionMode: 'SIMULATION',
       nowSeconds: () => world.kernel.clock.t,
     });
@@ -59,13 +79,14 @@ describe('SEC-002/SEC-014 secrets never enter model context', () => {
       ],
       fixtureKey: 'secret',
     });
-    expect(bodies).toHaveLength(2);
+    expect(bodies).toHaveLength(3);
     expect(headers[0]?.get('authorization')).toBe(`Bearer ${QWEN_KEY}`);
     expect(headers[1]?.get('authorization')).toBe(`Bearer ${KIMI_KEY}`);
     const visible = JSON.stringify({ bodies, result });
     for (const secret of [QWEN_KEY, KIMI_KEY, 'AUDIT_KEY_FILE', 'secrets.env'])
       expect(visible).not.toContain(secret);
     expect(result.modelCalls.map((c) => [c.mode, c.fixtureLabel])).toEqual([
+      ['LIVE', null],
       ['LIVE', null],
       ['LIVE', null],
     ]);

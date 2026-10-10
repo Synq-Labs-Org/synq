@@ -22,12 +22,16 @@
               "index": 0,
               "message": {
                 "role": "assistant",
-                "content": "{\"verdict\":\"SUPPORT\",\"issues\":[\"The MON accumulation plan needs a spot venue; the WORLD block lists Kuru Flow only on proof/monad-mainnet.\",\"The gift reserve sends funds to a member, so the mandate needs unanimous approval.\"],\"disagreements\":[],\"uncertainty\":0.2}"
+                "content": "{\"verdict\": \"SUPPORT\", \"issues\": [\"The local transfer mandate needs human approval; Kuru is unavailable on local Anvil.\", \"Trusted AUSD and MON risk evidence is missing; pause and hedge guards must be integrated before execution.\"], \"disagreements\": [], \"uncertainty\": 0.2}"
               },
               "finish_reason": "stop"
             }
           ],
-          "usage": { "prompt_tokens": 3100, "completion_tokens": 140, "total_tokens": 3240 }
+          "usage": {
+            "prompt_tokens": 3100,
+            "completion_tokens": 140,
+            "total_tokens": 3240
+          }
         }
       }
     }

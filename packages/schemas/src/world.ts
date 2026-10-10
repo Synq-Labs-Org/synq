@@ -158,13 +158,13 @@ export const WorldGroupSchema = z.strictObject({
   chainId: ChainIdSchema,
   account: AddressSchema,
   owners: z.array(AddressSchema),
-  threshold: z.number().int().nonnegative(),
+  threshold: z.number().int().positive().nullable(),
   paused: z.boolean(),
   accountingStatus: z.enum(['OPEN', 'FROZEN']),
   membershipEpoch: z.number().int().nonnegative(),
 });
 export const QuorumStateSchema = z.strictObject({
-  accountThreshold: z.number().int().nonnegative(),
+  accountThreshold: z.number().int().positive().nullable(),
   approvers: z.number().int().nonnegative(),
   mandates: z.array(
     z.strictObject({

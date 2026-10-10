@@ -18,8 +18,8 @@ import {
   mainnetBroadcastAllowed,
 } from '@synq/world-model';
 import { FixtureFileSchema, SynqBrain } from '@synq/agent-runtime';
-import { QwenStructuredReasoner, qwenOptionsFromEnv } from '@synq/plugin-qwen';
-import { KimiReasoner, kimiOptionsFromEnv } from '@synq/plugin-kimi';
+import { QwenStructuredReasoner } from '@synq/plugin-qwen';
+import { KimiReasoner } from '@synq/plugin-kimi';
 import {
   DeclaredSimulation,
   KernelProposalGateway,
@@ -36,18 +36,7 @@ const REDIS_URL =
 const GROUP_TEXT = [
   {
     memberId: 'member_0',
-    name: 'Alice',
-    text: "We're going to Tokyo next month. Keep 150 aside for Sarah's birthday gift.",
-  },
-  {
-    memberId: 'member_1',
-    name: 'Ben',
-    text: "I'll buy Sarah's gift, so let me withdraw that 150 when it's time. Also put 200 into MON gradually over two months, but don't chase spikes.",
-  },
-  {
-    memberId: 'member_2',
-    name: 'Sarah',
-    text: 'Fine by me, but anything that moves money still needs our votes.',
+    text: 'We have 300 AUSD.\nKeep 150 liquid.\nUse up to 100 AUSD to accumulate MON gradually.\nNever buy more than 25 AUSD per week.\nPause if AUSD becomes unhealthy.\nIf MON risk gets too high, propose a hedge covering at most 20%.',
   },
 ];
 
@@ -116,23 +105,23 @@ try {
           .replaceAll('{{MEMBER_1}}', member1.signer)
           .replaceAll('{{DECIMALS}}', String(decimals))
           .replaceAll('{{UNITS_150}}', units(150))
-          .replaceAll('{{UNITS_200}}', units(200))
+          .replaceAll('{{UNITS_100}}', units(100))
           .replaceAll('{{UNITS_25}}', units(25)),
       ),
     );
-  const qwen = new QwenStructuredReasoner(
-    qwenOptionsFromEnv(process.env, {
-      fixtures: bind('tests/brain/fixtures/demo.qwen.json'),
-    }),
-  );
+  const qwen = new QwenStructuredReasoner({
+    mode: 'REPLAY',
+    fixtures: bind('tests/brain/fixtures/demo.qwen.json'),
+  });
   const kimi = new KimiReasoner({
-    ...kimiOptionsFromEnv(process.env, {
-      fixtures: bind('tests/brain/fixtures/demo.kimi.json'),
-    }),
+    mode: 'REPLAY',
+    fixtures: bind('tests/brain/fixtures/demo.kimi.json'),
     now: () => local.clock.now(),
   });
   const gateway = new KernelProposalGateway({
     kernel: local.kernel,
+    network: local.mandate.network,
+    mainnetBroadcastAllowed: false,
     market: { quotes: async () => [] },
     simulations: new DeclaredSimulation(local.clock, 'brain-demo-declared'),
     clock: local.clock,
@@ -146,6 +135,12 @@ try {
     research: kimi,
     critic: kimi,
     proposals: gateway,
+    authenticateMessage: async ({ groupId, memberId }) => {
+      const member = world.members.value.find((m) => m.memberId === memberId);
+      return groupId === local.mandate.groupId && member
+        ? { memberId, principalId: member.principalId }
+        : null;
+    },
     executionMode: 'SIMULATION',
     nowSeconds: () => local.clock.now(),
   });
@@ -154,10 +149,7 @@ try {
     runId,
     groupId: local.mandate.groupId,
     world,
-    messages: GROUP_TEXT.map(({ memberId, name, text }) => ({
-      memberId,
-      text: `${name}: ${text}`,
-    })),
+    messages: GROUP_TEXT,
     fixtureKey: 'brain-demo',
   });
   const output = {
@@ -172,7 +164,9 @@ try {
       kimi: `${kimi.availability().mode}${kimi.transport.label ? ` (${kimi.transport.label})` : ''}`,
       market: 'none configured in the local profile (P09 adapters)',
       groupText:
-        'authored from Bible §21/§69; the run brief §71 text was not on disk',
+        'verbatim run brief §71; HAND_AUTHORED_FIXTURE replay, local token analogue for AUSD; no live Qwen/Kimi inference',
+      authentication:
+        'local software-identity fixture ingress; real Mera evidence pending',
     },
     world: {
       snapshotId: world.snapshotId,
@@ -198,14 +192,14 @@ try {
     costs: result.costs,
     kernelGrants: local.kernel.stateView().grants.length,
   };
-  const dir = resolve('artifacts/brain-demo');
+  const dir = resolve('reports/evidence/brain');
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, `${runId}.json`),
     JSON.stringify({ ...output, result }, null, 2) + '\n',
   );
   console.log(JSON.stringify(output, null, 2));
-  console.log(`\nfull run written to artifacts/brain-demo/${runId}.json`);
+  console.log(`\nfull run written to reports/evidence/brain/${runId}.json`);
   await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
 } finally {
   await redis.quit().catch(() => undefined);

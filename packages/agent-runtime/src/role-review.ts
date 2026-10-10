@@ -22,22 +22,25 @@ export const ROLE_ROUTE: Readonly<Record<EconomicDraft['action'], ModelRole>> =
     CARD_PAYMENT: 'COMMERCE',
     X402_PAYMENT: 'COMMERCE',
   };
-const VENUE_ACTION: Readonly<Record<EconomicDraft['action'], CapabilityAction>> =
-  {
-    TRANSFER: 'TRANSFER',
-    CROSS_CHAIN_FUND: 'FUND',
-    SPOT_TRADE: 'TRADE',
-    PERP_HEDGE: 'TRADE',
-    CARD_PAYMENT: 'TRANSFER',
-    X402_PAYMENT: 'TRANSFER',
-  };
+const VENUE_ACTION: Readonly<
+  Record<EconomicDraft['action'], CapabilityAction>
+> = {
+  TRANSFER: 'TRANSFER',
+  CROSS_CHAIN_FUND: 'FUND',
+  SPOT_TRADE: 'TRADE',
+  PERP_HEDGE: 'TRADE',
+  CARD_PAYMENT: 'TRANSFER',
+  X402_PAYMENT: 'TRANSFER',
+};
 export const MAX_REVIEW_SLIPPAGE_BPS = 500;
 
 export function isEconomic(item: IntentItem): item is EconomicDraft {
   return item.kind === 'ACTION' || item.kind === 'MANDATE';
 }
 
-export function routeDrafts(items: readonly IntentItem[]): Map<ModelRole, number[]> {
+export function routeDrafts(
+  items: readonly IntentItem[],
+): Map<ModelRole, number[]> {
   const routed = new Map<ModelRole, number[]>();
   items.forEach((item, i) => {
     if (!isEconomic(item)) return;
@@ -89,7 +92,10 @@ export function roleChecks(
     checks.push(
       check(
         'tranche_within_budget',
-        tranche !== null && budget !== null && tranche > 0n && tranche <= budget,
+        tranche !== null &&
+          budget !== null &&
+          tranche > 0n &&
+          tranche <= budget,
         'per-tranche cap must be positive and within the cumulative budget',
       ),
       check(
@@ -116,17 +122,14 @@ export function roleChecks(
     );
   }
   if (role === 'FUNDING') {
-    const token =
-      draft.kind === 'ACTION' ? draft.token : draft.inputToken;
+    const token = draft.kind === 'ACTION' ? draft.token : draft.inputToken;
     const amount = units(
       draft.kind === 'ACTION'
         ? draft.amount.baseUnits
         : draft.cumulativeBudget.baseUnits,
     );
     const position = world.treasury.value.find(
-      (p) =>
-        'address' in p.asset &&
-        p.asset.address === token.toLowerCase(),
+      (p) => 'address' in p.asset && p.asset.address === token.toLowerCase(),
     );
     checks.push(
       check(
@@ -151,7 +154,8 @@ export function roleBlocks(
     if (!r.itemIndexes.includes(itemIndex)) continue;
     if (r.outcome !== 'OK') return `${r.role} ${r.outcome}`;
     const failed = r.checks.find((c) => c.itemIndex === itemIndex && !c.ok);
-    if (failed) return `${r.role} check ${failed.name} failed: ${failed.detail}`;
+    if (failed)
+      return `${r.role} check ${failed.name} failed: ${failed.detail}`;
     const v = r.verdicts.find((x) => x.itemIndex === itemIndex);
     if (!v) return `${r.role} returned no verdict`;
     if (v.verdict !== 'PROCEED') return `${r.role} ${v.verdict}: ${v.notes}`;

@@ -51,7 +51,10 @@ function metaMatchesBody(i: z.output<typeof InteractionSchema>): boolean {
   if (objectField(body, 'choices') === undefined) return true;
   return (
     objectField(body, 'id') === meta.responseId &&
-    objectField(body, 'model') === meta.model
+    objectField(body, 'model') === meta.model &&
+    objectField(body, 'created') === meta.created &&
+    canonicalArtifactHash(objectField(body, 'usage') ?? null) ===
+      canonicalArtifactHash(meta.usage)
   );
 }
 export const FixtureFileSchema = z
@@ -155,6 +158,12 @@ export class RecordReplayTransport {
   ) {
     if (mode === 'REPLAY' && !options.fixtures)
       throw new ReasonerError('REPLAY_MISS', 'replay mode needs fixtures');
+    this.options = {
+      ...options,
+      ...(options.fixtures
+        ? { fixtures: FixtureFileSchema.parse(options.fixtures) }
+        : {}),
+    };
     if (options.fixtures && options.fixtures.provider !== options.provider)
       throw new ReasonerError('REPLAY_MISS', 'fixture provider mismatch');
   }

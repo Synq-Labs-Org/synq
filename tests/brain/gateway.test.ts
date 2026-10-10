@@ -98,6 +98,7 @@ describe('Kernel proposal gateway', () => {
     expect(
       () =>
         new KernelProposalGateway({
+          network: world.kernel.kernel.stateView().network,
           kernel: world.kernel.kernel,
           market: world.market,
           simulations: new DeclaredSimulation(world.kernel.clock, 'x'),
@@ -128,6 +129,7 @@ describe('Kernel proposal gateway', () => {
         uncertainties: [],
         contradictions: [],
         critic: { verdict: 'NOT_RUN', issues: [], uncertainty: 1 },
+        roleReviews: [],
         untrustedEvidence: [],
         costs: {
           inputTokens: 0,

@@ -313,6 +313,19 @@ describe('WorldSnapshot from real Postgres read model, Redis cache, Postgres ide
     const gateway = new KernelProposalGateway({
       kernel,
       market,
+      network,
+      risk: {
+        current: async () => ({
+          state: {
+            status: 'HEALTHY',
+            reasons: [],
+            attestationRef: null,
+            referenceDeviationBps: 0,
+          },
+          observedAt: clock.t,
+          maxAgeSeconds: 30,
+        }),
+      },
       simulations: new DeclaredSimulation(
         clock,
         'integration-declared-simulation',
@@ -349,6 +362,13 @@ describe('WorldSnapshot from real Postgres read model, Redis cache, Postgres ide
           },
         ]),
         kimi: chatFixture('kimi', [{ key: 'it:critic', content: SUPPORT }]),
+      },
+      {
+        authenticateMessage: async ({ memberId }) => ({
+          memberId,
+          principalId: first.members.value.find((m) => m.memberId === memberId)!
+            .principalId,
+        }),
       },
     );
     const run = await brain.run({

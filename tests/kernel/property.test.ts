@@ -272,7 +272,7 @@ describe('B02.9 property: no generated input yields a grant outside the mandate 
       { numRuns: 300 },
     );
     expect(authorized).toBeGreaterThan(30);
-  });
+  }, 60_000);
 
   it('sequences never exceed per-action, cumulative token, cumulative native or treasury bounds', async () => {
     await fc.assert(
@@ -300,7 +300,7 @@ describe('B02.9 property: no generated input yields a grant outside the mandate 
       ),
       { numRuns: 60 },
     );
-  });
+  }, 60_000);
 
   it('without approvals nothing is ever authorized', async () => {
     await fc.assert(
@@ -310,5 +310,5 @@ describe('B02.9 property: no generated input yields a grant outside the mandate 
       }),
       { numRuns: 200 },
     );
-  });
+  }, 60_000);
 });

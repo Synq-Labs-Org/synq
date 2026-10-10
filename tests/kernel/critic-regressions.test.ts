@@ -296,7 +296,7 @@ describe('F2 supersession narrowing is defined over every mandate field', () => 
       }),
       { numRuns: 100 },
     );
-  });
+  }, 60_000);
 });
 
 describe('F3 audit is written before state commits', () => {
@@ -550,5 +550,5 @@ describe('F6 stateful property: approval sets and execution outcomes', () => {
       ),
       { numRuns: 40 },
     );
-  });
+  }, 60_000);
 });

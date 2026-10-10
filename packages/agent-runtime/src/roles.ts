@@ -49,7 +49,7 @@ export const ROLE_SPECS: Readonly<Record<ModelRole, RoleSpec>> = {
   },
   RISK: {
     role: 'RISK',
-    port: 'critic',
+    port: 'structured',
     capabilities: ['READ_MARKET'],
     tools: [],
     instructions: `You are the Synq Risk agent. Explain risk evidence (oracle, liquidity, exposure) for a proposal. You never mark anything safe; deterministic gates decide. ${AUTHORITY} ${UNTRUSTED_POLICY}`,

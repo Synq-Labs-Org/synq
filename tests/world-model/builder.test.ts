@@ -47,6 +47,34 @@ const FIELDS = [
 ] as const satisfies readonly (keyof WorldModelSnapshot)[];
 
 describe('WorldSnapshot builder', () => {
+  it('missing on-chain threshold remains null and UNKNOWN instead of a fresh zero', async () => {
+    const world = await evalWorld();
+    world.readModel.snapshot!.group.threshold = null;
+    const snapshot = await world.builder.build({ groupId: GROUP });
+    expect(snapshot.group.value?.threshold).toBeNull();
+    expect(snapshot.group.meta.freshness).toBe('UNKNOWN');
+    expect(snapshot.quorum.value.accountThreshold).toBeNull();
+    expect(snapshot.quorum.meta.freshness).toBe('UNKNOWN');
+  });
+
+  it('capability and plugin-health freshness use the actual health-check time', async () => {
+    const world = await evalWorld();
+    world.kernel.clock.t += 120;
+    const snapshot = await world.builder.build({ groupId: GROUP });
+    expect(snapshot.network.meta).toMatchObject({
+      provenance: 'CONFIG',
+      observedAt: null,
+    });
+    expect(snapshot.capabilities.meta).toMatchObject({
+      observedAt: now,
+      freshness: 'STALE',
+    });
+    expect(snapshot.pluginHealth.meta).toMatchObject({
+      observedAt: now,
+      freshness: 'STALE',
+    });
+  });
+
   it('every field carries provenance, freshness and confidence from its real source', async () => {
     const world = await evalWorld();
     const s = await world.builder.build({ groupId: GROUP });
@@ -58,7 +86,7 @@ describe('WorldSnapshot builder', () => {
     expect(
       Object.fromEntries(FIELDS.map((f) => [f, s[f].meta.provenance])),
     ).toEqual({
-      network: 'CHAIN',
+      network: 'CONFIG',
       readModel: 'ENVIO',
       group: 'ENVIO',
       members: 'POSTGRES',

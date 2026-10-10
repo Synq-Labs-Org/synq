@@ -11,17 +11,25 @@ import {
   type FieldFreshness,
   type ModelCallRecord,
   type ModelRole,
+  type RoleReview,
   type ProposalDecision,
   type RunCosts,
   type UntrustedEvidence,
   type WorldModelSnapshot,
 } from '@synq/schemas';
-import { worstFreshness } from '@synq/world-model';
+import { CapabilityGraph, worstFreshness } from '@synq/world-model';
+import {
+  isEconomic,
+  routeDrafts,
+  roleChecks,
+  roleBlocks,
+} from './role-review.js';
 import { MastraRoleHarness } from './mastra.js';
 import {
   CriticOutputSchema,
   IntentOutputSchema,
   ResearchOutputSchema,
+  RoleReviewOutputSchema,
   jsonSchemaOf,
   strictParse,
   type CriticOutput,
@@ -76,7 +84,10 @@ export type BrainDependencies = {
   research?: ResearchReasoner;
   critic?: CriticReasoner;
   proposals: ProposalPort;
-  executionMode: ExecutionMode;
+  executionMode?: ExecutionMode;
+  authenticateMessage?: (
+    input: MemberMessage & { groupId: string },
+  ) => Promise<{ memberId: string; principalId: string } | null>;
   limits?: Partial<BudgetLimits>;
   uncertaintyThreshold?: number;
   nowSeconds?: () => number;
@@ -126,6 +137,7 @@ const BLOCKING_FINDINGS = new Set<AgentFinding['kind']>([
   'CONCURRENCY_EXCEEDED',
   'PROMPT_INJECTION_SUSPECTED',
   'CANCELLED',
+  'CRITIC_GATE',
 ]);
 const PARSE_FAILURE: AgentFinding['kind'] = 'VALIDATION_REJECTED';
 
@@ -193,8 +205,25 @@ export class SynqBrain {
 
     const evidence: UntrustedEvidence[] = [];
     const memberIds = new Set(input.world.members.value.map((m) => m.memberId));
+    const speakers = new Set<string>();
+    let unauthenticatedMessage = false;
+    for (const m of input.messages) {
+      const authenticated = await deps
+        .authenticateMessage?.({ ...m, groupId: input.groupId })
+        .catch(() => null);
+      const member = input.world.members.value.find(
+        (x) => x.memberId === m.memberId,
+      );
+      if (
+        member &&
+        authenticated?.memberId === member.memberId &&
+        authenticated.principalId === member.principalId
+      )
+        speakers.add(member.memberId);
+      else unauthenticatedMessage = true;
+    }
     input.messages.forEach((m, i) => {
-      const known = memberIds.has(m.memberId);
+      const known = memberIds.has(m.memberId) && speakers.has(m.memberId);
       const wrapped = wrapUntrusted({
         evidenceId: `${input.runId}.msg.${i}`,
         kind: 'MEMBER_MESSAGE',
@@ -485,6 +514,71 @@ export class SynqBrain {
         }
       : { verdict: 'NOT_RUN', issues: [], uncertainty: 1 };
 
+    if (critic.verdict !== 'SUPPORT')
+      manager.finding(
+        'CRITIC_GATE',
+        `critic ${critic.verdict}: no proposal can cross the gate`,
+        root,
+        'HIGH',
+      );
+
+    const roleReviews: RoleReview[] = [];
+    const draftItems = intent.value?.items ?? [];
+    const graph = CapabilityGraph.fromView(input.world.capabilities.value);
+    for (const [role, itemIndexes] of routeDrafts(draftItems)) {
+      roles.add(role);
+      const checks = itemIndexes.flatMap((i) => {
+        const draft = draftItems[i]!;
+        return isEconomic(draft)
+          ? roleChecks(role, draft, i, input.world, graph)
+          : [];
+      });
+      if (role === 'COMMERCE') {
+        roleReviews.push({
+          role,
+          agentId: null,
+          itemIndexes,
+          checks,
+          verdicts: [],
+          uncertainty: 1,
+          outcome: 'UNAVAILABLE_IN_PHASE',
+        });
+        continue;
+      }
+      const out = await runRole(
+        role,
+        `WORLD:\n${brief}\n\nDRAFTS (untrusted):\n${JSON.stringify(itemIndexes.map((itemIndex) => ({ itemIndex, draft: draftItems[itemIndex] })))}\n\nDETERMINISTIC CHECKS:\n${JSON.stringify(checks)}\nReturn RoleReviewOutput JSON for exactly these itemIndexes; never adjust the economic draft.`,
+        (h, messages, signal) =>
+          deps.structured.complete({
+            role,
+            agentId: h.agentId,
+            fixtureKey: `${input.fixtureKey}:${role.toLowerCase()}`,
+            messages,
+            responseSchema: {
+              name: 'RoleReviewOutput',
+              schema: jsonSchemaOf(RoleReviewOutputSchema),
+            },
+            maxOutputTokens: 1500,
+            ...(signal ? { signal } : {}),
+          }),
+        (text) => strictParse(RoleReviewOutputSchema, text),
+      );
+      const reviews = out.value?.reviews ?? [];
+      const exactIndexes =
+        reviews.length === itemIndexes.length &&
+        new Set(reviews.map((v) => v.itemIndex)).size === itemIndexes.length &&
+        reviews.every((v) => itemIndexes.includes(v.itemIndex));
+      roleReviews.push({
+        role,
+        agentId: out.handle?.agentId ?? null,
+        itemIndexes,
+        checks,
+        verdicts: reviews,
+        uncertainty: out.value?.uncertainty ?? 1,
+        outcome: out.value && exactIndexes ? 'OK' : 'NOT_RUN',
+      });
+    }
+
     const contradictions: Contradiction[] = (
       criticOut?.disagreements ?? []
     ).map((d) => ({
@@ -529,6 +623,12 @@ export class SynqBrain {
             },
           ]
         : []),
+      ...roleReviews.map((r) => ({
+        role: r.role,
+        topic: 'specialist review',
+        level: r.uncertainty,
+        note: r.outcome,
+      })),
       ...(criticOut
         ? [
             {
@@ -545,6 +645,7 @@ export class SynqBrain {
       BLOCKING_FINDINGS.has(f.kind),
     );
     const escalateAll =
+      unauthenticatedMessage ||
       contradictions.some((c) => c.material) ||
       maxUncertainty > threshold ||
       blocking.length > 0;
@@ -556,7 +657,7 @@ export class SynqBrain {
         'MEDIUM',
       );
 
-    const validator = new SemanticValidator(input.world, now);
+    const validator = new SemanticValidator(input.world, now, speakers);
     const relevant: FieldFreshness[] = [
       input.world.group.meta.freshness,
       input.world.treasury.meta.freshness,
@@ -598,14 +699,32 @@ export class SynqBrain {
           status: 'REJECTED',
         };
       }
+      const blocked = roleBlocks(roleReviews, i);
+      if (blocked)
+        manager.finding('ROLE_REVIEW_BLOCKED', blocked, root, 'MEDIUM');
       return {
         proposalId,
         item,
         issues: [],
         normalized: validated.value,
-        status: escalateAll ? 'ESCALATED' : 'SUBMITTED',
+        status: escalateAll || blocked ? 'ESCALATED' : 'SUBMITTED',
       };
     });
+    const unique = new Set<string>();
+    for (const p of pending) {
+      if (!p.normalized) continue;
+      const key = canonicalArtifactHash(p.normalized);
+      if (unique.has(key)) {
+        p.status = 'ESCALATED';
+        manager.finding(
+          'DUPLICATE_PROPOSAL',
+          'identical economic proposal suppressed',
+          root,
+          'INFO',
+        );
+      }
+      unique.add(key);
+    }
     if (pending.length === 0)
       pending.push({
         proposalId: ProposalIdSchema.parse(`${input.runId}.p0`),
@@ -652,7 +771,7 @@ export class SynqBrain {
           groupId: input.groupId,
           snapshotId: input.world.snapshotId,
           createdAt: now,
-          executionMode: deps.executionMode,
+          executionMode: deps.proposals.executionMode,
           sources: input.world.sourceFreshness,
           decisiveFreshness,
           modelCalls,
@@ -661,6 +780,7 @@ export class SynqBrain {
           uncertainties,
           contradictions,
           critic,
+          roleReviews,
           untrustedEvidence: evidence,
           costs: costs(),
           findings: manager.findings,
@@ -739,7 +859,7 @@ export class SynqBrain {
         : 'FAILED';
     return {
       runId: input.runId,
-      executionMode: deps.executionMode,
+      executionMode: deps.proposals.executionMode,
       status,
       items,
       findings: manager.findings,

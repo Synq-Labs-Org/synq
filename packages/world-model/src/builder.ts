@@ -189,7 +189,6 @@ export class WorldSnapshotBuilder {
       mainnetBroadcastAllowed: s.mainnetBroadcastAllowed,
     });
 
-
     const rmMeta = (source: string) =>
       rm?.snapshot
         ? fieldMeta({
@@ -212,12 +211,23 @@ export class WorldSnapshotBuilder {
               chainId: s.network.chainId,
               account: rm.snapshot.group.account,
               owners: rm.snapshot.group.owners,
-              threshold: Number(rm.snapshot.group.threshold ?? '0'),
+              threshold:
+                rm.snapshot.group.threshold === null
+                  ? null
+                  : Number(rm.snapshot.group.threshold),
               paused: rm.snapshot.group.paused,
               accountingStatus: rm.snapshot.group.accountingStatus,
               membershipEpoch: identity.membershipEpoch,
             },
-            rmMeta('envio-read-model')!,
+            rm.snapshot.group.threshold === null
+              ? fieldMeta({
+                  provenance: 'ENVIO',
+                  source: 'envio-read-model',
+                  observedAt: null,
+                  freshness: 'UNKNOWN',
+                  reason: 'account threshold not indexed',
+                })
+              : rmMeta('envio-read-model')!,
           )
         : unknownField(
             null,
@@ -263,7 +273,10 @@ export class WorldSnapshotBuilder {
       });
     const quorum = observed(
       {
-        accountThreshold: Number(rm?.snapshot?.group.threshold ?? 0),
+        accountThreshold:
+          rm?.snapshot?.group.threshold == null
+            ? null
+            : Number(rm.snapshot.group.threshold),
         approvers: (active ?? []).filter((m) => m.role === 'APPROVER').length,
         mandates: mandates.map(({ mandate }) => ({
           mandateId: mandate.mandateId,
@@ -426,8 +439,8 @@ export class WorldSnapshotBuilder {
       fieldMeta({
         provenance: 'PLUGIN',
         source: 'plugin-registry',
-        observedAt: now,
-        freshness: s.plugins ? 'FRESH' : 'UNKNOWN',
+        observedAt: null,
+        freshness: 'UNKNOWN',
         ...(s.plugins ? {} : { reason: 'plugin registry not configured' }),
       }),
     );
@@ -438,6 +451,13 @@ export class WorldSnapshotBuilder {
       checks.length && checks.every((c) => c !== null)
         ? Math.min(...(checks as number[]))
         : null;
+    pluginHealth.meta = fieldMeta({
+      provenance: 'PLUGIN',
+      source: 'plugin-registry',
+      observedAt: oldestCheck,
+      freshness: ageFreshness(oldestCheck, now, 60),
+      ...(oldestCheck === null ? { reason: 'health checks unavailable' } : {}),
+    });
     const capabilities = observed(
       graphView,
       fieldMeta({

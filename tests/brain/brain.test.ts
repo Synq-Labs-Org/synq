@@ -58,9 +58,10 @@ describe('SynqBrain end to end through Mastra, replay adapters and the real Kern
     ).toEqual([
       ['INTENT', 'qwen', 'REPLAY', 'HAND_AUTHORED_FIXTURE'],
       ['CRITIC', 'kimi', 'REPLAY', 'HAND_AUTHORED_FIXTURE'],
+      ['FUNDING', 'qwen', 'REPLAY', 'HAND_AUTHORED_FIXTURE'],
     ]);
-    expect(artifact.costs.inputTokens).toBe(2_400);
-    expect(artifact.costs.subagentsSpawned).toBe(2);
+    expect(artifact.costs.inputTokens).toBe(3_600);
+    expect(artifact.costs.subagentsSpawned).toBe(3);
     expect(artifact.untrustedEvidence.every((e) => e.untrusted)).toBe(true);
     expect(result.spans.map((s) => s.name)).toContain('brain.propose_action');
   });
