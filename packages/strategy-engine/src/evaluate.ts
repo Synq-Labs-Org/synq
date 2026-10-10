@@ -92,7 +92,7 @@ function accounting(input: DcaEvaluationInput) {
     deploymentCapacity: clampZero(policy.maxDeployment - deployed),
     allocationCap,
     allocationHeadroom:
-      allocationCap - treasury.targetPositionValueInBudgetAsset,
+      allocationCap - treasury.targetPositionValueInBudgetAsset - pending,
     lastExecutionAt,
   };
 }
@@ -131,6 +131,18 @@ export function evaluateDca(raw: DcaEvaluationInput): DcaDecision {
     diagnostics,
   });
 
+  const settledPrincipal = history.executions
+    .filter((e) => e.status === 'SETTLED')
+    .reduce((total, e) => total + e.amountIn, 0n);
+  if (history.exitedPrincipal > settledPrincipal)
+    return decide('ESCALATE', ['INVALID_EXIT_ACCOUNTING']);
+  if (
+    new Set(history.executions.map((e) => e.intentId)).size !==
+      history.executions.length ||
+    new Set(history.executions.map((e) => e.slot)).size !==
+      history.executions.length
+  )
+    return decide('ESCALATE', ['DUPLICATE_EXECUTION_HISTORY']);
   if (now >= policy.expiresAt)
     return decide('SKIP', ['EXPIRED'], { terminal: true });
   if (now < policy.startAt) return decide('SKIP', ['NOT_STARTED']);
@@ -218,7 +230,9 @@ export function evaluateDca(raw: DcaEvaluationInput): DcaDecision {
 
   const total = treasury.totalValueInBudgetAsset;
   diagnostics.allocationAfterBps = Number(
-    ((treasury.targetPositionValueInBudgetAsset + tranche) * BPS) / total,
+    ((treasury.targetPositionValueInBudgetAsset + acct.pending + tranche) *
+      BPS) /
+      total,
   );
   const output = indicativeOutput(
     tranche,

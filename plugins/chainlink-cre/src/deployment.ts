@@ -13,7 +13,7 @@ import type {
 import testnetManifest from '../../../contracts/deployments/10143.risk-attestation.json' with { type: 'json' };
 import testnetConfig from '../synq-ausd-risk/config.testnet.json' with { type: 'json' };
 import mainnetConfig from '../synq-ausd-risk/config.mainnet.json' with { type: 'json' };
-import { canonicalAssetKey } from './attestation.js';
+import { canonicalAssetKey, sourceConfigHash } from './attestation.js';
 
 export const RiskAttestationManifestSchema = z.strictObject({
   RiskAttestationRegistry: AddressSchema,
@@ -65,6 +65,15 @@ export function stableRiskGateConfig(
       },
     ],
     maxAttestationAgeSeconds,
+    trustedSourceConfigHash: sourceConfigHash({
+      config: validateWorkflowConfig(testnetConfig),
+      chainId: deployment.chainId,
+    }),
+    maxReferenceStalenessSeconds: testnetConfig.thresholds.maxStalenessSec,
+    maxHealthyDeviationBps: testnetConfig.thresholds.degradedDeviationBps,
+    trustedForwarder: deployment.forwarder,
+    forwarderKind: deployment.forwarderKind,
+    trustedWorkflowId: `0x${'11'.repeat(32)}`,
   };
 }
 

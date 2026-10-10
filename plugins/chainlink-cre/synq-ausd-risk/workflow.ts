@@ -65,8 +65,18 @@ export const configSchema = z
   .strict();
 export type Config = z.infer<typeof configSchema>;
 
-type RegistryContract = { chainId: number; address: string; kind: string };
-type RegistryAsset = { chainId: number; address: string; decimals: number };
+type RegistryContract = {
+  chainId: number;
+  address: string;
+  kind: string;
+  pair?: string;
+};
+type RegistryAsset = {
+  chainId: number;
+  address: string;
+  decimals: number;
+  symbol: string;
+};
 const contracts = registry.contracts as Record<string, RegistryContract>;
 const assets = registry.assets as Record<string, RegistryAsset>;
 
@@ -215,6 +225,28 @@ export function onCron(runtime: Runtime<Config>, payload: CronPayload): string {
   const client = evmClient(config);
   const asset = assetFor(config.assetRegistryKey, chainId);
   const assetId = canonicalAssetKey(chainId, asset.address);
+  if (
+    asset.symbol !== 'AUSD' ||
+    (config.chainSelectorName === 'monad-testnet') !== config.isTestnet ||
+    (config.receiverDeployment !== null && !config.isTestnet)
+  )
+    throw new Error('RISK_CONFIG_NETWORK_OR_ASSET_MISMATCH');
+  if (
+    config.referenceFeedRegistryKey &&
+    contracts[config.referenceFeedRegistryKey]?.pair !== 'AUSD/USD'
+  )
+    throw new Error('RISK_CONFIG_REFERENCE_PAIR');
+  if (!config.referenceFeedRegistryKey && !config.referenceUnavailableReason)
+    throw new Error('RISK_CONFIG_REFERENCE_MISSING');
+  if (config.kuruQuote) {
+    const input = assetFor(config.kuruQuote.tokenInRegistryKey, chainId);
+    const output = assetFor(config.kuruQuote.tokenOutRegistryKey, chainId);
+    if (
+      input.address.toLowerCase() !== asset.address.toLowerCase() ||
+      output.symbol !== 'USDC'
+    )
+      throw new Error('RISK_CONFIG_QUOTE_PAIR');
+  }
 
   const reference = config.referenceFeedRegistryKey
     ? readFeed(

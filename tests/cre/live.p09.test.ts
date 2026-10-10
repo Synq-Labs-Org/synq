@@ -56,10 +56,13 @@ describe.skipIf(!live)(
       const client = createPublicClient({
         transport: http(monadTestnetProfile.defaultRpcUrl),
       });
+      const deployment = riskAttestationDeployment('sandbox/monad-testnet');
       const reader = new RpcRiskAttestationReader(client, {
         confirmationDepth: monadTestnetProfile.confirmationDepth,
+        trustedForwarder: deployment.forwarder,
+        forwarderKind: deployment.forwarderKind,
+        trustedWorkflowId: `0x${'11'.repeat(32)}`,
       });
-      const deployment = riskAttestationDeployment('sandbox/monad-testnet');
       const ausd = officialAsset('testnetAUSD');
       const observation = await reader.latest({
         chainId: deployment.chainId,

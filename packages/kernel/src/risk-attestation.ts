@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isLocalChain } from '@synq/chain-registry';
 import {
   AddressSchema,
   HashSchema,
@@ -42,6 +43,9 @@ export const RiskAttestationObservationSchema = z.strictObject({
   stalenessSec: z.number().int().nonnegative(),
   sourceConfigHash: HashSchema,
   blockNumber: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  workflowId: HashSchema,
+  forwarder: AddressSchema,
+  forwarderKind: z.enum(['CRE_FORWARDER', 'CRE_MOCK_FORWARDER']),
 });
 export type RiskAttestationObservation = z.output<
   typeof RiskAttestationObservationSchema
@@ -61,6 +65,12 @@ export type RiskAttestationGateConfig = {
   registry: `0x${string}`;
   assets: readonly StableRiskAsset[];
   maxAttestationAgeSeconds: number;
+  trustedSourceConfigHash: Hash;
+  maxReferenceStalenessSeconds: number;
+  maxHealthyDeviationBps: number;
+  trustedForwarder: `0x${string}`;
+  forwarderKind: 'CRE_FORWARDER' | 'CRE_MOCK_FORWARDER';
+  trustedWorkflowId: Hash;
   degradedTier?: Extract<Tier, 'REVIEW' | 'CONSENSUS'>;
   actions?: readonly ActionKind[];
 };
@@ -101,7 +111,14 @@ export class RiskAttestationGate {
     );
     if (
       !Number.isSafeInteger(config.maxAttestationAgeSeconds) ||
-      config.maxAttestationAgeSeconds <= 0
+      config.maxAttestationAgeSeconds <= 0 ||
+      !Number.isSafeInteger(config.maxReferenceStalenessSeconds) ||
+      config.maxReferenceStalenessSeconds <= 0 ||
+      !Number.isSafeInteger(config.maxHealthyDeviationBps) ||
+      config.maxHealthyDeviationBps < 0 ||
+      !HashSchema.safeParse(config.trustedSourceConfigHash).success ||
+      !HashSchema.safeParse(config.trustedWorkflowId).success ||
+      !AddressSchema.safeParse(config.trustedForwarder).success
     )
       throw new KernelError('INVALID_REQUEST');
     this.actions = new Set(config.actions ?? DEFAULT_STABLE_RISK_ACTIONS);
@@ -147,6 +164,33 @@ export class RiskAttestationGate {
       observation.assetId !== query.assetId
     )
       throw unavailable('attestation does not echo the query');
+    if (
+      observation.sourceConfigHash !== this.config.trustedSourceConfigHash ||
+      observation.workflowId !== this.config.trustedWorkflowId ||
+      observation.forwarder !== this.config.trustedForwarder.toLowerCase() ||
+      observation.forwarderKind !== this.config.forwarderKind
+    )
+      throw unavailable('untrusted source or writer identity');
+    if (
+      this.config.forwarderKind === 'CRE_MOCK_FORWARDER' &&
+      !isLocalChain(intent.chainId)
+    )
+      throw unavailable(
+        'simulation attestation cannot authorize live execution',
+      );
+    const peg = 100_000_000n;
+    const price = BigInt(observation.referencePrice);
+    const pegDeviation =
+      ((price > peg ? price - peg : peg - price) * 10_000n + peg - 1n) / peg;
+    if (
+      observation.stalenessSec + Math.max(0, now - observation.timestamp) >
+        this.config.maxReferenceStalenessSeconds ||
+      BigInt(observation.referencePrice) <= 0n ||
+      (observation.status === 'HEALTHY' &&
+        (observation.deviationBps > this.config.maxHealthyDeviationBps ||
+          pegDeviation > BigInt(this.config.maxHealthyDeviationBps)))
+    )
+      throw unavailable('underlying reference is stale or inconsistent');
     if (observation.status === 'UNKNOWN' || observation.status === 'STALE')
       throw unavailable(`attestation status ${observation.status}`);
     if (

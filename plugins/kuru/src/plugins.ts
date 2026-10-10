@@ -226,7 +226,12 @@ function swapPlugin(
         account: swap.account,
         target: swap.swap.target,
         succeeded:
-          result.succeeded && BigInt(result.outputAmount) >= swap.minOutput,
+          result.succeeded &&
+          BigInt(result.outputAmount) >= swap.minOutput &&
+          BigInt(result.inputBalanceBefore) -
+            BigInt(result.inputBalanceAfter) ===
+            swap.amountIn &&
+          result.residualAllowance === '0',
         simulatedAt: context.now,
         blockNumber: result.blockNumber,
         artifactHash: keccak256(

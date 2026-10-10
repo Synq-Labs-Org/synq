@@ -256,11 +256,47 @@ describe('DCA strategy evaluator rules', () => {
           executions: pending,
           exitedPrincipal: 30n * UNIT,
         }),
-      ).tranche!.amountIn,
-    ).toBe(25n * UNIT);
+      ),
+    ).toMatchObject({ kind: 'ESCALATE', reasons: ['INVALID_EXIT_ACCOUNTING'] });
     expect(
       evaluateDca(baseInput({ treasury: { freeBudgetAsset: UNIT - 1n } })),
     ).toMatchObject({ kind: 'SKIP', reasons: ['INSUFFICIENT_FREE_BALANCE'] });
+  });
+
+  it('pending lots consume allocation and cannot be released by unproved exits', () => {
+    const result = evaluateDca(
+      baseInput({
+        now: START + WEEK + 10,
+        executions: [execution(0, 25n * UNIT, 'PENDING')],
+        treasury: {
+          totalValueInBudgetAsset: 100n * UNIT,
+          freeBudgetAsset: 75n * UNIT,
+        },
+      }),
+    );
+    expect(result.tranche?.amountIn).toBe(15n * UNIT);
+    expect(result.diagnostics.allocationAfterBps).toBe(4000);
+    const settled = evaluateDca(
+      baseInput({
+        now: START + WEEK + 10,
+        executions: [execution(0, 25n * UNIT, 'SETTLED')],
+        treasury: {
+          totalValueInBudgetAsset: 100n * UNIT,
+          freeBudgetAsset: 75n * UNIT,
+          targetPositionValueInBudgetAsset: 25n * UNIT,
+        },
+      }),
+    );
+    expect(settled.tranche?.amountIn).toBe(15n * UNIT);
+    const duplicate = execution(0, 25n * UNIT, 'PENDING');
+    expect(
+      evaluateDca(
+        baseInput({
+          now: START + WEEK + 10,
+          executions: [duplicate, duplicate],
+        }),
+      ).reasons,
+    ).toContain('DUPLICATE_EXECUTION_HISTORY');
   });
 
   it('thin liquidity resizes or escalates', () => {

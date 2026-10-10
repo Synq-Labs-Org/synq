@@ -133,6 +133,9 @@ afterAll(() => {
 function kernelWithRegistry(): Harness {
   const reader = new RpcRiskAttestationReader(clients().public, {
     confirmationDepth: 2,
+    trustedForwarder: forwarder,
+    forwarderKind: 'CRE_MOCK_FORWARDER',
+    trustedWorkflowId: hash(0),
   });
   return harness([], [tradeMandate({ outputAssets: [outputAsset] })], {
     stableRisk: {
@@ -141,6 +144,12 @@ function kernelWithRegistry(): Harness {
       registry,
       assets: [{ address: TOKEN, assetId: AUSD_ID }],
       maxAttestationAgeSeconds: 3600,
+      trustedSourceConfigHash: hash(5),
+      maxReferenceStalenessSeconds: 3900,
+      maxHealthyDeviationBps: 50,
+      trustedForwarder: forwarder,
+      forwarderKind: 'CRE_MOCK_FORWARDER',
+      trustedWorkflowId: hash(0),
     },
   });
 }

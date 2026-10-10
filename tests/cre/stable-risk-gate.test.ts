@@ -55,6 +55,9 @@ class FixtureReader implements RiskAttestationReader {
       stalenessSec: 120,
       sourceConfigHash: hash(5),
       blockNumber: '99',
+      workflowId: hash(6),
+      forwarder: address(90),
+      forwarderKind: 'CRE_MOCK_FORWARDER',
       ...this.next,
     } as RiskAttestationObservation;
   }
@@ -68,6 +71,12 @@ function gate(reader: RiskAttestationReader) {
       registry: REGISTRY,
       assets: [{ address: TOKEN, assetId: AUSD_ID }],
       maxAttestationAgeSeconds: 3600,
+      trustedSourceConfigHash: hash(5),
+      maxReferenceStalenessSeconds: 3900,
+      maxHealthyDeviationBps: 50,
+      trustedForwarder: address(90),
+      forwarderKind: 'CRE_MOCK_FORWARDER' as const,
+      trustedWorkflowId: hash(6),
     },
   };
 }
@@ -259,6 +268,33 @@ describe('Kernel stable-risk attestation gate (AUSD-015/016)', () => {
         code: 'STABLE_RISK_UNAVAILABLE',
       },
     );
+  });
+
+  it('refuses unapproved sources, stale underlying references, inconsistent HEALTHY prices and writer drift', async () => {
+    for (const change of [
+      { sourceConfigHash: hash(999) },
+      { stalenessSec: 4000 },
+      { referencePrice: '1', deviationBps: 0 },
+      { forwarder: address(91) },
+      { workflowId: hash(7) },
+      { status: 'HEALTHY' as const, deviationBps: 9999 },
+    ]) {
+      const reader = new FixtureReader(change);
+      await expect(
+        new RiskAttestationGate(gate(reader).stableRisk).assess(
+          swapIntent(),
+          now,
+        ),
+      ).rejects.toThrow('STABLE_RISK_UNAVAILABLE');
+    }
+    const reader = new FixtureReader({ chainId: 10143 });
+    const config = { ...gate(reader).stableRisk, chainId: 10143 };
+    await expect(
+      new RiskAttestationGate(config).assess(
+        { ...swapIntent(), chainId: 10143 },
+        now,
+      ),
+    ).rejects.toThrow('STABLE_RISK_UNAVAILABLE');
   });
 
   it('rejects an invalid gate configuration', () => {

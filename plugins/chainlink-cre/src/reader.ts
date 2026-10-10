@@ -10,6 +10,7 @@ import {
 export const riskAttestationRegistryAbi = parseAbi([
   'struct Attestation { uint64 timestamp; uint64 stalenessSec; uint32 deviationBps; uint8 status; uint256 referencePrice; bytes32 sourceConfigHash; bytes32 workflowId; uint64 recordedAt; uint64 recordedBlock; }',
   'function latest(bytes32 assetId) view returns (Attestation)',
+  'function expectedWorkflowId() view returns (bytes32)',
   'function forwarder() view returns (address)',
   'function onReport(bytes metadata, bytes report)',
   'event AttestationRecorded(bytes32 indexed assetId, uint8 indexed status, uint64 timestamp, uint256 referencePrice, uint32 deviationBps, uint64 stalenessSec, bytes32 sourceConfigHash, bytes32 workflowId)',
@@ -27,7 +28,12 @@ type Reader = Pick<
 export class RpcRiskAttestationReader implements RiskAttestationReader {
   constructor(
     private readonly client: Reader,
-    private readonly options: { confirmationDepth: number },
+    private readonly options: {
+      confirmationDepth: number;
+      trustedForwarder: `0x${string}`;
+      forwarderKind: 'CRE_FORWARDER' | 'CRE_MOCK_FORWARDER';
+      trustedWorkflowId: `0x${string}`;
+    },
   ) {
     if (
       !Number.isSafeInteger(options.confirmationDepth) ||
@@ -45,6 +51,25 @@ export class RpcRiskAttestationReader implements RiskAttestationReader {
     const depth = BigInt(this.options.confirmationDepth - 1);
     if (head < depth) return null;
     const blockNumber = head - depth;
+    const forwarder = await this.client.readContract({
+      address: query.registry,
+      abi: riskAttestationRegistryAbi,
+      functionName: 'forwarder',
+      blockNumber,
+    });
+    if (forwarder.toLowerCase() !== this.options.trustedForwarder.toLowerCase())
+      throw new Error('UNTRUSTED_FORWARDER');
+    const expectedWorkflowId = await this.client.readContract({
+      address: query.registry,
+      abi: riskAttestationRegistryAbi,
+      functionName: 'expectedWorkflowId',
+      blockNumber,
+    });
+    if (
+      this.options.forwarderKind === 'CRE_FORWARDER' &&
+      expectedWorkflowId !== this.options.trustedWorkflowId
+    )
+      throw new Error('UNTRUSTED_WORKFLOW_CONFIG');
     const a = await this.client.readContract({
       address: query.registry,
       abi: riskAttestationRegistryAbi,
@@ -53,10 +78,15 @@ export class RpcRiskAttestationReader implements RiskAttestationReader {
       blockNumber,
     });
     if (a.timestamp === 0n) return null;
+    if (a.workflowId !== this.options.trustedWorkflowId)
+      throw new Error('UNTRUSTED_WORKFLOW_REPORT');
     const status = STABLE_RISK_STATUSES[a.status];
     if (status === undefined) throw new Error('INVALID_STATUS');
     return RiskAttestationObservationSchema.parse({
       chainId,
+      workflowId: a.workflowId,
+      forwarder: forwarder.toLowerCase(),
+      forwarderKind: this.options.forwarderKind,
       registry: query.registry,
       assetId: query.assetId,
       status,

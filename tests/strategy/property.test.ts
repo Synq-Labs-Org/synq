@@ -9,7 +9,11 @@ import {
 } from '@synq/strategy-engine';
 import { START, UNIT, WEEK, policy } from './fixtures.js';
 
-const RUNS = { numRuns: 400 };
+const RUNS = {
+  numRuns: 400,
+  interruptAfterTimeLimit: 60_000,
+  markInterruptAsFailure: true,
+};
 const amount = (max: bigint) => fc.bigInt({ min: 1n, max });
 const mostly = <T>(usual: T, rare: T) =>
   fc.oneof({ weight: 5, arbitrary: fc.constant(usual) }, fc.constant(rare));
@@ -143,7 +147,12 @@ const inputArb = fc
             status: e.status,
           }),
         ),
-        exitedPrincipal: r.exited,
+        exitedPrincipal: (() => {
+          const settled = r.executions
+            .filter((e) => e.status === 'SETTLED')
+            .reduce((sum, e) => sum + e.amountIn, 0n);
+          return r.exited < settled ? r.exited : settled;
+        })(),
       },
       now,
     };
@@ -181,7 +190,12 @@ describe('DCA evaluator properties', () => {
         expect(amt).toBeLessThanOrEqual(t.freeBudgetAsset);
         expect(amt).toBeLessThanOrEqual(m.liquidityMaxInput);
         expect(
-          (t.targetPositionValueInBudgetAsset + amt) * 10_000n,
+          (t.targetPositionValueInBudgetAsset +
+            input.history.executions
+              .filter((e) => e.status === 'PENDING')
+              .reduce((total, e) => total + e.amountIn, 0n) +
+            amt) *
+            10_000n,
         ).toBeLessThanOrEqual(
           BigInt(p.maxAllocationBps) * t.totalValueInBudgetAsset,
         );
