@@ -9,14 +9,18 @@
     "./read-model-routes": "./src/read-model-routes.ts",
     "./kernel-runtime": "./src/kernel-runtime.ts",
     "./kernel-store": "./src/kernel-store.ts",
-    "./brain-runtime": "./src/brain-runtime.ts"
+    "./brain-runtime": "./src/brain-runtime.ts",
+    "./send-routes": "./src/send-routes.ts",
+    "./send-runtime": "./src/send-runtime.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
+    "@synq/funding": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/read-model": "workspace:*",

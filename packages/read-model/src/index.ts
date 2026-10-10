@@ -14,3 +14,4 @@ export * from './cache.js';
 export * from './authorization.js';
 export * from './envio-source.js';
 export * from './deployment.js';
+export * from './treasury.js';

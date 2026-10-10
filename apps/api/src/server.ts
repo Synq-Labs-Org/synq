@@ -46,6 +46,7 @@ export type ReadModelRuntime = ReadModelRouteDeps & {
   reader: ProjectionReader;
   projection: ProjectionConfig;
   client: PublicClient;
+  projectionStore: PostgresProjectionStore;
   close(): Promise<void>;
 };
 
@@ -107,6 +108,7 @@ export async function readModelRuntime(
     reader,
     projection: config,
     client,
+    projectionStore: store,
     async close() {
       await redis.quit();
       await pool.end();

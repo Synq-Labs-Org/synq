@@ -18,3 +18,4 @@ test-results/
 playwright-report/
 .synq-dev/
 artifacts/brain-demo/
+artifacts/synq-send/
