@@ -95,7 +95,9 @@ export type StrategyPorts = {
   marketEvidence(strategy: DcaStrategy): Promise<MarketEvidence>;
   buildAction: StrategyActivities['buildDcaAction'];
   ticks: { record: FileTickStore['record'] };
-  evaluator?: typeof evaluateDcaDeterministic;
+  evaluator?: (
+    input: Parameters<typeof evaluateDcaDeterministic>[0],
+  ) => DcaEvaluation | Promise<DcaEvaluation>;
 };
 
 export function createStrategyActivities(

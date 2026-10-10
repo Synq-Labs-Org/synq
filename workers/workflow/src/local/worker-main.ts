@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DefaultLogger, NativeConnection, Runtime } from '@temporalio/worker';
 import { loadWorkflowConfig, type WorkflowFamily } from '../config.js';
@@ -17,7 +18,8 @@ import { openLocalRuntime } from './runtime.js';
 
 /**
  * Worker process for the local-anvil runtime: `node --import tsx worker-main.ts <manifest.json>`.
- * SYNQ_WORKFLOW_CRASH_AT arms one instrumented point (crash harness only).
+ * SYNQ_WORKFLOW_CRASH_AT arms one instrumented point (crash harness only). SYNQ_DCA_POLICY_FILE (JSON map of
+ * strategyId to DCA policy) binds the deterministic strategy engine as the DCA evaluator.
  */
 async function main(): Promise<void> {
   const manifestPath = process.argv[2];
@@ -46,6 +48,13 @@ async function main(): Promise<void> {
     faults,
     allowMainnetBroadcast: config.allowMainnetBroadcast,
     workerId: process.env.SYNQ_WORKFLOW_WORKER_ID ?? 'local-workflow-worker',
+    ...(process.env.SYNQ_DCA_POLICY_FILE
+      ? {
+          dcaPolicies: JSON.parse(
+            readFileSync(resolve(process.env.SYNQ_DCA_POLICY_FILE), 'utf8'),
+          ) as Record<string, unknown>,
+        }
+      : {}),
   });
   const connection = await NativeConnection.connect({
     address: config.address,

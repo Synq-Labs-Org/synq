@@ -56,6 +56,8 @@ import {
   createStrategyActivities,
 } from '../activities/strategy.js';
 import { FileAutonomyFreeze } from '../activities/freeze.js';
+import { localDcaContext } from './dca-context.js';
+import { engineDcaEvaluator } from '../activities/dca-engine.js';
 import { NO_FAULTS, type FaultHooks } from '../activities/faults.js';
 import type { SynqActivities } from '../activities/types.js';
 import { unconfiguredPorts } from '../activities/unconfigured.js';
@@ -103,6 +105,7 @@ export async function openLocalRuntime(
     workerId?: string;
     faults?: FaultHooks;
     allowMainnetBroadcast?: boolean;
+    dcaPolicies?: Readonly<Record<string, unknown>>;
   } = {},
 ): Promise<LocalRuntime> {
   const faults = options.faults ?? NO_FAULTS;
@@ -521,6 +524,13 @@ export async function openLocalRuntime(
       return { start, workflowId: actionWorkflowIdFor(start.intent) };
     },
     ticks,
+    ...(options.dcaPolicies
+      ? {
+          evaluator: engineDcaEvaluator(
+            localDcaContext(manifest, ticks, options.dcaPolicies),
+          ),
+        }
+      : {}),
   });
   const activities = withHeartbeats({
     ...unconfiguredPorts(),

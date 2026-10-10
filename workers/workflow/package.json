@@ -25,6 +25,7 @@
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
+    "@synq/strategy-engine": "workspace:*",
     "@temporalio/activity": "1.24.0",
     "@temporalio/client": "1.24.0",
     "@temporalio/common": "1.24.0",

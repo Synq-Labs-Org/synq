@@ -3,6 +3,7 @@ export * from './guard.js';
 export * from './faults.js';
 export * from './economic.js';
 export * from './strategy.js';
+export * from './dca-engine.js';
 export * from './freeze.js';
 export * from './operations.js';
 export * from './approval.js';
