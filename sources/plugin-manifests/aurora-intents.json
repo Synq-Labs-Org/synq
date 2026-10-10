@@ -1,0 +1,28 @@
+{
+  "id": "aurora-intents",
+  "version": "0.1.0",
+  "capabilities": [
+    "QUOTE",
+    "CROSS_CHAIN_FUND"
+  ],
+  "chains": [
+    143
+  ],
+  "riskClass": "FINANCIAL_EXECUTION",
+  "requiresSimulation": true,
+  "maxGrantTtlSeconds": 120,
+  "dependencies": {},
+  "sourceDocs": [
+    "https://intents.aurora.dev"
+  ],
+  "sourceIds": [
+    "S036"
+  ],
+  "health": {
+    "maxStalenessSeconds": 60,
+    "checks": [
+      "PROVIDER_API",
+      "CREDENTIALS"
+    ]
+  }
+}

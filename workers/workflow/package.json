@@ -1,0 +1,40 @@
+{
+  "name": "@synq/workflow-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./workflows": "./src/workflows/index.ts",
+    "./client": "./src/client.ts",
+    "./config": "./src/config.ts",
+    "./activities": "./src/activities/index.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/api": "workspace:*",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/demo": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/execution-worker": "workspace:*",
+    "@synq/identity": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/plugin-sdk": "workspace:*",
+    "@synq/read-model": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/common": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0",
+    "pg": "8.18.0",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@temporalio/testing": "1.24.0"
+  }
+}

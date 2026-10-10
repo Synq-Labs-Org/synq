@@ -16,3 +16,5 @@ artifacts/testnet-e2e/
 .claude/
 test-results/
 playwright-report/
+.synq-dev/
+artifacts/brain-demo/

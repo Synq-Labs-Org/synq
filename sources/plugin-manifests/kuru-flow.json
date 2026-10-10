@@ -1,0 +1,29 @@
+{
+  "id": "kuru-flow",
+  "version": "0.1.0",
+  "capabilities": [
+    "READ_MARKET",
+    "QUOTE",
+    "SPOT_TRADE"
+  ],
+  "chains": [
+    143
+  ],
+  "riskClass": "FINANCIAL_EXECUTION",
+  "requiresSimulation": true,
+  "maxGrantTtlSeconds": 120,
+  "dependencies": {},
+  "sourceDocs": [
+    "https://docs.kuru.io"
+  ],
+  "sourceIds": [
+    "S025"
+  ],
+  "health": {
+    "maxStalenessSeconds": 60,
+    "checks": [
+      "PROVIDER_API",
+      "QUOTE_SOURCE"
+    ]
+  }
+}

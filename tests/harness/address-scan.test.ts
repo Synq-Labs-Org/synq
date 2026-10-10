@@ -18,6 +18,7 @@ const ALLOWED_PATHS = [
   /^bounty-evidence\//,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
+  /^sources\/research\/2026-10-10-(?:perpl-intents-ausd|kuru-chainlink-cre|mastra-temporal-models)\.md$/,
   /^adrs\//,
   /^docs\//,
   /(^|\/)README\.md$/,
@@ -50,6 +51,7 @@ it('P00-004 no real address is hard-coded outside the chain registry and evidenc
     [
       'indexer/envio/.env.example',
       'packages/kernel/src/index.ts',
+      'sources/research/unreviewed-provider.md',
       'reports/evidence/run.json',
       'tests/kernel/fixtures.ts',
     ],
@@ -61,6 +63,7 @@ it('P00-004 no real address is hard-coded outside the chain registry and evidenc
   expect(planted).toEqual([
     `indexer/envio/.env.example: ${real}`,
     `packages/kernel/src/index.ts: ${real}`,
+    `sources/research/unreviewed-provider.md: ${real}`,
   ]);
 });
 
