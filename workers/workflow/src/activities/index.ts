@@ -7,3 +7,5 @@ export * from './freeze.js';
 export * from './operations.js';
 export * from './approval.js';
 export * from './unconfigured.js';
+
+export * from './control.js';

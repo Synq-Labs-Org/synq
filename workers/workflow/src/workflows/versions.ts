@@ -1,7 +1,7 @@
 import { patched } from '@temporalio/workflow';
 
 /**
- * In-flight-safe workflow changes (ADR-0014). Each id stays until every history recorded without it
+ * In-flight-safe workflow changes (ADR-0015). Each id stays until every history recorded without it
  * has closed; then the call becomes deprecatePatch(id), and finally the branch and the id go away.
  */
 export const PATCHES = {

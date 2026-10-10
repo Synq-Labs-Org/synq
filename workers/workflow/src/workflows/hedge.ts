@@ -1,3 +1,4 @@
+import { createControlAuthorizer } from './control.js';
 import {
   allHandlersFinished,
   condition,
@@ -48,6 +49,7 @@ const TERMINAL = ['FILLED', 'CANCELLED', 'REJECTED'];
 
 /** Hedge orchestration skeleton: venue specifics live behind HedgeActivities. The client order id is the idempotency key. */
 export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
+  const authorize = createControlAuthorizer(input.groupId);
   const poll = input.pollSeconds ?? 10;
   const acts = proxyActivities<HedgeActivities>({
     startToCloseTimeout: seconds(input.activityTimeoutSeconds ?? 30),
@@ -57,6 +59,10 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
       maximumInterval: '30s',
       nonRetryableErrorTypes: [...NON_RETRYABLE],
     },
+  });
+  const mutations = proxyActivities<HedgeActivities>({
+    startToCloseTimeout: seconds(input.activityTimeoutSeconds ?? 30),
+    retry: { maximumAttempts: 1 },
   });
   const s: HedgeState = {
     hedgeId: input.hedgeId,
@@ -73,7 +79,8 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   setHandler(nextScheduledEventQuery, () => s.nextEvent);
   setHandler(
     cancelUpdate,
-    () => {
+    async (request) => {
+      await authorize('CANCEL', request);
       s.cancelRequested = true;
       return { accepted: true as const, at: new Date().toISOString() };
     },
@@ -104,12 +111,16 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   });
   s.plan = plan;
   if (plan.action === 'NONE' || s.cancelRequested) return done('NO_ACTION');
-  s.clientOrderId = `synq.${input.hedgeId}.${plan.action.toLowerCase()}`;
-  s.order = await acts.submitHedgeOrder({
-    groupId: input.groupId,
-    clientOrderId: s.clientOrderId,
-    plan,
-  });
+  s.clientOrderId = `synq.${input.groupId}.${input.hedgeId}.${plan.action.toLowerCase()}`;
+  try {
+    s.order = await mutations.submitHedgeOrder({
+      groupId: input.groupId,
+      clientOrderId: s.clientOrderId,
+      plan,
+    });
+  } catch {
+    s.order = await acts.hedgeOrderStatus({ clientOrderId: s.clientOrderId });
+  }
   let cancelSent = false;
   for (
     let i = 0;
@@ -118,7 +129,15 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   ) {
     if (s.cancelRequested && !cancelSent) {
       cancelSent = true;
-      s.order = await acts.cancelHedgeOrder({ clientOrderId: s.clientOrderId });
+      try {
+        s.order = await mutations.cancelHedgeOrder({
+          clientOrderId: s.clientOrderId,
+        });
+      } catch {
+        s.order = await acts.hedgeOrderStatus({
+          clientOrderId: s.clientOrderId,
+        });
+      }
       continue;
     }
     s.nextEvent = { kind: 'HEDGE_POLL', at: Date.now() + poll * 1000 };
@@ -131,6 +150,7 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   });
   s.reconciled = rec.reconciled;
   s.position = rec.position;
-  if (!TERMINAL.includes(s.order.status)) return done('UNRESOLVED');
+  if (!rec.reconciled || !TERMINAL.includes(s.order.status))
+    return done('UNRESOLVED');
   return done(s.order.status as 'FILLED' | 'CANCELLED' | 'REJECTED');
 }

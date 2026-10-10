@@ -1,3 +1,4 @@
+import type { Actor, ControlAuthorization } from '../workflows/messages.js';
 import type {
   ActionState,
   BoundActionIntent,
@@ -7,6 +8,7 @@ import type {
   RiskPacket,
   Simulation,
   StartActionExecution,
+  StartMandateApproval,
   TxState,
   VerifiedApproval,
 } from '@synq/schemas';
@@ -147,6 +149,9 @@ export type MandateApprovalSubmission = {
 };
 
 export interface ApprovalActivities {
+  loadMandateProposal(input: {
+    proposalId: string;
+  }): Promise<{ proposal: StartMandateApproval; digest: Hex } | null>;
   verifyMandateApproval(input: {
     proposalId: string;
     mandateHash: Hex;
@@ -348,7 +353,29 @@ export interface OperationsActivities {
   }): Promise<{ paused: boolean; block: string }>;
 }
 
-export type SynqActivities = EconomicActivities &
+export type WorkflowControlRequest = {
+  groupId: string;
+  workflowId: string;
+  operation:
+    | 'CANCEL'
+    | 'REJECT'
+    | 'PAUSE'
+    | 'RESUME'
+    | 'RESOLVE_RETRY'
+    | 'RESOLVE_ABANDON'
+    | 'RESUME_EMERGENCY';
+  requestedBy: Actor;
+  reason: string;
+  authorization?: ControlAuthorization;
+};
+export interface ControlActivities {
+  authorizeWorkflowControl(
+    input: WorkflowControlRequest,
+  ): Promise<{ authorized: boolean }>;
+}
+
+export type SynqActivities = ControlActivities &
+  EconomicActivities &
   ApprovalActivities &
   StrategyActivities &
   HedgeActivities &

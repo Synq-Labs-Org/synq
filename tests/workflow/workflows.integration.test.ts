@@ -17,7 +17,10 @@ import type {
   OperationsActivities,
   StrategyActivities,
 } from '../../workers/workflow/src/activities/types.js';
-import { createApprovalActivities } from '../../workers/workflow/src/activities/approval.js';
+import {
+  mandateApprovalDigest,
+  createApprovalActivities,
+} from '../../workers/workflow/src/activities/approval.js';
 import { FileAutonomyFreeze } from '../../workers/workflow/src/activities/freeze.js';
 import {
   createStrategyActivities,
@@ -40,13 +43,16 @@ import { eventually, startTemporal, testConfig } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
 import { fakeEconomic } from './harness/fake-economic.js';
 import { startFixture } from './harness/fixtures.js';
+import { fixtureControls } from './harness/controls.js';
 
 const ops = { principalId: 'member_ops', kind: 'HUMAN' as const };
 let env: TestWorkflowEnvironment;
 let dir: string;
+let controls: ReturnType<typeof fixtureControls>;
 beforeAll(async () => {
   env = await startTemporal();
   dir = mkdtempSync(join(tmpdir(), 'synq-wf-units-'));
+  controls = fixtureControls(join(dir, 'controls'), ['g']);
 });
 afterAll(async () => {
   await env?.teardown();
@@ -68,7 +74,12 @@ describe('MandateApprovalWorkflow', () => {
     let observed = 0;
     const notes: string[] = [];
     const applied: number[] = [];
+    let proposal: StartMandateApproval;
     const approval: ApprovalActivities = createApprovalActivities({
+      resolveProposal: async (proposalId) =>
+        proposal?.proposalId === proposalId
+          ? { proposal, membershipEpoch: 4, requiredApprovals: 2 }
+          : null,
       members: async () => members,
       observeMandate: async () => ({
         observed: ++observed >= 3,
@@ -85,7 +96,7 @@ describe('MandateApprovalWorkflow', () => {
     });
     const config = testConfig('mandate');
     await withWorkers(env, config, approval, async () => {
-      const input: StartMandateApproval = {
+      const input: StartMandateApproval = (proposal = {
         schemaVersion: 1,
         proposalId: id('proposal'),
         kind: 'SUPERSEDE',
@@ -101,7 +112,7 @@ describe('MandateApprovalWorkflow', () => {
         expiresAt: Math.floor(Date.now() / 1000) + 600,
         requestedBy: { principalId: 'brain' as never, kind: 'AGENT' },
         correlationId: 'corr_mandate' as never,
-      };
+      });
       const handle = await env.client.workflow.start(
         'MandateApprovalWorkflow',
         {
@@ -111,7 +122,15 @@ describe('MandateApprovalWorkflow', () => {
         },
       );
       const sign = (i: number) =>
-        owners[i]!.signMessage({ message: { raw: mandateHash } });
+        owners[i]!.signMessage({
+          message: {
+            raw: mandateApprovalDigest({
+              proposal,
+              membershipEpoch: 4,
+              requiredApprovals: 2,
+            }),
+          },
+        });
       const approve = async (memberId: string, signature: string) =>
         handle.executeUpdate(approveMandateUpdate, {
           args: [{ memberId, signature }],
@@ -244,19 +263,24 @@ describe('DCAWorkflow tick', () => {
       [1, 'DEGRADED', 'RISK_DEGRADED'],
     ] as const) {
       const { acts, built } = strategyActivities(version, risk);
-      await withWorkers(env, config, acts, async () => {
-        const result = await env.client.workflow.execute('DCAWorkflow', {
-          workflowId: id('synq.dca.unit.tick'),
-          taskQueue: config.taskQueues.strategy,
-          args: [{ strategy }],
-        });
-        expect(result).toMatchObject({
-          decision: 'ESCALATE',
-          childWorkflowId: null,
-          reasons: [reason],
-        });
-        expect(built).toEqual([]);
-      });
+      await withWorkers(
+        env,
+        config,
+        { ...acts, ...controls.activities },
+        async () => {
+          const result = await env.client.workflow.execute('DCAWorkflow', {
+            workflowId: id('synq.dca.unit.tick'),
+            taskQueue: config.taskQueues.strategy,
+            args: [{ strategy }],
+          });
+          expect(result).toMatchObject({
+            decision: 'ESCALATE',
+            childWorkflowId: null,
+            reasons: [reason],
+          });
+          expect(built).toEqual([]);
+        },
+      );
     }
   });
 });
@@ -266,7 +290,7 @@ describe('HedgeWorkflow and FundingWorkflow skeletons', () => {
     const calls: string[] = [];
     let i = 0;
     const view = (status: HedgeOrderView['status']): HedgeOrderView => ({
-      clientOrderId: 'synq.h1.open',
+      clientOrderId: 'synq.g.h1.open',
       status,
       filledSize: status === 'FILLED' ? '5' : '0',
     });
@@ -302,40 +326,52 @@ describe('HedgeWorkflow and FundingWorkflow skeletons', () => {
   it('submits one idempotent order, polls to a fill and reconciles', async () => {
     const config = testConfig('hedge');
     const { acts, calls } = hedge(['PARTIALLY_FILLED', 'FILLED']);
-    await withWorkers(env, config, acts, async () => {
-      const result = await env.client.workflow.execute('HedgeWorkflow', {
-        workflowId: id('hedge'),
-        taskQueue: config.taskQueues.strategy,
-        args: [{ groupId: 'g', hedgeId: 'h1', pollSeconds: 1 }],
-      });
-      expect(result).toMatchObject({
-        outcome: 'FILLED',
-        reconciled: true,
-        clientOrderId: 'synq.h1.open',
-      });
-      expect(calls).toEqual(['submit:synq.h1.open']);
-    });
+    await withWorkers(
+      env,
+      config,
+      { ...acts, ...controls.activities },
+      async () => {
+        const result = await env.client.workflow.execute('HedgeWorkflow', {
+          workflowId: id('hedge'),
+          taskQueue: config.taskQueues.strategy,
+          args: [{ groupId: 'g', hedgeId: 'h1', pollSeconds: 1 }],
+        });
+        expect(result).toMatchObject({
+          outcome: 'FILLED',
+          reconciled: true,
+          clientOrderId: 'synq.g.h1.open',
+        });
+        expect(calls).toEqual(['submit:synq.g.h1.open']);
+      },
+    );
   });
 
   it('a cancel update cancels the resting order once', async () => {
     const config = testConfig('hedge-cancel');
     const { acts, calls } = hedge(['ACCEPTED']);
-    await withWorkers(env, config, acts, async () => {
-      const handle = await env.client.workflow.start('HedgeWorkflow', {
-        workflowId: id('hedge'),
-        taskQueue: config.taskQueues.strategy,
-        args: [{ groupId: 'g', hedgeId: 'h1', pollSeconds: 1 }],
-      });
-      await eventually(
-        () => handle.query(stateQuery) as Promise<{ order: unknown }>,
-        (s) => s.order !== null,
-      );
-      await handle.executeUpdate(cancelUpdate, {
-        args: [{ requestedBy: ops, reason: 'risk off' }],
-      });
-      expect(await handle.result()).toMatchObject({ outcome: 'CANCELLED' });
-      expect(calls.filter((c) => c === 'cancel')).toHaveLength(1);
-    });
+    await withWorkers(
+      env,
+      config,
+      { ...acts, ...controls.activities },
+      async () => {
+        const handle = await env.client.workflow.start('HedgeWorkflow', {
+          workflowId: id('hedge'),
+          taskQueue: config.taskQueues.strategy,
+          args: [{ groupId: 'g', hedgeId: 'h1', pollSeconds: 1 }],
+        });
+        await eventually(
+          () => handle.query(stateQuery) as Promise<{ order: unknown }>,
+          (s) => s.order !== null,
+        );
+        await handle.executeUpdate(cancelUpdate, {
+          args: [
+            await controls.sign('g', handle.workflowId, 'CANCEL', 'risk off'),
+          ],
+        });
+        expect(await handle.result()).toMatchObject({ outcome: 'CANCELLED' });
+        expect(calls.filter((c) => c === 'cancel')).toHaveLength(1);
+      },
+    );
   });
 
   it('funding picks the best available live quote, waits for settlement and credits once; no route means no movement', async () => {
@@ -389,7 +425,7 @@ describe('HedgeWorkflow and FundingWorkflow skeletons', () => {
           credited: true,
           selected: { route: 'AUSD_OFT' },
         });
-        expect(executed).toEqual(['synq.funding.f1:AUSD_OFT']);
+        expect(executed).toEqual(['synq.funding.g.f1:AUSD_OFT']);
       },
     );
     await withWorkers(
@@ -424,22 +460,30 @@ describe('ReconciliationWorkflow and EmergencyPauseWorkflow', () => {
         };
       },
     };
-    await withWorkers(env, config, acts, async () => {
-      const handle = await env.client.workflow.start('ReconciliationWorkflow', {
-        workflowId: id('recon'),
-        taskQueue: config.taskQueues.operations,
-        args: [{ intervalSeconds: 1, sweeps: 3, sweepsPerRun: 2 }],
-      });
-      const result = await handle.result();
-      expect(sweeps).toBe(3);
-      expect(result).toMatchObject({
-        totals: { confirmed: 1, released: 3, unresolved: 0 },
-      });
-      const first = await env.client.workflow
-        .getHandle(handle.workflowId, handle.firstExecutionRunId)
-        .describe();
-      expect(first.status.name).toBe('CONTINUED_AS_NEW');
-    });
+    await withWorkers(
+      env,
+      config,
+      { ...acts, ...controls.activities },
+      async () => {
+        const handle = await env.client.workflow.start(
+          'ReconciliationWorkflow',
+          {
+            workflowId: id('recon'),
+            taskQueue: config.taskQueues.operations,
+            args: [{ intervalSeconds: 1, sweeps: 3, sweepsPerRun: 2 }],
+          },
+        );
+        const result = await handle.result();
+        expect(sweeps).toBe(3);
+        expect(result).toMatchObject({
+          totals: { confirmed: 1, released: 3, unresolved: 0 },
+        });
+        const first = await env.client.workflow
+          .getHandle(handle.workflowId, handle.firstExecutionRunId)
+          .describe();
+        expect(first.status.name).toBe('CONTINUED_AS_NEW');
+      },
+    );
   });
 
   it('freezes Synq autonomy immediately, hands owners the Safe pause and only an explicit resume unfreezes', async () => {
@@ -470,44 +514,61 @@ describe('ReconciliationWorkflow and EmergencyPauseWorkflow', () => {
         return { delivered: true };
       },
     };
-    await withWorkers(env, config, acts, async () => {
-      const handle = await env.client.workflow.start('EmergencyPauseWorkflow', {
-        workflowId: id('pause'),
-        taskQueue: config.taskQueues.operations,
-        args: [
+    await withWorkers(
+      env,
+      config,
+      { ...acts, ...controls.activities },
+      async () => {
+        const handle = await env.client.workflow.start(
+          'EmergencyPauseWorkflow',
           {
-            groupId: 'g',
-            incidentId: 'inc1',
-            reason: 'oracle anomaly',
-            requestedBy: ops,
-            pollSeconds: 1,
+            workflowId: id('pause'),
+            taskQueue: config.taskQueues.operations,
+            args: [
+              {
+                groupId: 'g',
+                incidentId: 'inc1',
+                reason: 'oracle anomaly',
+                requestedBy: ops,
+                pollSeconds: 1,
+              },
+            ],
           },
-        ],
-      });
-      await eventually(
-        () => freeze.status('g'),
-        (s) => s.frozen,
-      );
-      const paused = await eventually(
-        () =>
-          handle.query(stateQuery) as Promise<{
-            onchainPaused: boolean;
-            safePauseTransaction: unknown;
-          }>,
-        (s) => s.onchainPaused,
-      );
-      expect(paused.safePauseTransaction).toMatchObject({ data: '0x8456cb59' });
-      expect(notified).toEqual(['emergency.pause.sign-required']);
-      expect((await freeze.status('g')).frozen).toBe(true);
-      await handle.executeUpdate(resumeUpdate, {
-        args: [{ requestedBy: ops, reason: 'incident closed' }],
-      });
-      expect(await handle.result()).toMatchObject({
-        outcome: 'RESUMED',
-        frozen: false,
-      });
-      expect((await freeze.status('g')).frozen).toBe(false);
-    });
+        );
+        await eventually(
+          () => freeze.status('g'),
+          (s) => s.frozen,
+        );
+        const paused = await eventually(
+          () =>
+            handle.query(stateQuery) as Promise<{
+              onchainPaused: boolean;
+              safePauseTransaction: unknown;
+            }>,
+          (s) => s.onchainPaused,
+        );
+        expect(paused.safePauseTransaction).toMatchObject({
+          data: '0x8456cb59',
+        });
+        expect(notified).toEqual(['emergency.pause.sign-required']);
+        expect((await freeze.status('g')).frozen).toBe(true);
+        await handle.executeUpdate(resumeUpdate, {
+          args: [
+            await controls.sign(
+              'g',
+              handle.workflowId,
+              'RESUME_EMERGENCY',
+              'incident closed',
+            ),
+          ],
+        });
+        expect(await handle.result()).toMatchObject({
+          outcome: 'RESUMED',
+          frozen: false,
+        });
+        expect((await freeze.status('g')).frozen).toBe(false);
+      },
+    );
   });
 });
 

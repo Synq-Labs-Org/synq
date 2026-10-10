@@ -11,12 +11,28 @@ export type ApproveResult = {
   required: number;
   satisfied: boolean;
 };
-export type RejectInput = { memberId: string; reason: string };
-export type ControlInput = { requestedBy: Actor; reason: string };
+export type ControlAuthorization = {
+  commandId: string;
+  expiresAt: number;
+  membershipEpoch: number;
+  signature: `0x${string}`;
+};
+export type RejectInput = {
+  memberId: string;
+  reason: string;
+  requestedBy?: Actor;
+  authorization?: ControlAuthorization;
+};
+export type ControlInput = {
+  requestedBy: Actor;
+  reason: string;
+  authorization?: ControlAuthorization;
+};
 export type EscalationResolution = {
   resolvedBy: Actor;
   resolution: 'RETRY' | 'ABANDON';
   note: string;
+  authorization?: ControlAuthorization;
 };
 export type ControlResult = { accepted: true; at: string };
 

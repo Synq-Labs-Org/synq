@@ -1,3 +1,4 @@
+import { createControlAuthorizer } from './control.js';
 import {
   allHandlersFinished,
   condition,
@@ -49,6 +50,7 @@ export type EmergencyPauseState = {
 export async function EmergencyPauseWorkflow(
   input: EmergencyPauseInput,
 ): Promise<EmergencyPauseState> {
+  const authorize = createControlAuthorizer(input.groupId);
   const poll = input.pollSeconds ?? 15;
   const options = {
     startToCloseTimeout: seconds(input.activityTimeoutSeconds ?? 30),
@@ -78,8 +80,9 @@ export async function EmergencyPauseWorkflow(
   setHandler(nextScheduledEventQuery, () => s.nextEvent);
   setHandler(
     resumeUpdate,
-    ({ requestedBy }) => {
-      resume = requestedBy;
+    async (request) => {
+      await authorize('RESUME_EMERGENCY', request);
+      resume = request.requestedBy;
       return { accepted: true as const, at: new Date().toISOString() };
     },
     {
@@ -124,10 +127,11 @@ export async function EmergencyPauseWorkflow(
     if (s.onchainPaused) await condition(() => resume !== null);
     else await condition(() => resume !== null, seconds(poll));
   }
-  await ops.unfreezeAutonomy({
+  const unfrozen = await ops.unfreezeAutonomy({
     groupId: input.groupId,
     incidentId: input.incidentId,
   });
+  if (unfrozen.frozen) throw new Error('AUTONOMY_STILL_FROZEN');
   s.frozen = false;
   s.resumedBy = resume;
   s.outcome = 'RESUMED';

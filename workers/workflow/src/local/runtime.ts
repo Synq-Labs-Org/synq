@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import pg from 'pg';
 import {
   createPublicClient,
@@ -36,11 +36,16 @@ import { moduleAbi, registryAbi, tokenAbi } from '@synq/execution-worker/abi';
 import { indexedEvents } from '@synq/demo/src/events.js';
 import { localTransferPlugin } from '@synq/demo/src/local-transfer-plugin.js';
 import type { LocalSynq } from '@synq/demo/src/safe.js';
-import { SimulationSchema, StartActionExecutionSchema } from '@synq/schemas';
+import {
+  SimulationSchema,
+  StartActionExecutionSchema,
+  StartMandateApprovalSchema,
+} from '@synq/schemas';
 import {
   createEconomicActivities,
   type EconomicChainPort,
 } from '../activities/economic.js';
+import { createControlActivities } from '../activities/control.js';
 import { createOperationsActivities } from '../activities/operations.js';
 import {
   createApprovalActivities,
@@ -355,13 +360,62 @@ export async function openLocalRuntime(
       return { paused, block };
     },
   });
+  const controls = createControlActivities({
+    ledgerDirectory: `${manifest.freezeFile}.controls`,
+    directory: async (groupId) =>
+      identityStore.transaction(async (tx) => {
+        const group = await tx.getGroup(groupId);
+        if (!group || groupId !== manifest.groupId) return null;
+        const members = await tx.listMemberships(groupId);
+        return {
+          membershipEpoch: group.membershipEpoch,
+          members: members.map((m) => ({
+            principalId: m.principalId,
+            kind: ['MERA_HUMAN', 'LOCAL_FIXTURE'].includes(m.principalKind)
+              ? 'HUMAN'
+              : m.principalKind,
+            signer: m.signer,
+            active: m.status === 'ACTIVE',
+            owner: group.owners.some(
+              (o) => o.toLowerCase() === m.signer.toLowerCase(),
+            ),
+          })),
+        };
+      }),
+  });
   const approval = createApprovalActivities({
     members: async () =>
-      manifest.mandate.members.map((m) => ({
-        memberId: m.memberId,
-        signer: m.signer as Hex,
-      })),
-    async observeMandate({ mandateId, groupId, version, kind }) {
+      identityStore.transaction(async (tx) =>
+        (await tx.listMemberships(manifest.groupId))
+          .filter((m) => m.status === 'ACTIVE')
+          .map((m) => ({ memberId: m.memberId, signer: m.signer as Hex })),
+      ),
+    resolveProposal: async (proposalId) => {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(proposalId)) return null;
+      const path = `${manifest.outboxFile}.proposals/${proposalId}.json`;
+      if (!existsSync(path)) return null;
+      const proposal = StartMandateApprovalSchema.parse(
+        JSON.parse(readFileSync(path, 'utf8')),
+      );
+      if (proposal.mandateRef.groupId !== manifest.groupId) return null;
+      return identityStore.transaction(async (tx) => {
+        const group = await tx.getGroup(manifest.groupId);
+        if (!group) return null;
+        const current = kernel.kernel.mandate(
+          manifest.groupId,
+          proposal.mandateRef.mandateId,
+        );
+        return {
+          proposal,
+          membershipEpoch: group.membershipEpoch,
+          requiredApprovals: Math.max(
+            group.threshold,
+            current.approvalPolicy.quorum,
+          ),
+        };
+      });
+    },
+    async observeMandate({ mandateId, groupId, version, kind, mandateHash }) {
       const current = kernel.kernel.mandate(groupId, mandateId);
       const state = await client.readContract({
         address: manifest.registry,
@@ -372,18 +426,41 @@ export async function openLocalRuntime(
           onchainMandateId({ ...current, groupId, mandateId }),
         ],
       });
+      const configs = await client.getContractEvents({
+        address: manifest.registry,
+        abi: registryAbi,
+        eventName: 'MandateConfigured',
+        fromBlock: BigInt(manifest.deploymentBlock),
+        args: {
+          mandateId: onchainMandateId(current),
+          version: BigInt(version),
+        },
+      });
+      const bound = configs.some(
+        (event) =>
+          event.args.mandateHash === mandateHash &&
+          event.args.account?.toLowerCase() === manifest.account.toLowerCase(),
+      );
       const observed =
-        kind === 'REVOKE'
-          ? state.status !== 1
-          : Number(state.currentVersion) >= version;
+        bound &&
+        Number(state.currentVersion) === version &&
+        (kind === 'REVOKE' ? state.status === 2 : state.status === 1);
       return {
         observed,
         block: observed ? String(await client.getBlockNumber()) : null,
       };
     },
-    async applyMandate({ groupId, mandateId, version }) {
+    async applyMandate({ groupId, mandateId, version, mandateHash, kind }) {
       const current = kernel.kernel.mandate(groupId, mandateId);
-      return { applied: current.version >= version, version: current.version };
+      return {
+        applied:
+          current.version === version &&
+          artifactHash(current) === mandateHash &&
+          (kind === 'REVOKE'
+            ? current.status === 'REVOKED'
+            : current.status === 'ACTIVE'),
+        version: current.version,
+      };
     },
     notify: outboxNotifier(manifest.outboxFile),
   });
@@ -449,6 +526,7 @@ export async function openLocalRuntime(
     ...unconfiguredPorts(),
     ...economic,
     ...operations,
+    ...controls,
     ...approval,
     ...strategy,
   }) as SynqActivities;

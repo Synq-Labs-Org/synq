@@ -1,3 +1,4 @@
+import { createControlAuthorizer } from './control.js';
 import {
   allHandlersFinished,
   condition,
@@ -157,6 +158,7 @@ export async function ActionExecutionWorkflow(
   input: StartActionExecution,
   tuning: Partial<ActionTuning> = {},
 ): Promise<ActionExecutionResult> {
+  const authorize = createControlAuthorizer(input.intent.groupId);
   const t: ActionTuning = { ...DEFAULT_ACTION_TUNING, ...tuning };
   const retry = {
     initialInterval: seconds(t.retryInitialSeconds),
@@ -279,7 +281,16 @@ export async function ActionExecutionWorkflow(
   });
   setHandler(
     rejectUpdate,
-    ({ memberId, reason }) => {
+    async (request) => {
+      const { memberId, reason } = request;
+      await authorize('REJECT', {
+        requestedBy: request.requestedBy ?? {
+          principalId: memberId,
+          kind: 'HUMAN',
+        },
+        reason,
+        authorization: request.authorization,
+      });
       s.cancellation = { by: null, memberId, reason };
       return accepted();
     },
@@ -299,7 +310,9 @@ export async function ActionExecutionWorkflow(
   const cancellable = () => !submissionStarted && s.outcome === null;
   setHandler(
     cancelUpdate,
-    (request) => {
+    async (request) => {
+      await authorize('CANCEL', request);
+      if (!cancellable()) throw new Error('CANCEL_AFTER_SUBMISSION_FORBIDDEN');
       cancel(request);
       return accepted();
     },
@@ -312,14 +325,20 @@ export async function ActionExecutionWorkflow(
       },
     },
   );
-  setHandler(cancelSignal, (request) => {
-    if (cancellable()) cancel(request);
+  setHandler(cancelSignal, async (request) => {
+    try {
+      await authorize('CANCEL', request);
+      if (cancellable()) cancel(request);
+    } catch {
+      return;
+    }
   });
   setHandler(
     pauseUpdate,
-    ({ requestedBy }) => {
+    async (request) => {
+      await authorize('PAUSE', request);
       s.paused = true;
-      s.pausedBy = requestedBy;
+      s.pausedBy = request.requestedBy;
       return accepted();
     },
     {
@@ -332,7 +351,8 @@ export async function ActionExecutionWorkflow(
   );
   setHandler(
     resumeUpdate,
-    () => {
+    async (request) => {
+      await authorize('RESUME', request);
       s.paused = false;
       s.pausedBy = null;
       return accepted();
@@ -348,7 +368,15 @@ export async function ActionExecutionWorkflow(
   );
   setHandler(
     resolveEscalationUpdate,
-    (r) => {
+    async (r) => {
+      await authorize(
+        r.resolution === 'RETRY' ? 'RESOLVE_RETRY' : 'RESOLVE_ABANDON',
+        {
+          requestedBy: r.resolvedBy,
+          reason: r.note,
+          authorization: r.authorization,
+        },
+      );
       resolution = r;
       return accepted();
     },

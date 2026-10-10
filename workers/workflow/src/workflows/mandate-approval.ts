@@ -1,5 +1,7 @@
+import { createControlAuthorizer } from './control.js';
 import {
   allHandlersFinished,
+  ApplicationFailure,
   condition,
   defineUpdate,
   proxyActivities,
@@ -32,7 +34,8 @@ export type MandateApprovalOutcome =
   | 'APPLIED'
   | 'REJECTED'
   | 'CANCELLED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'UNRESOLVED';
 export type MandateApprovalState = {
   proposalId: string;
   kind: StartMandateApproval['kind'];
@@ -46,10 +49,21 @@ export type MandateApprovalState = {
   outcome: MandateApprovalOutcome | null;
 };
 
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object')
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, val]) => `${JSON.stringify(key)}:${canonical(val)}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
+};
+
 export async function MandateApprovalWorkflow(
   input: StartMandateApproval,
   tuning: { pollSeconds?: number; activityTimeoutSeconds?: number } = {},
 ): Promise<MandateApprovalState> {
+  const authorize = createControlAuthorizer(input.mandateRef.groupId);
   const poll = tuning.pollSeconds ?? 30;
   const acts = proxyActivities<ApprovalActivities>({
     startToCloseTimeout: seconds(tuning.activityTimeoutSeconds ?? 30),
@@ -74,6 +88,17 @@ export async function MandateApprovalWorkflow(
     outcome: null,
   };
   let stopped: 'REJECTED' | 'CANCELLED' | null = null;
+  let trustedDigest: string | null = null;
+  const currentProposal = async () => {
+    const current = await acts.loadMandateProposal({
+      proposalId: input.proposalId,
+    });
+    return (
+      trustedDigest !== null &&
+      current?.digest === trustedDigest &&
+      canonical(current.proposal) === canonical(input)
+    );
+  };
   const accepted = (): ControlResult => ({
     accepted: true,
     at: new Date().toISOString(),
@@ -88,6 +113,20 @@ export async function MandateApprovalWorkflow(
   setHandler(
     approveMandateUpdate,
     async ({ memberId, signature }) => {
+      await condition(() => trustedDigest !== null || s.outcome !== null);
+      if (trustedDigest === null)
+        throw ApplicationFailure.nonRetryable(
+          'Proposal is not ready.',
+          'PROPOSAL_NOT_READY',
+        );
+      if (!(await currentProposal())) {
+        s.approvals = [];
+        stopped = 'REJECTED';
+        throw ApplicationFailure.nonRetryable(
+          'Proposal context changed.',
+          'PROPOSAL_CONTEXT_CHANGED',
+        );
+      }
       if (s.approvals.some((a) => a.memberId === memberId)) return summary();
       const verdict = await acts.verifyMandateApproval({
         proposalId: input.proposalId,
@@ -122,7 +161,15 @@ export async function MandateApprovalWorkflow(
   );
   setHandler(
     rejectUpdate,
-    () => {
+    async (request) => {
+      await authorize('REJECT', {
+        requestedBy: request.requestedBy ?? {
+          principalId: request.memberId,
+          kind: 'HUMAN',
+        },
+        reason: request.reason,
+        authorization: request.authorization,
+      });
       stopped = 'REJECTED';
       return accepted();
     },
@@ -139,7 +186,8 @@ export async function MandateApprovalWorkflow(
   );
   setHandler(
     cancelUpdate,
-    () => {
+    async (request) => {
+      await authorize('CANCEL', request);
       stopped = 'CANCELLED';
       return accepted();
     },
@@ -169,6 +217,13 @@ export async function MandateApprovalWorkflow(
     return s;
   };
 
+  const trusted = await acts.loadMandateProposal({
+    proposalId: input.proposalId,
+  });
+  const sameProposal =
+    trusted && canonical(trusted.proposal) === canonical(input);
+  if (!sameProposal) return done('REJECTED');
+  trustedDigest = trusted.digest;
   await acts.notify({
     channel: 'APPROVERS',
     subject: 'mandate.approval.requested',
@@ -186,8 +241,10 @@ export async function MandateApprovalWorkflow(
   if (stopped) return done(stopped);
   if (!decided) return done('EXPIRED');
 
+  if (!(await currentProposal())) return done('REJECTED');
   s.waitingFor = 'ONCHAIN_GOVERNANCE';
   for (;;) {
+    if (!(await currentProposal())) return done('REJECTED');
     const seen = await acts.observeMandateOnchain({
       groupId: input.mandateRef.groupId,
       mandateId: input.mandateRef.mandateId,
@@ -195,6 +252,7 @@ export async function MandateApprovalWorkflow(
       mandateHash: s.mandateHash,
       kind: input.kind,
     });
+    if (!(await currentProposal())) return done('REJECTED');
     if (seen.observed) {
       s.onchainBlock = seen.block;
       break;
@@ -206,7 +264,8 @@ export async function MandateApprovalWorkflow(
     };
     await sleep(seconds(poll));
   }
-  await acts.applyMandateToKernel({
+  if (!(await currentProposal())) return done('REJECTED');
+  const applied = await acts.applyMandateToKernel({
     groupId: input.mandateRef.groupId,
     mandateId: input.mandateRef.mandateId,
     version: input.mandateRef.version,
@@ -214,5 +273,7 @@ export async function MandateApprovalWorkflow(
     kind: input.kind,
     securitySensitive: input.securitySensitive,
   });
+  if (!applied.applied || applied.version !== input.mandateRef.version)
+    return done('UNRESOLVED');
   return done('APPLIED');
 }

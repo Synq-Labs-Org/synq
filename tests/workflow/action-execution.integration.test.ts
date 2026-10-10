@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TestWorkflowEnvironment } from '@temporalio/testing';
 import {
@@ -28,6 +31,9 @@ import { eventually, startTemporal, testConfig } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
 import { fakeEconomic, type FakeOptions } from './harness/fake-economic.js';
 import { startFixture } from './harness/fixtures.js';
+import { fixtureControls } from './harness/controls.js';
+import type { WorkflowControlRequest } from '../../workers/workflow/src/activities/types.js';
+import type { ControlInput } from '../../workers/workflow/src/workflows/messages.js';
 
 const FAST: Partial<ActionTuning> = {
   activityTimeoutSeconds: 5,
@@ -42,11 +48,16 @@ const FAST: Partial<ActionTuning> = {
 const human = { principalId: 'member_ops', kind: 'HUMAN' as const };
 
 let env: TestWorkflowEnvironment;
+let controlDir: string;
+let controls: ReturnType<typeof fixtureControls>;
 beforeAll(async () => {
   env = await startTemporal();
+  controlDir = mkdtempSync(join(tmpdir(), 'synq-action-controls-'));
+  controls = fixtureControls(controlDir, ['wf_group']);
 });
 afterAll(async () => {
   await env?.teardown();
+  if (controlDir) rmSync(controlDir, { recursive: true, force: true });
 });
 
 let seq = 0;
@@ -56,26 +67,48 @@ async function run(
     handle: WorkflowHandle<typeof ActionExecutionWorkflow>;
     fake: ReturnType<typeof fakeEconomic>;
     state: () => Promise<ActionWorkflowState>;
+    control: (
+      operation: WorkflowControlRequest['operation'],
+      reason: string,
+      principalId?: string,
+    ) => Promise<ControlInput>;
   }) => Promise<void>,
   input: { approvalTimeoutSeconds?: number } = {},
   tuning: Partial<ActionTuning> = {},
 ) {
   const config = testConfig('action');
   const fake = fakeEconomic(options);
-  await withWorkers(env, config, fake.activities, async () => {
-    seq++;
-    const start = { ...startFixture(`${Date.now()}${seq}`), ...input };
-    const handle = await env.client.workflow.start<
-      typeof ActionExecutionWorkflow
-    >('ActionExecutionWorkflow', {
-      workflowId: `test.action.${process.pid}.${seq}`,
-      taskQueue: config.taskQueues.economic,
-      args: [start, { ...FAST, ...tuning }],
-    });
-    const state = () =>
-      handle.query(stateQuery) as Promise<ActionWorkflowState>;
-    await body({ handle, fake, state });
-  });
+  await withWorkers(
+    env,
+    config,
+    { ...fake.activities, ...controls.activities },
+    async () => {
+      seq++;
+      const start = { ...startFixture(`${Date.now()}${seq}`), ...input };
+      const handle = await env.client.workflow.start<
+        typeof ActionExecutionWorkflow
+      >('ActionExecutionWorkflow', {
+        workflowId: `test.action.${process.pid}.${seq}`,
+        taskQueue: config.taskQueues.economic,
+        args: [start, { ...FAST, ...tuning }],
+      });
+      const state = () =>
+        handle.query(stateQuery) as Promise<ActionWorkflowState>;
+      await body({
+        handle,
+        fake,
+        state,
+        control: (operation, reason, principalId) =>
+          controls.sign(
+            start.intent.groupId,
+            handle.workflowId,
+            operation,
+            reason,
+            principalId,
+          ),
+      });
+    },
+  );
 }
 const awaitingApproval = (state: () => Promise<ActionWorkflowState>) =>
   eventually(state, (s) => s.waitingFor === 'APPROVAL');
@@ -210,14 +243,14 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
   });
 
   it('cancelling while approvals are pending ends the intent with no claim, signature or broadcast', async () => {
-    await run({}, async ({ handle, fake, state }) => {
+    await run({}, async ({ handle, fake, state, control }) => {
       await awaitingApproval(state);
       fake.approve('member_0');
       await handle.executeUpdate(approveUpdate, {
         args: [{ memberId: 'member_0', draftDigest: fake.DIGEST }],
       });
       await handle.executeUpdate(cancelUpdate, {
-        args: [{ requestedBy: human, reason: 'changed our mind' }],
+        args: [await control('CANCEL', 'changed our mind')],
       });
       const result = await handle.result();
       expect(result.outcome).toBe('CANCELLED');
@@ -231,10 +264,15 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
   });
 
   it('a member veto (reject) ends the intent before authorization', async () => {
-    await run({}, async ({ handle, state, fake }) => {
+    await run({}, async ({ handle, state, fake, control }) => {
       await awaitingApproval(state);
       await handle.executeUpdate(rejectUpdate, {
-        args: [{ memberId: 'member_2', reason: 'recipient unknown' }],
+        args: [
+          {
+            memberId: 'member_2',
+            ...(await control('REJECT', 'recipient unknown', 'member_2')),
+          },
+        ],
       });
       const result = await handle.result();
       expect(result.outcome).toBe('CANCELLED');
@@ -247,13 +285,13 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
     const claimLatch = new Promise<void>((r) => (release = r));
     await run(
       { autoAuthorize: true, validUntilSeconds: 2, claimLatch },
-      async ({ handle, fake, state }) => {
+      async ({ handle, fake, state, control }) => {
         await eventually(
           async () => fake.count('claimAndPrepare'),
           (n) => n === 1,
         );
         await handle.executeUpdate(cancelUpdate, {
-          args: [{ requestedBy: human, reason: 'operator stop' }],
+          args: [await control('CANCEL', 'operator stop')],
         });
         release();
         await eventually(state, (s) => s.waitingFor === 'RESERVATION_RELEASE');
@@ -271,10 +309,10 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
   });
 
   it('pause holds the economic path until resume', async () => {
-    await run({}, async ({ handle, fake, state }) => {
+    await run({}, async ({ handle, fake, state, control }) => {
       await awaitingApproval(state);
       await handle.executeUpdate(pauseUpdate, {
-        args: [{ requestedBy: human, reason: 'investigating' }],
+        args: [await control('PAUSE', 'investigating')],
       });
       fake.approve('member_0');
       fake.approve('member_1');
@@ -286,23 +324,26 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
       expect(fake.count('authorize')).toBe(1);
       expect(fake.count('claimAndPrepare')).toBe(0);
       await handle.executeUpdate(resumeUpdate, {
-        args: [{ requestedBy: human, reason: 'clear' }],
+        args: [await control('RESUME', 'clear')],
       });
       expect((await handle.result()).outcome).toBe('SETTLED');
     });
   });
 
   it('an emergency autonomy freeze parks the intent until an explicit resume', async () => {
-    await run({ autoAuthorize: true }, async ({ handle, fake, state }) => {
-      fake.state.frozen = true;
-      await eventually(state, (s) => s.waitingFor === 'RESUME' && s.paused);
-      expect(fake.count('attestEvidence')).toBe(0);
-      fake.state.frozen = false;
-      await handle.executeUpdate(resumeUpdate, {
-        args: [{ requestedBy: human, reason: 'incident closed' }],
-      });
-      expect((await handle.result()).outcome).toBe('SETTLED');
-    });
+    await run(
+      { autoAuthorize: true },
+      async ({ handle, fake, state, control }) => {
+        fake.state.frozen = true;
+        await eventually(state, (s) => s.waitingFor === 'RESUME' && s.paused);
+        expect(fake.count('attestEvidence')).toBe(0);
+        fake.state.frozen = false;
+        await handle.executeUpdate(resumeUpdate, {
+          args: [await control('RESUME', 'incident closed')],
+        });
+        expect((await handle.result()).outcome).toBe('SETTLED');
+      },
+    );
   });
 
   it('provider 500s on confirmation back off exponentially and retry without resubmitting', async () => {
@@ -359,7 +400,7 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
   it('a reverted execution escalates and can be abandoned by a human', async () => {
     await run(
       { autoAuthorize: true, revert: true },
-      async ({ handle, state }) => {
+      async ({ handle, state, control }) => {
         await eventually(state, (s) => s.waitingFor === 'ESCALATION');
         expect((await state()).escalation?.reason).toContain(
           'EXECUTION_REVERTED',
@@ -370,6 +411,12 @@ describe('ActionExecutionWorkflow messages and lifecycle', () => {
               resolvedBy: human,
               resolution: 'ABANDON',
               note: 'reverted on chain; nothing moved',
+              authorization: (
+                await control(
+                  'RESOLVE_ABANDON',
+                  'reverted on chain; nothing moved',
+                )
+              ).authorization,
             },
           ],
         });

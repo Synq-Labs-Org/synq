@@ -1,3 +1,4 @@
+import { authorizeControl } from './control.js';
 import {
   allHandlersFinished,
   condition,
@@ -60,11 +61,15 @@ export async function FundingWorkflow(
       nonRetryableErrorTypes: [...NON_RETRYABLE],
     },
   });
+  const mutations = proxyActivities<FundingActivities>({
+    startToCloseTimeout: seconds(input.activityTimeoutSeconds ?? 30),
+    retry: { maximumAttempts: 1 },
+  });
   const s: FundingState = {
     fundingId: input.fundingId,
     quotes: [],
     selected: null,
-    transferKey: `synq.funding.${input.fundingId}`,
+    transferKey: `synq.funding.${input.groupId}.${input.fundingId}`,
     transfer: null,
     credited: false,
     cancelRequested: false,
@@ -75,7 +80,8 @@ export async function FundingWorkflow(
   setHandler(nextScheduledEventQuery, () => s.nextEvent);
   setHandler(
     cancelUpdate,
-    () => {
+    async (request) => {
+      await authorizeControl(input.groupId, 'CANCEL', request);
       s.cancelRequested = true;
       return { accepted: true as const, at: new Date().toISOString() };
     },
@@ -108,14 +114,19 @@ export async function FundingWorkflow(
   s.selected = usable[0] ?? null;
   if (!s.selected) return done('NO_ROUTE');
   if (s.cancelRequested) return done('CANCELLED');
-  s.transfer = await acts.executeFundingRoute({
-    groupId: input.groupId,
-    transferKey: s.transferKey,
-    quote: s.selected,
-  });
+  try {
+    s.transfer = await mutations.executeFundingRoute({
+      groupId: input.groupId,
+      transferKey: s.transferKey,
+      quote: s.selected,
+    });
+  } catch {
+    s.transfer = await acts.fundingStatus({ transferKey: s.transferKey });
+  }
   for (
     let i = 0;
-    i < (input.maxPolls ?? 240) && s.transfer.status === 'PENDING';
+    i < (input.maxPolls ?? 240) &&
+    ['PENDING', 'UNKNOWN'].includes(s.transfer.status);
     i++
   ) {
     s.nextEvent = { kind: 'FUNDING_POLL', at: Date.now() + poll * 1000 };
@@ -132,5 +143,5 @@ export async function FundingWorkflow(
       amount: s.transfer.settledAmount,
     })
   ).credited;
-  return done('CREDITED');
+  return done(s.credited ? 'CREDITED' : 'UNRESOLVED');
 }
