@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@synq/domain": "workspace:*",
+    "@synq/funding": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/offer-exchange": "workspace:*",
     "@synq/schemas": "workspace:*",

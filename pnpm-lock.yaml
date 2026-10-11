@@ -501,6 +501,9 @@ importers:
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../funding
       '@synq/kernel':
         specifier: workspace:*
         version: link:../kernel
