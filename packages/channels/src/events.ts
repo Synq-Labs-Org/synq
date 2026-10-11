@@ -140,4 +140,6 @@ export interface ChannelAdapter {
     message: OutboundMessage,
   ): Promise<DeliveryResult>;
   acknowledgeAction?(callbackId: string, text: string): Promise<void>;
+  /** URL that opens a private chat with the bot carrying `payload`; null if unsupported. */
+  deepLink?(payload: string): string | null;
 }

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
   ChannelDeliveryError,
@@ -58,6 +58,10 @@ export class TelegramBotApi {
       throw new Error('TELEGRAM_TOKEN_MALFORMED');
     this.base = `${(options.baseUrl ?? 'https://api.telegram.org').replace(/\/$/, '')}/bot${options.token}`;
     this.redact = (s) => s.split(options.token).join('<redacted>');
+  }
+
+  verifyLogin(raw: unknown, nowSeconds: number) {
+    return verifyTelegramLogin(raw, this.options.token, nowSeconds);
   }
 
   async call<T = unknown>(
@@ -228,6 +232,19 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!me.is_bot || !me.username) throw new Error('TELEGRAM_GETME_NOT_A_BOT');
     this.bot = { id: me.id, username: me.username };
     return this.bot;
+  }
+
+  deepLink(payload: string): string | null {
+    if (!this.bot || !/^[A-Za-z0-9_-]{1,64}$/.test(payload)) return null;
+    return `https://t.me/${this.bot.username}?start=${payload}`;
+  }
+
+  verifyLogin(raw: unknown, nowSeconds: number) {
+    return this.options.api.verifyLogin(raw, nowSeconds);
+  }
+
+  get botId() {
+    return this.bot?.id ?? null;
   }
 
   verifyWebhook(header: string | string[] | undefined): boolean {
@@ -536,4 +553,60 @@ export class TelegramAdapter implements ChannelAdapter {
       await input.onBatch?.(updates.length);
     }
   }
+}
+
+export const TelegramLoginSchema = z.strictObject({
+  id: z.union([z.number().int(), z.string().regex(/^[0-9]{1,20}$/)]),
+  first_name: z.string().max(256).optional(),
+  last_name: z.string().max(256).optional(),
+  username: z.string().max(64).optional(),
+  photo_url: z.string().max(2048).optional(),
+  auth_date: z.union([z.number().int(), z.string().regex(/^[0-9]{1,12}$/)]),
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type TelegramLogin = z.input<typeof TelegramLoginSchema>;
+
+/**
+ * Telegram Login verification: HMAC-SHA256 over the sorted "key=value" lines
+ * with SHA-256(bot token) as the key. Returns the proven user id or null.
+ */
+export function verifyTelegramLogin(
+  raw: unknown,
+  botToken: string,
+  nowSeconds: number,
+  maxAgeSeconds = 600,
+): string | null {
+  const parsed = TelegramLoginSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const { hash, ...fields } = parsed.data;
+  const authDate = Number(fields.auth_date);
+  if (nowSeconds - authDate > maxAgeSeconds || authDate - nowSeconds > 60)
+    return null;
+  const check = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join('\n');
+  const secret = createHash('sha256').update(botToken).digest();
+  const expected = createHmac('sha256', secret).update(check).digest();
+  const given = Buffer.from(hash, 'hex');
+  return given.length === expected.length && timingSafeEqual(given, expected)
+    ? String(fields.id)
+    : null;
+}
+
+export function signTelegramLoginForTest(
+  fields: Omit<TelegramLogin, 'hash'>,
+  botToken: string,
+): TelegramLogin {
+  const check = Object.entries(fields)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join('\n');
+  const secret = createHash('sha256').update(botToken).digest();
+  return {
+    ...fields,
+    hash: createHmac('sha256', secret).update(check).digest('hex'),
+  };
 }

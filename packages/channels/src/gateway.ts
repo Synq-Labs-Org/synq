@@ -37,6 +37,10 @@ export type ApprovalSummary = {
   counted: number;
   required: number;
   status: 'PENDING' | 'SATISFIED' | 'INVALIDATED';
+  kind?: 'SEND' | 'ACTION' | 'MANDATE';
+  /** Web path of the authenticated review page; defaults to /intents/<intentHash>. */
+  reviewPath?: string;
+  reason?: string | null;
 };
 export type ReceiptSummary = {
   intentHash: string;
@@ -50,6 +54,7 @@ export type BrainProposalSummary = {
   status: string;
   code: string | null;
   intentHash: string | null;
+  reviewPath?: string | null;
 };
 export type BrainReply = { text: string; proposals: BrainProposalSummary[] };
 
@@ -107,6 +112,8 @@ export type ChannelGatewayOptions = {
   maxClockSkewSeconds?: number;
   linkCodeTtlSeconds?: number;
   brainCooldownSeconds?: number;
+  /** Channels whose link redemption must carry a verified provider identity. */
+  requireExternalProof?: Partial<Record<ChannelId, boolean>>;
   onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
 };
 
@@ -114,6 +121,9 @@ const APPROVAL_WORDS =
   /^(yes|yep|yeah|y|ok|okay|approve|approved|i approve|confirm|confirmed|lgtm|do it|go|\+1|👍|✅)[.! ]*$/i;
 const hashCode = (code: string) =>
   createHash('sha256').update(`synq-channel-link:${code}`).digest('hex');
+const hashStart = (nonce: string) =>
+  createHash('sha256').update(`synq-channel-start:${nonce}`).digest('hex');
+const START_TTL_SECONDS = 600;
 const short = (v: string) =>
   v.length > 14 ? `${v.slice(0, 8)}…${v.slice(-4)}` : v;
 
@@ -239,6 +249,13 @@ export class ChannelGateway {
       return this.replyOutcome(envelope, 'HANDLED', 'HELP', {
         text: HELP_TEXT,
       });
+    if (
+      envelope.chatKind === 'DIRECT' &&
+      parsed.kind === 'COMMAND' &&
+      parsed.name === 'start' &&
+      parsed.args
+    )
+      return this.start(envelope, parsed.args);
     if (envelope.chatKind !== 'GROUP')
       return this.replyOutcome(envelope, 'REFUSED', 'GROUP_CHAT_REQUIRED', {
         text: 'Use Synq from your group chat. Direct messages cannot act on a group treasury.',
@@ -361,20 +378,74 @@ export class ChannelGateway {
         });
       }
     }
-    const code = randomBytes(24).toString('base64url');
+    const adapter = this.adapters.get(envelope.channel);
+    const nonce = randomBytes(24).toString('base64url');
+    const url = adapter?.deepLink?.(nonce) ?? null;
+    if (!url)
+      return this.replyOutcome(
+        envelope,
+        'REFUSED',
+        'PRIVATE_LINK_UNAVAILABLE',
+        {
+          text: 'Linking needs a private chat with Synq, which this channel does not support yet. Nothing was linked.',
+        },
+      );
     const now = this.options.now();
     await store.createLinkCode({
-      codeHash: hashCode(code),
+      codeHash: hashStart(nonce),
       channel: envelope.channel,
       externalGroupId: envelope.externalGroupId,
       externalUserId: envelope.externalUserId!,
       displayName: envelope.verifiedSender.displayName,
       createdAt: now,
-      expiresAt: now + (this.options.linkCodeTtlSeconds ?? 900),
+      expiresAt: now + START_TTL_SECONDS,
     });
     const who = envelope.verifiedSender.displayName ?? 'this chat account';
+    return this.replyOutcome(envelope, 'HANDLED', 'PRIVATE_LINK_ISSUED', {
+      text: `${who}: tap the button to continue in a private chat with Synq. Your personal link is sent only there, and only to you.`,
+      buttons: [{ label: 'Continue privately', url }],
+    });
+  }
+
+  /** `/start <nonce>` in a private chat: only the member who asked in the group gets a web link. */
+  private async start(
+    envelope: Envelope,
+    nonce: string,
+  ): Promise<GatewayOutcome> {
+    const store = this.options.store;
+    const hash = hashStart(nonce.trim());
+    const view = /^[A-Za-z0-9_-]{16,64}$/.test(nonce.trim())
+      ? await store.linkCode(hash)
+      : null;
+    const now = this.options.now();
+    if (!view || view.consumedAt !== null || view.expiresAt <= now)
+      return this.replyOutcome(envelope, 'REFUSED', 'START_INVALID', {
+        text: 'This link is invalid, used or expired. Send /synq in your group chat again.',
+      });
+    if (
+      view.channel !== envelope.channel ||
+      view.externalUserId !== envelope.externalUserId
+    )
+      return this.replyOutcome(envelope, 'REFUSED', 'START_NOT_YOURS', {
+        text: 'This link was requested by another member. Send /synq in the group yourself.',
+      });
+    if (!(await store.consumeLinkCode(hash, now)))
+      return this.replyOutcome(envelope, 'REFUSED', 'START_INVALID', {
+        text: 'This link was already used. Send /synq in your group chat again.',
+      });
+    const code = randomBytes(24).toString('base64url');
+    await store.createLinkCode({
+      codeHash: hashCode(code),
+      channel: view.channel,
+      externalGroupId: view.externalGroupId,
+      externalUserId: view.externalUserId,
+      displayName: view.displayName,
+      createdAt: now,
+      expiresAt: now + (this.options.linkCodeTtlSeconds ?? 900),
+    });
+    const group = await store.groupLink(view.channel, view.externalGroupId);
     return this.replyOutcome(envelope, 'HANDLED', 'LINK_CODE_ISSUED', {
-      text: `${who}: open the link and confirm with your passkey to link this chat account${group?.status === 'ACTIVE' ? '' : ' and this chat'} to your Synq group. Only open it yourself; the code expires in ${Math.round((this.options.linkCodeTtlSeconds ?? 900) / 60)} minutes and works once.`,
+      text: `Open your personal link and confirm with your passkey to link this chat account${group?.status === 'ACTIVE' ? '' : ' and your group chat'} to your Synq group. Do not share it; it works once and expires in ${Math.round((this.options.linkCodeTtlSeconds ?? 900) / 60)} minutes.`,
       buttons: [
         {
           label: 'Link with passkey',
@@ -389,9 +460,23 @@ export class ChannelGateway {
     code: string;
     groupId: string;
     principalId: string;
+    /** Provider identity the web session proved (e.g. a verified Telegram Login), if any. */
+    provenExternalUserId?: string;
   }): Promise<RedeemOutcome> {
     if (!/^[A-Za-z0-9_-]{16,64}$/.test(input.code))
       return { status: 'CODE_INVALID' };
+    const code = await this.options.store.linkCode(hashCode(input.code));
+    if (!code) return { status: 'CODE_INVALID' };
+    if (
+      input.provenExternalUserId === undefined &&
+      this.options.requireExternalProof?.[code.channel]
+    )
+      return { status: 'EXTERNAL_PROOF_REQUIRED' };
+    if (
+      input.provenExternalUserId !== undefined &&
+      input.provenExternalUserId !== code.externalUserId
+    )
+      return { status: 'EXTERNAL_IDENTITY_MISMATCH' };
     const member = await this.options.ports.activeMember(
       input.groupId,
       input.principalId,
@@ -467,8 +552,24 @@ export class ChannelGateway {
               `${m.mandateId} v${m.version} ${m.status}: per action ${m.perActionCap} ${m.symbol}, budget ${m.cumulativeBudget}, spent ${m.spent}`,
           )
           .join('\n')
-      : 'No mandates. Use /propose to ask the Brain to draft one; it must be approved before it has any authority.';
-    return this.replyOutcome(envelope, 'HANDLED', 'MANDATES', { text });
+      : 'No active mandates. Use /propose to ask the Brain to draft one; it must be approved before it has any authority.';
+    const proposals = (
+      await this.options.ports.approvals(group.groupId).catch(() => [])
+    ).filter((a) => a.kind === 'MANDATE' && a.status !== 'INVALIDATED');
+    const lines = [
+      text,
+      ...proposals.map(
+        (a) =>
+          `Proposed: ${a.label}: ${a.counted}/${a.required} verified owner approvals`,
+      ),
+    ];
+    return this.replyOutcome(envelope, 'HANDLED', 'MANDATES', {
+      text: lines.join('\n'),
+      buttons: proposals.slice(0, 3).map((a) => ({
+        label: `Review ${a.label}`.slice(0, 64),
+        url: this.web(reviewPath(a)),
+      })),
+    });
   }
 
   private async status(envelope: Envelope, group: GroupLink) {
@@ -500,7 +601,7 @@ export class ChannelGateway {
         .slice(0, 3)
         .map((a) => ({
           label: `Review ${short(a.intentHash)}`,
-          url: this.web(`/intents/${a.intentHash}`),
+          url: this.web(reviewPath(a)),
         })),
     });
   }
@@ -581,11 +682,14 @@ export class ChannelGateway {
     return this.replyOutcome(envelope, 'HANDLED', 'BRAIN', {
       text: lines.join('\n'),
       buttons: reply.proposals
-        .filter((p) => p.intentHash && p.status === 'PENDING_APPROVAL')
+        .filter(
+          (p) =>
+            p.reviewPath || (p.intentHash && p.status === 'PENDING_APPROVAL'),
+        )
         .slice(0, 3)
         .map((p) => ({
           label: 'Review and approve',
-          url: this.web(`/intents/${p.intentHash}`),
+          url: this.web(p.reviewPath ?? `/intents/${p.intentHash}`),
         })),
     });
   }
@@ -603,27 +707,37 @@ export class ChannelGateway {
       ]);
       const messages: { key: string; message: OutboundMessage }[] = [];
       for (const a of approvals) {
-        if (a.status === 'INVALIDATED') continue;
+        const what = a.kind === 'MANDATE' ? 'passkey owner' : 'passkey';
         messages.push(
-          a.status === 'SATISFIED'
+          a.status === 'INVALIDATED'
             ? {
-                key: `approval:${a.draftDigest}:satisfied`,
+                key: `approval:${a.draftDigest}:invalidated`,
                 message: {
-                  text: `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified passkey approvals. The Kernel issues the grant; execution follows.`,
+                  text: `${a.label} is no longer valid${a.reason ? ` (${a.reason})` : ''}. Nothing will execute.`,
                 },
               }
-            : {
-                key: `approval:${a.draftDigest}:${a.counted}`,
-                message: {
-                  text: `Approval needed for ${a.label}: ${a.counted}/${a.required} verified passkey approvals.`,
-                  buttons: [
-                    {
-                      label: 'Review and approve',
-                      url: this.web(`/intents/${a.intentHash}`),
-                    },
-                  ],
+            : a.status === 'SATISFIED'
+              ? {
+                  key: `approval:${a.draftDigest}:satisfied`,
+                  message: {
+                    text:
+                      a.kind === 'MANDATE'
+                        ? `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals. The Safe governance transaction is submitted next.`
+                        : `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals. The Kernel issues the grant; execution follows.`,
+                  },
+                }
+              : {
+                  key: `approval:${a.draftDigest}:${a.counted}`,
+                  message: {
+                    text: `Approval needed for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals.`,
+                    buttons: [
+                      {
+                        label: 'Review and approve',
+                        url: this.web(reviewPath(a)),
+                      },
+                    ],
+                  },
                 },
-              },
         );
       }
       for (const r of receipts)
@@ -710,6 +824,10 @@ export class ChannelGateway {
       return false;
     }
   }
+}
+
+function reviewPath(a: ApprovalSummary) {
+  return a.reviewPath ?? `/intents/${a.intentHash}`;
 }
 
 function stripMention(text: string) {

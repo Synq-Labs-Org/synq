@@ -6,11 +6,14 @@ import {
   TelegramAdapter,
   TelegramBotApi,
   signLinqWebhookForTest,
+  signTelegramLoginForTest,
+  verifyTelegramLogin,
 } from '@synq/channels';
 import { channelRoutes } from '../../apps/api/src/channel-routes.js';
 import { CHAT_A, GROUP_A, fixture } from './harness.js';
 
 const SECRET = 'webhook_secret_0123456789';
+const TG_TOKEN = '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
 const LINQ_SECRET = `whsec_${Buffer.from('0123456789abcdef0123456789abcdef').toString('base64')}`;
 const noWait = async () => undefined;
 let app: FastifyInstance | null = null;
@@ -19,11 +22,11 @@ afterEach(async () => {
   app = null;
 });
 
-async function server() {
-  const f = fixture();
+async function server(requireTelegramProof = false) {
+  const f = fixture(1_800_000_000, { requireTelegramProof });
   const telegram = new TelegramAdapter({
     api: new TelegramBotApi({
-      token: '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef',
+      token: TG_TOKEN,
       fetch: (async () =>
         new Response(
           JSON.stringify({ ok: true, result: { message_id: 1 } }),
@@ -45,6 +48,11 @@ async function server() {
     telegram,
     linq,
     now: () => f.clock.t,
+    telegramLogin: {
+      botId: 42,
+      required: requireTelegramProof,
+      verify: (raw, at) => verifyTelegramLogin(raw, TG_TOKEN, at),
+    },
     memberSession: async (token, groupId) =>
       token === 'alice-session' && groupId === GROUP_A
         ? { memberId: 'member_0', principalId: 'principal_alice' }
@@ -110,7 +118,13 @@ describe('channel routes', () => {
   it('redeems a link code only with a member session for that group', async () => {
     const { update, f } = await server();
     await app!.inject(tg(update(6, '/synq'), SECRET));
-    expect([...f.store.codes.values()][0]!.externalGroupId).toBe(CHAT_A);
+    const start = new URL(f.adapter.last()!.buttons![0]!.url).searchParams.get(
+      'start',
+    )!;
+    const dm = update(7, `/start ${start}`);
+    dm.message.chat = { id: 111, type: 'private' };
+    await app!.inject(tg(dm, SECRET));
+    expect(f.adapter.sent.at(-1)!.chat).toBe('111');
     const raw = new URL(f.adapter.last()!.buttons![0]!.url).searchParams.get(
       'code',
     )!;
@@ -204,5 +218,55 @@ describe('channel routes', () => {
     expect(
       caps.find((c: { channel: string }) => c.channel === 'whatsapp').status,
     ).toBe('UNAVAILABLE');
+  });
+
+  it('binds redemption to a verified Telegram Login when required', async () => {
+    const { update, f } = await server(true);
+    await app!.inject(tg(update(6, '/synq'), SECRET));
+    const start = new URL(f.adapter.last()!.buttons![0]!.url).searchParams.get(
+      'start',
+    )!;
+    const dm = update(7, `/start ${start}`);
+    dm.message.chat = { id: 111, type: 'private' };
+    await app!.inject(tg(dm, SECRET));
+    const code = new URL(f.adapter.last()!.buttons![0]!.url).searchParams.get(
+      'code',
+    )!;
+    const preview = (
+      await app!.inject({ method: 'GET', url: `/v1/channels/links/${code}` })
+    ).json();
+    expect(preview.telegramLogin).toEqual({ botId: 42, required: true });
+    const redeem = (telegramLogin?: unknown) =>
+      app!.inject({
+        method: 'POST',
+        url: '/v1/channels/links/redeem',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer alice-session',
+        },
+        payload: JSON.stringify({
+          code,
+          groupId: GROUP_A,
+          ...(telegramLogin ? { telegramLogin } : {}),
+        }),
+      });
+    const login = (id: number, token = TG_TOKEN) =>
+      signTelegramLoginForTest(
+        { id, first_name: 'X', auth_date: f.clock.t },
+        token,
+      );
+    expect((await redeem()).json()).toEqual({
+      error: 'EXTERNAL_PROOF_REQUIRED',
+    });
+    expect(
+      (await redeem(login(111, '999:forgedforgedforgedforgedforged')))
+        .statusCode,
+    ).toBe(401);
+    expect((await redeem(login(222))).json()).toEqual({
+      error: 'EXTERNAL_IDENTITY_MISMATCH',
+    });
+    expect((await redeem(login(111))).json()).toMatchObject({
+      status: 'LINKED',
+    });
   });
 });

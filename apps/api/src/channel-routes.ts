@@ -18,6 +18,12 @@ export type ChannelRouteDeps = {
     groupId: string,
   ): Promise<{ memberId: string; principalId: string } | null>;
   now: () => number;
+  /** Telegram Login verification for link redemption (binds the web session to the chat user). */
+  telegramLogin?: {
+    botId: number;
+    required: boolean;
+    verify(raw: unknown, nowSeconds: number): string | null;
+  };
   env?: Readonly<Record<string, string | undefined>>;
 };
 
@@ -25,6 +31,7 @@ const CodeSchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/);
 const RedeemSchema = z.strictObject({
   code: CodeSchema,
   groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+  telegramLogin: z.record(z.string(), z.unknown()).optional(),
 });
 const REDEEM_STATUS: Record<string, number> = {
   LINKED: 200,
@@ -33,6 +40,8 @@ const REDEEM_STATUS: Record<string, number> = {
   CODE_CONSUMED: 409,
   GROUP_LINK_CONFLICT: 409,
   USER_LINK_CONFLICT: 409,
+  EXTERNAL_PROOF_REQUIRED: 403,
+  EXTERNAL_IDENTITY_MISMATCH: 403,
 };
 
 /** Untrusted chat ingress plus member-authenticated link redemption. */
@@ -93,7 +102,17 @@ export async function channelRoutes(
     const view = parsed.success
       ? await deps.gateway.linkCodePreview(parsed.data.code)
       : null;
-    return view ? view : reply.code(404).send({ error: 'CODE_INVALID' });
+    if (!view) return reply.code(404).send({ error: 'CODE_INVALID' });
+    return {
+      ...view,
+      telegramLogin:
+        view.channel === 'telegram' && deps.telegramLogin
+          ? {
+              botId: deps.telegramLogin.botId,
+              required: deps.telegramLogin.required,
+            }
+          : null,
+    };
   });
 
   api.post('/v1/channels/links/redeem', async (request, reply) => {
@@ -106,10 +125,20 @@ export async function channelRoutes(
     const session = token ? await deps.memberSession(token, groupId) : null;
     if (!session)
       return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
+    let proven: string | undefined;
+    if (body.data.telegramLogin !== undefined) {
+      const id = deps.telegramLogin?.verify(
+        body.data.telegramLogin,
+        deps.now(),
+      );
+      if (!id) return reply.code(401).send({ error: 'TELEGRAM_LOGIN_INVALID' });
+      proven = id;
+    }
     const outcome = await deps.gateway.redeemLinkCode({
       code: body.data.code,
       groupId,
       principalId: session.principalId,
+      ...(proven !== undefined ? { provenExternalUserId: proven } : {}),
     });
     return reply.code(REDEEM_STATUS[outcome.status] ?? 409).send(
       outcome.status === 'LINKED'

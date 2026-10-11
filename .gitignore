@@ -19,3 +19,4 @@ playwright-report/
 .synq-dev/
 artifacts/brain-demo/
 artifacts/synq-send/
+.synq-local/

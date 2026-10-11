@@ -8,6 +8,7 @@ export const COMMANDS = [
   'propose',
   'status',
   'help',
+  'start',
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 

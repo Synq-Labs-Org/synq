@@ -22,6 +22,7 @@ import {
   type ChannelExecutionSource,
 } from './channel-runtime.js';
 import type { SendRouteDeps } from './send-routes.js';
+import type { MandateProposalService } from './mandate-proposals.js';
 
 const ChannelEnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
@@ -33,6 +34,7 @@ const ChannelEnvSchema = z.object({
   LINQ_API_KEY: z.string().optional(),
   LINQ_WEBHOOK_SECRET: z.string().optional(),
   LINQ_BASE_URL: z.string().url().optional(),
+  SYNQ_TELEGRAM_LOGIN_REQUIRED: z.enum(['0', '1']).default('0'),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
 });
 
@@ -53,6 +55,7 @@ export async function registerChannels(input: {
   executed?: ChannelExecutionSource;
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
   brain?: ChannelPorts['brain'];
+  mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
   log: ChannelLog;
   fetch?: typeof fetch;
   telegramBaseUrl?: string;
@@ -116,6 +119,9 @@ export async function registerChannels(input: {
       ...(input.executed ? { executed: input.executed } : {}),
       executionMode: input.executionMode,
       ...(input.brain ? { brain: input.brain } : {}),
+      ...(input.mandateProposals
+        ? { mandateProposals: input.mandateProposals }
+        : {}),
     }),
     webBaseUrl: env.SYNQ_WEB_BASE_URL ?? input.origin,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,
@@ -123,6 +129,9 @@ export async function registerChannels(input: {
     ...(telegram?.botUsername
       ? { botUsernames: { telegram: telegram.botUsername } }
       : {}),
+    requireExternalProof: {
+      telegram: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
+    },
     onEvent: (event, outcome) =>
       input.log('channel event', {
         type: event.type,
@@ -139,6 +148,16 @@ export async function registerChannels(input: {
     memberSession: async (token, groupId) =>
       memberAccess ? memberAccess.session(token, groupId) : null,
     now,
+    ...(telegram && telegram.botId !== null
+      ? {
+          telegramLogin: {
+            botId: telegram.botId,
+            required: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
+            verify: (raw: unknown, at: number) =>
+              telegram!.verifyLogin(raw, at),
+          },
+        }
+      : {}),
     env: input.env,
   });
   const controller = new AbortController();
