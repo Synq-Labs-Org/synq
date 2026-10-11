@@ -250,6 +250,21 @@ it('Telegram group → link → balance → Send → web approvals → Kernel gr
       principalId: principal(memberId),
     });
     expect(outcome.status).toBe('LINKED');
+    const ask = telegram.sent.find(
+      (m) => m.chat_id === userId && m.text.includes('/confirm '),
+    )!;
+    expect(ask.text).toContain(memberId);
+    n = sentCount();
+    say(userId, name, `/confirm ${/\/confirm (\S+)/.exec(ask.text)![1]}`, {
+      chat: { id: userId, type: 'private' },
+    });
+    await waitFor(() => telegram.sent.slice(n).some((m) => m.chat_id === CHAT));
+    const chatNote = telegram.sent.slice(n).find((m) => m.chat_id === CHAT)!;
+    expect(chatNote.text).toMatch(
+      userId === 1001
+        ? /Waiting for another member/
+        : /now speaks for Synq group/,
+    );
   }
 
   n = sentCount();

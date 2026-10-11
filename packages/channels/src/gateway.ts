@@ -112,6 +112,10 @@ export type ChannelGatewayOptions = {
   maxClockSkewSeconds?: number;
   linkCodeTtlSeconds?: number;
   brainCooldownSeconds?: number;
+  /** A claimed event whose processing never completed may be retried after this. */
+  eventLeaseSeconds?: number;
+  /** Distinct confirmed members required before a new chat speaks for a group. */
+  chatLinkQuorum?: number;
   /** Channels whose link redemption must carry a verified provider identity. */
   requireExternalProof?: Partial<Record<ChannelId, boolean>>;
   onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
@@ -121,6 +125,8 @@ const APPROVAL_WORDS =
   /^(yes|yep|yeah|y|ok|okay|approve|approved|i approve|confirm|confirmed|lgtm|do it|go|\+1|👍|✅)[.! ]*$/i;
 const hashCode = (code: string) =>
   createHash('sha256').update(`synq-channel-link:${code}`).digest('hex');
+const hashConfirm = (token: string) =>
+  createHash('sha256').update(`synq-channel-confirm:${token}`).digest('hex');
 const hashStart = (nonce: string) =>
   createHash('sha256').update(`synq-channel-start:${nonce}`).digest('hex');
 const START_TTL_SECONDS = 600;
@@ -171,14 +177,37 @@ export class ChannelGateway {
     if (event.type === 'APPROVAL_LINK_OPENED')
       return this.result('RECORDED', 'APPROVAL_LINK_OPENED');
     const envelope = event.envelope;
+    const store = this.options.store;
     if (
-      !(await this.options.store.recordEvent(
+      !(await store.claimEvent(
         envelope.channel,
         envelope.eventId,
         now,
+        this.options.eventLeaseSeconds ?? 120,
       ))
     )
       return this.result('DUPLICATE');
+    let outcome: GatewayOutcome;
+    try {
+      outcome = await this.apply(event, envelope, now);
+    } catch (error) {
+      await store
+        .releaseEvent(envelope.channel, envelope.eventId)
+        .catch(() => undefined);
+      throw error;
+    }
+    await store.completeEvent(envelope.channel, envelope.eventId, now);
+    return outcome;
+  }
+
+  private async apply(
+    event: Exclude<
+      ChannelEvent,
+      { type: 'MESSAGE_DELIVERY_FAILED' | 'APPROVAL_LINK_OPENED' }
+    >,
+    envelope: Envelope,
+    now: number,
+  ): Promise<GatewayOutcome> {
     const age = now - envelope.timestamp;
     if (
       age > (this.options.maxEventAgeSeconds ?? 600) ||
@@ -190,6 +219,7 @@ export class ChannelGateway {
         for (const m of event.members)
           await this.options.store.revokeUser(
             envelope.channel,
+            envelope.externalGroupId,
             m.externalUserId,
             now,
           );
@@ -256,6 +286,12 @@ export class ChannelGateway {
       parsed.args
     )
       return this.start(envelope, parsed.args);
+    if (
+      envelope.chatKind === 'DIRECT' &&
+      parsed.kind === 'COMMAND' &&
+      parsed.name === 'confirm'
+    )
+      return this.confirm(envelope, parsed.args);
     if (envelope.chatKind !== 'GROUP')
       return this.replyOutcome(envelope, 'REFUSED', 'GROUP_CHAT_REQUIRED', {
         text: 'Use Synq from your group chat. Direct messages cannot act on a group treasury.',
@@ -319,10 +355,22 @@ export class ChannelGateway {
       envelope.channel,
       envelope.externalGroupId,
     );
-    if (!group || group.status !== 'ACTIVE')
+    if (!group || group.status === 'REVOKED')
       return { refusal: this.result('UNAUTHORIZED', 'GROUP_NOT_LINKED') };
+    if (group.status === 'PENDING')
+      return {
+        refusal: await this.replyOutcome(
+          envelope,
+          'UNAUTHORIZED',
+          'GROUP_LINK_PENDING',
+          {
+            text: `This chat's link to a Synq group is waiting for a second member to confirm. Synq ignores financial commands until then.`,
+          },
+        ),
+      };
     const user = await store.userLink(
       envelope.channel,
+      envelope.externalGroupId,
       envelope.externalUserId!,
     );
     if (!user || user.status !== 'ACTIVE')
@@ -362,6 +410,7 @@ export class ChannelGateway {
     );
     const user = await store.userLink(
       envelope.channel,
+      envelope.externalGroupId,
       envelope.externalUserId!,
     );
     if (group?.status === 'ACTIVE' && user?.status === 'ACTIVE') {
@@ -482,17 +531,79 @@ export class ChannelGateway {
       input.principalId,
     );
     if (!member) return { status: 'CODE_INVALID' };
+    const confirmToken = randomBytes(24).toString('base64url');
     const outcome = await this.options.store.redeemLinkCode({
       codeHash: hashCode(input.code),
       groupId: input.groupId,
       principalId: input.principalId,
+      confirmTokenHash: hashConfirm(confirmToken),
       now: this.options.now(),
     });
-    if (outcome.status === 'LINKED')
+    if (outcome.status !== 'LINKED') return outcome;
+    const about = await this.describeGroup(outcome.group.groupId);
+    if (outcome.user.status === 'PENDING')
+      await this.post(outcome.user.channel, outcome.user.externalUserId, {
+        text: `Confirm: link this chat account, in the group chat where you asked, to Synq ${member.memberId} of group ${about}? If that is you, send:\n/confirm ${confirmToken}\nIf it is not you, ignore this message; nothing is linked until you confirm here.`,
+      });
+    if (outcome.group.status === 'PENDING')
       await this.post(outcome.group.channel, outcome.group.externalGroupId, {
-        text: `Linked: ${member.memberId} confirmed with a passkey. This chat now speaks for Synq group ${short(outcome.group.groupId)}; approvals still require each member's passkey.`,
+        text: `Pending: a member asked to link this chat to Synq group ${about}. It takes effect only after ${this.options.chatLinkQuorum ?? 2} members of that group each link and confirm. If this is not your group's treasury, do not confirm.`,
       });
     return outcome;
+  }
+
+  /** `/confirm <token>` in the user's private chat finishes the link it was sent for. */
+  private async confirm(
+    envelope: Envelope,
+    token: string,
+  ): Promise<GatewayOutcome> {
+    const store = this.options.store;
+    const now = this.options.now();
+    const user = /^[A-Za-z0-9_-]{16,64}$/.test(token.trim())
+      ? await store.confirmUserLink({
+          channel: envelope.channel,
+          externalUserId: envelope.externalUserId!,
+          confirmTokenHash: hashConfirm(token.trim()),
+          now,
+        })
+      : null;
+    if (!user)
+      return this.replyOutcome(envelope, 'REFUSED', 'CONFIRM_INVALID', {
+        text: 'Nothing to confirm with that code. Send /synq in your group chat to start again.',
+      });
+    const before = await store.groupLink(user.channel, user.externalGroupId);
+    const group = await store.activateGroupLink(
+      user.channel,
+      user.externalGroupId,
+      this.options.chatLinkQuorum ?? 2,
+      now,
+    );
+    const member = group
+      ? await this.options.ports.activeMember(group.groupId, user.principalId)
+      : null;
+    const who = member?.memberId ?? 'a member';
+    if (group) {
+      const about = await this.describeGroup(group.groupId);
+      await this.post(user.channel, user.externalGroupId, {
+        text:
+          group.status === 'ACTIVE' && before?.status === 'PENDING'
+            ? `Linked: this chat now speaks for Synq group ${about}, confirmed by ${this.options.chatLinkQuorum ?? 2} members. Approvals still require each member's passkey.`
+            : group.status === 'ACTIVE'
+              ? `Linked: ${who} confirmed with a passkey and from their private chat.`
+              : `${who} confirmed. Waiting for another member of Synq group ${about} to link and confirm before this chat is active.`,
+      });
+    }
+    return this.replyOutcome(envelope, 'HANDLED', 'LINK_CONFIRMED', {
+      text: `Confirmed as ${who}.`,
+    });
+  }
+
+  private async describeGroup(groupId: string) {
+    const label =
+      (await this.options.ports.groupLabel?.(groupId).catch(() => null)) ??
+      short(groupId);
+    const t = await this.options.ports.treasury(groupId).catch(() => null);
+    return t ? `${label} (treasury ${t.account} on chain ${t.chainId})` : label;
   }
 
   async linkCodePreview(code: string) {
@@ -511,6 +622,9 @@ export class ChannelGateway {
       groupLinked:
         (await this.options.store.groupLink(view.channel, view.externalGroupId))
           ?.status === 'ACTIVE',
+      groupPending:
+        (await this.options.store.groupLink(view.channel, view.externalGroupId))
+          ?.status === 'PENDING',
     };
   }
 

@@ -242,6 +242,42 @@ describe('telegram adapter', () => {
     ).toBe('PROVIDER_REJECTED');
   });
 
+  it('does not advance the poll offset past an update whose handling failed', async () => {
+    const controller = new AbortController();
+    const handled: string[] = [];
+    let attempts = 0;
+    const { a, calls } = adapter((call) => {
+      if (call.method !== 'getUpdates') return { body: { ok: true } };
+      if (call.body.offset === 9) {
+        controller.abort();
+        return { body: { ok: true, result: [] } };
+      }
+      return {
+        body: {
+          ok: true,
+          result: [
+            msg({ text: 'hi' }),
+            { ...msg({ text: 'yo' }), update_id: 8 },
+          ],
+        },
+      };
+    });
+    await a.poll({
+      signal: controller.signal,
+      handle: async (e) => {
+        const body = e.type === 'MESSAGE_RECEIVED' ? e.envelope.body : '';
+        if (body === 'yo' && attempts++ === 0)
+          throw new Error('DATABASE_UNAVAILABLE');
+        handled.push(body);
+      },
+    });
+    const offsets = calls
+      .filter((c) => c.method === 'getUpdates')
+      .map((c) => c.body.offset);
+    expect(offsets).toEqual([undefined, 8, 9]);
+    expect(handled).toEqual(['hi', 'hi', 'yo']);
+  });
+
   it('long-polls with an advancing offset and calls getMe on init', async () => {
     const controller = new AbortController();
     const seen: string[] = [];

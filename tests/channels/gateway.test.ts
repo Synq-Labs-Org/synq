@@ -14,7 +14,13 @@ describe('channel gateway linking', () => {
       'principal_alice',
     );
     expect(outcome.status).toBe('LINKED');
-    expect(f.adapter.last()?.text).toMatch(/Linked: member_0/);
+    expect(f.adapter.last()?.text).toBe('Confirmed as member_0.');
+    expect(
+      f.adapter.sent.some(
+        (m) =>
+          m.chat === CHAT_A && /now speaks for Synq group/.test(m.message.text),
+      ),
+    ).toBe(true);
     expect(
       (
         await f.gateway.redeemLinkCode({
@@ -61,9 +67,27 @@ describe('channel gateway linking', () => {
 
   it('a chat user already bound to one principal cannot be rebound to another', async () => {
     const f = fixture();
-    await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');
-    const again = await f.link(CHAT_B, '111', GROUP_B, 'principal_carol');
-    expect(again.outcome.status).toBe('USER_LINK_CONFLICT');
+    const first = await f.issueCode(CHAT_A, '111');
+    const second = await f.issueCode(CHAT_A, '111');
+    expect(
+      (
+        await f.gateway.redeemLinkCode({
+          code: first.code,
+          groupId: GROUP_A,
+          principalId: 'principal_alice',
+        })
+      ).status,
+    ).toBe('LINKED');
+    await f.confirm('111');
+    expect(
+      (
+        await f.gateway.redeemLinkCode({
+          code: second.code,
+          groupId: GROUP_A,
+          principalId: 'principal_bob',
+        })
+      ).status,
+    ).toBe('USER_LINK_CONFLICT');
   });
 });
 
@@ -116,7 +140,7 @@ describe('private link binding', () => {
       });
     expect((await redeem()).status).toBe('EXTERNAL_PROOF_REQUIRED');
     expect((await redeem('222')).status).toBe('EXTERNAL_IDENTITY_MISMATCH');
-    expect(await f.store.userLink('telegram', '111')).toBeNull();
+    expect(await f.store.userLink('telegram', CHAT_A, '111')).toBeNull();
     expect((await redeem('111')).status).toBe('LINKED');
   });
 
@@ -219,7 +243,9 @@ describe('channel gateway adversarial ingress', () => {
       envelope: f.message('').envelope,
       members: [{ externalUserId: '222', displayName: null, isBot: false }],
     });
-    expect((await f.store.userLink('telegram', '222'))?.status).toBe('REVOKED');
+    expect((await f.store.userLink('telegram', CHAT_A, '222'))?.status).toBe(
+      'REVOKED',
+    );
     expect(
       (await f.gateway.handle(f.message('/balance', { userId: '222' }))).code,
     ).toBe('USER_NOT_LINKED');
@@ -290,7 +316,7 @@ describe('channel gateway adversarial ingress', () => {
           f.message('/status', { externalGroupId: CHAT_B, userId: '111' }),
         )
       ).code,
-    ).toBe('NOT_A_MEMBER');
+    ).toBe('USER_NOT_LINKED');
   });
 
   it('posts approval counts and receipts once each, and retries after a provider outage', async () => {

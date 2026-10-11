@@ -19,7 +19,7 @@ export async function freshChannelDatabase(connectionString: string) {
   }
   const p = new pg.Pool({ connectionString, max: 4 });
   await p.query(
-    'DROP TABLE IF EXISTS synq_channel_event, synq_channel_group_link, synq_channel_user_link, synq_channel_link_code, synq_channel_notification, synq_channel_delivery_failure',
+    'DROP TABLE IF EXISTS synq_channel_event, synq_channel_group_link, synq_channel_user_link, synq_channel_inbound, synq_channel_chat_link, synq_channel_member_link, synq_channel_link_code, synq_channel_notification, synq_channel_delivery_failure',
   );
   return p;
 }
