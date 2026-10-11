@@ -28,6 +28,7 @@ export * from './journal.js';
 export * from './deployment.js';
 export * from './integrity.js';
 export * from './reconciliation.js';
+export * from './x402-signer.js';
 
 const ERC20_TRANSFER = '0xa9059cbb';
 const NATIVE_TRANSFER = '0x00000000';
