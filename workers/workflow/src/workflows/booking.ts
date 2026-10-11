@@ -55,6 +55,7 @@ export type BookingWorkflowState = {
   reference: string | null;
   idempotencyKey: string;
   stepUp: StepUpChallenge | null;
+  requestHash: string | null;
   receipt: FulfillmentReceipt | null;
   refund: Money | null;
   notes: string[];
@@ -102,6 +103,7 @@ export async function BookingWorkflow(
     reference: null,
     idempotencyKey: `synq:${input.groupId}:${input.bookingId}:${workflowInfo().workflowId}`,
     stepUp: null,
+    requestHash: null,
     receipt: null,
     refund: null,
     notes: [],
@@ -188,6 +190,8 @@ export async function BookingWorkflow(
       landed,
       reservationId: reserved.reservationId,
       planHash: reserved.planHash,
+      reservedAssetId: reserved.reservedAssetId,
+      reservedAmount: reserved.reservedAmount,
       approvals: [...approvals],
     });
     if (a.status === 'AUTHORIZED') {
@@ -195,6 +199,7 @@ export async function BookingWorkflow(
       break;
     }
     if (a.status === 'REJECTED') return fail(`kernel: ${a.reason}`);
+    s.requestHash = a.requestHash;
     const remaining = deadline - Date.now();
     if (remaining <= 0) return fail('approval timed out');
     await condition(
@@ -232,24 +237,40 @@ export async function BookingWorkflow(
   }
 
   to('BOOKING_PENDING', s.idempotencyKey);
-  const executed = await once.executeBooking({
-    bookingId: input.bookingId,
-    offer: s.offer,
-    grant,
-    reservationId: reserved.reservationId,
-    planHash: reserved.planHash,
-    travelerRefs: input.travelerRefs,
-    idempotencyKey: s.idempotencyKey,
-  });
+  let executed: Awaited<ReturnType<BookingActivities['executeBooking']>>;
+  try {
+    executed = await once.executeBooking({
+      bookingId: input.bookingId,
+      offer: s.offer,
+      grant,
+      reservationId: reserved.reservationId,
+      planHash: reserved.planHash,
+      reservedAssetId: reserved.reservedAssetId,
+      reservedAmount: reserved.reservedAmount,
+      travelerRefs: input.travelerRefs,
+      idempotencyKey: s.idempotencyKey,
+    });
+  } catch {
+    executed = {
+      status: 'UNKNOWN',
+      reason: 'booking activity failed or timed out',
+    };
+  }
   let outcome: {
     status: 'CONFIRMED' | 'CANCELED';
     providerRef: string;
     reference: string | null;
     charged: Money | null;
   } | null = null;
+  let held = false;
   if (executed.status === 'FAILED') return fail(executed.reason);
   if (executed.status === 'UNKNOWN') {
     to('UNKNOWN_PROVIDER_OUTCOME', executed.reason);
+    await reads.holdBookingFunds({
+      reservationId: reserved.reservationId,
+      reason: 'provider outcome unknown',
+    });
+    held = true;
     const attempts = input.reconcileAttempts ?? 6;
     for (let i = 0; i < attempts && !outcome; i++) {
       await sleep(
@@ -270,10 +291,26 @@ export async function BookingWorkflow(
     }
   } else outcome = executed;
 
+  if (outcome.status === 'CANCELED') {
+    s.providerRef = outcome.providerRef;
+    s.reference = outcome.reference;
+    if (outcome.charged === null && !held)
+      return fail('provider canceled the booking before any charge');
+    to('CANCELED', 'provider reports the booking canceled');
+    if (!held)
+      await reads.holdBookingFunds({
+        reservationId: reserved.reservationId,
+        reason: 'provider canceled; refund via recourse',
+      });
+    s.notes.push('canceled by provider; reservation held for recourse');
+    to('REFUND_PENDING', 'recourse');
+    return finish();
+  }
+
   s.providerRef = outcome.providerRef;
   s.reference = outcome.reference;
   to('CONFIRMED', outcome.reference ?? outcome.providerRef);
-  s.receipt = await reads.settleBooking({
+  const settled = await reads.settleBooking({
     bookingId: input.bookingId,
     intent: input.intent,
     offer: s.offer,
@@ -285,6 +322,11 @@ export async function BookingWorkflow(
     grantId: grant.grantId,
     idempotencyKey: s.idempotencyKey,
   });
+  if (settled.status === 'INCIDENT') {
+    s.notes.push(`settlement incident: ${settled.reason}`);
+    return finish();
+  }
+  s.receipt = settled.receipt;
   to('RECONCILED', s.receipt.receiptId);
 
   if (!cancelRequested && (input.cancelWindowSeconds ?? 0) > 0)

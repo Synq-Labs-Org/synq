@@ -3,6 +3,9 @@ import {
   ReservationRequestSchema,
   applyCapture,
   applyRelease,
+  applyBegin,
+  applyHold,
+  applyReleaseHeld,
   applySettle,
   sameRequest,
   type FreeBalance,
@@ -78,11 +81,11 @@ export class PostgresReservationStore implements TreasuryReservationStore {
       .query(`CREATE TABLE IF NOT EXISTS ${this.s}.synq_treasury_reservations (
       reservation_id text PRIMARY KEY, group_id text NOT NULL, asset_id text NOT NULL,
       amount numeric(78,0) NOT NULL CHECK (amount > 0), captured numeric(78,0) NOT NULL DEFAULT 0 CHECK (captured <= amount),
-      state text NOT NULL CHECK (state IN ('ACTIVE','CAPTURED','SETTLED','RELEASED')),
+      state text NOT NULL CHECK (state IN ('ACTIVE','EXECUTING','HELD','CAPTURED','SETTLED','RELEASED')),
       expires_at bigint NOT NULL, request jsonb NOT NULL, reason text,
       created_at bigint NOT NULL, updated_at bigint NOT NULL)`);
     await this.pool.query(
-      `CREATE INDEX IF NOT EXISTS synq_treasury_reservations_holding ON ${this.s}.synq_treasury_reservations (group_id, asset_id) WHERE state IN ('ACTIVE','CAPTURED')`,
+      `CREATE INDEX IF NOT EXISTS synq_treasury_reservations_holding ON ${this.s}.synq_treasury_reservations (group_id, asset_id) WHERE state IN ('ACTIVE','EXECUTING','HELD','CAPTURED')`,
     );
     await this.pool
       .query(`CREATE TABLE IF NOT EXISTS ${this.s}.synq_treasury_refunds (
@@ -136,8 +139,8 @@ export class PostgresReservationStore implements TreasuryReservationStore {
   ): Promise<FreeBalance> {
     const r = await c.query(
       `SELECT b.confirmed::text AS confirmed, b.mandatory_reserve::text AS reserve, b.as_of,
-        COALESCE((SELECT SUM(CASE WHEN state='ACTIVE' THEN amount ELSE captured END) FROM ${this.s}.synq_treasury_reservations
-          WHERE group_id=$1 AND asset_id=$2 AND state IN ('ACTIVE','CAPTURED')),0)::text AS held,
+        COALESCE((SELECT SUM(CASE WHEN state='CAPTURED' THEN captured ELSE amount END) FROM ${this.s}.synq_treasury_reservations
+          WHERE group_id=$1 AND asset_id=$2 AND state IN ('ACTIVE','EXECUTING','HELD','CAPTURED')),0)::text AS held,
         COALESCE((SELECT SUM(f.amount) FROM ${this.s}.synq_treasury_refunds f JOIN ${this.s}.synq_treasury_reservations t USING (reservation_id)
           WHERE t.group_id=$1 AND t.asset_id=$2 AND f.state='PROMISED'),0)::text AS pending
        FROM (SELECT 1) one LEFT JOIN ${this.s}.synq_treasury_balances b ON b.group_id=$1 AND b.asset_id=$2`,
@@ -167,53 +170,77 @@ export class PostgresReservationStore implements TreasuryReservationStore {
     raw: ReservationRequest,
     now: number,
   ): Promise<TreasuryReservation> {
-    const req = ReservationRequestSchema.parse(raw);
+    return (await this.reservePlan([raw], now))[0]!;
+  }
+
+  async reservePlan(
+    raws: readonly ReservationRequest[],
+    now: number,
+  ): Promise<TreasuryReservation[]> {
+    const reqs = raws.map((r) => ReservationRequestSchema.parse(r));
     return this.tx(async (c) => {
-      const bal = await c.query(
-        `SELECT 1 FROM ${this.s}.synq_treasury_balances WHERE group_id=$1 AND asset_id=$2 FOR UPDATE`,
-        [req.groupId, req.assetId],
-      );
-      const prior = await c.query(
-        `SELECT * FROM ${this.s}.synq_treasury_reservations WHERE reservation_id=$1 FOR UPDATE`,
-        [req.reservationId],
-      );
-      if (prior.rows[0]) {
-        const existing = toReservation(prior.rows[0]);
-        if (!sameRequest(existing, req))
-          throw new ReservationError('RESERVATION_CONFLICT', req.reservationId);
-        return existing;
-      }
-      if (req.expiresAt <= now)
-        throw new ReservationError('RESERVATION_EXPIRED');
-      if (!bal.rows.length) throw new ReservationError('NO_CONFIRMED_BALANCE');
-      await c.query(
-        `UPDATE ${this.s}.synq_treasury_reservations SET state='RELEASED', reason='EXPIRED', updated_at=$3
-         WHERE group_id=$1 AND asset_id=$2 AND state='ACTIVE' AND expires_at <= $3`,
-        [req.groupId, req.assetId, now],
-      );
-      const free = BigInt(
-        (await this.freeWith(c, req.groupId, req.assetId)).free,
-      );
-      if (BigInt(req.amount) > free)
-        throw new ReservationError(
-          'INSUFFICIENT_FREE_BALANCE',
-          `requested ${req.amount}, free ${free}`,
+      const keys = [
+        ...new Set(reqs.map((r) => JSON.stringify([r.groupId, r.assetId]))),
+      ].sort();
+      const present = new Set<string>();
+      for (const k of keys) {
+        const [groupId, assetId] = JSON.parse(k) as [string, string];
+        const bal = await c.query(
+          `SELECT 1 FROM ${this.s}.synq_treasury_balances WHERE group_id=$1 AND asset_id=$2 FOR UPDATE`,
+          [groupId, assetId],
         );
-      const r = await c.query(
-        `INSERT INTO ${this.s}.synq_treasury_reservations
-          (reservation_id, group_id, asset_id, amount, captured, state, expires_at, request, reason, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,0,'ACTIVE',$5,$6,NULL,$7,$7) RETURNING *`,
-        [
-          req.reservationId,
-          req.groupId,
-          req.assetId,
-          req.amount,
-          req.expiresAt,
-          JSON.stringify(req),
-          now,
-        ],
-      );
-      return toReservation(r.rows[0]!);
+        if (bal.rows.length) present.add(k);
+        await c.query(
+          `UPDATE ${this.s}.synq_treasury_reservations SET state='RELEASED', reason='EXPIRED', updated_at=$3
+           WHERE group_id=$1 AND asset_id=$2 AND state='ACTIVE' AND expires_at <= $3`,
+          [groupId, assetId, now],
+        );
+      }
+      const out: TreasuryReservation[] = [];
+      for (const req of reqs) {
+        const prior = await c.query(
+          `SELECT * FROM ${this.s}.synq_treasury_reservations WHERE reservation_id=$1 FOR UPDATE`,
+          [req.reservationId],
+        );
+        if (prior.rows[0]) {
+          const existing = toReservation(prior.rows[0]);
+          if (!sameRequest(existing, req))
+            throw new ReservationError(
+              'RESERVATION_CONFLICT',
+              req.reservationId,
+            );
+          out.push(existing);
+          continue;
+        }
+        if (req.expiresAt <= now)
+          throw new ReservationError('RESERVATION_EXPIRED');
+        if (!present.has(JSON.stringify([req.groupId, req.assetId])))
+          throw new ReservationError('NO_CONFIRMED_BALANCE');
+        const free = BigInt(
+          (await this.freeWith(c, req.groupId, req.assetId)).free,
+        );
+        if (BigInt(req.amount) > free)
+          throw new ReservationError(
+            'INSUFFICIENT_FREE_BALANCE',
+            `requested ${req.amount}, free ${free}`,
+          );
+        const r = await c.query(
+          `INSERT INTO ${this.s}.synq_treasury_reservations
+            (reservation_id, group_id, asset_id, amount, captured, state, expires_at, request, reason, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,0,'ACTIVE',$5,$6,NULL,$7,$7) RETURNING *`,
+          [
+            req.reservationId,
+            req.groupId,
+            req.assetId,
+            req.amount,
+            req.expiresAt,
+            JSON.stringify(req),
+            now,
+          ],
+        );
+        out.push(toReservation(r.rows[0]!));
+      }
+      return out;
     });
   }
 
@@ -227,7 +254,10 @@ export class PostgresReservationStore implements TreasuryReservationStore {
 
   private mutate(
     id: string,
-    fn: (r: TreasuryReservation) => TreasuryReservation,
+    fn: (
+      r: TreasuryReservation,
+      balanceAsOf: number | null,
+    ) => TreasuryReservation,
   ) {
     return this.tx(async (c) => {
       const r = await c.query(
@@ -235,7 +265,12 @@ export class PostgresReservationStore implements TreasuryReservationStore {
         [id],
       );
       if (!r.rows[0]) throw new ReservationError('RESERVATION_NOT_FOUND', id);
-      const next = fn(toReservation(r.rows[0]));
+      const current = toReservation(r.rows[0]);
+      const b = await c.query(
+        `SELECT as_of FROM ${this.s}.synq_treasury_balances WHERE group_id=$1 AND asset_id=$2`,
+        [current.groupId, current.assetId],
+      );
+      const next = fn(current, b.rows[0] ? Number(b.rows[0].as_of) : null);
       await c.query(
         `UPDATE ${this.s}.synq_treasury_reservations SET state=$2, captured=$3, reason=$4, updated_at=$5 WHERE reservation_id=$1`,
         [id, next.state, next.captured, next.reason, next.updatedAt],
@@ -248,10 +283,23 @@ export class PostgresReservationStore implements TreasuryReservationStore {
     return this.mutate(id, (r) => applyCapture(r, amount, now));
   }
   settle(id: string, now: number) {
-    return this.mutate(id, (r) => applySettle(r, now));
+    return this.mutate(id, (r, asOf) => applySettle(r, now, asOf));
   }
   release(id: string, reason: string, now: number) {
     return this.mutate(id, (r) => applyRelease(r, reason, now));
+  }
+  beginExecution(
+    id: string,
+    expect: { groupId: string; settlementPlanHash: string },
+    now: number,
+  ) {
+    return this.mutate(id, (r) => applyBegin(r, expect, now));
+  }
+  hold(id: string, reason: string, now: number) {
+    return this.mutate(id, (r) => applyHold(r, reason, now));
+  }
+  releaseHeld(id: string, reason: string, now: number) {
+    return this.mutate(id, (r) => applyReleaseHeld(r, reason, now));
   }
 
   async expireDue(now: number) {

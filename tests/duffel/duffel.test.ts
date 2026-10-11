@@ -358,3 +358,45 @@ describe('Duffel Flights / Duffel Airways', () => {
     expect(fake.orders.size).toBe(1);
   });
 });
+
+describe('Duffel transport and redaction', () => {
+  it('a hung booking request aborts before the activity timeout and is classed ambiguous', async () => {
+    const hang: import('@synq/plugin-duffel').HttpFetch = (_url, init) =>
+      new Promise((_, reject) =>
+        init.signal?.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        ),
+      );
+    const client = new DuffelClient(TOKEN, hang, {
+      evidence: 'MOCKED',
+      timeoutMs: 50,
+    });
+    await expect(
+      client.request('POST', '/stays/bookings', {}),
+    ).rejects.toMatchObject({ kind: 'AMBIGUOUS', code: 'TRANSPORT' });
+    await expect(
+      client.request('GET', '/stays/bookings'),
+    ).rejects.toMatchObject({ kind: 'DEFINITIVE' });
+  });
+  it('provider error text is redacted before it reaches workflow notes', async () => {
+    const { createBookingActivities } =
+      await import('../../workers/workflow/src/activities/booking.js');
+    const port = {
+      providerId: 'duffel-stays',
+      host: 'api.duffel.com',
+      book: async () => ({ status: 'FAILED' as const, reason: 'x' }),
+      find: async () => {
+        throw new Error('401 for duffel_test_SECRET123 guest ada@example.com');
+      },
+      cancel: async () => ({ confirmed: false, refund: null, reason: null }),
+    };
+    const acts = createBookingActivities({
+      ports: { 'duffel-stays': port },
+    } as never);
+    const r = await acts.reconcileBooking({
+      offer: { fulfillmentProviderId: 'duffel-stays' } as never,
+      idempotencyKey: 'k',
+    });
+    expect(JSON.stringify(r)).not.toMatch(/SECRET123|ada@example\.com/);
+  });
+});

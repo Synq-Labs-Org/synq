@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   artifactHash,
+  economicRequestHash,
   type EconomicExecution,
   type EconomicGrant,
   type EconomicGrantAuthority,
@@ -30,10 +31,12 @@ export const X402ChallengeSchema = z.looseObject({
   error: z.string().max(200).optional(),
 });
 
+export type X402Asset = { chainId: number; address: string; decimals: number };
 export type X402Allowance = {
   hosts: readonly string[];
-  networks: readonly string[];
-  assets: readonly string[];
+  /** CAIP-2 network -> EVM chain id. */
+  networks: ReadonlyMap<string, number>;
+  assets: readonly X402Asset[];
   payTo: readonly string[] | null;
   maxPerRequest: bigint;
 };
@@ -60,7 +63,7 @@ export interface X402PaymentSigner {
 
 export type X402Fetch = (
   url: string,
-  init: { method: string; headers: Record<string, string> },
+  init: { method: string; headers: Record<string, string>; redirect: 'manual' },
 ) => Promise<{
   status: number;
   headers: { get(name: string): string | null };
@@ -85,6 +88,25 @@ export type X402Receipt = {
 const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
 const unb64 = (v: string): unknown =>
   JSON.parse(Buffer.from(v, 'base64').toString('utf8'));
+
+const MAX_HOPS = 3;
+async function fetchAllowlisted(
+  f: X402Fetch,
+  hosts: readonly string[],
+  start: string,
+  headers: Record<string, string>,
+) {
+  let url = start;
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    if (!hosts.includes(new URL(url).host)) throw new Error('HOST_NOT_ALLOWED');
+    const res = await f(url, { method: 'GET', headers, redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return res;
+    const location = res.headers.get('location');
+    if (!location) return res;
+    url = new URL(location, url).toString();
+  }
+  throw new Error('TOO_MANY_REDIRECTS');
+}
 
 export function parseChallenge(
   header: string | null,
@@ -117,7 +139,8 @@ export async function payForResource(
     groupId: string;
     mandateId: string;
     edgeAssetId: string;
-    approvers?: readonly string[];
+    /** Identity layer: verified approval records bound to the Kernel request hash. */
+    approvals?: (requestHash: string) => Promise<readonly unknown[]>;
     /** REAL_TESTNET only against a live facilitator on a testnet; doubles say MOCKED. */
     label: 'REAL_TESTNET' | 'MOCKED';
     now: () => number;
@@ -142,10 +165,14 @@ export async function payForResource(
   const refuse = (reason: string): X402Receipt => ({ ...base, reason });
   if (!deps.allowance.hosts.includes(url.host))
     return refuse('HOST_NOT_ALLOWED');
-  const first = await deps.fetch(resource, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-  });
+  let first;
+  try {
+    first = await fetchAllowlisted(deps.fetch, deps.allowance.hosts, resource, {
+      Accept: 'application/json',
+    });
+  } catch (e) {
+    return refuse((e as Error).message.slice(0, 60));
+  }
   if (first.status !== 402) {
     const body = await first.text();
     return first.status < 300
@@ -157,10 +184,16 @@ export async function payForResource(
     await first.text(),
   );
   const lower = (s: string) => s.toLowerCase();
+  const assetOf = (r: X402Requirement) =>
+    deps.allowance.assets.find(
+      (a) =>
+        lower(a.address) === lower(r.asset) &&
+        a.chainId === deps.allowance.networks.get(r.network),
+    );
   const req = requirements.find(
     (r) =>
-      deps.allowance.networks.includes(r.network) &&
-      deps.allowance.assets.map(lower).includes(lower(r.asset)) &&
+      deps.allowance.networks.has(r.network) &&
+      assetOf(r) !== undefined &&
       (deps.allowance.payTo === null ||
         deps.allowance.payTo.map(lower).includes(lower(r.payTo))),
   );
@@ -190,6 +223,7 @@ export async function payForResource(
       e instanceof ReservationError ? e.code : 'RESERVATION_FAILED',
     );
   }
+  const asset = assetOf(req)!;
   const execution: EconomicExecution = {
     domain: 'DATA',
     providerId: 'x402',
@@ -197,24 +231,34 @@ export async function payForResource(
     offerId: resource.slice(0, 160),
     subjectHash: reqHash,
     quantity: 1,
-    maxAmount: { amount: String(amount), currency: 'USDC', decimals: 6 },
+    maxAmount: {
+      amount: String(amount),
+      currency: 'USDC',
+      decimals: asset.decimals,
+    },
     reservationId,
+    reservedAssetId: deps.edgeAssetId,
+    reservedAmount: String(amount),
     settlementPlanHash: reqHash,
     recipientRef: lower(req.payTo),
-  };
-  const decision = deps.authority.authorize(
-    {
-      intentId: `x402-${reqHash.slice(2, 18)}`,
-      groupId: deps.groupId,
-      mandateId: deps.mandateId,
-      execution,
-      quoteExpiresAt: now + req.maxTimeoutSeconds,
-      revalidatedAt: now,
-      reservationHeld: true,
+    payAsset: {
+      chainId: asset.chainId,
+      address: lower(asset.address) as `0x${string}`,
+      decimals: asset.decimals,
     },
-    deps.approvers ?? [],
-    now,
-  );
+  };
+  const request = {
+    intentId: `x402-${reqHash.slice(2, 18)}`,
+    groupId: deps.groupId,
+    mandateId: deps.mandateId,
+    execution,
+    quoteExpiresAt: now + req.maxTimeoutSeconds,
+    revalidatedAt: now,
+  };
+  const approvals = deps.approvals
+    ? await deps.approvals(economicRequestHash(request))
+    : [];
+  const decision = await deps.authority.authorize(request, approvals, now);
   const scoped = {
     ...base,
     amount: req.amount,
@@ -235,6 +279,11 @@ export async function payForResource(
   }
   let signed;
   try {
+    await deps.reservations.beginExecution(
+      reservationId,
+      { groupId: deps.groupId, settlementPlanHash: reqHash },
+      now,
+    );
     signed = await deps.signer.sign({
       grant: decision.grant,
       execution,
@@ -249,9 +298,10 @@ export async function payForResource(
       reason: `SIGNER_REFUSED: ${(e as Error).message.slice(0, 120)}`,
     };
   }
-  const paid = await deps.fetch(resource, {
-    method: 'GET',
-    headers: {
+  await deps.reservations.hold(reservationId, 'x402 authorization signed', now);
+  let paid;
+  try {
+    paid = await fetchAllowlisted(deps.fetch, deps.allowance.hosts, resource, {
       Accept: 'application/json',
       'PAYMENT-SIGNATURE': b64({
         x402Version: 2,
@@ -259,8 +309,15 @@ export async function payForResource(
         accepted: req,
         payload: signed,
       }),
-    },
-  });
+    });
+  } catch (e) {
+    return {
+      ...scoped,
+      status: 'UNSETTLED',
+      grantId: decision.grant.grantId,
+      reason: `${(e as Error).message.slice(0, 60)}; reservation held for recourse`,
+    };
+  }
   const body = await paid.text();
   const header = paid.headers.get('payment-response');
   let settlement: {
@@ -290,6 +347,6 @@ export async function payForResource(
     ...scoped,
     status: 'UNSETTLED',
     grantId: decision.grant.grantId,
-    reason: `HTTP_${paid.status}${settlement.errorReason ? `: ${settlement.errorReason}` : ''}; reservation held until the authorization expires`,
+    reason: `HTTP_${paid.status}${settlement.errorReason ? `: ${settlement.errorReason}` : ''}; reservation held for recourse until the authorization expires`,
   };
 }

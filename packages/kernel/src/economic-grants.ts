@@ -1,11 +1,15 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import {
+  AddressSchema,
   AmountSchema,
   HashSchema,
   IdSchema,
+  IdentityPrincipalKindSchema,
   MemberIdSchema,
   TimestampSchema,
+  VerifiedApprovalSchema,
+  type VerifiedApproval,
 } from '@synq/schemas';
 import { artifactHash } from './canonical.js';
 
@@ -25,6 +29,7 @@ export const ECONOMIC_DOMAINS = [
   'FLIGHT',
   'DATA',
   'CANCEL',
+  'CONVERSION',
 ] as const;
 
 export const EconomicMandateSchema = z
@@ -41,6 +46,10 @@ export const EconomicMandateSchema = z
     autoApproveMax: MoneySchema,
     quorum: z.number().int().positive(),
     members: z.array(MemberIdSchema).min(1),
+    approverKinds: z
+      .array(IdentityPrincipalKindSchema.exclude(['DYNAMIC_OPERATOR']))
+      .min(1)
+      .default(['MERA_HUMAN']),
     maxQuoteAgeSeconds: z.number().int().positive().max(3_600),
     grantTtlSeconds: z.number().int().positive().max(3_600),
     environment: z.enum(['SANDBOX', 'TESTNET']),
@@ -59,6 +68,7 @@ export const EconomicMandateSchema = z
       ctx.addIssue({ code: 'custom', message: 'quorum exceeds members' });
   });
 export type EconomicMandate = z.output<typeof EconomicMandateSchema>;
+export type EconomicMandateInput = z.input<typeof EconomicMandateSchema>;
 
 /** Everything the executor will do, bound before the grant is issued. */
 export const EconomicExecutionSchema = z.strictObject({
@@ -70,10 +80,23 @@ export const EconomicExecutionSchema = z.strictObject({
   quantity: z.number().int().positive(),
   maxAmount: MoneySchema,
   reservationId: z.string().min(1).max(160),
+  reservedAssetId: z.string().min(1).max(160),
+  reservedAmount: AmountSchema.refine(
+    (v) => BigInt(v) > 0n,
+    'reserved amount must be positive',
+  ),
   settlementPlanHash: z.string().min(1).max(80),
   recipientRef: z.string().max(160).nullable(),
+  payAsset: z
+    .strictObject({
+      chainId: z.number().int().positive(),
+      address: AddressSchema,
+      decimals: z.number().int().min(0).max(36),
+    })
+    .nullable(),
 });
 export type EconomicExecution = z.output<typeof EconomicExecutionSchema>;
+export type EconomicExecutionInput = z.input<typeof EconomicExecutionSchema>;
 
 export const EconomicAuthorizationRequestSchema = z.strictObject({
   intentId: IdSchema,
@@ -82,14 +105,13 @@ export const EconomicAuthorizationRequestSchema = z.strictObject({
   execution: EconomicExecutionSchema,
   quoteExpiresAt: TimestampSchema,
   revalidatedAt: TimestampSchema.nullable(),
-  reservationHeld: z.boolean(),
 });
-export type EconomicAuthorizationRequest = z.output<
+export type EconomicAuthorizationRequest = z.input<
   typeof EconomicAuthorizationRequestSchema
 >;
 
 export const EconomicGrantSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   grantId: HashSchema,
   intentId: IdSchema,
   groupId: IdSchema,
@@ -117,6 +139,8 @@ export type EconomicRefusal =
   | 'QUOTE_NOT_REVALIDATED'
   | 'QUOTE_EXPIRED'
   | 'RESERVATION_MISSING'
+  | 'RESERVATION_MISMATCH'
+  | 'INTENT_ALREADY_EXECUTED'
   | 'APPROVER_NOT_MEMBER';
 
 export type EconomicDecision =
@@ -145,58 +169,170 @@ export class EconomicGrantError extends Error {
   }
 }
 
-export function economicRequestHash(r: EconomicAuthorizationRequest) {
+export function economicRequestHash(raw: EconomicAuthorizationRequest) {
+  const r = EconomicAuthorizationRequestSchema.parse(raw);
   return artifactHash({ kind: 'EconomicAuthorizationRequest', ...r });
+}
+export const executionHash = (x: EconomicExecution) =>
+  artifactHash({ kind: 'EconomicExecution', ...x });
+
+/** Reservation view the Kernel reads itself; callers cannot assert a reservation is held. */
+export type EconomicReservationView = {
+  state: string;
+  groupId: string;
+  assetId: string;
+  amount: string;
+  settlementPlanHash: string | null;
+  expiresAt: number;
+};
+export interface EconomicReservationReader {
+  get(reservationId: string): Promise<EconomicReservationView | null>;
 }
 
 /**
- * The Kernel's Web2/x402 authority: commerce, stays, flights and paid data all
- * compile to the same one-time, HMAC-bound grant the bounded executor checks.
- * Approver ids must already be verified by the identity layer.
+ * Durable grant state. `issue` charges the budget atomically for every issued
+ * grant; `consume` is a single atomic insert unique on grant and intent.
+ */
+export interface EconomicGrantLedger {
+  installMandate(m: EconomicMandate): Promise<void>;
+  mandate(mandateId: string): Promise<EconomicMandate | null>;
+  revoke(mandateId: string): Promise<void>;
+  latestGrant(intentId: string): Promise<EconomicGrant | null>;
+  intentConsumed(intentId: string): Promise<boolean>;
+  issue(
+    grant: EconomicGrant,
+    amount: bigint,
+    budget: bigint,
+  ): Promise<'ISSUED' | 'BUDGET_EXHAUSTED' | 'INTENT_CONSUMED'>;
+  consume(
+    grant: EconomicGrant,
+    executionHash: string,
+    at: number,
+  ): Promise<boolean>;
+  spent(mandateId: string): Promise<bigint>;
+  isConsumed(grantId: string): Promise<boolean>;
+}
+
+export class MandateVersionError extends Error {
+  constructor(id: string) {
+    super(`MANDATE_VERSION_NOT_NEWER: ${id}`);
+    this.name = 'MandateVersionError';
+  }
+}
+
+export class MemoryEconomicGrantLedger implements EconomicGrantLedger {
+  private readonly mandates = new Map<string, EconomicMandate>();
+  private readonly spentBy = new Map<string, bigint>();
+  private readonly latest = new Map<string, EconomicGrant>();
+  private readonly consumedGrants = new Set<string>();
+  private readonly consumedIntents = new Set<string>();
+  async installMandate(m: EconomicMandate) {
+    const prior = this.mandates.get(m.mandateId);
+    if (prior && prior.version >= m.version)
+      throw new MandateVersionError(m.mandateId);
+    this.mandates.set(m.mandateId, m);
+  }
+  async mandate(id: string) {
+    return this.mandates.get(id) ?? null;
+  }
+  async revoke(id: string) {
+    const m = this.mandates.get(id);
+    if (m) this.mandates.set(id, { ...m, status: 'REVOKED' });
+  }
+  async latestGrant(intentId: string) {
+    return this.latest.get(intentId) ?? null;
+  }
+  async intentConsumed(intentId: string) {
+    return this.consumedIntents.has(intentId);
+  }
+  async issue(grant: EconomicGrant, amount: bigint, budget: bigint) {
+    if (this.consumedIntents.has(grant.intentId))
+      return 'INTENT_CONSUMED' as const;
+    const spent = this.spentBy.get(grant.mandateId) ?? 0n;
+    if (spent + amount > budget) return 'BUDGET_EXHAUSTED' as const;
+    this.spentBy.set(grant.mandateId, spent + amount);
+    this.latest.set(grant.intentId, grant);
+    return 'ISSUED' as const;
+  }
+  async consume(grant: EconomicGrant) {
+    if (
+      this.consumedGrants.has(grant.grantId) ||
+      this.consumedIntents.has(grant.intentId)
+    )
+      return false;
+    this.consumedGrants.add(grant.grantId);
+    this.consumedIntents.add(grant.intentId);
+    return true;
+  }
+  async spent(id: string) {
+    return this.spentBy.get(id) ?? 0n;
+  }
+  async isConsumed(grantId: string) {
+    return this.consumedGrants.has(grantId);
+  }
+}
+
+const MATCHING_KINDS = new Set([
+  'MERA_HUMAN',
+  'PRIVY_DELEGATE',
+  'LOCAL_FIXTURE',
+]);
+
+/**
+ * The Kernel's Web2/x402 authority: commerce, stays, flights, paid data and
+ * conversions compile to the same one-time, HMAC-bound grant. Approvals must
+ * be identity-verified records bound to the exact request hash; the
+ * reservation is read by the Kernel itself.
  */
 export class EconomicGrantAuthority {
-  private readonly mandates = new Map<string, EconomicMandate>();
-  private readonly spent = new Map<string, bigint>();
-  private readonly issued = new Map<string, EconomicGrant>();
-  private readonly consumed = new Set<string>();
-  constructor(private readonly key: Uint8Array) {
-    if (key.length < 32) throw new Error('GRANT_KEY_TOO_SHORT');
+  private readonly key: Uint8Array;
+  private readonly ledger: EconomicGrantLedger;
+  private readonly reservations: EconomicReservationReader;
+  constructor(input: {
+    key: Uint8Array;
+    reservations: EconomicReservationReader;
+    ledger?: EconomicGrantLedger;
+  }) {
+    if (input.key.length < 32) throw new Error('GRANT_KEY_TOO_SHORT');
+    this.key = input.key;
+    this.reservations = input.reservations;
+    this.ledger = input.ledger ?? new MemoryEconomicGrantLedger();
   }
 
   private mac(grantId: string) {
     return createHmac('sha256', this.key).update(grantId).digest('hex');
   }
 
-  install(raw: unknown): EconomicMandate {
+  async install(raw: EconomicMandateInput): Promise<EconomicMandate> {
     const m = EconomicMandateSchema.parse(raw);
-    const prior = this.mandates.get(m.mandateId);
-    if (prior && prior.version >= m.version)
-      throw new Error('MANDATE_VERSION_NOT_NEWER');
-    this.mandates.set(m.mandateId, m);
+    await this.ledger.installMandate(m);
     return m;
   }
 
-  revoke(mandateId: string): void {
-    const m = this.mandates.get(mandateId);
-    if (m) this.mandates.set(mandateId, { ...m, status: 'REVOKED' });
+  revoke(mandateId: string): Promise<void> {
+    return this.ledger.revoke(mandateId);
   }
 
-  spentFor(mandateId: string): bigint {
-    return this.spent.get(mandateId) ?? 0n;
+  spentFor(mandateId: string): Promise<bigint> {
+    return this.ledger.spent(mandateId);
   }
 
-  authorize(
+  isConsumed(grantId: string): Promise<boolean> {
+    return this.ledger.isConsumed(grantId);
+  }
+
+  async authorize(
     raw: EconomicAuthorizationRequest,
-    approvers: readonly string[],
+    approvals: readonly unknown[],
     now: number,
-  ): EconomicDecision {
+  ): Promise<EconomicDecision> {
     const r = EconomicAuthorizationRequestSchema.parse(raw);
     const reject = (code: EconomicRefusal, detail = ''): EconomicDecision => ({
       status: 'REJECTED',
       code,
       detail,
     });
-    const m = this.mandates.get(r.mandateId);
+    const m = await this.ledger.mandate(r.mandateId);
     if (!m) return reject('MANDATE_UNKNOWN');
     if (m.status !== 'ACTIVE' || m.validUntil <= now)
       return reject('MANDATE_INACTIVE');
@@ -214,39 +350,62 @@ export class EconomicGrantAuthority {
       return reject('CURRENCY_MISMATCH');
     const amount = BigInt(x.maxAmount.amount);
     if (amount > BigInt(m.perActionCap.amount)) return reject('PER_ACTION_CAP');
-    const prior = this.issued.get(r.intentId);
-    const priorSameRequest =
-      prior !== undefined &&
-      artifactHash(prior.execution) === artifactHash(x) &&
-      prior.mandateVersion === m.version;
-    if (
-      !priorSameRequest &&
-      this.spentFor(m.mandateId) + amount > BigInt(m.cumulativeBudget.amount)
-    )
-      return reject('BUDGET_EXHAUSTED');
     if (
       r.revalidatedAt === null ||
       now - r.revalidatedAt > m.maxQuoteAgeSeconds
     )
       return reject('QUOTE_NOT_REVALIDATED');
     if (r.quoteExpiresAt <= now) return reject('QUOTE_EXPIRED');
-    if (!r.reservationHeld) return reject('RESERVATION_MISSING');
-    const members = new Set(m.members);
-    const unique = [...new Set(approvers)].sort();
-    const outsider = unique.find((a) => !members.has(a as never));
-    if (outsider) return reject('APPROVER_NOT_MEMBER', outsider);
+    if (await this.ledger.intentConsumed(r.intentId))
+      return reject('INTENT_ALREADY_EXECUTED');
+    const res = await this.reservations.get(x.reservationId);
+    if (!res) return reject('RESERVATION_MISSING');
+    if (
+      res.state !== 'ACTIVE' ||
+      res.expiresAt <= now ||
+      res.groupId !== r.groupId ||
+      res.assetId !== x.reservedAssetId ||
+      BigInt(res.amount) < BigInt(x.reservedAmount) ||
+      res.settlementPlanHash !== x.settlementPlanHash
+    )
+      return reject('RESERVATION_MISMATCH', `reservation ${res.state}`);
+
+    const requestHash = economicRequestHash(r);
+    const members = new Set<string>(m.members);
+    const kinds = new Set<string>(m.approverKinds);
+    const approvers = new Set<string>();
+    for (const a of approvals) {
+      const parsed = VerifiedApprovalSchema.safeParse(a);
+      if (!parsed.success) continue;
+      const v: VerifiedApproval = parsed.data;
+      if (v.draftDigest !== requestHash || v.groupId !== r.groupId) continue;
+      if (!MATCHING_KINDS.has(v.principalKind) || !kinds.has(v.principalKind))
+        continue;
+      if (!members.has(v.memberId))
+        return reject('APPROVER_NOT_MEMBER', v.memberId);
+      approvers.add(v.memberId);
+    }
+    const unique = [...approvers].sort();
     const required = amount <= BigInt(m.autoApproveMax.amount) ? 0 : m.quorum;
     if (unique.length < required)
       return {
         status: 'PENDING_APPROVAL',
         requiredApprovals: required,
         approvals: unique,
-        requestHash: economicRequestHash(r),
+        requestHash,
       };
-    if (priorSameRequest && prior.expiresAt > now)
+
+    const prior = await this.ledger.latestGrant(r.intentId);
+    if (
+      prior &&
+      prior.expiresAt > now &&
+      prior.mandateVersion === m.version &&
+      executionHash(prior.execution) === executionHash(x) &&
+      !(await this.ledger.isConsumed(prior.grantId))
+    )
       return { status: 'AUTHORIZED', grant: prior };
     const body = {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       intentId: r.intentId,
       groupId: r.groupId,
       mandateId: m.mandateId,
@@ -259,6 +418,7 @@ export class EconomicGrantAuthority {
         now + m.grantTtlSeconds,
         r.quoteExpiresAt,
         m.validUntil,
+        res.expiresAt,
       ),
     };
     const grantId = artifactHash(body);
@@ -267,14 +427,22 @@ export class EconomicGrantAuthority {
       grantId,
       mac: this.mac(grantId),
     });
-    if (!priorSameRequest)
-      this.spent.set(m.mandateId, this.spentFor(m.mandateId) + amount);
-    this.issued.set(r.intentId, grant);
+    const issued = await this.ledger.issue(
+      grant,
+      amount,
+      BigInt(m.cumulativeBudget.amount),
+    );
+    if (issued === 'BUDGET_EXHAUSTED') return reject('BUDGET_EXHAUSTED');
+    if (issued === 'INTENT_CONSUMED') return reject('INTENT_ALREADY_EXECUTED');
     return { status: 'AUTHORIZED', grant };
   }
 
   /** Verifies an execution against its grant without consuming it. */
-  verify(raw: unknown, actual: EconomicExecution, now: number): EconomicGrant {
+  async verify(
+    raw: unknown,
+    actual: EconomicExecutionInput,
+    now: number,
+  ): Promise<EconomicGrant> {
     const parsed = EconomicGrantSchema.safeParse(raw);
     if (!parsed.success) throw new EconomicGrantError('GRANT_INVALID');
     const { grantId, mac, ...body } = parsed.data;
@@ -289,7 +457,7 @@ export class EconomicGrantAuthority {
       throw new EconomicGrantError('GRANT_MAC');
     if (now >= body.expiresAt || now < body.issuedAt)
       throw new EconomicGrantError('GRANT_EXPIRED');
-    const m = this.mandates.get(body.mandateId);
+    const m = await this.ledger.mandate(body.mandateId);
     if (!m || m.status !== 'ACTIVE' || m.version !== body.mandateVersion)
       throw new EconomicGrantError('GRANT_BINDING', 'mandate changed');
     const g = body.execution;
@@ -304,8 +472,22 @@ export class EconomicGrantAuthority {
     bind(x.subjectHash === g.subjectHash, 'item');
     bind(x.quantity === g.quantity, 'quantity');
     bind(x.reservationId === g.reservationId, 'reservation');
+    bind(
+      x.reservedAssetId === g.reservedAssetId &&
+        x.reservedAmount === g.reservedAmount,
+      'reserved amount',
+    );
     bind(x.settlementPlanHash === g.settlementPlanHash, 'settlement plan');
     bind(x.recipientRef === g.recipientRef, 'recipient');
+    bind(
+      (x.payAsset === null && g.payAsset === null) ||
+        (x.payAsset !== null &&
+          g.payAsset !== null &&
+          x.payAsset.chainId === g.payAsset.chainId &&
+          x.payAsset.address === g.payAsset.address &&
+          x.payAsset.decimals === g.payAsset.decimals),
+      'pay asset',
+    );
     bind(
       x.maxAmount.currency === g.maxAmount.currency &&
         x.maxAmount.decimals === g.maxAmount.decimals &&
@@ -315,15 +497,20 @@ export class EconomicGrantAuthority {
     return parsed.data;
   }
 
-  consume(raw: unknown, actual: EconomicExecution, now: number): EconomicGrant {
-    const grant = this.verify(raw, actual, now);
-    if (this.consumed.has(grant.grantId))
+  async consume(
+    raw: unknown,
+    actual: EconomicExecutionInput,
+    now: number,
+  ): Promise<EconomicGrant> {
+    const grant = await this.verify(raw, actual, now);
+    if (
+      !(await this.ledger.consume(
+        grant,
+        executionHash(EconomicExecutionSchema.parse(actual)),
+        now,
+      ))
+    )
       throw new EconomicGrantError('GRANT_CONSUMED');
-    this.consumed.add(grant.grantId);
     return grant;
-  }
-
-  isConsumed(grantId: string): boolean {
-    return this.consumed.has(grantId);
   }
 }

@@ -54,6 +54,30 @@ const realFetch: HttpFetch = async (url, init) => {
   return { status: res.status, headers: res.headers, text: () => res.text() };
 };
 
+let approvalSeq = 0;
+/** Identity-ledger shaped approval from the stub verifier (LOCAL_FIXTURE, not a passkey). */
+function fixtureApproval(
+  memberId: string,
+  requestHash: string,
+  groupId: string,
+) {
+  approvalSeq++;
+  return {
+    schemaVersion: 1,
+    approvalId: `fixture-apr-${approvalSeq}`,
+    challengeId: `fixture-chl-${approvalSeq}`,
+    groupId,
+    memberId,
+    principalId: `fixture-${memberId}`,
+    principalKind: 'LOCAL_FIXTURE',
+    signer: `0x${String(approvalSeq).padStart(40, '0')}`,
+    draftDigest: requestHash,
+    signature: `0x${'11'.repeat(65)}`,
+    membershipEpoch: 1,
+    verifiedAt: Math.floor(Date.now() / 1000),
+  };
+}
+
 async function main() {
   if (!token.startsWith('duffel_test_'))
     throw new Error('DUFFEL_TEST_TOKEN (duffel_test_) required');
@@ -72,8 +96,12 @@ async function main() {
     confirmed: 2_000_000_000n,
     asOf: now(),
   });
-  const authority = new EconomicGrantAuthority(new Uint8Array(randomBytes(32)));
-  authority.install({
+  const authority = new EconomicGrantAuthority({
+    key: new Uint8Array(randomBytes(32)),
+    reservations,
+  });
+  await authority.install({
+    approverKinds: ['LOCAL_FIXTURE'],
     mandateId: 'travel-evidence',
     groupId: 'evidence-group',
     version: 1,
@@ -166,10 +194,13 @@ async function main() {
     },
     authority,
     approvals: {
-      verify: async ({ tokens }) =>
-        tokens
-          .filter((t) => t.startsWith('fixture-verified:'))
-          .map((t) => t.slice(17)),
+      verify: async ({ tokens, requestHash, groupId }) =>
+        tokens.flatMap((t) => {
+          const [kind, member, hash] = t.split(':');
+          return kind === 'fixture-verified' && member && hash === requestHash
+            ? [fixtureApproval(member, requestHash, groupId)]
+            : [];
+        }),
     },
     travelers: {
       resolve: async ({ groupId, refs, purpose }) =>
@@ -286,8 +317,17 @@ async function main() {
       );
     };
     await until('RESERVED');
-    await handle.signal('bookingApproval', { token: 'fixture-verified:alice' });
-    await handle.signal('bookingApproval', { token: 'fixture-verified:bob' });
+    let hash: string | null = null;
+    for (let i = 0; i < 300 && !hash; i++) {
+      hash = (await query()).requestHash;
+      if (!hash) await new Promise((r) => setTimeout(r, 200));
+    }
+    await handle.signal('bookingApproval', {
+      token: `fixture-verified:alice:${hash}`,
+    });
+    await handle.signal('bookingApproval', {
+      token: `fixture-verified:bob:${hash}`,
+    });
     await until('RECONCILED');
     await handle.signal('bookingCancel');
     state = (await handle.result()) as BookingWorkflowState;

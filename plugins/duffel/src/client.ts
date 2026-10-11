@@ -1,6 +1,7 @@
 export const DUFFEL_API = 'https://api.duffel.com';
 export const DUFFEL_HOST = 'api.duffel.com';
 export const DUFFEL_VERSION = 'v2';
+export const DUFFEL_TIMEOUT_MS = 25_000;
 
 export type HttpFetch = (
   url: string,
@@ -59,14 +60,21 @@ export class DuffelClient {
   private readonly token: string;
   readonly evidence: 'PROVIDER_SANDBOX' | 'MOCKED';
   private readonly baseUrl: string;
+  readonly timeoutMs: number;
   /** PROVIDER_SANDBOX only when talking to the real test-mode API; doubles say MOCKED. */
   constructor(
     token: string,
     private readonly fetchImpl: HttpFetch,
-    options: { evidence: 'PROVIDER_SANDBOX' | 'MOCKED'; baseUrl?: string },
+    options: {
+      evidence: 'PROVIDER_SANDBOX' | 'MOCKED';
+      baseUrl?: string;
+      /** Must stay below the calling activity's start-to-close timeout. */
+      timeoutMs?: number;
+    },
   ) {
     this.evidence = options.evidence;
     this.baseUrl = options.baseUrl ?? DUFFEL_API;
+    this.timeoutMs = options.timeoutMs ?? DUFFEL_TIMEOUT_MS;
     if (!/^duffel_test_[A-Za-z0-9_-]+$/.test(token))
       throw new LiveKeyRefusedError();
     this.token = token;
@@ -90,7 +98,9 @@ export class DuffelClient {
           'Content-Type': 'application/json',
         },
         ...(body === undefined ? {} : { body: JSON.stringify({ data: body }) }),
-        ...(signal ? { signal } : {}),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
+          : AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
       throw new DuffelError(

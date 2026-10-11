@@ -60,6 +60,8 @@ export interface RecourseStore {
     kind: string,
     at: number,
   ): Promise<boolean>;
+  /** Undoes a claim when processing failed, so the event can be retried. */
+  unclaim(eventId: string): Promise<void>;
   /** Advances the per-ref cursor; returns false when the update is older than the last applied one. */
   advance(providerRef: string, providerUpdatedAt: number): Promise<boolean>;
   incident(i: Incident): Promise<void>;
@@ -74,6 +76,9 @@ export class MemoryRecourseStore implements RecourseStore {
     if (this.seen.has(eventId)) return false;
     this.seen.add(eventId);
     return true;
+  }
+  async unclaim(eventId: string) {
+    this.seen.delete(eventId);
   }
   async advance(ref: string, at: number) {
     const prior = this.cursors.get(ref);
@@ -117,6 +122,12 @@ export class PostgresRecourseStore implements RecourseStore {
       [eventId, providerRef, kind, at],
     );
     return r.rowCount === 1;
+  }
+  async unclaim(eventId: string) {
+    await this.pool.query(
+      `DELETE FROM ${this.s}.synq_recourse_events WHERE event_id=$1`,
+      [eventId],
+    );
   }
   async advance(ref: string, at: number) {
     const r = await this.pool.query(
@@ -165,6 +176,35 @@ export class RecourseReconciler {
     const now = this.now();
     if (!(await this.store.claim(e.eventId, e.providerRef, e.kind, now)))
       return 'DUPLICATE';
+    try {
+      return await this.process(e, now);
+    } catch (err) {
+      await this.store.unclaim(e.eventId);
+      throw err;
+    }
+  }
+
+  private async releaseUncaptured(
+    reservationId: string,
+    state: string,
+    reason: string,
+    now: number,
+  ): Promise<boolean> {
+    if (state === 'ACTIVE' || state === 'EXECUTING') {
+      await this.reservations.release(reservationId, reason, now);
+      return true;
+    }
+    if (state === 'HELD') {
+      await this.reservations.releaseHeld(reservationId, reason, now);
+      return true;
+    }
+    return false;
+  }
+
+  private async process(
+    e: ProviderEvent,
+    now: number,
+  ): Promise<RecourseOutcome> {
     if (!(await this.store.advance(e.providerRef, e.providerUpdatedAt)))
       return 'STALE';
     const r = await this.reservations.get(e.reservationId);
@@ -182,26 +222,28 @@ export class RecourseReconciler {
       case 'CONFIRMED':
         return 'APPLIED';
       case 'PAYMENT_FAILED':
-        if (r.state === 'ACTIVE') {
-          await this.reservations.release(
+        if (
+          await this.releaseUncaptured(
             r.reservationId,
+            r.state,
             `payment failed: ${e.reason}`,
             now,
-          );
+          )
+        )
           return 'RELEASED';
-        }
         return r.state === 'RELEASED'
           ? 'APPLIED'
           : incident('PAYMENT_FAILED_AFTER_CAPTURE', `reservation ${r.state}`);
       case 'CANCELED':
-        if (r.state === 'ACTIVE') {
-          await this.reservations.release(
+        if (
+          await this.releaseUncaptured(
             r.reservationId,
+            r.state,
             'provider canceled before capture',
             now,
-          );
+          )
+        )
           return 'RELEASED';
-        }
         if (e.refundCore === null || BigInt(e.refundCore) === 0n)
           return 'APPLIED';
         return this.refund(

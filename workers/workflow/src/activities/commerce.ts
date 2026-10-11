@@ -7,6 +7,9 @@ import {
 import {
   FulfillmentReceiptSchema,
   assertExecutable,
+  compare,
+  convert,
+  landedTotal,
   type EconomicOffer,
   type FulfillmentReceipt,
   type Money,
@@ -20,15 +23,22 @@ import {
 export type CommerceCheckoutResult =
   | { kind: 'RECEIPT'; receipt: FulfillmentReceipt }
   | { kind: 'HANDOFF'; reason: string }
-  | { kind: 'REFUSED'; reason: string };
+  | { kind: 'REFUSED'; reason: string }
+  | { kind: 'INCIDENT'; reason: string; receipt: FulfillmentReceipt };
+
+export type CommerceReservationBinding = {
+  reservationId: string;
+  planHash: string;
+  reservedAssetId: string;
+  reservedAmount: string;
+};
 
 export function commerceExecution(input: {
   offer: EconomicOffer;
   host: string;
   providerId: string;
   maxAmount: Money;
-  reservationId: string;
-  planHash: string;
+  reservation: CommerceReservationBinding;
   recipientRef: string;
 }): EconomicExecution {
   return {
@@ -43,16 +53,19 @@ export function commerceExecution(input: {
     quantity:
       input.offer.subject.kind === 'PRODUCT' ? input.offer.subject.quantity : 1,
     maxAmount: input.maxAmount,
-    reservationId: input.reservationId,
-    settlementPlanHash: input.planHash,
+    reservationId: input.reservation.reservationId,
+    reservedAssetId: input.reservation.reservedAssetId,
+    reservedAmount: input.reservation.reservedAmount,
+    settlementPlanHash: input.reservation.planHash,
     recipientRef: input.recipientRef,
+    payAsset: null,
   };
 }
 
 /**
- * Commerce checkout in the execution worker: the Kernel grant is consumed for
- * the exact merchant host, item, quantity, amount and recipient before any
- * route runs. Without sandbox access the result is SIMULATED_CHECKOUT.
+ * Commerce checkout in the execution worker. The execution checked against the
+ * Kernel grant is rebuilt here from the offer actually being placed and the
+ * route actually used, never taken from the caller.
  */
 export async function executeCommerceCheckout(
   deps: {
@@ -65,7 +78,8 @@ export async function executeCommerceCheckout(
     decision: CheckoutDecision;
     offer: EconomicOffer;
     grant: EconomicGrant;
-    actual: EconomicExecution;
+    reservation: CommerceReservationBinding;
+    recipientRef: string;
     idempotencyKey: string;
   },
 ): Promise<CommerceCheckoutResult> {
@@ -73,17 +87,22 @@ export async function executeCommerceCheckout(
   if (input.decision.kind === 'HANDOFF')
     return { kind: 'HANDOFF', reason: input.decision.reason };
   const route = input.decision.route;
-  if (
-    input.actual.host !== route.host ||
-    input.actual.providerId !== route.providerId
-  )
-    return {
-      kind: 'REFUSED',
-      reason: 'route differs from the authorized merchant',
-    };
+  const cap = input.grant.execution.maxAmount;
+  let landed: Money;
   try {
     assertExecutable(input.offer, now, 900);
-    deps.authority.consume(input.grant, input.actual, now);
+    landed = landedTotal(input.offer, cap);
+    if (compare(landed, cap) > 0)
+      return { kind: 'REFUSED', reason: 'landed price exceeds the grant' };
+    const actual = commerceExecution({
+      offer: input.offer,
+      host: route.host,
+      providerId: route.providerId,
+      maxAmount: landed,
+      reservation: input.reservation,
+      recipientRef: input.recipientRef,
+    });
+    await deps.authority.consume(input.grant, actual, now);
   } catch (e) {
     return {
       kind: 'REFUSED',
@@ -98,13 +117,13 @@ export async function executeCommerceCheckout(
         route,
         intentId: input.intentId,
         idempotencyKey: input.idempotencyKey,
-        reservationId: input.actual.reservationId,
+        reservationId: input.reservation.reservationId,
         grantId: input.grant.grantId,
         now,
       }),
     };
   const recipient = await deps.resolveRecipient(
-    input.actual.recipientRef ?? '',
+    input.recipientRef,
     `checkout:${input.intentId}`,
   );
   const placed = await route.place!({
@@ -112,28 +131,41 @@ export async function executeCommerceCheckout(
     recipient,
     idempotencyKey: input.idempotencyKey,
   });
-  return {
-    kind: 'RECEIPT',
-    receipt: FulfillmentReceiptSchema.parse({
-      receiptId: `order-${input.idempotencyKey}`.slice(0, 160),
-      intentId: input.intentId,
-      offerId: input.offer.offerId,
-      providerId: route.providerId,
-      providerRef: placed.state === 'ORDER_PLACED' ? placed.orderRef : null,
-      providerReference: null,
-      state:
-        placed.state === 'ORDER_PLACED'
-          ? 'ORDER_PLACED'
-          : placed.state === 'FAILED'
-            ? 'FAILED'
-            : 'UNKNOWN_PROVIDER_OUTCOME',
-      charged: placed.state === 'ORDER_PLACED' ? placed.charged : null,
-      idempotencyKey: input.idempotencyKey,
-      reservationId: input.actual.reservationId,
-      grantId: input.grant.grantId,
-      environment: 'SANDBOX',
-      evidence: 'PROVIDER_SANDBOX',
-      createdAt: now,
-    }),
-  };
+  const receipt = FulfillmentReceiptSchema.parse({
+    receiptId: `order-${input.idempotencyKey}`.slice(0, 160),
+    intentId: input.intentId,
+    offerId: input.offer.offerId,
+    providerId: route.providerId,
+    providerRef: placed.state === 'ORDER_PLACED' ? placed.orderRef : null,
+    providerReference: null,
+    state:
+      placed.state === 'ORDER_PLACED'
+        ? 'ORDER_PLACED'
+        : placed.state === 'FAILED'
+          ? 'FAILED'
+          : 'UNKNOWN_PROVIDER_OUTCOME',
+    charged: placed.state === 'ORDER_PLACED' ? placed.charged : null,
+    idempotencyKey: input.idempotencyKey,
+    reservationId: input.reservation.reservationId,
+    grantId: input.grant.grantId,
+    environment: 'SANDBOX',
+    evidence: 'PROVIDER_SANDBOX',
+    createdAt: now,
+  });
+  if (placed.state === 'ORDER_PLACED' && placed.charged) {
+    let over = true;
+    try {
+      over =
+        compare(convert(placed.charged, cap, input.offer.price.fx), cap) > 0;
+    } catch {
+      over = true;
+    }
+    if (over)
+      return {
+        kind: 'INCIDENT',
+        reason: 'charged amount exceeds the grant',
+        receipt,
+      };
+  }
+  return { kind: 'RECEIPT', receipt };
 }

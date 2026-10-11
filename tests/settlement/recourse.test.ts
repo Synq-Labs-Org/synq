@@ -80,3 +80,61 @@ describe('recourse policy helpers', () => {
     ).toBe(true);
   });
 });
+
+describe('recourse durability', () => {
+  it('a processing failure does not drop the event; the retry applies it', async () => {
+    const { MemoryRecourseStore, MemoryReservationStore, RecourseReconciler } =
+      await import('@synq/settlement');
+    const reservations = new MemoryReservationStore();
+    await reservations.setConfirmedBalance({
+      groupId: 'group-1',
+      assetId: 'a',
+      confirmed: 100n,
+      asOf: T0,
+    });
+    await reservations.reserve(
+      {
+        reservationId: 'r1',
+        groupId: 'group-1',
+        assetId: 'a',
+        amount: '50',
+        intentId: 'i',
+        purpose: 'STAY',
+        settlementPlanHash: null,
+        expiresAt: T0 + 60,
+      },
+      T0,
+    );
+    let fail = true;
+    const flaky = Object.assign(
+      Object.create(reservations) as typeof reservations,
+      {
+        get: async (id: string) => {
+          if (fail) {
+            fail = false;
+            throw new Error('db down');
+          }
+          return reservations.get(id);
+        },
+      },
+    );
+    const rec = new RecourseReconciler(
+      new MemoryRecourseStore(),
+      flaky,
+      async () => null,
+      () => T0,
+    );
+    const ev = {
+      eventId: 'e1',
+      providerId: 'p',
+      providerRef: 'ref',
+      reservationId: 'r1',
+      providerUpdatedAt: T0,
+      kind: 'PAYMENT_FAILED' as const,
+      reason: 'declined',
+    };
+    await expect(rec.apply(ev)).rejects.toThrow(/db down/);
+    expect(await rec.apply(ev)).toBe('RELEASED');
+    expect(await rec.apply(ev)).toBe('DUPLICATE');
+  });
+});

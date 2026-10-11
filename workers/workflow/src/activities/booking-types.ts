@@ -18,13 +18,20 @@ export type ReserveBookingResult =
       reservationId: string;
       planHash: string;
       coreAmount: string;
+      reservedAssetId: string;
+      reservedAmount: string;
       expiresAt: number;
     }
   | { status: 'REFUSED'; reason: string };
 
 export type AuthorizeBookingResult =
   | { status: 'AUTHORIZED'; grant: EconomicGrant }
-  | { status: 'PENDING_APPROVAL'; requiredApprovals: number; approvals: number }
+  | {
+      status: 'PENDING_APPROVAL';
+      requiredApprovals: number;
+      approvals: number;
+      requestHash: string;
+    }
   | { status: 'REJECTED'; reason: string };
 
 export type StepUpChallenge = {
@@ -53,6 +60,10 @@ export type ReconcileBookingResult =
     }
   | { status: 'ABSENT' }
   | { status: 'UNKNOWN'; reason: string };
+
+export type SettleBookingResult =
+  | { status: 'SETTLED'; receipt: FulfillmentReceipt }
+  | { status: 'INCIDENT'; reason: string };
 
 export type CancelBookingResult = {
   confirmed: boolean;
@@ -88,6 +99,8 @@ export interface BookingActivities {
     landed: Money;
     reservationId: string;
     planHash: string;
+    reservedAssetId: string;
+    reservedAmount: string;
     approvals: ApprovalToken[];
   }): Promise<AuthorizeBookingResult>;
   bookingStepUpRequirement(input: {
@@ -105,9 +118,15 @@ export interface BookingActivities {
     grant: EconomicGrant;
     reservationId: string;
     planHash: string;
+    reservedAssetId: string;
+    reservedAmount: string;
     travelerRefs: string[];
     idempotencyKey: string;
   }): Promise<ExecuteBookingResult>;
+  holdBookingFunds(input: {
+    reservationId: string;
+    reason: string;
+  }): Promise<void>;
   reconcileBooking(input: {
     offer: EconomicOffer;
     idempotencyKey: string;
@@ -123,7 +142,7 @@ export interface BookingActivities {
     charged: Money | null;
     grantId: string;
     idempotencyKey: string;
-  }): Promise<FulfillmentReceipt>;
+  }): Promise<SettleBookingResult>;
   releaseBookingFunds(input: {
     reservationId: string;
     reason: string;

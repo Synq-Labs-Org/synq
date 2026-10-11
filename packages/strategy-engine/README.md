@@ -3,12 +3,14 @@
 Deterministic DCA `StrategyEvaluator` (Bible §23). The model writes or revises a strategy; this package evaluates ordinary triggers with no model call, no I/O and no clock of its own (`now` is an input). The output is `EXECUTE`, `SKIP` or `ESCALATE`. `ESCALATE` wakes the risk and strategy agents. The evaluator never authorizes anything: an `EXECUTE` still becomes an `ActionIntent` that the Kernel checks against the mandate, a live quote, the AUSD risk attestation and simulation.
 
 ## Units
+
 - Amounts are `bigint` in the budget asset's raw units (AUSD has 6 decimals).
 - Prices are 1e18 fixed point, in budget asset per one whole target unit (AUSD per MON).
 - Percentages are integer basis points.
 - JSON callers pass bigints as canonical decimal strings.
 
 ## Inputs
+
 - `policy` (`DcaPolicySchema`):
   - schedule: `strategyId`, `startAt`, `expiresAt`, `frequencySeconds`
   - assets and venue: `budgetAsset`, `targetAsset`, `allowedAssets`, `venue`, `allowedVenues`
@@ -26,6 +28,7 @@ Deterministic DCA `StrategyEvaluator` (Bible §23). The model writes or revises 
 - `history`: `executions[{slot, intentId, at, amountIn, status}]` and `exitedPrincipal`. PENDING and SETTLED spends both count, so pending money is never free. FAILED spends do not count.
 
 ## Rule order
+
 The first rule that matches decides. `slot = floor((now - startAt) / frequencySeconds)` and `decisionId = "<strategyId>:<slot>"`.
 
 1. `now >= expiresAt` gives SKIP `EXPIRED` (terminal). `now < startAt` gives SKIP `NOT_STARTED`.
@@ -53,7 +56,9 @@ The first rule that matches decides. `slot = floor((now - startAt) / frequencySe
     - Both are indicative. The live quote at execution time and the Kernel's slippage floor govern.
 
 ## Workflow integration
+
 `evaluateDcaActivity(input: unknown): DcaDecisionJson` is the Temporal Activity entrypoint. It parses JSON input (bigints as strings) and returns JSON-safe output. A DCA workflow evaluator port maps onto it directly:
+
 - The workflow timer fires.
 - An Activity assembles `{policy, market, treasury, history, now}` from the read model, the Kuru quote and the risk attestation reader.
 - It calls `evaluateDcaActivity`.

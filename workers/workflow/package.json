@@ -38,7 +38,8 @@
     "@synq/plugin-chainlink-cre": "workspace:*",
     "@synq/offer-exchange": "workspace:*",
     "@synq/settlement": "workspace:*",
-    "@synq/plugin-commerce": "workspace:*"
+    "@synq/plugin-commerce": "workspace:*",
+    "@synq/profile-vault": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "1.24.0"

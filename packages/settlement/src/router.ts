@@ -1,4 +1,9 @@
 import type { Asset } from '@synq/schemas';
+import type {
+  EconomicExecution,
+  EconomicGrant,
+  EconomicGrantAuthority,
+} from '@synq/kernel';
 import {
   bindConversionQuote,
   contentHash,
@@ -106,7 +111,8 @@ export type SettlementRefusal = {
     | 'INSUFFICIENT_FREE_BALANCE'
     | 'CONVERSION_CAP_EXCEEDED'
     | 'REFERENCE_STALE'
-    | 'DEPEG_GUARD';
+    | 'DEPEG_GUARD'
+    | 'INVALID_POLICY';
   reason: string;
   skipped: { rail: SettlementRail; reason: string }[];
 };
@@ -140,6 +146,16 @@ export function planSettlement(input: {
     code: SettlementRefusal['code'],
     reason: string,
   ): SettlementRefusal => ({ status: 'REFUSED', code, reason, skipped });
+  const bps = [
+    policy.fxBufferBps,
+    policy.conversion.maxSlippageBps,
+    policy.conversion.maxDepegBps,
+  ];
+  if (bps.some((b) => !Number.isInteger(b) || b < 0 || b >= 10_000))
+    return refuse(
+      'INVALID_POLICY',
+      'basis points must be integers in [0, 10000)',
+    );
   if (
     !policy.allowedSourceAssets.includes(treasury.core.asset.canonicalAssetId)
   )
@@ -297,7 +313,18 @@ export function planSettlement(input: {
 export type ConversionRoute = ConversionVenue & {
   readonly label: EvidenceLabel;
   readonly executable: boolean;
-  execute?(intent: ConversionIntent, now: number): Promise<ConversionReceipt>;
+  execute?(
+    intent: ConversionIntent,
+    now: number,
+    authorization: ConversionAuthorization,
+  ): Promise<ConversionReceipt>;
+};
+
+/** Every conversion execution consumes a Kernel grant bound to its exact amount. */
+export type ConversionAuthorization = {
+  authority: EconomicGrantAuthority;
+  grant: EconomicGrant;
+  execution: EconomicExecution;
 };
 
 export type ConversionReceipt = {
@@ -318,7 +345,8 @@ export class ConversionError extends Error {
       | 'ROUTE_NOT_EXECUTABLE'
       | 'SLIPPAGE_EXCEEDED'
       | 'QUOTE_EXPIRED'
-      | 'BELOW_SHORTFALL',
+      | 'BELOW_SHORTFALL'
+      | 'GRANT_REQUIRED',
     detail?: string,
   ) {
     super(detail ? `${code}: ${detail}` : code);
@@ -401,9 +429,26 @@ export class TestnetSettlementFixture implements ConversionRoute {
   async execute(
     intent: ConversionIntent,
     now: number,
+    authorization: ConversionAuthorization,
   ): Promise<ConversionReceipt> {
     if (intent.status !== 'QUOTED' || !intent.quote)
       throw new ConversionError('ROUTE_NOT_EXECUTABLE', 'unquoted');
+    const x = authorization?.execution;
+    if (
+      !authorization?.grant ||
+      x?.domain !== 'CONVERSION' ||
+      x.offerId !== intent.conversionId ||
+      x.maxAmount.amount !== intent.amountIn
+    )
+      throw new ConversionError(
+        'GRANT_REQUIRED',
+        'conversion needs a matching Kernel grant',
+      );
+    try {
+      await authorization.authority.consume(authorization.grant, x, now);
+    } catch (e) {
+      throw new ConversionError('GRANT_REQUIRED', (e as Error).message);
+    }
     return {
       conversionId: intent.conversionId,
       venue: this.venue,

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { LocalAccount } from 'viem';
+import { isMutationEnabledChain } from '@synq/chain-registry';
 import type {
   EconomicExecution,
   EconomicGrant,
@@ -30,6 +31,14 @@ export class X402AuthorizationSigner {
     private readonly account: LocalAccount,
     private readonly authority: EconomicGrantAuthority,
     private readonly networks: ReadonlyMap<string, number>,
+    private readonly assets: readonly {
+      chainId: number;
+      address: string;
+      decimals: number;
+    }[],
+    private readonly options: { allowMainnetBroadcast: boolean } = {
+      allowMainnetBroadcast: false,
+    },
   ) {}
 
   get payer(): string {
@@ -40,13 +49,30 @@ export class X402AuthorizationSigner {
     const { requirement: r, execution: x, grant, now } = input;
     const chainId = this.networks.get(r.network);
     if (chainId === undefined) throw new Error('X402_NETWORK_NOT_ALLOWED');
+    if (!isMutationEnabledChain(chainId) && !this.options.allowMainnetBroadcast)
+      throw new Error('MAINNET_BROADCAST_DISABLED');
+    const asset = this.assets.find(
+      (a) =>
+        a.chainId === chainId &&
+        a.address.toLowerCase() === r.asset.toLowerCase(),
+    );
+    if (!asset) throw new Error('X402_ASSET_NOT_ALLOWED');
+    const pay = x.payAsset;
+    if (
+      !pay ||
+      pay.chainId !== chainId ||
+      pay.address !== r.asset.toLowerCase() ||
+      pay.decimals !== asset.decimals ||
+      x.maxAmount.decimals !== asset.decimals
+    )
+      throw new Error('X402_ASSET_BINDING_MISMATCH');
     if (
       x.maxAmount.currency !== 'USDC' ||
       BigInt(r.amount) > BigInt(x.maxAmount.amount) ||
       x.recipientRef !== r.payTo.toLowerCase()
     )
       throw new Error('X402_REQUIREMENT_DIFFERS_FROM_EXECUTION');
-    this.authority.consume(grant, x, now);
+    await this.authority.consume(grant, x, now);
     const authorization = {
       from: this.account.address,
       to: r.payTo as `0x${string}`,
