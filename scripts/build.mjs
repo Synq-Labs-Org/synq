@@ -11,7 +11,7 @@ const env = {
   ].join(delimiter),
 };
 for (const args of [
-  ['node_modules/turbo/bin/turbo', 'run', 'build'],
+  ['node_modules/turbo/bin/turbo', 'run', 'build', '--concurrency=1'],
   ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.build.json'],
 ]) {
   const child = spawnSync(process.execPath, args, { stdio: 'inherit', env });
