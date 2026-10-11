@@ -35,10 +35,11 @@ if (
 )
   throw new Error('RPC_CHAIN_MISMATCH');
 const receipts = [];
-for (const hash of [
-  '0x9bdaf851fc8056a88c104b3a9086ff244e3f969390391c9c0bab11c3a0592a31',
-  '0xe6779f59822612c51189baf294a0f7808cf558020e220eaa0f6ee168d3fc40bf',
-] as const) {
+const historicalOpenTx =
+  '0x9bdaf851fc8056a88c104b3a9086ff244e3f969390391c9c0bab11c3a0592a31' as const;
+const historicalCloseTx =
+  '0xe6779f59822612c51189baf294a0f7808cf558020e220eaa0f6ee168d3fc40bf' as const;
+for (const hash of [historicalOpenTx, historicalCloseTx]) {
   const receipt = await chain.getTransactionReceipt({ hash });
   if (receipt.status !== 'success')
     throw new Error('HISTORICAL_RECEIPT_REVERTED');
