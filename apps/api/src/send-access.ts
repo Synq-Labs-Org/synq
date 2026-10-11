@@ -34,6 +34,19 @@ export function createSendMemberAccess(input: {
       context.mandate.network.chainId === c.chainId
     );
   }
+  async function session(token: string, groupId: string) {
+    await store.prune(input.now());
+    const stored = await store.session(hash(token));
+    return !!stored &&
+      stored.expiresAt > input.now() &&
+      stored.challenge.groupId === groupId.toLowerCase() &&
+      (await current(stored.challenge))
+      ? {
+          memberId: stored.challenge.memberId,
+          principalId: stored.challenge.principalId,
+        }
+      : null;
+  }
   return {
     async challenge(groupId: string, principalId: string) {
       await store.prune(input.now());
@@ -97,15 +110,8 @@ export function createSendMemberAccess(input: {
         scope: c.scope,
       };
     },
-    async verify(token: string, groupId: string) {
-      await store.prune(input.now());
-      const session = await store.session(hash(token));
-      return (
-        !!session &&
-        session.expiresAt > input.now() &&
-        session.challenge.groupId === groupId.toLowerCase() &&
-        (await current(session.challenge))
-      );
-    },
+    verify: async (token: string, groupId: string) =>
+      (await session(token, groupId)) !== null,
+    session,
   };
 }

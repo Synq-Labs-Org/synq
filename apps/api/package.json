@@ -38,6 +38,8 @@
     "@synq/plugin-kuru": "workspace:*",
     "@synq/plugin-perpl": "workspace:*",
     "@synq/plugin-sdk": "workspace:*",
-    "@synq/channels": "workspace:*"
+    "@synq/channels": "workspace:*",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/plugin-qwen": "workspace:*"
   }
 }

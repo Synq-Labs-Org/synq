@@ -169,6 +169,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@synq/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
@@ -199,6 +202,9 @@ importers:
       '@synq/plugin-perpl':
         specifier: workspace:*
         version: link:../../plugins/perpl
+      '@synq/plugin-qwen':
+        specifier: workspace:*
+        version: link:../../plugins/qwen
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

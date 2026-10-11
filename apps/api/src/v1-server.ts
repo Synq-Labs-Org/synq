@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { Client, Connection } from '@temporalio/client';
 import { WorldSnapshotBuilder } from '@synq/world-model';
-import { StoreIdentityDirectoryReader } from './brain-runtime.js';
+import {
+  ChainSimulation,
+  KernelProposalGateway,
+  StoreIdentityDirectoryReader,
+} from './brain-runtime.js';
+import { SynqBrain } from '@synq/agent-runtime';
+import { QwenStructuredReasoner, qwenOptionsFromEnv } from '@synq/plugin-qwen';
+import { brainChannelPort } from './channel-runtime.js';
 import {
   VenueMarketSource,
   productionRegistryRisk,
@@ -37,9 +44,11 @@ import {
 } from '@synq/execution-worker/integrity';
 import {
   DynamicAdapter,
+  GrantApprovalGateway,
   PostgresIdentityStore,
   PrivyAdapter,
 } from '@synq/identity/server';
+import { registerChannels } from './channel-server.js';
 import {
   MIN_ADMIN_TOKEN_LENGTH,
   createV1Api,
@@ -347,6 +356,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       })
     : null;
   let temporalConnection: Connection | undefined;
+  let channels: Awaited<ReturnType<typeof registerChannels>> = null;
   const app = createV1Api({
     store,
     config: {
@@ -417,6 +427,24 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
     worldPlugins.register(kuruSkillPlugin(kuruDeps));
     worldPlugins.register(kuruClobPlugin(kuruDeps));
     worldPlugins.register(chainlinkCrePlugin(() => readModel.client));
+    const worldMarket =
+      config.SYNQ_PROFILE === 'local/anvil'
+        ? { quotes: async () => [] }
+        : new VenueMarketSource(
+            network,
+            readModel.client,
+            new PerplRestClient({
+              network: perplNetwork(config.SYNQ_PROFILE),
+            }),
+          );
+    const worldRisk = new CombinedRiskSource(
+      productionRegistryRisk(network, readModel.client, now),
+      new PostgresPortfolioRiskSource(
+        pool,
+        now,
+        config.SYNQ_PROFILE === 'local/anvil' ? 'SIMULATION' : 'REAL_TESTNET',
+      ),
+    );
     const world = new WorldSnapshotBuilder({
       network,
       now,
@@ -425,24 +453,8 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       identity: new StoreIdentityDirectoryReader(store, pool),
       plugins: worldPlugins,
       mainnetBroadcastAllowed: false,
-      market:
-        config.SYNQ_PROFILE === 'local/anvil'
-          ? { quotes: async () => [] }
-          : new VenueMarketSource(
-              network,
-              readModel.client,
-              new PerplRestClient({
-                network: perplNetwork(config.SYNQ_PROFILE),
-              }),
-            ),
-      risk: new CombinedRiskSource(
-        productionRegistryRisk(network, readModel.client, now),
-        new PostgresPortfolioRiskSource(
-          pool,
-          now,
-          config.SYNQ_PROFILE === 'local/anvil' ? 'SIMULATION' : 'REAL_TESTNET',
-        ),
-      ),
+      market: worldMarket,
+      risk: worldRisk,
       workflows: temporalStatus,
     });
     app.get('/v1/world/:groupId', async (request, reply) => {
@@ -517,8 +529,100 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       ports: registered.ports,
       readModel,
     });
+    const approvalGateway = new GrantApprovalGateway(
+      store,
+      {
+        profile: config.SYNQ_PROFILE,
+        rpId: config.SYNQ_RP_ID,
+        origin: config.SYNQ_ORIGIN,
+      },
+      { executionModules, localAssets: [] },
+    );
+    const directoryReader = new StoreIdentityDirectoryReader(store, pool);
+    const qwen = qwenOptionsFromEnv(env);
+    const authorizer = intents;
+    const brain =
+      qwen.mode === 'LIVE'
+        ? brainChannelPort({
+            drafts: (groupId) => directoryReader.drafts(groupId),
+            run: async ({ runId, groupId, memberId, text }) => {
+              const snapshot = await world.build({ groupId });
+              const proposals = new KernelProposalGateway({
+                kernel: {
+                  authorize: async (request) => authorizer.authorize(request),
+                  attestEvidence: (evidence) => kernel.attestEvidence(evidence),
+                  listMandates: () => kernel.listMandates(),
+                },
+                market: worldMarket,
+                risk: worldRisk,
+                network,
+                mainnetBroadcastAllowed: false,
+                simulations: new ChainSimulation(
+                  readModel.client,
+                  { now },
+                  network,
+                ),
+                clock: { now },
+                onPendingDraft: async (draft) => {
+                  await approvalGateway.registerKernelDraft(draft);
+                },
+              });
+              return new SynqBrain({
+                structured: new QwenStructuredReasoner(qwen),
+                proposals,
+                executionMode: proposals.executionMode,
+                authenticateMessage: async (m) => {
+                  const member = snapshot.members.value.find(
+                    (x) => x.memberId === m.memberId,
+                  );
+                  return m.groupId === groupId && member
+                    ? {
+                        memberId: member.memberId,
+                        principalId: member.principalId,
+                      }
+                    : null;
+                },
+                nowSeconds: now,
+              }).run({
+                runId,
+                groupId,
+                world: snapshot,
+                messages: [{ memberId, text }],
+                fixtureKey: runId,
+              });
+            },
+          })
+        : undefined;
+    channels = await registerChannels({
+      app,
+      env,
+      origin: config.SYNQ_ORIGIN,
+      pool,
+      send: registered.ports,
+      sends: registered.sends,
+      approvals: {
+        drafts: (groupId) => directoryReader.drafts(groupId),
+        quorum: (digest) => approvalGateway.quorum(digest),
+      },
+      executed: {
+        executed: async (groupId) =>
+          (
+            (await readModel.reader.groupSnapshot(groupId as `0x${string}`))
+              ?.group.grantsExecuted ?? []
+          ).map((g) => ({
+            intentHash: g.intentHash,
+            transactionHash: g.transactionHash,
+          })),
+      },
+      executionMode:
+        config.SYNQ_PROFILE === LOCAL_PROFILE ? 'SIMULATION' : 'REAL_TESTNET',
+      ...(brain ? { brain } : {}),
+      log: (message, fields) => app.log.info(fields ?? {}, message),
+    });
   }
+  app.addHook('onReady', async () => channels?.start());
   app.addHook('onClose', async () => {
+    await channels?.stop();
     await temporalConnection?.close();
     await readModel?.close();
     await pool.end();

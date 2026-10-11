@@ -99,7 +99,16 @@ export default function SendPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => setRecord(loadCredential()), []);
+  useEffect(() => {
+    setRecord(loadCredential());
+    const q = new URLSearchParams(window.location.search);
+    const g = q.get('groupId');
+    const r = q.get('recipientId');
+    const a = q.get('amount');
+    if (g && /^0x[0-9a-fA-F]{64}$/.test(g)) setGroupId(g);
+    if (r && r.length <= 200) setRecipientId(r);
+    if (a && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(a)) setAmount(a);
+  }, []);
   useEffect(() => {
     if (!send || send.state === 'INDEXED' || send.state === 'REJECTED') return;
     const t = setInterval(() => {
