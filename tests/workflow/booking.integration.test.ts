@@ -26,6 +26,12 @@ import type { Asset } from '@synq/schemas';
 import { createBookingActivities } from '../../workers/workflow/src/activities/booking.js';
 import type { BookingWorkflowState } from '../../workers/workflow/src/workflows/booking.js';
 import { FakeDuffel } from '../duffel/fake-duffel.js';
+import {
+  HmacHumanProofVerifier,
+  MerchantAuthBroker,
+} from '@synq/profile-vault';
+
+const proofs = new HmacHumanProofVerifier(new Uint8Array(32).fill(4));
 import { startTemporal, testConfig } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
 
@@ -70,7 +76,12 @@ afterAll(async () => {
   await env?.teardown();
 });
 
-function world(opts: { coreFree?: bigint } = {}) {
+function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
+  const broker = new MerchantAuthBroker(
+    proofs,
+    () => Math.floor(Date.now() / 1000),
+    { isEligibleHuman: (p) => p.startsWith('human:') },
+  );
   const fake = new FakeDuffel(() => Math.floor(Date.now() / 1000));
   const now = () => Math.floor(Date.now() / 1000);
   const client = new DuffelClient('duffel_test_fixture', fake.fetch, {
@@ -160,6 +171,20 @@ function world(opts: { coreFree?: bigint } = {}) {
       },
     },
     receipts: { write: async (r) => void receipts.push(r) },
+    ...(opts.stepUp
+      ? {
+          stepUp: {
+            requirement: async () =>
+              broker.open({
+                kind: 'THREE_DS',
+                principalId: 'human:alice',
+                ttlSeconds: 600,
+              }),
+            verify: ({ challenge, completion }) =>
+              broker.complete(challenge, completion),
+          },
+        }
+      : {}),
   });
   return {
     fake,
@@ -172,6 +197,7 @@ function world(opts: { coreFree?: bigint } = {}) {
     decrypts,
     activities,
     opts,
+    broker,
   };
 }
 
@@ -418,6 +444,81 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
     });
     expect(out.state).toBe('FAILED');
     expect(out.notes.at(-1)).toMatch(/INSUFFICIENT_FREE_BALANCE/);
+  });
+
+  it('CARD-008/AUTH-001 a 3DS step-up pauses the workflow until the cardholder completes it', async () => {
+    const w = world({ stepUp: true });
+    const intent = stayIntent('stay-3ds');
+    const out = await run(
+      w,
+      {
+        bookingId: 'tds',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await h.signal('bookingApproval', { token: 'verified:alice' });
+        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await waitFor(h.state, 'APPROVED');
+        let st = await h.state();
+        for (let i = 0; i < 50 && !st.stepUp; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          st = await h.state();
+        }
+        const challenge = st.stepUp!;
+        expect(challenge.principalId).toBe('human:alice');
+        await h.signal('bookingStepUp', {
+          challengeId: challenge.challengeId,
+          principalId: 'agent:brain',
+          proof: proofs.issue(challenge, 'agent:brain'),
+        });
+        await h.signal('bookingStepUp', {
+          challengeId: challenge.challengeId,
+          principalId: 'human:alice',
+          proof: '0'.repeat(64),
+        });
+        await new Promise((r) => setTimeout(r, 500));
+        expect((await h.state()).state).toBe('APPROVED');
+        expect(w.fake.bookings.size).toBe(0);
+        await h.signal('bookingStepUp', {
+          challengeId: challenge.challengeId,
+          principalId: 'human:alice',
+          proof: proofs.issue(challenge, 'human:alice'),
+        });
+      },
+    );
+    expect(out.state).toBe('RECONCILED');
+    expect(w.broker.events.map((e) => e.event)).toEqual([
+      'OPENED',
+      'REJECTED:WRONG_PRINCIPAL',
+      'REJECTED:BAD_PROOF',
+      'COMPLETED',
+    ]);
+  });
+
+  it('a step-up that never completes fails closed without booking', async () => {
+    const w = world({ stepUp: true });
+    const intent = stayIntent('stay-3ds-timeout');
+    const out = await run(
+      w,
+      {
+        bookingId: 'tdsx',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+        stepUpTimeoutSeconds: 2,
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await h.signal('bookingApproval', { token: 'verified:alice' });
+        await h.signal('bookingApproval', { token: 'verified:bob' });
+      },
+    );
+    expect(out.state).toBe('FAILED');
+    expect(w.fake.bookings.size).toBe(0);
+    expect((await w.reservations.get('bk-tdsx'))?.state).toBe('RELEASED');
   });
 
   it('FLT-007/FLT-008 Duffel Airways order then cancel to REFUND_PENDING', async () => {

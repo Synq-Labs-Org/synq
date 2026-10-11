@@ -106,6 +106,7 @@
     "@synq/offer-exchange": "workspace:*",
     "@synq/settlement": "workspace:*",
     "@synq/plugin-duffel": "workspace:*",
-    "@synq/plugin-commerce": "workspace:*"
+    "@synq/plugin-commerce": "workspace:*",
+    "@synq/profile-vault": "workspace:*"
   }
 }
