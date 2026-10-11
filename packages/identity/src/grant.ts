@@ -1,4 +1,3 @@
-import { perplNetwork } from '@synq/chain-registry';
 import {
   keccak256,
   stringToHex,
@@ -52,7 +51,6 @@ export function grantPreview(
   const { grant } = draft;
   const hedge = draft.hedgeIntent;
   if (hedge) {
-    const network = perplNetwork('sandbox/monad-testnet');
     const canonical = (value: unknown): string => {
       if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
       if (value !== null && typeof value === 'object')
@@ -68,13 +66,9 @@ export function grantPreview(
     const hash = keccak256(stringToHex(canonical(hedge)));
     if (
       draft.groupId !== hedge.groupId ||
-      hedge.chainId !== network.chainId ||
-      grant.target !== network.exchange ||
-      grant.chainId !== String(network.chainId) ||
-      grant.token !== network.collateral.address ||
-      asset.address !== network.collateral.address ||
-      asset.chainId !== network.chainId ||
-      asset.decimals !== network.collateral.decimals ||
+      grant.chainId !== String(hedge.chainId) ||
+      asset.address !== grant.token ||
+      asset.chainId !== hedge.chainId ||
       grant.maxInputAmount !== hedge.collateral ||
       grant.intentHash !== hash ||
       grant.calldataHash !== hash ||

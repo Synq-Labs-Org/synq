@@ -114,6 +114,7 @@ describe('HedgeIntent from exposure', () => {
         perpFreeCollateral: '2000000',
       }),
     });
+    expect(decision.rejection).toBeNull();
     expect(decision.status).toBe('PENDING_APPROVAL');
     expect(decision.treasuryReservation).toBe('0');
   });

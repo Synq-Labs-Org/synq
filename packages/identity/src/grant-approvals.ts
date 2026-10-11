@@ -1,5 +1,9 @@
 import { recoverTypedDataAddress, type Hex } from 'viem';
-import { officialAssets, verifiedAsset } from '@synq/chain-registry';
+import {
+  officialAssets,
+  perplNetworkForChain,
+  verifiedAsset,
+} from '@synq/chain-registry';
 import {
   AddressSchema,
   ApprovalChallengeRequestSchema,
@@ -132,6 +136,21 @@ export class GrantApprovalGateway implements GrantApprovalPort {
       throw new IdentityError('DRAFT_INVALID', 'asset not in registry');
     }
     grantPreview(draft, asset);
+    if (draft.hedgeIntent) {
+      let venue: ReturnType<typeof perplNetworkForChain>;
+      try {
+        venue = perplNetworkForChain(draft.hedgeIntent.chainId);
+      } catch {
+        throw new IdentityError('DRAFT_INVALID', 'hedge venue not in registry');
+      }
+      if (
+        venue.profile !== this.config.profile ||
+        draft.grant.target !== venue.exchange ||
+        asset.address !== venue.collateral.address ||
+        asset.decimals !== venue.collateral.decimals
+      )
+        throw new IdentityError('DRAFT_INVALID', 'hedge venue binding');
+    }
     const module = this.modules.get(draft.domain.chainId);
     if (!module || draft.domain.verifyingContract !== module)
       throw new IdentityError('DRAFT_INVALID', 'verifying contract');

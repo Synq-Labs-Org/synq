@@ -27,7 +27,7 @@ jobs:
       - name: Format
         run: corepack pnpm format:check
       - name: Lint
-        run: corepack pnpm exec eslint packages apps workers scripts tests --no-warn-ignored
+        run: corepack pnpm exec eslint packages apps workers plugins scripts tests --no-warn-ignored
       - name: Strict typecheck
         run: corepack pnpm typecheck
       - name: Dependency boundaries

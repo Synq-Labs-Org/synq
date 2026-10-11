@@ -83,6 +83,23 @@ export type KernelOptions = KernelDependencies & {
   trustedEvidence?: TrustedEvidence;
 };
 
+export type KernelStateView = {
+  network: NetworkProfile;
+  mandates: { mandate: Mandate; budget: Budget }[];
+  grants: {
+    grantId: string;
+    intentId: string;
+    groupId: string;
+    mandateId: string;
+    state: string;
+    maxInputAmount: string;
+    nativeValue: string;
+    validUntil: number;
+  }[];
+  intents: { intentId: string; state: ActionState; updatedAt: string }[];
+  observedAt: number | null;
+};
+
 export class Kernel {
   readonly network: NetworkProfile;
   readonly executionModule: `0x${string}`;
@@ -653,6 +670,32 @@ export class Kernel {
   }
   auditLog(): AuditRecord[] {
     return this.audit.records();
+  }
+  stateView(): KernelStateView {
+    const mandates = this.mandates.values();
+    return structuredClone({
+      network: this.network,
+      mandates: mandates.map((mandate) => ({
+        mandate,
+        budget: this.ledger.budget(mandate),
+      })),
+      grants: [...this.ledger.grants.values()].map((r) => ({
+        grantId: r.grant.grantId,
+        intentId: r.grant.intentId,
+        groupId: r.grant.groupId,
+        mandateId: r.grant.mandateId,
+        state: r.state,
+        maxInputAmount: r.grant.maxInputAmount,
+        nativeValue: r.grant.nativeValue,
+        validUntil: r.grant.validUntil,
+      })),
+      intents: this.lifecycles.export().map(([intentId, history]) => ({
+        intentId,
+        state: history.at(-1)?.to ?? ('PROPOSED' as ActionState),
+        updatedAt: history.at(-1)?.at ?? '',
+      })),
+      observedAt: this.lastNow,
+    });
   }
 
   private state(audit: AuditRecord[]): KernelSnapshot {
