@@ -74,7 +74,15 @@ import {
   safeReader,
 } from '@synq/api/mandate-proposals';
 import { mandateRoutes } from '@synq/api/mandate-routes';
-import { StoreIdentityDirectoryReader } from '@synq/api/brain-runtime';
+import {
+  ChainSimulation,
+  StoreIdentityDirectoryReader,
+} from '@synq/api/brain-runtime';
+import { brainReasonersFromEnv, channelBrain } from '@synq/api/channel-brain';
+import {
+  InMemoryWorkflowStatusReader,
+  WorldSnapshotBuilder,
+} from '@synq/world-model';
 import { GrantApprovalGateway } from '@synq/identity/server';
 import { registryDeploymentSettings } from '../../../scripts/envio-env.js';
 import { EnvioProcess } from '../../../scripts/envio-process.js';
@@ -458,6 +466,10 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       state: await kernelStateFromReadModel(reader),
     });
     late.kernel = kernel;
+    await plugins.refreshHealth(PLUGIN_ID, {
+      network: PROFILE.network,
+      now: clock.now(),
+    });
     await setup.close();
     const app = newApi();
     const readModel = {
@@ -542,6 +554,47 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       }
       return response;
     };
+    const reasoners = brainReasonersFromEnv(process.env);
+    const world = new WorldSnapshotBuilder({
+      network: PROFILE.network,
+      now: clock.now,
+      readModel: {
+        snapshots: reader,
+        head: readModel.head,
+        maxLagBlocks: settings.maxLagBlocks,
+      },
+      kernel,
+      identity: directoryReader,
+      plugins,
+      mainnetBroadcastAllowed: false,
+      workflows: new InMemoryWorkflowStatusReader([], clock.now()),
+    });
+    const brain = reasoners
+      ? channelBrain({
+          reasoners,
+          world,
+          kernel,
+          market: { quotes: async () => [] },
+          network: PROFILE.network,
+          simulations: new ChainSimulation(client, clock, PROFILE.network),
+          now: clock.now,
+          registerDraft: async (draft) => {
+            await approvalGateway.registerKernelDraft(draft);
+          },
+          drafts: (g) => directoryReader.drafts(g),
+          proposeMandate: async ({ groupId, memberId, mandate, change }) =>
+            (
+              await mandates.propose({
+                groupId,
+                mandate,
+                change,
+                proposedBy: { memberId, source: 'BRAIN' },
+              })
+            ).proposalId,
+        })
+      : undefined;
+    evidence.brain = reasoners ? reasoners.label : 'NOT_CONFIGURED';
+    log(`brain: ${evidence.brain}`);
     const channels = await registerChannels({
       app,
       env: {
@@ -570,6 +623,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       },
       executionMode: 'REAL_TESTNET',
       mandateProposals: mandates,
+      ...(brain ? { brain } : {}),
       log: (m, f) => log(`${m} ${f ? JSON.stringify(f) : ''}`),
       fetch: recordingFetch,
       ...(options.telegramBaseUrl

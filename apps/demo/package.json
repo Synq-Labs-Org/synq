@@ -10,6 +10,7 @@
     "@category-labs/mera": "0.2.0",
     "@synq/api": "workspace:*",
     "@synq/chain-registry": "workspace:*",
+    "@synq/channels": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/funding": "workspace:*",
@@ -18,6 +19,7 @@
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/schemas": "workspace:*",
+    "@synq/world-model": "workspace:*",
     "pg": "8.18.0",
     "viem": "2.57.4",
     "zod": "4.6.5"
