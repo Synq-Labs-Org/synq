@@ -532,6 +532,13 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       localAssets: [],
     });
     const directoryReader = new StoreIdentityDirectoryReader(store, pool);
+    /** Operator-local view of what the bot sent (not evidence; may hold link codes). */
+    const outbox: {
+      chatId: string;
+      text: string;
+      urls: string[];
+      at: string;
+    }[] = [];
     const recordingFetch: typeof fetch = async (input, init) => {
       const response = await fetch(input, init);
       const method = String(input).split('/').at(-1);
@@ -539,7 +546,19 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         const body = JSON.parse(String(init.body)) as {
           chat_id: number;
           text: string;
+          reply_markup?: { inline_keyboard?: { url?: string }[][] };
         };
+        outbox.push({
+          chatId: String(body.chat_id),
+          text: body.text,
+          urls: [
+            ...(body.reply_markup?.inline_keyboard
+              ?.flat()
+              .map((b) => b.url ?? '') ?? []),
+            ...(body.text.match(/https?:\/\/\S+/g) ?? []),
+          ].filter(Boolean),
+          at: new Date().toISOString(),
+        });
         const copy = response.clone();
         const result = (await copy.json().catch(() => null)) as {
           result?: { message_id?: number };
@@ -779,16 +798,40 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         return v.split('/').at(-1) ?? v;
       }
     };
+    const latestUrl = (match: (u: string) => boolean, chatId?: string) =>
+      [...outbox]
+        .reverse()
+        .filter((m) => chatId === undefined || m.chatId === chatId)
+        .flatMap((m) => m.urls)
+        .find(match) ?? null;
     const commands = {
+      pendingLinks() {
+        return (
+          outbox
+            .filter((m) =>
+              m.urls.some((u) => u.includes('/channels/link?code=')),
+            )
+            .map((m) => `${m.at} private chat ${m.chatId}`)
+            .join('\n') || 'no private links issued yet'
+        );
+      },
       async link(label: string, codeOrUrl: string) {
-        const code = lastPart(codeOrUrl, 'code');
+        const resolved = /^-?[0-9]+$/.test(codeOrUrl)
+          ? latestUrl((u) => u.includes('/channels/link?code='), codeOrUrl)
+          : codeOrUrl;
+        if (!resolved)
+          throw new Error(`no link was sent to private chat ${codeOrUrl}`);
+        const code = lastPart(resolved, 'code');
         return api.post(
           '/v1/channels/links/redeem',
           { code, groupId: st.chainGroupId },
           await memberSession(label),
         );
       },
-      async confirm(label: string, sendUrl: string) {
+      async confirm(label: string, sendArg: string) {
+        const sendUrl =
+          sendArg === 'last' ? latestUrl((u) => u.includes('/send?')) : sendArg;
+        if (!sendUrl) throw new Error('no Send link posted yet');
         const q = new URL(sendUrl).searchParams;
         const session = await memberSession(label);
         const preview = await api.post<SendPreview>(
@@ -815,7 +858,12 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         });
       },
       async approve(label: string, intent: string) {
-        const intentHash = intent.split('/').at(-1)!;
+        const latest = (await registered.sends.inState('PENDING_APPROVAL')).at(
+          -1,
+        );
+        const intentHash =
+          intent === 'last' ? latest?.intentHash : intent.split('/').at(-1);
+        if (!intentHash) throw new Error('no Send is waiting for approval');
         const p = byLabel(label);
         const view = PendingIntentViewSchema.parse(
           await api.get(`/v1/intents/${intentHash}`),
@@ -862,7 +910,14 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         );
       },
       async approveMandate(label: string, proposal: string) {
-        const id = proposal.split('/').at(-1)!;
+        const open = (await mandates.list(st.chainGroupId)).filter(
+          (p) => p.state === 'PENDING' || p.state === 'READY',
+        );
+        const id =
+          proposal === 'last'
+            ? open.at(-1)?.proposalId
+            : proposal.split('/').at(-1);
+        if (!id) throw new Error('no mandate proposal is open');
         const view = await api.get<{
           safeTx: {
             safe: Address;
@@ -933,26 +988,28 @@ function runConsole(
   quit: () => Promise<void>,
 ) {
   const help =
-    'commands: link <member> <code|url> | confirm <member> <send-url> | approve <member> <intentHash|url> | propose-mandate <perActionCapAUSD> | approve-mandate <member> <proposalId|url> | quit';
+    'commands: links | link <member> <private-chat-id|link> | confirm <member> <send-url|last> | approve <member> <intentHash|last> | propose-mandate <perActionCapAUSD> | approve-mandate <member> <proposalId|last> | quit';
   log(help);
   const rl = createInterface({ input: process.stdin });
   rl.on('line', async (line) => {
     const [cmd, a = '', b = ''] = line.trim().split(/\s+/);
     try {
       const out =
-        cmd === 'link'
-          ? await commands.link(a, b)
-          : cmd === 'confirm'
-            ? await commands.confirm(a, b)
-            : cmd === 'approve'
-              ? await commands.approve(a, b)
-              : cmd === 'propose-mandate'
-                ? await commands.proposeMandate(a)
-                : cmd === 'approve-mandate'
-                  ? await commands.approveMandate(a, b)
-                  : cmd === 'quit'
-                    ? (rl.close(), await quit())
-                    : help;
+        cmd === 'links'
+          ? commands.pendingLinks()
+          : cmd === 'link'
+            ? await commands.link(a, b)
+            : cmd === 'confirm'
+              ? await commands.confirm(a, b)
+              : cmd === 'approve'
+                ? await commands.approve(a, b)
+                : cmd === 'propose-mandate'
+                  ? await commands.proposeMandate(a)
+                  : cmd === 'approve-mandate'
+                    ? await commands.approveMandate(a, b)
+                    : cmd === 'quit'
+                      ? (rl.close(), await quit())
+                      : help;
       log(typeof out === 'string' ? out : JSON.stringify(out).slice(0, 400));
     } catch (error) {
       log(`error: ${String(error).slice(0, 300)}`);
