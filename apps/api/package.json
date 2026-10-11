@@ -16,7 +16,8 @@
     "./channel-runtime": "./src/channel-runtime.ts",
     "./mandate-proposals": "./src/mandate-proposals.ts",
     "./mandate-routes": "./src/mandate-routes.ts",
-    "./channel-server": "./src/channel-server.ts"
+    "./channel-server": "./src/channel-server.ts",
+    "./channel-brain": "./src/channel-brain.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -43,6 +44,8 @@
     "@synq/plugin-sdk": "workspace:*",
     "@synq/channels": "workspace:*",
     "@synq/agent-runtime": "workspace:*",
-    "@synq/plugin-qwen": "workspace:*"
+    "@synq/plugin-qwen": "workspace:*",
+    "@synq/plugin-openai": "workspace:*",
+    "@synq/plugin-kimi": "workspace:*"
   }
 }

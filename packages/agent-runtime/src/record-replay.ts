@@ -61,7 +61,7 @@ export const FixtureFileSchema = z
   .strictObject({
     schemaVersion: z.literal(1),
     label: FixtureLabelSchema,
-    provider: z.enum(['qwen', 'kimi']),
+    provider: z.enum(['qwen', 'kimi', 'openai']),
     description: z.string().min(10).max(500),
     recordedAt: z.iso.datetime().nullable(),
     manifestHash: HashSchema.nullable().default(null),
@@ -151,7 +151,7 @@ export class RecordReplayTransport {
     readonly mode: TransportMode,
     private readonly options: {
       fixtures?: FixtureFile;
-      provider: 'qwen' | 'kimi';
+      provider: 'qwen' | 'kimi' | 'openai';
       recordTo?: string;
       liveFetch?: FetchLike;
     },

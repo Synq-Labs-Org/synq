@@ -85,6 +85,16 @@
       ]
     },
     {
+      "providerId": "AUSD_TRANSFER",
+      "pluginId": "ausd-transfer",
+      "kind": "PLUGIN",
+      "credentialEnv": [],
+      "sourceRefs": ["sources/plugin_registry.json#ausd-transfer"],
+      "facts": [
+        { "action": "TRANSFER", "networks": ["sandbox/monad-testnet"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Grant-bound official AUSD transfer through the Safe ExecutionModule on Monad testnet." }
+      ]
+    },
+    {
       "providerId": "QWEN",
       "pluginId": null,
       "kind": "MODEL_PROVIDER",

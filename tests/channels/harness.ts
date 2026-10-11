@@ -40,7 +40,7 @@ export class FakeAdapter implements ChannelAdapter {
 
 export function fixture(
   now = 1_800_000_000,
-  options: { requireTelegramProof?: boolean } = {},
+  options: { requireTelegramProof?: boolean; chatLinkQuorum?: number } = {},
 ) {
   const clock = { t: now };
   const store = new MemoryChannelStore();
@@ -98,6 +98,7 @@ export function fixture(
     botUsernames: { telegram: 'synq_bot' },
     brainCooldownSeconds: 0,
     requireExternalProof: { telegram: options.requireTelegramProof ?? false },
+    chatLinkQuorum: options.chatLinkQuorum ?? 1,
     onEvent: (event, o) =>
       events.push({ event, status: o.status, code: o.code }),
   });
@@ -166,6 +167,22 @@ export function fixture(
     };
   };
   /** Issues a private link code for `userId` and redeems it as `principalId` for `groupId`. */
+  /** The `/confirm <token>` most recently DM'd to `userId`, if any. */
+  const confirmTokenFor = (userId: string) => {
+    const dm = [...adapter.sent]
+      .reverse()
+      .find((m) => m.chat === userId && m.message.text.includes('/confirm '));
+    return /\/confirm ([A-Za-z0-9_-]+)/.exec(dm?.message.text ?? '')?.[1] ?? '';
+  };
+  const confirm = (userId: string, token = confirmTokenFor(userId)) =>
+    gateway.handle(
+      message(`/confirm ${token}`, {
+        externalGroupId: userId,
+        chatKind: 'DIRECT',
+        userId,
+      }),
+    );
+  /** Full link: private code, web redemption as `principalId`, private confirmation. */
   const link = async (
     chat: string,
     userId: string,
@@ -173,10 +190,14 @@ export function fixture(
     principalId: string,
   ) => {
     const { code } = await issueCode(chat, userId);
-    return {
+    const outcome = await gateway.redeemLinkCode({
       code,
-      outcome: await gateway.redeemLinkCode({ code, groupId, principalId }),
-    };
+      groupId,
+      principalId,
+    });
+    const confirmed =
+      outcome.status === 'LINKED' ? await confirm(userId) : null;
+    return { code, outcome, confirmed };
   };
   return {
     clock,
@@ -192,5 +213,7 @@ export function fixture(
     message,
     link,
     issueCode,
+    confirm,
+    confirmTokenFor,
   };
 }

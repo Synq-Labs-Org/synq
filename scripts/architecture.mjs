@@ -96,7 +96,7 @@ const SECRET_MATERIAL =
 const PLANNER_FORBIDDEN_MODULES =
   /^(@synq\/(execution-worker|wallet-core|identity)(\/.*)?|.*\/(workers\/execution|contracts)(\/.*)?)$/;
 const BRAIN_ZONE =
-  /^(packages\/(agent-runtime|brain|world-model)|plugins\/(qwen|kimi))$/;
+  /^(packages\/(agent-runtime|brain|world-model)|plugins\/(qwen|kimi|openai))$/;
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 

@@ -1,0 +1,16 @@
+{
+  "name": "@synq/plugin-openai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.67",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "zod": "4.6.5"
+  }
+}

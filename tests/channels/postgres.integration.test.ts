@@ -31,108 +31,143 @@ const code = (hash: string, over = {}) => ({
   ...over,
 });
 
+const redeem = (
+  codeHash: string,
+  groupId: string,
+  principalId: string,
+  token = `t_${codeHash}`,
+) =>
+  store.redeemLinkCode({
+    codeHash,
+    groupId,
+    principalId,
+    confirmTokenHash: token,
+    now: NOW + 1,
+  });
+
 describe('postgres channel store', () => {
-  it('dedupes events durably by (channel, eventId)', async () => {
-    expect(await store.recordEvent('telegram', 'update:1', NOW)).toBe(true);
-    expect(await store.recordEvent('telegram', 'update:1', NOW)).toBe(false);
-    expect(await store.recordEvent('linq', 'update:1', NOW)).toBe(true);
+  it('claims events durably, retries released or abandoned claims, never completed ones', async () => {
+    expect(await store.claimEvent('telegram', 'update:1', NOW, 120)).toBe(true);
+    expect(await store.claimEvent('telegram', 'update:1', NOW + 10, 120)).toBe(
+      false,
+    );
+    expect(await store.claimEvent('linq', 'update:1', NOW, 120)).toBe(true);
+    await store.releaseEvent('telegram', 'update:1');
+    expect(await store.claimEvent('telegram', 'update:1', NOW + 20, 120)).toBe(
+      true,
+    );
+    expect(await store.claimEvent('telegram', 'update:1', NOW + 200, 120)).toBe(
+      true,
+    );
+    await store.completeEvent('telegram', 'update:1', NOW + 201);
+    await store.releaseEvent('telegram', 'update:1');
     expect(
-      await new PostgresChannelStore(pool).recordEvent(
+      await new PostgresChannelStore(pool).claimEvent(
         'telegram',
         'update:1',
-        NOW,
+        NOW + 9999,
+        120,
       ),
     ).toBe(false);
   });
 
-  it('redeems a link code exactly once under concurrency', async () => {
+  it('redeems a link code exactly once under concurrency into PENDING links', async () => {
     await store.createLinkCode(code('h1'));
     const results = await Promise.all(
-      Array.from({ length: 6 }, () =>
-        store.redeemLinkCode({
-          codeHash: 'h1',
-          groupId: '0xg1',
-          principalId: 'p_alice',
-          now: NOW + 1,
-        }),
-      ),
+      Array.from({ length: 6 }, () => redeem('h1', '0xg1', 'p_alice')),
     );
     expect(results.filter((r) => r.status === 'LINKED')).toHaveLength(1);
     expect(results.filter((r) => r.status === 'CODE_CONSUMED')).toHaveLength(5);
     expect(await store.groupLink('telegram', '-100')).toMatchObject({
       groupId: '0xg1',
-      status: 'ACTIVE',
+      status: 'PENDING',
     });
-    expect(await store.userLink('telegram', '111')).toMatchObject({
+    expect(await store.userLink('telegram', '-100', '111')).toMatchObject({
       principalId: 'p_alice',
+      status: 'PENDING',
     });
-    expect((await store.linkCode('h1'))?.consumedAt).toBe(NOW + 1);
+    expect(await store.groupLinks()).toEqual([]);
   });
 
-  it('rejects expired codes, cross-group relinks and user rebinding', async () => {
-    await store.createLinkCode(code('h2', { expiresAt: NOW }));
+  it('confirms only with the right chat user and token, and activates the chat at quorum', async () => {
+    expect(
+      await store.confirmUserLink({
+        channel: 'telegram',
+        externalUserId: '999',
+        confirmTokenHash: 't_h1',
+        now: NOW,
+      }),
+    ).toBeNull();
+    expect(
+      await store.confirmUserLink({
+        channel: 'telegram',
+        externalUserId: '111',
+        confirmTokenHash: 'wrong',
+        now: NOW,
+      }),
+    ).toBeNull();
     expect(
       (
-        await store.redeemLinkCode({
-          codeHash: 'h2',
-          groupId: '0xg1',
-          principalId: 'p_alice',
+        await store.confirmUserLink({
+          channel: 'telegram',
+          externalUserId: '111',
+          confirmTokenHash: 't_h1',
           now: NOW,
         })
-      ).status,
-    ).toBe('CODE_EXPIRED');
-    await store.createLinkCode(code('h3', { externalUserId: '222' }));
+      )?.status,
+    ).toBe('ACTIVE');
     expect(
-      (
-        await store.redeemLinkCode({
-          codeHash: 'h3',
-          groupId: '0xg2',
-          principalId: 'p_bob',
-          now: NOW,
-        })
-      ).status,
-    ).toBe('GROUP_LINK_CONFLICT');
-    expect((await store.linkCode('h3'))?.consumedAt).toBeNull();
-    await store.createLinkCode(code('h4', { externalGroupId: '-200' }));
+      await store.confirmUserLink({
+        channel: 'telegram',
+        externalUserId: '111',
+        confirmTokenHash: 't_h1',
+        now: NOW,
+      }),
+    ).toBeNull();
     expect(
-      (
-        await store.redeemLinkCode({
-          codeHash: 'h4',
-          groupId: '0xg2',
-          principalId: 'p_bob',
-          now: NOW,
-        })
-      ).status,
-    ).toBe('USER_LINK_CONFLICT');
+      (await store.activateGroupLink('telegram', '-100', 2, NOW))?.status,
+    ).toBe('PENDING');
+    await store.createLinkCode(code('h2', { externalUserId: '222' }));
+    expect((await redeem('h2', '0xg1', 'p_bob')).status).toBe('LINKED');
+    await store.confirmUserLink({
+      channel: 'telegram',
+      externalUserId: '222',
+      confirmTokenHash: 't_h2',
+      now: NOW,
+    });
     expect(
-      (
-        await store.redeemLinkCode({
-          codeHash: 'nope',
-          groupId: '0xg2',
-          principalId: 'p_bob',
-          now: NOW,
-        })
-      ).status,
-    ).toBe('CODE_INVALID');
-    await store.createLinkCode(code('h5', { externalUserId: '222' }));
-    expect(
-      (
-        await store.redeemLinkCode({
-          codeHash: 'h5',
-          groupId: '0xg1',
-          principalId: 'p_bob',
-          now: NOW,
-        })
-      ).status,
-    ).toBe('LINKED');
+      (await store.activateGroupLink('telegram', '-100', 2, NOW))?.status,
+    ).toBe('ACTIVE');
     expect(
       (await store.groupLinks('0xg1')).map((g) => g.externalGroupId),
     ).toEqual(['-100']);
   });
 
-  it('revokes users and claims notifications once', async () => {
-    await store.revokeUser('telegram', '222', NOW);
-    expect((await store.userLink('telegram', '222'))?.status).toBe('REVOKED');
+  it('rejects expired codes, cross-group relinks and in-chat user rebinding', async () => {
+    await store.createLinkCode(code('h3', { expiresAt: NOW }));
+    expect((await redeem('h3', '0xg1', 'p_alice')).status).toBe('CODE_EXPIRED');
+    await store.createLinkCode(code('h4', { externalUserId: '333' }));
+    expect((await redeem('h4', '0xg2', 'p_carol')).status).toBe(
+      'GROUP_LINK_CONFLICT',
+    );
+    expect((await store.linkCode('h4'))?.consumedAt).toBeNull();
+    await store.createLinkCode(code('h5'));
+    expect((await redeem('h5', '0xg1', 'p_bob')).status).toBe(
+      'USER_LINK_CONFLICT',
+    );
+    expect((await redeem('nope', '0xg1', 'p_bob')).status).toBe('CODE_INVALID');
+    await store.createLinkCode(code('h6', { externalGroupId: '-200' }));
+    expect((await redeem('h6', '0xg2', 'p_bob')).status).toBe('LINKED');
+  });
+
+  it('revokes users per chat and claims notifications once', async () => {
+    await store.revokeUser('telegram', '-200', '111', NOW);
+    expect((await store.userLink('telegram', '-200', '111'))?.status).toBe(
+      'REVOKED',
+    );
+    expect((await store.userLink('telegram', '-100', '111'))?.status).toBe(
+      'ACTIVE',
+    );
     expect(
       await store.claimNotification('telegram', '-100', 'receipt:1', NOW),
     ).toBe(true);

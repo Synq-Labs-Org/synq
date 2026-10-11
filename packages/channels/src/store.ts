@@ -1,19 +1,23 @@
 import type { ChannelId } from './events.js';
 
+export type LinkStatus = 'PENDING' | 'ACTIVE' | 'REVOKED';
+/** Chat → Synq group binding. PENDING until two distinct confirmed members vouch for it. */
 export type GroupLink = {
   channel: ChannelId;
   externalGroupId: string;
   groupId: string;
   linkedByPrincipalId: string;
   linkedAt: number;
-  status: 'ACTIVE' | 'REVOKED';
+  status: LinkStatus;
 };
+/** Chat user → Synq principal, scoped to one chat. PENDING until confirmed in the user's private chat. */
 export type UserLink = {
   channel: ChannelId;
+  externalGroupId: string;
   externalUserId: string;
   principalId: string;
   linkedAt: number;
-  status: 'ACTIVE' | 'REVOKED';
+  status: LinkStatus;
 };
 export type LinkCodeRecord = {
   codeHash: string;
@@ -49,33 +53,62 @@ export type DeliveryFailure = {
 
 /** Durable channel state. Every method must be atomic on its own. */
 export interface ChannelStore {
-  /** True only the first time (channel, eventId) is seen. */
-  recordEvent(
+  /**
+   * Claims an inbound event for processing: true the first time, or when a
+   * previous claim was released or its lease expired without completion.
+   */
+  claimEvent(
     channel: ChannelId,
     eventId: string,
-    at: number,
+    now: number,
+    leaseSeconds: number,
   ): Promise<boolean>;
+  completeEvent(
+    channel: ChannelId,
+    eventId: string,
+    now: number,
+  ): Promise<void>;
+  releaseEvent(channel: ChannelId, eventId: string): Promise<void>;
   groupLink(
     channel: ChannelId,
     externalGroupId: string,
   ): Promise<GroupLink | null>;
+  /** Active chat links only. */
   groupLinks(groupId?: string): Promise<GroupLink[]>;
   userLink(
     channel: ChannelId,
+    externalGroupId: string,
     externalUserId: string,
   ): Promise<UserLink | null>;
   createLinkCode(record: LinkCodeRecord): Promise<void>;
   linkCode(codeHash: string): Promise<LinkCodeView | null>;
   /** Marks an unexpired, unconsumed code consumed; true only for the first caller. */
   consumeLinkCode(codeHash: string, now: number): Promise<boolean>;
+  /** Consumes the code; creates a PENDING user link (and a PENDING chat link if none). */
   redeemLinkCode(input: {
     codeHash: string;
     groupId: string;
     principalId: string;
+    confirmTokenHash: string;
     now: number;
   }): Promise<RedeemOutcome>;
+  /** Activates a PENDING user link when its own chat user presents the confirm token. */
+  confirmUserLink(input: {
+    channel: ChannelId;
+    externalUserId: string;
+    confirmTokenHash: string;
+    now: number;
+  }): Promise<UserLink | null>;
+  /** PENDING → ACTIVE once `minPrincipals` distinct confirmed members of the bound group exist. */
+  activateGroupLink(
+    channel: ChannelId,
+    externalGroupId: string,
+    minPrincipals: number,
+    now: number,
+  ): Promise<GroupLink | null>;
   revokeUser(
     channel: ChannelId,
+    externalGroupId: string,
     externalUserId: string,
     at: number,
   ): Promise<void>;
@@ -98,24 +131,50 @@ const k = (...parts: string[]) => parts.join('\u0000');
 
 /** Test and development store; production uses PostgresChannelStore. */
 export class MemoryChannelStore implements ChannelStore {
-  readonly events = new Set<string>();
+  readonly events = new Map<
+    string,
+    { state: 'PROCESSING' | 'DONE'; at: number }
+  >();
   readonly groups = new Map<string, GroupLink>();
-  readonly users = new Map<string, UserLink>();
+  readonly users = new Map<
+    string,
+    UserLink & { confirmTokenHash: string | null }
+  >();
   readonly codes = new Map<
     string,
     LinkCodeRecord & { consumedAt: number | null }
   >();
   readonly notifications = new Set<string>();
   readonly failures: DeliveryFailure[] = [];
+  /** Test hook: throw from the next claim to simulate a database outage. */
+  failNextClaim = false;
 
-  async recordEvent(channel: ChannelId, eventId: string) {
+  async claimEvent(
+    channel: ChannelId,
+    eventId: string,
+    now: number,
+    lease: number,
+  ) {
+    if (this.failNextClaim) {
+      this.failNextClaim = false;
+      throw new Error('DATABASE_UNAVAILABLE');
+    }
     const key = k(channel, eventId);
-    if (this.events.has(key)) return false;
-    this.events.add(key);
+    const e = this.events.get(key);
+    if (e && (e.state === 'DONE' || now - e.at < lease)) return false;
+    this.events.set(key, { state: 'PROCESSING', at: now });
     return true;
   }
+  async completeEvent(channel: ChannelId, eventId: string, now: number) {
+    this.events.set(k(channel, eventId), { state: 'DONE', at: now });
+  }
+  async releaseEvent(channel: ChannelId, eventId: string) {
+    const key = k(channel, eventId);
+    if (this.events.get(key)?.state === 'PROCESSING') this.events.delete(key);
+  }
   async groupLink(channel: ChannelId, externalGroupId: string) {
-    return this.groups.get(k(channel, externalGroupId)) ?? null;
+    const g = this.groups.get(k(channel, externalGroupId));
+    return g ? { ...g } : null;
   }
   async groupLinks(groupId?: string) {
     return [...this.groups.values()].filter(
@@ -124,8 +183,15 @@ export class MemoryChannelStore implements ChannelStore {
         (groupId === undefined || g.groupId === groupId),
     );
   }
-  async userLink(channel: ChannelId, externalUserId: string) {
-    return this.users.get(k(channel, externalUserId)) ?? null;
+  async userLink(
+    channel: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+  ) {
+    const u = this.users.get(k(channel, externalGroupId, externalUserId));
+    if (!u) return null;
+    const { confirmTokenHash: _t, ...link } = u;
+    return link;
   }
   async createLinkCode(record: LinkCodeRecord) {
     if (this.codes.has(record.codeHash)) throw new Error('LINK_CODE_EXISTS');
@@ -147,6 +213,7 @@ export class MemoryChannelStore implements ChannelStore {
     codeHash: string;
     groupId: string;
     principalId: string;
+    confirmTokenHash: string;
     now: number;
   }): Promise<RedeemOutcome> {
     const code = this.codes.get(input.codeHash);
@@ -154,22 +221,24 @@ export class MemoryChannelStore implements ChannelStore {
     if (code.consumedAt !== null) return { status: 'CODE_CONSUMED' };
     if (code.expiresAt <= input.now) return { status: 'CODE_EXPIRED' };
     const gKey = k(code.channel, code.externalGroupId);
-    const uKey = k(code.channel, code.externalUserId);
+    const uKey = k(code.channel, code.externalGroupId, code.externalUserId);
     const existingGroup = this.groups.get(gKey);
     if (
-      existingGroup?.status === 'ACTIVE' &&
+      existingGroup &&
+      existingGroup.status !== 'REVOKED' &&
       existingGroup.groupId !== input.groupId
     )
       return { status: 'GROUP_LINK_CONFLICT' };
     const existingUser = this.users.get(uKey);
     if (
-      existingUser?.status === 'ACTIVE' &&
+      existingUser &&
+      existingUser.status !== 'REVOKED' &&
       existingUser.principalId !== input.principalId
     )
       return { status: 'USER_LINK_CONFLICT' };
     code.consumedAt = input.now;
     const group: GroupLink =
-      existingGroup?.status === 'ACTIVE'
+      existingGroup && existingGroup.status !== 'REVOKED'
         ? existingGroup
         : {
             channel: code.channel,
@@ -177,24 +246,75 @@ export class MemoryChannelStore implements ChannelStore {
             groupId: input.groupId,
             linkedByPrincipalId: input.principalId,
             linkedAt: input.now,
-            status: 'ACTIVE',
+            status: 'PENDING',
           };
-    const user: UserLink =
-      existingUser?.status === 'ACTIVE'
-        ? existingUser
-        : {
-            channel: code.channel,
-            externalUserId: code.externalUserId,
-            principalId: input.principalId,
-            linkedAt: input.now,
-            status: 'ACTIVE',
-          };
+    const user = {
+      channel: code.channel,
+      externalGroupId: code.externalGroupId,
+      externalUserId: code.externalUserId,
+      principalId: input.principalId,
+      linkedAt: input.now,
+      status:
+        existingUser?.status === 'ACTIVE'
+          ? ('ACTIVE' as const)
+          : ('PENDING' as const),
+      confirmTokenHash:
+        existingUser?.status === 'ACTIVE' ? null : input.confirmTokenHash,
+    };
     this.groups.set(gKey, group);
     this.users.set(uKey, user);
-    return { status: 'LINKED', group, user };
+    const { confirmTokenHash: _t, ...link } = user;
+    return { status: 'LINKED', group, user: link };
   }
-  async revokeUser(channel: ChannelId, externalUserId: string) {
-    const u = this.users.get(k(channel, externalUserId));
+  async confirmUserLink(input: {
+    channel: ChannelId;
+    externalUserId: string;
+    confirmTokenHash: string;
+    now: number;
+  }) {
+    for (const u of this.users.values())
+      if (
+        u.channel === input.channel &&
+        u.externalUserId === input.externalUserId &&
+        u.status === 'PENDING' &&
+        u.confirmTokenHash === input.confirmTokenHash
+      ) {
+        u.status = 'ACTIVE';
+        u.confirmTokenHash = null;
+        u.linkedAt = input.now;
+        const { confirmTokenHash: _t, ...link } = u;
+        return link;
+      }
+    return null;
+  }
+  async activateGroupLink(
+    channel: ChannelId,
+    externalGroupId: string,
+    minPrincipals: number,
+  ) {
+    const g = this.groups.get(k(channel, externalGroupId));
+    if (!g || g.status === 'REVOKED') return null;
+    if (g.status === 'PENDING') {
+      const principals = new Set(
+        [...this.users.values()]
+          .filter(
+            (u) =>
+              u.channel === channel &&
+              u.externalGroupId === externalGroupId &&
+              u.status === 'ACTIVE',
+          )
+          .map((u) => u.principalId),
+      );
+      if (principals.size >= minPrincipals) g.status = 'ACTIVE';
+    }
+    return { ...g };
+  }
+  async revokeUser(
+    channel: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+  ) {
+    const u = this.users.get(k(channel, externalGroupId, externalUserId));
     if (u) u.status = 'REVOKED';
   }
   async claimNotification(

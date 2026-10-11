@@ -7,12 +7,9 @@ import { Client, Connection } from '@temporalio/client';
 import { WorldSnapshotBuilder } from '@synq/world-model';
 import {
   ChainSimulation,
-  KernelProposalGateway,
   StoreIdentityDirectoryReader,
 } from './brain-runtime.js';
-import { SynqBrain } from '@synq/agent-runtime';
-import { QwenStructuredReasoner, qwenOptionsFromEnv } from '@synq/plugin-qwen';
-import { brainChannelPort } from './channel-runtime.js';
+import { brainReasonersFromEnv, channelBrain } from './channel-brain.js';
 import {
   VenueMarketSource,
   productionRegistryRisk,
@@ -584,69 +581,38 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       service: mandateProposals,
       adminToken: config.SYNQ_API_ADMIN_TOKEN,
     });
-    const qwen = qwenOptionsFromEnv(env);
+    const reasoners = brainReasonersFromEnv(env);
     const authorizer = intents;
-    const brain =
-      qwen.mode === 'LIVE'
-        ? brainChannelPort({
-            drafts: (groupId) => directoryReader.drafts(groupId),
-            proposeMandate: async ({ groupId, memberId, mandate, change }) =>
-              (
-                await mandateProposals.propose({
-                  groupId,
-                  mandate,
-                  change,
-                  proposedBy: { memberId, source: 'BRAIN' },
-                })
-              ).proposalId,
-            run: async ({ runId, groupId, memberId, text }) => {
-              const snapshot = await world.build({ groupId });
-              const proposals = new KernelProposalGateway({
-                kernel: {
-                  authorize: async (request) => authorizer.authorize(request),
-                  attestEvidence: (evidence) => kernel.attestEvidence(evidence),
-                  listMandates: () => kernel.listMandates(),
-                },
-                market: worldMarket,
-                risk: worldRisk,
-                network,
-                mainnetBroadcastAllowed: false,
-                simulations: new ChainSimulation(
-                  readModel.client,
-                  { now },
-                  network,
-                ),
-                clock: { now },
-                onPendingDraft: async (draft) => {
-                  await approvalGateway.registerKernelDraft(draft);
-                },
-              });
-              return new SynqBrain({
-                structured: new QwenStructuredReasoner(qwen),
-                proposals,
-                executionMode: proposals.executionMode,
-                authenticateMessage: async (m) => {
-                  const member = snapshot.members.value.find(
-                    (x) => x.memberId === m.memberId,
-                  );
-                  return m.groupId === groupId && member
-                    ? {
-                        memberId: member.memberId,
-                        principalId: member.principalId,
-                      }
-                    : null;
-                },
-                nowSeconds: now,
-              }).run({
-                runId,
+    const brain = reasoners
+      ? channelBrain({
+          reasoners,
+          world,
+          kernel: {
+            authorize: async (request) => authorizer.authorize(request),
+            attestEvidence: (evidence) => kernel.attestEvidence(evidence),
+            listMandates: () => kernel.listMandates(),
+          },
+          market: worldMarket,
+          risk: worldRisk,
+          network,
+          simulations: new ChainSimulation(readModel.client, { now }, network),
+          now,
+          registerDraft: async (draft) => {
+            await approvalGateway.registerKernelDraft(draft);
+          },
+          drafts: (groupId) => directoryReader.drafts(groupId),
+          proposeMandate: async ({ groupId, memberId, mandate, change }) =>
+            (
+              await mandateProposals.propose({
                 groupId,
-                world: snapshot,
-                messages: [{ memberId, text }],
-                fixtureKey: runId,
-              });
-            },
-          })
-        : undefined;
+                mandate,
+                change,
+                proposedBy: { memberId, source: 'BRAIN' },
+              })
+            ).proposalId,
+        })
+      : undefined;
+    if (reasoners) app.log.info({ brain: reasoners.label }, 'channel brain');
     channels = await registerChannels({
       app,
       env,

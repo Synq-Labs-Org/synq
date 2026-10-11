@@ -53,7 +53,7 @@ export type FixtureLabel = z.output<typeof FixtureLabelSchema>;
 export const ModelCallRecordSchema = z.strictObject({
   role: ModelRoleSchema,
   agentId: IdSchema,
-  provider: z.enum(['qwen', 'kimi', 'deterministic']),
+  provider: z.enum(['qwen', 'kimi', 'openai', 'deterministic']),
   model: z.string().min(1).max(64),
   mode: z.enum(['LIVE', 'REPLAY', 'NONE']),
   fixtureLabel: FixtureLabelSchema.nullable(),

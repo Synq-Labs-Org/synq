@@ -94,6 +94,9 @@ importers:
       '@synq/plugin-layerzero':
         specifier: workspace:*
         version: link:plugins/layerzero
+      '@synq/plugin-openai':
+        specifier: workspace:*
+        version: link:plugins/openai
       '@synq/plugin-perpl':
         specifier: workspace:*
         version: link:plugins/perpl
@@ -211,9 +214,15 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:../../plugins/chainlink-cre
+      '@synq/plugin-kimi':
+        specifier: workspace:*
+        version: link:../../plugins/kimi
       '@synq/plugin-kuru':
         specifier: workspace:*
         version: link:../../plugins/kuru
+      '@synq/plugin-openai':
+        specifier: workspace:*
+        version: link:../../plugins/openai
       '@synq/plugin-perpl':
         specifier: workspace:*
         version: link:../../plugins/perpl
@@ -262,6 +271,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -286,6 +298,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/world-model':
+        specifier: workspace:*
+        version: link:../../packages/world-model
       pg:
         specifier: 8.18.0
         version: 8.18.0
@@ -690,6 +705,21 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+
+  plugins/openai:
+    dependencies:
+      '@ai-sdk/openai-compatible':
+        specifier: 3.0.67
+        version: 3.0.67(zod@4.6.5)
+      '@synq/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   plugins/perpl:
     dependencies:

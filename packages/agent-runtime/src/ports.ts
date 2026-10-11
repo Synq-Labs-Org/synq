@@ -28,7 +28,7 @@ export type ReasonerResult = {
   toolCalls: ReasonerToolCall[];
   inputTokens: number;
   outputTokens: number;
-  provider: 'qwen' | 'kimi';
+  provider: 'qwen' | 'kimi' | 'openai';
   model: string;
   mode: 'LIVE' | 'REPLAY';
   fixtureLabel: FixtureLabel | null;
@@ -37,13 +37,13 @@ export type ReasonerResult = {
   structuredMode: 'JSON_SCHEMA' | 'JSON_OBJECT' | 'TEXT';
 };
 export type ProviderAvailability = {
-  providerId: 'QWEN' | 'KIMI';
+  providerId: 'QWEN' | 'KIMI' | 'OPENAI';
   installed: true;
   credentialsPresent: boolean;
   mode: 'LIVE' | 'REPLAY' | 'RECORD';
 };
 export interface ReasonerBase {
-  readonly provider: 'qwen' | 'kimi';
+  readonly provider: 'qwen' | 'kimi' | 'openai';
   readonly model: string;
   availability(): ProviderAvailability;
 }

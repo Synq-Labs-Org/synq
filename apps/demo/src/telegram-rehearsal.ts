@@ -97,10 +97,30 @@ export async function rehearseTelegram() {
           m.chat_id === user &&
           button(m).includes('/channels/link'),
       );
+      const linkedAt = telegram.sent.length;
       log(
         `link ${label}: ${JSON.stringify(await demo.commands.link(label, button(dm)))}`,
       );
+      const ask = await waitFor(
+        'private confirmation',
+        (m) =>
+          telegram.sent.indexOf(m) >= linkedAt &&
+          m.chat_id === user &&
+          m.text.includes('/confirm '),
+      );
+      say(user, `/confirm ${/\/confirm (\S+)/.exec(ask.text)![1]}`, {
+        id: user,
+        type: 'private',
+      });
+      await waitFor(
+        'confirmed',
+        (m) => m.chat_id === user && /^Confirmed as/.test(m.text),
+      );
     }
+    await waitFor(
+      'chat active',
+      (m) => m.chat_id === CHAT && /now speaks for Synq group/.test(m.text),
+    );
     let before = telegram.sent.length;
     say(1001, '/balance');
     log(

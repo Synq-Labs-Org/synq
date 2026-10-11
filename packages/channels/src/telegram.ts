@@ -541,16 +541,29 @@ export class TelegramAdapter implements ChannelAdapter {
         await this.wait(retry * 1000, input.signal);
         continue;
       }
+      let failed = false;
       for (const raw of updates) {
         const id = z
           .looseObject({ update_id: z.number().int() })
           .safeParse(raw);
         if (!id.success) continue;
-        for (const event of this.normalize(raw, 'BOT_API_POLL'))
-          await input.handle(event).catch((error) => input.onError?.(error));
+        try {
+          for (const event of this.normalize(raw, 'BOT_API_POLL'))
+            await input.handle(event);
+        } catch (error) {
+          // Keep the offset: Telegram redelivers this update and the gateway's
+          // released claim lets it be processed again.
+          input.onError?.(error);
+          failed = true;
+          break;
+        }
         offset = id.data.update_id + 1;
       }
       await input.onBatch?.(updates.length);
+      if (failed) {
+        await this.wait(backoff * 1000, input.signal);
+        backoff = Math.min(backoff * 2, 30);
+      }
     }
   }
 }
