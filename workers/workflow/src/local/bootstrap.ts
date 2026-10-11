@@ -126,6 +126,7 @@ export async function bootstrapLocalEnvironment(input: {
   dataDir: string;
   databaseUrl: string;
   mandateTtlSeconds?: number;
+  funding?: bigint;
 }): Promise<LocalEnvironment> {
   const dataDir = resolve(input.dataDir);
   const keys = join(dataDir, 'keys');
@@ -174,7 +175,7 @@ export async function bootstrapLocalEnvironment(input: {
       onchainMandateId(mandate),
       toMandateConfig(mandate),
     );
-    await chain.fund(LOCAL_FUNDING);
+    await chain.fund(input.funding ?? LOCAL_FUNDING);
     const principalIds = await enrolLocalGroup(pool, {
       groupId: LOCAL_GROUP_ID,
       chainGroupId: chain.chainGroupId,

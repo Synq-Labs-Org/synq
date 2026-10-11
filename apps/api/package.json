@@ -34,6 +34,7 @@
     "@temporalio/client": "1.24.0",
     "@synq/plugin-chainlink-cre": "workspace:*",
     "@synq/plugin-kuru": "workspace:*",
-    "@synq/plugin-perpl": "workspace:*"
+    "@synq/plugin-perpl": "workspace:*",
+    "@synq/plugin-sdk": "workspace:*"
   }
 }

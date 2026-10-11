@@ -14,6 +14,15 @@ import {
 } from './world-sources.js';
 import { PerplRestClient } from '@synq/plugin-perpl';
 import { perplNetwork } from '@synq/chain-registry';
+import { PluginRegistry } from '@synq/plugin-sdk';
+import {
+  KuruFlowClient,
+  KuruClobAdapter,
+  kuruFlowPlugin,
+  kuruSkillPlugin,
+  kuruClobPlugin,
+} from '@synq/plugin-kuru';
+import { chainlinkCrePlugin } from '@synq/plugin-chainlink-cre';
 import { z } from 'zod';
 import {
   AddressSchema,
@@ -394,18 +403,38 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       },
       now,
     );
+    const worldPlugins = new PluginRegistry();
+    const kuruDeps = {
+      clientFor: () => readModel.client,
+      clob: new KuruClobAdapter(() => readModel.client),
+      flow: new KuruFlowClient({
+        fetch: (url, init) => fetch(url, init),
+        clock: { now: Date.now },
+      }),
+      probeAddress: AddressSchema.parse(executionModules[chainId]),
+    };
+    worldPlugins.register(kuruFlowPlugin(kuruDeps));
+    worldPlugins.register(kuruSkillPlugin(kuruDeps));
+    worldPlugins.register(kuruClobPlugin(kuruDeps));
+    worldPlugins.register(chainlinkCrePlugin(() => readModel.client));
     const world = new WorldSnapshotBuilder({
       network,
       now,
       readModel,
       kernel,
       identity: new StoreIdentityDirectoryReader(store, pool),
+      plugins: worldPlugins,
       mainnetBroadcastAllowed: false,
-      market: new VenueMarketSource(
-        network,
-        readModel.client,
-        new PerplRestClient({ network: perplNetwork(config.SYNQ_PROFILE) }),
-      ),
+      market:
+        config.SYNQ_PROFILE === 'local/anvil'
+          ? { quotes: async () => [] }
+          : new VenueMarketSource(
+              network,
+              readModel.client,
+              new PerplRestClient({
+                network: perplNetwork(config.SYNQ_PROFILE),
+              }),
+            ),
       risk: new CombinedRiskSource(
         productionRegistryRisk(network, readModel.client, now),
         new PostgresPortfolioRiskSource(
@@ -420,8 +449,6 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       const { groupId } = z
         .object({ groupId: z.string().min(1).max(128) })
         .parse(request.params);
-      const session = await store.transaction((tx) => tx.getGroup(groupId));
-      if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
       const supplied = createHash('sha256')
         .update(request.headers.authorization ?? '')
         .digest();
@@ -430,6 +457,8 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
         .digest();
       if (!timingSafeEqual(supplied, expected))
         return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      const session = await store.transaction((tx) => tx.getGroup(groupId));
+      if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
       return world.build({ groupId });
     });
     const registered = await registerProductionSend({

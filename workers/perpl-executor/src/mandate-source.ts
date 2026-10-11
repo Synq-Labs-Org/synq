@@ -82,3 +82,86 @@ export class PostgresHedgeMandateSource implements HedgeMandateSource {
     return { mandate, hedgeMandate };
   }
 }
+
+import { parseAbi, type PublicClient } from 'viem';
+import { onchainMandateId } from '@synq/kernel';
+
+const governedRegistryAbi = parseAbi([
+  'struct MandateState { uint8 status; uint256 currentVersion; uint256 minValidVersion; uint256 spentToken; uint256 spentNative; }',
+  'struct MandateTerms { bytes32 mandateHash; address token; uint256 maxTokenPerAction; uint256 maxNativePerAction; uint256 cumulativeTokenCap; uint256 cumulativeNativeCap; uint256 validAfter; uint256 validUntil; }',
+  'function mandateState(address account, bytes32 mandateId) view returns (MandateState)',
+  'function mandateTerms(address account, bytes32 mandateId, uint256 version) view returns (MandateTerms)',
+]);
+
+/** Revalidates the full approved parent hash against one chain block at every hedge issuance. */
+export class RegistryGovernedParentMandateReader implements GovernedParentMandateReader {
+  constructor(
+    private readonly options: {
+      kernel: { listMandates(): Mandate[] };
+      client: Pick<
+        PublicClient,
+        'getChainId' | 'getBlockNumber' | 'readContract'
+      >;
+      registry: `0x${string}`;
+    },
+  ) {}
+  async current(groupId: string) {
+    const candidates = this.options.kernel
+      .listMandates()
+      .filter((m) => m.groupId === groupId && m.hedgePolicyHash);
+    if (candidates.length !== 1)
+      throw new HedgeGrantError(
+        'GRANT_BINDING',
+        'ambiguous or missing governed parent',
+      );
+    const parent = MandateSchema.parse(candidates[0]);
+    const client = this.options.client;
+    if ((await client.getChainId()) !== parent.network.chainId)
+      throw new HedgeGrantError('GRANT_BINDING', 'governance RPC chain');
+    const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
+    const mandateId = onchainMandateId(parent);
+    const state = await client.readContract({
+      address: this.options.registry,
+      abi: governedRegistryAbi,
+      functionName: 'mandateState',
+      args: [parent.account, mandateId],
+      blockNumber,
+    });
+    const terms = await client.readContract({
+      address: this.options.registry,
+      abi: governedRegistryAbi,
+      functionName: 'mandateTerms',
+      args: [parent.account, mandateId, BigInt(parent.version)],
+      blockNumber,
+    });
+    const expectedStatus = parent.status === 'ACTIVE' ? 1 : 2;
+    if (
+      state.currentVersion !== BigInt(parent.version) ||
+      state.status !== expectedStatus ||
+      terms.mandateHash !==
+        artifactHash(
+          parent.status === 'REVOKED'
+            ? { ...parent, status: 'ACTIVE' }
+            : parent,
+        )
+    )
+      throw new HedgeGrantError(
+        'GRANT_BINDING',
+        'parent not current on registry',
+      );
+    return parent;
+  }
+}
+
+export async function productionHedgeMandateSource(
+  options: ConstructorParameters<
+    typeof RegistryGovernedParentMandateReader
+  >[0] & { pool: Pick<Pool, 'query'> },
+) {
+  const source = new PostgresHedgeMandateSource({
+    pool: options.pool,
+    parents: new RegistryGovernedParentMandateReader(options),
+  });
+  await source.migrate();
+  return source;
+}
