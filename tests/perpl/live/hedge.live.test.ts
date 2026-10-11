@@ -1,39 +1,41 @@
+import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { monadTestnet } from 'viem/chains';
 import { perplNetwork, profileConfiguration } from '@synq/chain-registry';
-import { HedgePolicy, hedgeIntentHash, type HedgeIntent } from '@synq/kernel';
+import { RISK_REDUCING_KINDS, hedgeIntentHash } from '@synq/kernel';
 import {
   MarketCatalog,
-  PerplCollateralAdapter,
   PerplRestClient,
   PerplTradingStream,
-  accountInput,
-  erc20Abi,
-  hedgeMarket,
-  markObservation,
-  positionInputs,
-  quoteFrom,
   type PerplFill,
   type PerplOrder,
 } from '@synq/plugin-perpl';
 import {
+  DurableHedgeGrantAuthority,
+  PerplHedgeEvidenceReader,
   PerplHedgeExecutor,
+  PerplHedgeService,
   defaultKeyPath,
   keyFileExists,
   loadPerplKey,
-  type TrustedHedgeState,
+  testnetTreasuryReader,
+  trustedHedgeStateLoader,
+  type HedgeMandates,
 } from '@synq/perpl-executor';
-import {
-  evaluatePortfolio,
-  portfolioRiskHash,
-  proposeHedge,
-  referenceDeviationBps,
-  toKernelRiskPacket,
-} from '@synq/risk-engine';
+import { referenceDeviationBps, toKernelRiskPacket } from '@synq/risk-engine';
+import { perplHedgeActivities } from '../../../workers/workflow/src/activities/hedge-perpl.js';
+import type { HedgeState } from '../../../workers/workflow/src/workflows/hedge.js';
+import { startTemporal, testConfig } from '../../workflow/harness/temporal.js';
+import { withWorkers } from '../../workflow/harness/worker.js';
+import { fixtureControls } from '../../workflow/harness/controls.js';
 import { hedgeMandate, parentMandate } from '../../risk/hedge-fixtures.js';
 import { liveHedgeAuthority } from './hedge-authority.js';
 import { LIVE, readEvidence, recordEvidence } from './evidence.js';
+
 const network = perplNetwork('sandbox/monad-testnet');
 const HAVE_KEYS =
   keyFileExists(defaultKeyPath('read')) &&
@@ -46,9 +48,9 @@ const wait = async (cond: () => boolean, ms: number) => {
 };
 
 describe.skipIf(!LIVE || !HAVE_KEYS)(
-  'REAL_TESTNET durable bounded Perpl hedge',
+  'REAL_TESTNET HedgeWorkflow over the durable Perpl hedge path',
   () => {
-    it('risk packet -> P05 signed software-Mera quorum -> persisted grant/rq -> fill -> positions -> close -> final risk packet', async () => {
+    it('risk packet -> HedgeIntent -> Kernel policy -> verified Mera quorum -> trade-scoped order -> fill -> reconcile -> close -> final risk packet', async () => {
       const read = loadPerplKey(defaultKeyPath('read'), {
           scope: 'read',
           chainId: network.chainId,
@@ -59,10 +61,9 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
         });
       const restRead = new PerplRestClient({ network, signer: read.signer }),
         restTrade = new PerplRestClient({ network, signer: trade.signer });
+      expect(restTrade.executionMode).toBe('REAL_TESTNET');
       const context = await restRead.context(),
-        collateral = new PerplCollateralAdapter(network).resolve(context),
-        catalog = new MarketCatalog(network, context, Date.now()),
-        market = catalog.byBase('MON');
+        market = new MarketCatalog(network, context, Date.now()).byBase('MON');
       const config = profileConfiguration(network.profile),
         chain = createPublicClient({
           chain: monadTestnet,
@@ -73,25 +74,66 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
       const accountId = Number(readEvidence('testnet-account')?.perplAccountId);
       expect(accountId).toBeGreaterThan(0);
       const owner = read.address,
-        groupId = `perpl_operator_harness_${Date.now()}`,
-        now = Math.floor(Date.now() / 1000);
+        stamp = Date.now(),
+        groupId = `perpl_operator_harness_${stamp}`,
+        now = Math.floor(stamp / 1000);
       const harness = await liveHedgeAuthority({
         mandate: parentMandate({
           groupId,
+          account: `0x${stamp.toString(16).padStart(40, '0')}`,
+          chainGroupId: `0x${stamp.toString(16).padStart(64, '0')}`,
           validAfter: now - 60,
           validUntil: now + 86400,
         }),
       });
-      const mandate = harness.mandate;
-      const hm = (zero = false) =>
+      const hm = (version: number, targetHedgeRatioBps: number) =>
         hedgeMandate({
           groupId,
+          version,
           perplAccountId: String(accountId),
           allowedMarkets: [{ marketId: market.id, base: 'MON' }],
           maxLeverageHundredths: 100,
+          targetHedgeRatioBps,
           validAfter: now - 60,
-          ...(zero ? { targetHedgeRatioBps: 0 } : {}),
+          validUntil: now + 86400,
         });
+      const mandates: HedgeMandates = {
+        mandate: harness.mandate,
+        hedgeMandate: hm(1, 5000),
+      };
+      const authority = new DurableHedgeGrantAuthority({
+        store: harness.store,
+        key: randomBytes(32),
+        mode: 'REAL_TESTNET',
+        approvals: harness.approvals,
+        executionModule: harness.mandate.account,
+        loadTrusted: trustedHedgeStateLoader({
+          store: harness.store,
+          mandates: { current: async () => mandates },
+          network,
+        }),
+      });
+      const reader = new PerplHedgeEvidenceReader({
+        rest: restRead,
+        treasury: testnetTreasuryReader({ chain, owner, network }),
+        accountId,
+        base: 'MON',
+      });
+      const service = new PerplHedgeService({
+        store: harness.store,
+        reader,
+        mandates: { current: async () => mandates },
+        authority,
+        executor: () =>
+          new PerplHedgeExecutor({
+            rest: restTrade,
+            grants: authority,
+            catalog: new MarketCatalog(network, context, Date.now()),
+            mode: 'REAL_TESTNET',
+          }),
+        positions: restRead,
+        accountId,
+      });
       const ws = new PerplTradingStream({ network, signer: read.signer }),
         wsOrders: PerplOrder[] = [],
         wsFills: PerplFill[] = [],
@@ -106,198 +148,144 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           `positions:${p.snapshot ? 'snapshot' : 'update'}:${p.positions.length}`,
         ),
       );
+      const env = await startTemporal();
+      const dir = mkdtempSync(join(tmpdir(), 'synq-perpl-live-'));
       const steps: Record<string, unknown>[] = [];
-      const snapshot = async (label: string) => {
-        const [wallet, positions, ticker, monWei, ausd] = await Promise.all([
-          restRead.wallet(),
-          restRead.positions(),
-          restRead.ticker(market.id),
-          chain.getBalance({ address: owner }),
-          chain.readContract({
-            address: collateral.address,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [owner],
-          }),
-        ]);
-        const quote = quoteFrom(
-          market.id,
-          ticker.d[String(market.id)]!,
-          60000,
-          Date.now(),
-        );
-        const risk = evaluatePortfolio({
-          asOf: Date.now(),
-          valueDecimals: collateral.decimals,
-          spot: [
-            {
-              asset: 'MON',
-              canonicalAssetId: `eip155:${network.chainId}/native`,
-              amount: monWei,
-              decimals: 18,
-              bucket: 'GAS_BUFFER',
-            },
-            {
-              asset: 'AUSD',
-              canonicalAssetId: collateral.canonicalAssetId,
-              amount: ausd,
-              decimals: collateral.decimals,
-              bucket: 'CORE_TREASURY',
-              stable: true,
-            },
-          ],
-          perpAccount: accountInput(
-            wallet.as?.find((a) => a.id === accountId) ?? null,
-          ),
-          perpPositions: positionInputs(catalog, positions.d, accountId),
-          prices: [markObservation(market, quote, network.label)],
-          maxPriceAgeMs: 60000,
-          scenarios: [
-            { id: 'mon-down-30', shocksBps: { MON: -3000 } },
-            { id: 'mon-up-30', shocksBps: { MON: 3000 } },
-          ],
-        });
-        expect(risk.blocked, `${label}: ${risk.blockReasons.join(',')}`).toBe(
-          false,
-        );
-        return { risk, quote, freeAusd: ausd };
-      };
-      const run = async (
-        label: string,
-        intent: HedgeIntent,
-        s: Awaited<ReturnType<typeof snapshot>>,
-        zero = false,
-      ) => {
-        const asset = s.risk.assets.find((a) => a.asset === 'MON'),
-          marketView = hedgeMarket(market, s.quote),
-          state: TrustedHedgeState = {
-            intent,
-            mandate,
-            hedgeMandate: hm(zero),
-            facts: {
-              now: Math.floor(Date.now() / 1000),
-              nowMs: Date.now(),
-              marketOpen: market.open,
-              expectedCollateral: collateral,
-              freeCoreTreasury: s.freeAusd.toString(),
-              perpFreeCollateral: s.risk.perpFreeCollateral,
-              currentHedgeNotional: (asset && BigInt(asset.perpNotional) < 0n
-                ? -BigInt(asset.perpNotional)
-                : 0n
-              ).toString(),
-              spotExposure: asset?.spotValue ?? '0',
-              riskPacketHash: portfolioRiskHash(s.risk),
-              risk: s.risk,
-              market: {
-                ...marketView,
-                chainId: network.chainId,
-                exchange: network.exchange,
-                mark: marketView.mark.toString(),
-                bid: marketView.bid.toString(),
-                ask: marketView.ask.toString(),
-              },
-            },
-          };
-        const decision = new HedgePolicy().evaluate(state);
-        expect(
-          decision.status,
-          `${label}: ${JSON.stringify(decision.rejection)}`,
-        ).not.toBe('REJECTED');
-        await harness.register(state, decision.requiredApprovals > 0);
-        const grant = await harness.authority.issue(intent.intentId);
-        const receipt = await new PerplHedgeExecutor({
-          rest: restTrade,
-          grants: harness.authority,
-          catalog,
-          mode: 'REAL_TESTNET',
-        }).execute(grant);
-        steps.push({
-          label,
-          intent,
-          decision,
-          grant: {
-            grantId: grant.grantId,
-            approvals: grant.approvals,
-            maxSize: grant.maxSize,
-            expiresAt: grant.expiresAt,
+      let seq = 0;
+      const run = async (hedgeId: string): Promise<HedgeState> => {
+        const tq = testConfig('perpl-live'),
+          controls = fixtureControls(join(dir, `c${++seq}`), [groupId]);
+        const state = await withWorkers(
+          env,
+          tq,
+          { ...perplHedgeActivities({ service }), ...controls.activities },
+          async () => {
+            const handle = await env.client.workflow.start('HedgeWorkflow', {
+              workflowId: `perpl-live.${groupId}.${hedgeId}`,
+              taskQueue: tq.taskQueues.strategy,
+              args: [
+                {
+                  groupId,
+                  hedgeId,
+                  pollSeconds: 2,
+                  maxPolls: 30,
+                  maxApprovalPolls: 60,
+                  activityTimeoutSeconds: 120,
+                },
+              ],
+            });
+            const approver = (async () => {
+              for (let i = 0; i < 150; i++) {
+                const p = await harness.store.proposal(groupId, hedgeId);
+                if (p) {
+                  if (!p.intent || RISK_REDUCING_KINDS.has(p.intent.kind))
+                    return null;
+                  return harness.approvePending(p.intent);
+                }
+                await new Promise((r) => setTimeout(r, 200));
+              }
+              return null;
+            })();
+            const [result, draftDigest] = await Promise.all([
+              handle.result() as Promise<HedgeState>,
+              approver,
+            ]);
+            return { ...result, approvedDraft: draftDigest };
           },
-          receipt,
+        );
+        const proposal = await harness.store.proposal(groupId, hedgeId);
+        const record = proposal
+          ? await harness.store.intent(proposal.intentId)
+          : null;
+        steps.push({
+          hedgeId,
+          workflow: state,
+          intent: proposal?.intent ?? null,
+          riskPacketHash: proposal?.evidence.riskPacketHash,
+          evidenceMode: proposal?.evidence.executionMode,
+          market: proposal?.evidence.quote,
+          decision: record?.authorization.decision ?? null,
+          grant: record
+            ? {
+                grantId: record.grant.grantId,
+                executionMode: record.grant.executionMode,
+                approvals: record.grant.approvals,
+                maxSize: record.grant.maxSize,
+                limitPrice: record.grant.limitPrice,
+                expiresAt: record.grant.expiresAt,
+              }
+            : null,
+          receipt: record?.receipt ?? null,
         });
-        recordEvidence('testnet-hedge-admission', 'REAL_TESTNET', {
-          proofMode: harness.proofMode,
+        recordEvidence('testnet-hedge-workflow-progress', 'REAL_TESTNET', {
           operatorAccountLabel: 'TEST_HARNESS_OPERATOR_ACCOUNT',
+          proofMode: harness.proofMode,
           steps,
         });
-        return receipt;
-      };
-      const proposal = (
-        s: Awaited<ReturnType<typeof snapshot>>,
-        zero: boolean,
-        label: string,
-      ) => {
-        const p = proposeHedge(s.risk, hm(zero), hedgeMarket(market, s.quote), {
-          intentId: `${groupId}_${label}_${Date.now()}`,
-          now: Date.now(),
-          ttlSeconds: 120,
-          trigger: 'OPERATOR_TEST',
-          leverageHundredths: 100,
-        });
-        if (p.action !== 'PROPOSE')
-          throw new Error(`${label}: ${JSON.stringify(p)}`);
-        return p.intent;
+        return state;
       };
       let opened = false;
       ws.connect();
       try {
         expect(await wait(() => ws.accounts.has(accountId), 20000)).toBe(true);
         expect(ws.accounts.get(accountId)?.fw).toBe(true);
-        let initial = await snapshot('initial');
-        if (initial.risk.positions.length) {
-          const flattened = await run(
-            'pre-flatten',
-            proposal(initial, true, 'flatten'),
-            initial,
-            true,
-          );
-          expect(flattened.reconciliation).toBe('SETTLED');
-          initial = await snapshot('flat');
-        }
+        const initial = await reader.read();
+        expect(initial.risk.blocked, initial.risk.blockReasons.join(',')).toBe(
+          false,
+        );
         expect(initial.risk.positions).toHaveLength(0);
-        const intent = proposal(initial, false, 'open');
-        expect(BigInt(intent.size)).toBeLessThanOrEqual(
-          3n * 10n ** BigInt(market.sizeDecimals),
+        const open = await run('open');
+        opened = open.outcome === 'FILLED';
+        expect(open, JSON.stringify(steps.at(-1))).toMatchObject({
+          outcome: 'FILLED',
+          reconciled: true,
+          approvals: { required: 2, satisfied: true },
+          plan: { action: 'OPEN', side: 'SHORT' },
+        });
+        const openStep = steps.at(-1)!;
+        expect(
+          (openStep.grant as { approvals: string[] }).approvals,
+        ).toHaveLength(2);
+        expect(BigInt(open.order!.filledSize)).toBeGreaterThan(0n);
+        expect(
+          BigInt((openStep.intent as { size: string }).size),
+        ).toBeLessThanOrEqual(3n * 10n ** BigInt(market.sizeDecimals));
+        const openReceipt = openStep.receipt as { orderId: number };
+        await wait(
+          () => wsFills.some((f) => f.oid === openReceipt.orderId),
+          20000,
         );
-        const open = await run('open-hedge', intent, initial);
-        opened = open.submitted;
-        expect(open.admission?.code, JSON.stringify(open.admission)).toBe(0);
-        expect(open.reconciliation).toBe('SETTLED');
-        expect(BigInt(open.filledSize)).toBeGreaterThan(0n);
-        await wait(() => wsFills.some((f) => f.oid === open.orderId), 20000);
-        const hedged = await snapshot('hedged');
+        const hedged = await reader.read();
         expect(hedged.risk.positions.length).toBeGreaterThan(0);
-        const close = await run(
-          'close-hedge',
-          proposal(hedged, true, 'close'),
-          hedged,
-          true,
-        );
-        expect(close.reconciliation).toBe('SETTLED');
-        const final = await snapshot('final');
-        expect(final.risk.positions).toHaveLength(0);
+        mandates.hedgeMandate = hm(2, 0);
+        const close = await run('close');
+        expect(close).toMatchObject({
+          outcome: 'FILLED',
+          reconciled: true,
+          approvals: { required: 0, satisfied: true },
+          position: '0',
+        });
         opened = false;
+        const final = await reader.read();
+        expect(final.risk.positions).toHaveLength(0);
+        const openIntent = steps[0]!.intent as Parameters<
+          typeof hedgeIntentHash
+        >[0];
         const finalKernelRiskPacket = toKernelRiskPacket({
           risk: final.risk,
-          intentHash: hedgeIntentHash(intent),
+          intentHash: hedgeIntentHash(openIntent),
           chainId: network.chainId as 10143,
           quoteTtlSeconds: 60,
           slippageBps: 300,
           referenceDeviationBps: referenceDeviationBps(
-            final.quote.mark,
-            final.quote.oracle,
+            BigInt(final.quote.mark),
+            BigInt(final.quote.oracle),
           ),
           maxReferenceDeviationBps: 300,
         });
-        recordEvidence('testnet-hedge-durable', 'REAL_TESTNET', {
+        const fills = await restRead.fills(20);
+        recordEvidence('testnet-hedge-workflow', 'REAL_TESTNET', {
+          path: 'HedgeWorkflow (Temporal) -> PerplHedgeService -> HedgePolicy -> DurableHedgeGrantAuthority (P05 verified approvals) -> PerplHedgeExecutor (trade-scoped key)',
           operatorAccount: {
             label: 'TEST_HARNESS_OPERATOR_ACCOUNT',
             owner,
@@ -307,7 +295,6 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           realHumanPasskeyEvidence: 'REAL_PASSKEY_EVIDENCE_PENDING',
           safeOwnershipEvidence: 'UNPROVEN',
           softwarePrincipals: harness.registeredPrincipals,
-          collateral,
           market: {
             id: market.id,
             base: market.base,
@@ -319,6 +306,12 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           finalRisk: final.risk,
           finalKernelRiskPacket,
           steps,
+          venueFills: fills.d.filter((f) =>
+            steps.some(
+              (s) =>
+                (s.receipt as { orderId?: number } | null)?.orderId === f.oid,
+            ),
+          ),
           testMonSpentWei: '0',
           newFundingDeposited: '0',
           ws: { events: wsEvents, orders: wsOrders, fills: wsFills },
@@ -326,9 +319,8 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
       } finally {
         if (opened) {
           try {
-            const s = await snapshot('cleanup');
-            if (s.risk.positions.length)
-              await run('cleanup-close', proposal(s, true, 'cleanup'), s, true);
+            mandates.hedgeMandate = hm(3, 0);
+            await run('cleanup');
           } catch (error) {
             recordEvidence('testnet-hedge-cleanup', 'REAL_TESTNET', {
               status: 'INVESTIGATE',
@@ -338,6 +330,8 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           }
         }
         ws.close();
+        await env.teardown();
+        rmSync(dir, { recursive: true, force: true });
         await harness.close();
       }
     });

@@ -1,7 +1,6 @@
 import type { Mandate } from '@synq/domain';
 import {
   HedgePolicy,
-  type HedgeApproval,
   type HedgeDecision,
   type HedgeFacts,
   type HedgeGrant,
@@ -43,7 +42,6 @@ export interface HedgeActivities {
     intent: HedgeIntent;
     hedgeMandate: HedgeMandate;
     mandate: Mandate;
-    approvals: readonly HedgeApproval[];
     now: number;
   }): Promise<HedgeGrant>;
   executeHedge(input: { grant: HedgeGrant }): Promise<HedgeExecutionReceipt>;

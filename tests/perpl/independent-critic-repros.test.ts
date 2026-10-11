@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   HedgeGrantAuthority,
+  HedgeGrantCodec,
+  artifactHash,
   HedgeIntentSchema,
   HedgePolicy,
 } from '@synq/kernel';
@@ -18,6 +20,8 @@ import {
   parentMandate,
   testnetPerpl,
   members,
+  fixtureRisk,
+  marketEvidence,
 } from '../risk/hedge-fixtures.js';
 const evaluate = (
   changes: Record<string, unknown> = {},
@@ -36,8 +40,126 @@ const evaluate = (
 };
 const issue = (a: HedgeGrantAuthority, now = T0) => {
   const x = evaluate();
-  return a.issue({ ...x, hedgeMandate: x.hm, approvals: [], now });
+  return a.issue({ ...x, hedgeMandate: x.hm, now });
 };
+const withRisk = (
+  risk: ReturnType<typeof fixtureRisk>,
+  changes: Record<string, unknown> = {},
+  factChanges: Record<string, unknown> = {},
+) => {
+  const intent = HedgeIntentSchema.parse(
+    hedgeIntent({ riskPacketHash: artifactHash(risk), ...changes }),
+  );
+  return new HedgePolicy().evaluate({
+    intent,
+    hedgeMandate: hedgeMandate(),
+    mandate: parentMandate(),
+    facts: facts({ risk, ...factChanges }),
+  });
+};
+describe('economic fields are derived from trusted evidence, never from the intent', () => {
+  it('baseline evidence authorizes only the derived size', () => {
+    expect(withRisk(fixtureRisk()).rejection).toBeNull();
+  });
+  it('F1 rejects a forged size that keeps the reported notional', () => {
+    const real = hedgeIntent();
+    expect(
+      withRisk(fixtureRisk(), { ...real, size: '41' }).rejection?.code,
+    ).toBe('ECONOMIC_MISMATCH');
+  });
+  it('F1 rejects a low reported notional for the real size', () => {
+    expect(
+      withRisk(fixtureRisk(), { notional: '1', collateral: '1' }).rejection
+        ?.code,
+    ).toBe('ECONOMIC_MISMATCH');
+  });
+  it('F1 rejects a forged post-trade liquidation buffer', () => {
+    const real = HedgeIntentSchema.parse(hedgeIntent());
+    expect(
+      withRisk(fixtureRisk(), {
+        postTradeLiquidationBufferBps:
+          (real.postTradeLiquidationBufferBps ?? 0) + 500,
+      }).rejection?.code,
+    ).toBe('LIQUIDATION_BUFFER');
+  });
+  it('F1 rejects a forged hedge ratio', () => {
+    expect(
+      withRisk(fixtureRisk(), { postTradeHedgeRatioBps: 1 }).rejection?.code,
+    ).toBe('HEDGE_EXCEEDS_MANDATE');
+  });
+  it('F1 rejects mismatched market price or decimals', () => {
+    expect(
+      withRisk(
+        fixtureRisk(),
+        {},
+        { market: { ...marketEvidence, mark: '9000' } },
+      ).status,
+    ).toBe('REJECTED');
+    expect(
+      withRisk(
+        fixtureRisk(),
+        {},
+        { market: { ...marketEvidence, priceDecimals: 6 } },
+      ).status,
+    ).toBe('REJECTED');
+  });
+  it('F1 rejects risk evidence in other value units than the collateral', () => {
+    expect(
+      withRisk({ ...fixtureRisk(), valueDecimals: 18 }).rejection?.code,
+    ).toBe('ECONOMIC_MISMATCH');
+  });
+  it('F1 rejects blocked and stale risk packets', () => {
+    expect(withRisk({ ...fixtureRisk(), blocked: true }).rejection?.code).toBe(
+      'STALE_MARKET',
+    );
+    expect(
+      withRisk({ ...fixtureRisk(), asOf: T0 * 1000 - 600_000 }).rejection?.code,
+    ).toBe('STALE_MARKET');
+  });
+  it('F1 rejects leverage above the venue market maximum', () => {
+    expect(
+      withRisk(
+        fixtureRisk(),
+        {},
+        { market: { ...marketEvidence, maxLeverageHundredths: 50 } },
+      ).rejection?.code,
+    ).toBe('LEVERAGE_CAP');
+  });
+  it('SIMULATION evidence can never sign a REAL_TESTNET grant', () => {
+    const decision = withRisk(fixtureRisk(), {}, {});
+    expect(decision.evidenceMode).toBe('SIMULATION');
+    const intent = HedgeIntentSchema.parse(
+      hedgeIntent({ riskPacketHash: artifactHash(fixtureRisk()) }),
+    );
+    expect(() =>
+      new HedgeGrantCodec(GRANT_KEY).sign({
+        decision: { ...decision, requiredApprovals: 0 },
+        intent,
+        hedgeMandate: hedgeMandate(),
+        mandate: parentMandate(),
+        approvers: [],
+        executionMode: 'REAL_TESTNET',
+        now: T0,
+      }),
+    ).toThrow(/simulation evidence cannot authorize a live order/);
+  });
+  it('grant lifetime is bounded by the evidence lifetime', () => {
+    const decision = withRisk(fixtureRisk());
+    const intent = HedgeIntentSchema.parse(
+      hedgeIntent({ riskPacketHash: artifactHash(fixtureRisk()) }),
+    );
+    const grant = new HedgeGrantCodec(GRANT_KEY).sign({
+      decision,
+      intent,
+      hedgeMandate: hedgeMandate(),
+      mandate: parentMandate(),
+      approvers: ['member_0', 'member_1'],
+      now: T0,
+    });
+    expect(grant.expiresAt).toBeLessThanOrEqual(decision.evidenceExpiresAt);
+    expect(decision.evidenceExpiresAt).toBeLessThanOrEqual(T0 + 60);
+  });
+});
 describe('independent critic findings inverted to local fail-closed regressions', () => {
   it('F1 rejects executable size disconnected from reported economy', () => {
     expect(
@@ -78,8 +200,8 @@ describe('independent critic findings inverted to local fail-closed regressions'
           memberId: `member_${i}`,
           signer: m.address,
           intentHash: x.decision.intentHash,
-        })) as never,
-      }),
+        })),
+      } as never),
     ).toThrow(/APPROVALS_MISSING/);
   });
   it('F4 cannot use restartable in-memory fixture grants for a live executor', () => {

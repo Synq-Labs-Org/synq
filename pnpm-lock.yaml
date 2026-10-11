@@ -564,6 +564,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/perpl-executor':
+        specifier: workspace:*
+        version: link:../perpl-executor
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

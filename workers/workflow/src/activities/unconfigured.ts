@@ -13,6 +13,7 @@ export function unconfiguredPorts(): HedgeActivities & FundingActivities {
   return {
     hedgeRiskSnapshot: missing('hedge risk'),
     planHedge: missing('hedge planner'),
+    hedgeApprovals: missing('hedge approvals'),
     submitHedgeOrder: missing('hedge venue'),
     hedgeOrderStatus: missing('hedge venue'),
     cancelHedgeOrder: missing('hedge venue'),

@@ -144,7 +144,6 @@ export class GrantApprovalGateway implements GrantApprovalPort {
         throw new IdentityError('DRAFT_INVALID', 'hedge venue not in registry');
       }
       if (
-        venue.profile !== this.config.profile ||
         draft.grant.target !== venue.exchange ||
         asset.address !== venue.collateral.address ||
         asset.decimals !== venue.collateral.decimals

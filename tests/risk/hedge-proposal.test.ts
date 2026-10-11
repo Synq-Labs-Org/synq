@@ -107,6 +107,8 @@ describe('HedgeIntent from exposure', () => {
           ask: market.ask.toString(),
           chainId: parentMandate().network.chainId,
           exchange: hedgeMandate().exchange,
+          executionMode: 'SIMULATION',
+          source: 'fixture:perpl:ticker:64',
         },
         nowMs: NOW,
         spotExposure: '2000000',

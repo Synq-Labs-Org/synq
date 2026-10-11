@@ -308,6 +308,12 @@ describe('HedgeWorkflow and FundingWorkflow skeletons', () => {
         maxSlippageBps: 30,
         reasons: ['EXPOSURE'],
       }),
+      hedgeApprovals: async () => ({
+        rejected: false,
+        required: 2,
+        satisfied: true,
+        draftDigest: null,
+      }),
       submitHedgeOrder: async ({ clientOrderId }) => {
         calls.push(`submit:${clientOrderId}`);
         return view('ACCEPTED');

@@ -344,6 +344,12 @@ describe('SIMULATION corrected independent critic regressions', () => {
         riskStatus: 'HEALTHY',
         observedAt: 1,
       }),
+      hedgeApprovals: async () => ({
+        rejected: false,
+        required: 2,
+        satisfied: true,
+        draftDigest: null,
+      }),
       planHedge: async () => ({
         action: 'OPEN',
         market: 'MON-PERP',

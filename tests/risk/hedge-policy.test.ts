@@ -245,9 +245,9 @@ describe('Kernel hedge policy with bound exact economic evidence', () => {
           memberId: `member_${i}`,
           signer: m.address,
           intentHash: x.decision.intentHash,
-        })) as never,
+        })),
         now: T0,
-      }),
+      } as never),
     ).toThrow(/APPROVALS_MISSING/);
     expect(
       run(
@@ -325,7 +325,6 @@ describe('SIMULATION-only fixture grants', () => {
       a.issue({
         ...setup(),
         hedgeMandate: hedgeMandate(),
-        approvals: [],
         now: T0,
       }),
     ).toThrow(/APPROVALS_MISSING/);

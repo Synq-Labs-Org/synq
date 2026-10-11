@@ -1,5 +1,9 @@
 import type { Pool, PoolClient } from 'pg';
-import type { GrantApprovalGateway } from '@synq/identity/server';
+import {
+  IdentityError,
+  grantDigest,
+  type GrantApprovalGateway,
+} from '@synq/identity/server';
 import {
   HedgeGrantCodec,
   HedgeGrantError,
@@ -14,15 +18,27 @@ import {
   type HedgeIntent,
   type HedgeMandate,
 } from '@synq/kernel';
-import type { Mandate } from '@synq/schemas';
+import { GrantDraftSchema, type GrantDraft, type Mandate } from '@synq/schemas';
 import type { OrderSpec } from '@synq/plugin-perpl';
 import type { HedgeExecutionReceipt } from './executor.js';
+import type { HedgeEvidence } from './evidence.js';
 
 export type TrustedHedgeState = {
   intent: HedgeIntent;
   hedgeMandate: HedgeMandate;
   mandate: Mandate;
   facts: HedgeFacts;
+};
+export type HedgeProposalRecord = {
+  groupId: string;
+  hedgeId: string;
+  intentId: string;
+  clientOrderId: string | null;
+  action: 'PROPOSE' | 'NONE' | 'BLOCKED';
+  reason: string;
+  intent: HedgeIntent | null;
+  evidence: HedgeEvidence;
+  createdAt: number;
 };
 export type PersistedHedge = {
   authorization: { state: TrustedHedgeState; decision: HedgeDecision };
@@ -49,6 +65,54 @@ export class PostgresHedgeStore {
       intent_id text PRIMARY KEY, intent_hash text NOT NULL UNIQUE,
       group_id text NOT NULL, account_key text NOT NULL,
       record jsonb NOT NULL)`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS synq_hedge_proposals (
+      group_id text NOT NULL, hedge_id text NOT NULL,
+      intent_id text NOT NULL UNIQUE, client_order_id text UNIQUE,
+      record jsonb NOT NULL, PRIMARY KEY (group_id, hedge_id))`);
+  }
+  // First writer wins: a retried planning step returns the persisted proposal.
+  async proposeOnce(record: HedgeProposalRecord): Promise<HedgeProposalRecord> {
+    await this.pool.query(
+      `INSERT INTO synq_hedge_proposals(group_id,hedge_id,intent_id,client_order_id,record)
+       VALUES($1,$2,$3,$4,$5) ON CONFLICT (group_id, hedge_id) DO NOTHING`,
+      [
+        record.groupId,
+        record.hedgeId,
+        record.intentId,
+        record.clientOrderId,
+        JSON.stringify(record),
+      ],
+    );
+    const saved = await this.proposal(record.groupId, record.hedgeId);
+    if (!saved) throw new HedgeGrantError('GRANT_INVALID', 'proposal missing');
+    return saved;
+  }
+  async proposal(
+    groupId: string,
+    hedgeId: string,
+  ): Promise<HedgeProposalRecord | null> {
+    const r = await this.pool.query<{ record: HedgeProposalRecord }>(
+      'SELECT record FROM synq_hedge_proposals WHERE group_id=$1 AND hedge_id=$2',
+      [groupId, hedgeId],
+    );
+    return r.rows[0]?.record ?? null;
+  }
+  async proposalBy(
+    key: 'intent_id' | 'client_order_id',
+    value: string,
+  ): Promise<HedgeProposalRecord | null> {
+    const r = await this.pool.query<{ record: HedgeProposalRecord }>(
+      `SELECT record FROM synq_hedge_proposals WHERE ${key}=$1`,
+      [value],
+    );
+    return r.rows[0]?.record ?? null;
+  }
+  async intent(id: string): Promise<PersistedHedge | null> {
+    const r = await this.pool.query<{ record: PersistedHedge }>(
+      'SELECT record FROM synq_hedge_intents WHERE intent_id=$1',
+      [id],
+    );
+    return r.rows[0]?.record ?? null;
   }
   async locked<T>(
     key: string | readonly string[],
@@ -133,8 +197,13 @@ export class DurableHedgeGrantAuthority {
       store: PostgresHedgeStore;
       key: Uint8Array;
       loadTrusted: (intentId: string) => Promise<TrustedHedgeState>;
-      approvals: Pick<GrantApprovalGateway, 'pendingIntent' | 'quorum'>;
+      approvals: Pick<
+        GrantApprovalGateway,
+        'pendingIntent' | 'quorum' | 'registerDraft'
+      >;
       mode: 'REAL_TESTNET' | 'SIMULATION';
+      // Verifying contract of the group's execution module for approval drafts.
+      executionModule?: `0x${string}`;
     },
   ) {
     this.codec = new HedgeGrantCodec(options.key);
@@ -264,6 +333,14 @@ export class DurableHedgeGrantAuthority {
           mandate,
           facts,
         });
+        if (
+          decision.status !== 'REJECTED' &&
+          decision.evidenceMode !== this.executionMode
+        )
+          throw new HedgeGrantError(
+            'DECISION_NOT_AUTHORIZABLE',
+            `${decision.evidenceMode} evidence for a ${this.executionMode} authority`,
+          );
         if (decision.status === 'REJECTED')
           throw new HedgeGrantError(
             'DECISION_NOT_AUTHORIZABLE',
@@ -358,11 +435,120 @@ export class DurableHedgeGrantAuthority {
     }
     return approvers;
   }
+  // The P05 draft every approver signs for this exact hedge. Built here from
+  // trusted state, never from a caller.
+  draftFor(state: TrustedHedgeState, decision: HedgeDecision): GrantDraft {
+    const { intent, hedgeMandate: hm, mandate: m } = state;
+    const module = this.options.executionModule;
+    const binding = m.bindings.find(
+      (b) =>
+        b.pluginId === 'perpl' &&
+        b.action === 'PERP_HEDGE' &&
+        b.target === hm.exchange,
+    );
+    if (!module || !binding || !m.operators[0])
+      throw new HedgeGrantError('APPROVALS_MISSING', 'no approval route');
+    const hash = decision.intentHash;
+    const base = GrantDraftSchema.parse({
+      schemaVersion: 1,
+      groupId: m.groupId,
+      hedgeIntent: intent,
+      domain: {
+        name: 'SynqExecutionModule',
+        version: '1',
+        chainId: m.network.chainId,
+        verifyingContract: module,
+      },
+      requiredApprovals: decision.requiredApprovals,
+      createdAt: intent.createdAt,
+      grant: {
+        groupId: m.chainGroupId,
+        account: m.account,
+        mandateId: onchainMandateId(m),
+        mandateVersion: String(m.version),
+        executor: m.operators[0],
+        pluginId: onchainPluginId('perpl'),
+        chainId: String(m.network.chainId),
+        target: hm.exchange,
+        selector: binding.selector,
+        calldataHash: hash,
+        token: m.inputAsset.address,
+        maxInputAmount: intent.collateral,
+        nativeValue: '0',
+        minOutputAmount: '0',
+        recipient: m.account,
+        validAfter: String(intent.createdAt),
+        validUntil: String(intent.expiresAt),
+        nonce: BigInt(hash.slice(0, 18)).toString(),
+        intentHash: hash,
+      },
+      digest: `0x${'00'.repeat(32)}`,
+    });
+    return { ...base, digest: grantDigest(base) };
+  }
+  // Current approval state for a proposed hedge, registering its draft once.
+  async approvalStatus(intentId: string): Promise<{
+    rejected: boolean;
+    required: number;
+    satisfied: boolean;
+    draftDigest: string | null;
+  }> {
+    const issued = await this.store.intent(intentId);
+    if (issued)
+      return {
+        rejected: false,
+        required: issued.authorization.decision.requiredApprovals,
+        satisfied: true,
+        draftDigest: null,
+      };
+    const state = await this.options.loadTrusted(intentId);
+    const decision = new HedgePolicy().evaluate(state);
+    if (
+      decision.status === 'REJECTED' ||
+      decision.evidenceMode !== this.executionMode
+    )
+      return {
+        rejected: true,
+        required: 0,
+        satisfied: false,
+        draftDigest: null,
+      };
+    if (decision.requiredApprovals === 0)
+      return {
+        rejected: false,
+        required: 0,
+        satisfied: true,
+        draftDigest: null,
+      };
+    let digest: string;
+    try {
+      digest = (await this.options.approvals.pendingIntent(decision.intentHash))
+        .draft.digest;
+    } catch (error) {
+      if (!(error instanceof IdentityError) || error.code !== 'DRAFT_NOT_FOUND')
+        throw error;
+      const draft = this.draftFor(state, decision);
+      await this.options.approvals.registerDraft({
+        draft,
+        asset: state.mandate.inputAsset,
+      });
+      digest = draft.digest;
+    }
+    const q = await this.options.approvals.quorum(digest);
+    return {
+      rejected: false,
+      required: decision.requiredApprovals,
+      satisfied: q.satisfied && q.required >= decision.requiredApprovals,
+      draftDigest: digest,
+    };
+  }
   async revalidate(grant: HedgeGrant): Promise<void> {
     const state = await this.options.loadTrusted(grant.intentId);
     if (hedgeIntentHash(state.intent) !== grant.intentHash)
       throw new HedgeGrantError('GRANT_BINDING', 'intent changed');
     const decision = new HedgePolicy().evaluate(state);
+    if (decision.evidenceMode !== this.executionMode)
+      throw new HedgeGrantError('DECISION_NOT_AUTHORIZABLE', 'evidence mode');
     if (decision.status === 'REJECTED')
       throw new HedgeGrantError(
         'DECISION_NOT_AUTHORIZABLE',

@@ -1,23 +1,12 @@
-import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import { GrantDraftSchema, type Mandate } from '@synq/schemas';
-import {
-  HedgeIntentSchema,
-  hedgeIntentHash,
-  onchainMandateId,
-  onchainPluginId,
-} from '@synq/kernel';
-import {
-  DurableHedgeGrantAuthority,
-  PostgresHedgeStore,
-  type TrustedHedgeState,
-} from '@synq/perpl-executor';
+import type { Mandate } from '@synq/schemas';
+import { hedgeIntentHash, type HedgeIntent } from '@synq/kernel';
+import { PostgresHedgeStore } from '@synq/perpl-executor';
 import {
   GrantApprovalGateway,
   MembershipService,
   PostgresIdentityStore,
   PrincipalService,
-  grantDigest,
   grantPreview,
 } from '../../../packages/identity/src/server.js';
 import {
@@ -129,92 +118,45 @@ export async function liveHedgeAuthority(input: { mandate: Mandate }) {
   const approvals = new GrantApprovalGateway(identity, config, {
     executionModules: { [testnetPerpl.chainId]: mandate.account },
   });
-  const states = new Map<string, TrustedHedgeState>();
-  const authority = new DurableHedgeGrantAuthority({
-    store,
-    key: randomBytes(32),
-    mode: 'REAL_TESTNET',
-    approvals,
-    loadTrusted: async (id) => {
-      const state = states.get(id);
-      if (!state) throw new Error('unknown trusted harness intent');
-      return {
-        ...state,
-        facts: {
-          ...state.facts,
-          now: Math.floor(Date.now() / 1000),
-          nowMs: Date.now(),
-        },
-      };
-    },
-  });
-  async function register(state: TrustedHedgeState, quorumRequired: boolean) {
-    const intent = HedgeIntentSchema.parse(state.intent);
-    states.set(intent.intentId, state);
-    if (!quorumRequired) return;
-    const hash = hedgeIntentHash(intent),
-      m = state.mandate;
-    const base = GrantDraftSchema.parse({
-      schemaVersion: 1,
-      groupId: m.groupId,
-      hedgeIntent: intent,
-      domain: {
-        name: 'SynqExecutionModule',
-        version: '1',
-        chainId: m.network.chainId,
-        verifyingContract: m.account,
-      },
-      requiredApprovals: 2,
-      createdAt: Math.floor(Date.now() / 1000),
-      grant: {
-        groupId: m.chainGroupId,
-        account: m.account,
-        mandateId: onchainMandateId(m),
-        mandateVersion: String(m.version),
-        executor: m.operators[0],
-        pluginId: onchainPluginId('perpl'),
-        chainId: String(m.network.chainId),
-        target: state.hedgeMandate.exchange,
-        selector: m.bindings[0]!.selector,
-        calldataHash: hash,
-        token: m.inputAsset.address,
-        maxInputAmount: intent.collateral,
-        nativeValue: '0',
-        minOutputAmount: '0',
-        recipient: m.account,
-        validAfter: String(intent.createdAt),
-        validUntil: String(intent.expiresAt),
-        nonce: String(Date.now()),
-        intentHash: hash,
-      },
-      digest: `0x${'00'.repeat(32)}`,
-    });
-    const draft = { ...base, digest: grantDigest(base) };
-    await approvals.registerDraft({ draft, asset: m.inputAsset });
-    for (let i = 0; i < humans.length; i++) {
-      const h = humans[i]!,
-        signed = await approveGrantWithMera(
-          {
-            record: h.record,
-            memberId: `member_${i}`,
-            draft,
-            asset: m.inputAsset,
-            confirmedPreview: grantPreview(draft, m.inputAsset),
-            requestChallenge: (r) => approvals.issueChallenge(r),
-          },
-          { webAuthnClient: h.auth },
-        );
-      await approvals.submit({
-        challengeId: signed.challenge.challengeId,
-        grantSignature: signed.grantSignature,
-        attestationSignature: signed.attestationSignature,
-      });
+  // Each software Mera principal approves the draft the authority registered
+  // for this exact hedge, through the P05 challenge flow.
+  async function approvePending(intent: HedgeIntent): Promise<string> {
+    const hash = hedgeIntentHash(intent);
+    for (let attempt = 0; attempt < 600; attempt++) {
+      const view = await approvals.pendingIntent(hash).catch(() => null);
+      if (view) {
+        const draft = view.draft;
+        for (let i = 0; i < humans.length; i++) {
+          const h = humans[i]!,
+            signed = await approveGrantWithMera(
+              {
+                record: h.record,
+                memberId: `member_${i}`,
+                draft,
+                asset: view.asset,
+                confirmedPreview: grantPreview(draft, view.asset),
+                requestChallenge: (r) => approvals.issueChallenge(r),
+              },
+              { webAuthnClient: h.auth },
+            );
+          await approvals.submit({
+            challengeId: signed.challenge.challengeId,
+            grantSignature: signed.grantSignature,
+            attestationSignature: signed.attestationSignature,
+          });
+        }
+        return draft.digest;
+      }
+      await new Promise((r) => setTimeout(r, 200));
     }
+    throw new Error('no approval draft registered for the hedge');
   }
   return {
-    authority,
+    pool,
+    store,
+    approvals,
     mandate,
-    register,
+    approvePending,
     close: () => pool.end(),
     proofMode: 'SOFTWARE_PASSKEY_TEST_HARNESS',
     registeredPrincipals: humans.map((h) => ({

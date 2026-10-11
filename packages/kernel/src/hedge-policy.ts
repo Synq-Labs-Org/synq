@@ -134,6 +134,9 @@ export const HedgeMarketEvidenceSchema = z.strictObject({
   priceDecimals: z.number().int().min(0).max(18),
   sizeDecimals: z.number().int().min(0).max(18),
   maintenanceMarginBps: z.number().int().min(0).max(9999),
+  maxLeverageHundredths: z.number().int().min(0).max(10_000),
+  executionMode: z.enum(['REAL_TESTNET', 'SIMULATION']),
+  source: z.string().min(1).max(200),
   mark: AmountSchema,
   bid: AmountSchema,
   ask: AmountSchema,
@@ -143,6 +146,7 @@ export type HedgeMarketEvidence = Omit<
   z.input<typeof HedgeMarketEvidenceSchema>,
   'chainId'
 > & { chainId: number };
+export type HedgeEvidenceMode = 'REAL_TESTNET' | 'SIMULATION';
 const RiskEvidenceSchema = z
   .object({
     asOf: z.number().int().nonnegative(),
@@ -206,6 +210,8 @@ export type HedgeDecision = Readonly<{
   matchedRules: string[];
   rejection: { rule: string; code: HedgeRejectionCode } | null;
   treasuryReservation: string;
+  evidenceMode: HedgeEvidenceMode;
+  evidenceExpiresAt: number;
   evaluatedAt: number;
 }>;
 
@@ -243,6 +249,8 @@ export class HedgePolicy {
         matchedRules: [],
         rejection: { rule: 'schema', code: 'INVALID_HEDGE' },
         treasuryReservation: '0',
+        evidenceMode: 'SIMULATION',
+        evidenceExpiresAt: 0,
         evaluatedAt: facts.now,
       };
     const intent = parsedIntent.data;
@@ -253,6 +261,8 @@ export class HedgePolicy {
     let mode: HedgeDecision['mode'] = 'NORMAL';
     let tier: Tier = 'AUTO';
     let reservation = 0n;
+    let evidenceMode: HedgeEvidenceMode = 'SIMULATION';
+    let evidenceExpiresAt = 0;
     const check = (rule: string, ok: boolean, code: HedgeRejectionCode) => {
       if (!ok) throw new Stop(rule, code);
       matchedRules.push(rule);
@@ -358,6 +368,20 @@ export class HedgePolicy {
       if (!evidence.success || !market)
         throw new Stop('risk.evidence', 'RISK_PACKET_MISMATCH');
       const risk = evidence.data;
+      evidenceMode = market.executionMode;
+      evidenceExpiresAt = Math.floor(
+        Math.min(
+          market.at +
+            Math.min(hm.maxMarketDataAgeMs, mandate.quoteTtlSeconds * 1000),
+          risk.asOf +
+            Math.min(hm.maxMarketDataAgeMs, mandate.evidenceTtlSeconds * 1000),
+        ) / 1000,
+      );
+      check(
+        'risk.units',
+        risk.valueDecimals === hm.collateralAsset.decimals,
+        'ECONOMIC_MISMATCH',
+      );
       check(
         'risk.binding',
         artifactHash(facts.risk) === intent.riskPacketHash &&
@@ -497,6 +521,7 @@ export class HedgePolicy {
         check(
           'leverage.cap',
           intent.leverageHundredths <= hm.maxLeverageHundredths &&
+            intent.leverageHundredths <= market.maxLeverageHundredths &&
             intent.leverageHundredths * 100 <= mandate.maxLeverageBps,
           'LEVERAGE_CAP',
         );
@@ -601,6 +626,8 @@ export class HedgePolicy {
       matchedRules,
       rejection,
       treasuryReservation: rejection ? '0' : reservation.toString(),
+      evidenceMode,
+      evidenceExpiresAt,
       evaluatedAt: facts.now,
     });
   }
@@ -613,13 +640,6 @@ const RANK: Record<Tier, number> = {
   BLOCKED: 3,
 };
 const rank = (t: Tier) => RANK[t];
-
-export const HedgeApprovalSchema = z.strictObject({
-  memberId: MemberIdSchema,
-  signer: AddressSchema,
-  intentHash: HashSchema,
-});
-export type HedgeApproval = z.output<typeof HedgeApprovalSchema>;
 
 export const HedgeGrantSchema = z.strictObject({
   executionMode: z.enum(['REAL_TESTNET', 'SIMULATION']),
@@ -707,6 +727,15 @@ export class HedgeGrantCodec {
       decision.intentHash !== hedgeIntentHash(intent)
     )
       throw new HedgeGrantError('DECISION_NOT_AUTHORIZABLE');
+    const executionMode = input.executionMode ?? 'SIMULATION';
+    if (
+      executionMode === 'REAL_TESTNET' &&
+      decision.evidenceMode !== 'REAL_TESTNET'
+    )
+      throw new HedgeGrantError(
+        'DECISION_NOT_AUTHORIZABLE',
+        'simulation evidence cannot authorize a live order',
+      );
     const approvers = new Set(input.approvers);
     if (approvers.size < decision.requiredApprovals)
       throw new HedgeGrantError('APPROVALS_MISSING');
@@ -722,6 +751,7 @@ export class HedgeGrantCodec {
           hm.validUntil,
           mandate.validUntil,
           now + mandate.maxGrantTtlSeconds,
+          decision.evidenceExpiresAt,
           Math.floor(intent.marketDataAt / 1000) +
             Math.min(
               Math.floor(hm.maxMarketDataAgeMs / 1000),
@@ -730,7 +760,7 @@ export class HedgeGrantCodec {
         );
     if (expiresAt <= now) throw new HedgeGrantError('GRANT_EXPIRED');
     const body = {
-      executionMode: input.executionMode ?? 'SIMULATION',
+      executionMode,
       schemaVersion: 1 as const,
       intentId: intent.intentId,
       intentHash: decision.intentHash,
@@ -815,13 +845,12 @@ export class HedgeGrantAuthority extends HedgeGrantCodec {
     intent: HedgeIntent;
     hedgeMandate: HedgeMandate;
     mandate: Mandate;
-    approvals: readonly HedgeApproval[];
     now: number;
   }): HedgeGrant {
-    if (input.decision.requiredApprovals > 0 || input.approvals.length > 0)
+    if (input.decision.requiredApprovals > 0)
       throw new HedgeGrantError(
         'APPROVALS_MISSING',
-        'persisted P05 quorum required',
+        'verified approvals come only from the durable authority',
       );
     const prior = this.issued.get(input.intent.intentId);
     if (prior) {

@@ -2,6 +2,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GrantDraftSchema } from '@synq/schemas';
 import {
+  HedgePolicy,
   HedgeIntentSchema,
   hedgeIntentHash,
   onchainMandateId,
@@ -363,6 +364,19 @@ describe('durable hedge authority and executor on isolated PostgreSQL, SIMULATIO
       hedgeIntent: s.intent,
     });
   });
+  it('a REAL_TESTNET authority refuses SIMULATION evidence even with a verified quorum', async () => {
+    const s = state('simulated_evidence');
+    await approve(s);
+    const live = new DurableHedgeGrantAuthority({
+      ...authority().options,
+      mode: 'REAL_TESTNET',
+    });
+    await expect(live.issue(s.intent.intentId)).rejects.toThrow(
+      /SIMULATION evidence for a REAL_TESTNET authority/,
+    );
+    const rows = await pool.query('SELECT 1 FROM synq_hedge_intents');
+    expect(rows.rows).toHaveLength(0);
+  });
   it('uses two signed proofs, and membership revocation invalidates execution', async () => {
     const s = state();
     await approve(s);
@@ -425,11 +439,21 @@ describe('durable hedge authority and executor on isolated PostgreSQL, SIMULATIO
       { perpFreeCollateral: '1000000', freeCoreTreasury: '0' },
     );
     b.intent = { ...b.intent, groupId: 'other_group' as never };
-    b.mandate = { ...b.mandate, groupId: b.intent.groupId };
+    b.mandate = {
+      ...b.mandate,
+      groupId: b.intent.groupId,
+      chainGroupId: `0x${'88'.repeat(32)}`,
+      account: `0x${'5aff'.padStart(40, '0')}`,
+    };
     b.hedgeMandate = { ...b.hedgeMandate, groupId: b.intent.groupId };
     await identity.transaction(async (tx) => {
       const group = await tx.getGroup(a.intent.groupId);
-      await tx.insertGroup({ ...group!, groupId: b.intent.groupId });
+      await tx.insertGroup({
+        ...group!,
+        groupId: b.intent.groupId,
+        chainGroupId: b.mandate.chainGroupId,
+        account: b.mandate.account,
+      });
       for (const m of await tx.listMemberships(a.intent.groupId))
         await tx.insertMembership({ ...m, groupId: b.intent.groupId });
     });
@@ -535,8 +559,12 @@ describe('durable hedge authority and executor on isolated PostgreSQL, SIMULATIO
     });
     const open = state('closed_open', {}, { marketOpen: false });
     trusted.set(open.intent.intentId, open);
-    await expect(authority().issue(open.intent.intentId)).rejects.toThrow(
-      /MARKET_CLOSED/,
+    expect(new HedgePolicy().evaluate(open).rejection?.code).toBe(
+      'MARKET_CLOSED',
     );
+    await expect(authority().issue(open.intent.intentId)).rejects.toThrow(
+      /DECISION_NOT_AUTHORIZABLE/,
+    );
+    expect(v.orders.every((o) => o.t === 5)).toBe(true);
   });
 });
