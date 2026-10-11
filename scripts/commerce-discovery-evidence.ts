@@ -116,13 +116,11 @@ async function main() {
     ranked: sel.ranked
       .slice(0, 5)
       .map((r) => ({ offerId: r.offer.offerId, explanation: r.explanation })),
-    recommendations: sel.recommendations
-      .slice(0, 5)
-      .map((r) => ({
-        offerId: r.offer.offerId,
-        level: r.match.level,
-        reasons: r.match.reasons,
-      })),
+    recommendations: sel.recommendations.slice(0, 5).map((r) => ({
+      offerId: r.offer.offerId,
+      level: r.match.level,
+      reasons: r.match.reasons,
+    })),
     rejected: sel.rejected.length,
   };
   const text = JSON.stringify(report, null, 2);
