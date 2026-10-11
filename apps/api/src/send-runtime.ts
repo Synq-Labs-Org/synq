@@ -5,6 +5,7 @@ import {
   artifactHash,
   economicIntentHash,
   intentHash,
+  onchainMandateId,
   type Kernel,
 } from '@synq/kernel';
 import {
@@ -101,6 +102,8 @@ export function productionSendPorts(input: {
   authorizer: SendRouteDeps['kernel'];
   executionModule: Address;
   adminToken: string;
+  /** Operator-selected route identity; callers cannot choose a wider treasury mandate. */
+  sendMandateId?: string;
   sends: PostgresSendStore;
   funding: PostgresFundingSessionStore;
 }): Omit<SendRouteDeps, 'store'> {
@@ -118,8 +121,14 @@ export function productionSendPorts(input: {
     },
   );
   const context = async (groupId: string) => {
+    const group = await input.identity.transaction((tx) =>
+      tx.getGroup(groupId),
+    );
+    if (!group) return null;
+    const designated = input.sendMandateId ?? 'synq_send';
+    const id = onchainMandateId({ groupId, mandateId: designated });
     const entries = (await readModel.reader.currentMandateArtifacts()).filter(
-      (e) => e.groupId === groupId.toLowerCase(),
+      (e) => e.groupId === groupId.toLowerCase() && e.mandateId === id,
     );
     const mandates = entries
       .map(mandateFromArtifact)
@@ -130,7 +139,9 @@ export function productionSendPorts(input: {
             (b) => b.action === 'TRANSFER' && b.target === m.inputAsset.address,
           ),
       );
-    if (mandates.length !== 1) return null;
+    if (mandates.length === 0)
+      throw new FundingError('SEND_MANDATE_UNAVAILABLE');
+    if (mandates.length !== 1) throw new FundingError('SEND_MANDATE_AMBIGUOUS');
     const mandate = mandates[0]!;
     const memberships = await input.identity.transaction((tx) =>
       tx.listMemberships(groupId),
@@ -299,7 +310,7 @@ export function productionSendPorts(input: {
           quoteExpiresAt: now + 120,
           slippageBps: 0,
           referenceDeviationBps: 0,
-          maxReferenceDeviationBps: 0,
+          maxReferenceDeviationBps: mandate.maxReferenceDeviationBps,
           blocked: false,
           evidence: [
             {

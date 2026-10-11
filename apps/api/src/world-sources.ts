@@ -150,6 +150,13 @@ export class TemporalWorkflowStatusSource implements WorkflowStatusReader {
     for await (const execution of this.temporal.list()) {
       if (++count > this.maxEntries)
         throw new Error('TEMPORAL_VISIBILITY_TRUNCATED');
+      if (
+        execution.status.name === 'RUNNING' &&
+        execution.type === 'ActionExecutionWorkflow' &&
+        (typeof execution.memo?.synqGroupId !== 'string' ||
+          execution.memo.synqGroupId.trim().length === 0)
+      )
+        throw new Error('TEMPORAL_UNSCOPED_ECONOMIC_WORKFLOW');
       if (execution.memo?.synqGroupId !== groupId) continue;
       const running = execution.status.name === 'RUNNING';
       const next = running

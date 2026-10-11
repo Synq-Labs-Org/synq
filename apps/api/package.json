@@ -11,7 +11,8 @@
     "./kernel-store": "./src/kernel-store.ts",
     "./brain-runtime": "./src/brain-runtime.ts",
     "./send-routes": "./src/send-routes.ts",
-    "./send-runtime": "./src/send-runtime.ts"
+    "./send-runtime": "./src/send-runtime.ts",
+    "./transfer-plugin": "./src/transfer-plugin.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

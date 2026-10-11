@@ -10,7 +10,7 @@ const feedAbi = parseAbi([
 ]);
 
 export const chainlinkCreManifest: PluginManifestInput = {
-  id: 'chainlink-cre-ausd-risk',
+  id: 'chainlink-cre',
   version: '0.1.0',
   capabilities: ['READ_MARKET'],
   chains: [
