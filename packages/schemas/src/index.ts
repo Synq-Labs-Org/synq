@@ -449,3 +449,5 @@ export type Principal = z.output<typeof PrincipalSchema>;
 export type Group = z.output<typeof GroupSchema>;
 export type Proposal = z.output<typeof ProposalSchema>;
 export * from './identity.js';
+
+export * from './hedge.js';

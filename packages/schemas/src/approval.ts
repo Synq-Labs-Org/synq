@@ -1,5 +1,6 @@
 import { hashTypedData } from 'viem';
 import { z } from 'zod';
+import { HedgeIntentSchema } from './hedge.js';
 import { ChainIdSchema } from './network.js';
 import {
   AddressSchema,
@@ -62,6 +63,7 @@ export type GrantDomain = z.output<typeof GrantDomainSchema>;
 
 export const GrantDraftSchema = z.strictObject({
   schemaVersion: z.literal(1),
+  hedgeIntent: HedgeIntentSchema.optional(),
   groupId: GroupIdSchema,
   domain: GrantDomainSchema,
   grant: OnchainGrantSchema,

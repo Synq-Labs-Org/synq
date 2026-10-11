@@ -60,6 +60,7 @@ const ContractEntrySchema = z
       'SAFE_PROXY_FACTORY',
       'SAFE_COMPATIBILITY_FALLBACK_HANDLER',
       'SAFE_MULTI_SEND_CALL_ONLY',
+      'PERPL_EXCHANGE',
     ]),
     version: z.string().optional(),
     codeHash: HashSchema.optional(),
@@ -107,6 +108,17 @@ const ProfileEntrySchema = z.strictObject({
     },
   ),
 });
+const PerplEntrySchema = z.strictObject({
+  label: z.enum(['TESTNET', 'MAINNET']),
+  restUrl: z.url(),
+  wsUrl: z.url(),
+  appUrl: z.url(),
+  exchange: keySchema,
+  collateral: keySchema,
+  deployBlock: z.string().regex(/^(0|[1-9][0-9]*)$/),
+  source: SourceIdSchema,
+  verifiedAt: IsoTimestampSchema,
+});
 export const ChainRegistrySchema = z
   .strictObject({
     schemaVersion: z.literal(2),
@@ -129,6 +141,10 @@ export const ChainRegistrySchema = z
         [K in ProfileName]: typeof ProfileEntrySchema;
       },
     ),
+    perpl: z.strictObject({
+      'sandbox/monad-testnet': PerplEntrySchema,
+      'proof/monad-mainnet': PerplEntrySchema,
+    }),
   })
   .superRefine((v, ctx) => {
     const fail = (path: (string | number)[], message: string) =>
@@ -177,6 +193,17 @@ export const ChainRegistrySchema = z
           v.nativeAssets[entry.asset]?.chainId !== chainId
         )
           fail(['profiles', name, 'treasuryBuckets', bucket], 'bad native');
+    }
+    for (const [name, entry] of Object.entries(v.perpl)) {
+      const profile = v.profiles[name as ProfileName];
+      const role = profile.assetRoles.perplCollateralAsset;
+      if (
+        v.contracts[entry.exchange]?.kind !== 'PERPL_EXCHANGE' ||
+        v.contracts[entry.exchange]?.chainId !== profile.network.chainId
+      )
+        fail(['perpl', name, 'exchange'], 'exchange not on profile');
+      if (role.status !== 'CONFIGURED' || role.asset !== entry.collateral)
+        fail(['perpl', name, 'collateral'], 'collateral role mismatch');
     }
     if (v.profiles['proof/monad-mainnet'].mutationEnabled)
       fail(['profiles', 'proof/monad-mainnet'], 'mainnet must stay disabled');
@@ -392,6 +419,51 @@ export function verifiedAsset(
   )
     throw new RegistryError('ASSET_REGISTRY_MISMATCH');
   return actual;
+}
+export type PerplProfileName = keyof ChainRegistry['perpl'];
+export interface PerplNetworkConfig {
+  profile: PerplProfileName;
+  label: 'TESTNET' | 'MAINNET';
+  chainId: number;
+  restUrl: string;
+  wsUrl: string;
+  appUrl: string;
+  exchange: `0x${string}`;
+  collateral: Asset;
+  deployBlock: bigint;
+  source: string;
+  mutationEnabled: boolean;
+}
+export function perplNetwork(name: string): PerplNetworkConfig {
+  const parsed = ProfileNameSchema.safeParse(name);
+  const entry =
+    parsed.success && parsed.data in chainRegistry.perpl
+      ? chainRegistry.perpl[parsed.data as PerplProfileName]
+      : undefined;
+  if (!parsed.success || !entry)
+    throw new RegistryError('ASSET_ROLE_UNCONFIGURED', `${name}:perpl`);
+  const config = profiles[parsed.data];
+  const exchange = chainRegistry.contracts[entry.exchange];
+  if (!exchange) throw new RegistryError('REGISTRY_INVALID', entry.exchange);
+  return Object.freeze({
+    profile: parsed.data as PerplProfileName,
+    label: entry.label,
+    chainId: config.network.chainId,
+    restUrl: entry.restUrl,
+    wsUrl: entry.wsUrl,
+    appUrl: entry.appUrl,
+    exchange: exchange.address,
+    collateral: assetForRole(config, 'perplCollateralAsset'),
+    deployBlock: BigInt(entry.deployBlock),
+    source: entry.source,
+    mutationEnabled: config.mutationEnabled,
+  });
+}
+export function perplNetworkForChain(chainId: number): PerplNetworkConfig {
+  const config = profileForChainId(chainId);
+  if (!config)
+    throw new RegistryError('ASSET_ROLE_UNCONFIGURED', `${chainId}:perpl`);
+  return perplNetwork(config.network.profile);
 }
 const legacyProfiles: Record<string, ProfileName> = {
   local: 'local/anvil',

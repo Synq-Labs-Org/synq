@@ -385,10 +385,15 @@ export class GrantApprovalGateway implements GrantApprovalPort {
     if (record.status === 'PENDING')
       for (const a of await tx.listApprovals(record.draft.digest)) {
         const m = memberships.find((x) => x.memberId === a.memberId);
+        const principal = m ? await tx.getPrincipal(m.principalId) : null;
         if (
           a.membershipEpoch !== group.membershipEpoch ||
           !m ||
           m.role !== 'APPROVER' ||
+          !principal ||
+          principal.status !== 'ACTIVE' ||
+          principal.signer !== a.signer ||
+          principal.kind !== a.principalKind ||
           m.principalId !== a.principalId ||
           m.signer !== a.signer ||
           !approvalEligible(a.principalKind, this.config.profile) ||

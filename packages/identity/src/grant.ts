@@ -1,4 +1,11 @@
-import { formatUnits, type Address, type Hex } from 'viem';
+import { perplNetwork } from '@synq/chain-registry';
+import {
+  keccak256,
+  stringToHex,
+  formatUnits,
+  type Address,
+  type Hex,
+} from 'viem';
 import {
   AssetSchema,
   GrantDraftSchema,
@@ -43,7 +50,40 @@ export function grantPreview(
   const draft = assertDraftConsistent(rawDraft);
   const asset = AssetSchema.parse(rawAsset);
   const { grant } = draft;
-  if (
+  const hedge = draft.hedgeIntent;
+  if (hedge) {
+    const network = perplNetwork('sandbox/monad-testnet');
+    const canonical = (value: unknown): string => {
+      if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+      if (value !== null && typeof value === 'object')
+        return `{${Object.entries(value)
+          .filter(([, v]) => v !== undefined)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+          .join(',')}}`;
+      const wire = JSON.stringify(value);
+      if (wire === undefined) throw new IdentityError('DRAFT_INVALID');
+      return wire;
+    };
+    const hash = keccak256(stringToHex(canonical(hedge)));
+    if (
+      draft.groupId !== hedge.groupId ||
+      hedge.chainId !== network.chainId ||
+      grant.target !== network.exchange ||
+      grant.chainId !== String(network.chainId) ||
+      grant.token !== network.collateral.address ||
+      asset.address !== network.collateral.address ||
+      asset.chainId !== network.chainId ||
+      asset.decimals !== network.collateral.decimals ||
+      grant.maxInputAmount !== hedge.collateral ||
+      grant.intentHash !== hash ||
+      grant.calldataHash !== hash ||
+      grant.pluginId !== keccak256(stringToHex('perpl')) ||
+      grant.nativeValue !== '0' ||
+      Number(grant.validUntil) > hedge.expiresAt
+    )
+      throw new IdentityError('DRAFT_INVALID', 'hedge preview binding');
+  } else if (
     grant.selector !== ERC20_TRANSFER_SELECTOR ||
     grant.target !== grant.token ||
     asset.address !== grant.token ||
@@ -52,6 +92,9 @@ export function grantPreview(
   )
     throw new IdentityError('DRAFT_INVALID', 'preview requires ERC20 transfer');
   return GrantPreviewSchema.parse({
+    ...(hedge
+      ? { action: 'PERP_HEDGE', target: grant.target, hedgeIntent: hedge }
+      : {}),
     groupId: draft.groupId,
     account: grant.account,
     chainId: Number(grant.chainId),

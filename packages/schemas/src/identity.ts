@@ -1,3 +1,4 @@
+import { HedgeIntentSchema } from './hedge.js';
 import { z } from 'zod';
 import {
   GrantDraftSchema,
@@ -115,6 +116,9 @@ export const GroupViewSchema = z.strictObject({
 export type GroupView = z.output<typeof GroupViewSchema>;
 
 export const GrantPreviewSchema = z.strictObject({
+  action: z.literal('PERP_HEDGE').optional(),
+  target: AddressSchema.optional(),
+  hedgeIntent: HedgeIntentSchema.optional(),
   groupId: GroupIdSchema,
   account: AddressSchema,
   chainId: z.number().int().positive(),

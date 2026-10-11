@@ -13,6 +13,7 @@ import {
 import { trackedFiles } from '../../scripts/secrets.mjs';
 
 const ALLOWED_PATHS = [
+  /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
   /^sources\/chain_registry\.json$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
@@ -50,6 +51,7 @@ it('P00-004 no real address is hard-coded outside the chain registry and evidenc
       'packages/kernel/src/index.ts',
       'reports/evidence/run.json',
       'tests/kernel/fixtures.ts',
+      'sources/research/unreviewed.md',
     ],
     (file) =>
       file === 'tests/kernel/fixtures.ts'
@@ -59,6 +61,7 @@ it('P00-004 no real address is hard-coded outside the chain registry and evidenc
   expect(planted).toEqual([
     `indexer/envio/.env.example: ${real}`,
     `packages/kernel/src/index.ts: ${real}`,
+    `sources/research/unreviewed.md: ${real}`,
   ]);
 });
 
