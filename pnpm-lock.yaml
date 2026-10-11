@@ -76,6 +76,9 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:plugins/chainlink-cre
+      '@synq/plugin-duffel':
+        specifier: workspace:*
+        version: link:plugins/duffel
       '@synq/plugin-kimi':
         specifier: workspace:*
         version: link:plugins/kimi
@@ -588,6 +591,15 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  plugins/duffel:
+    dependencies:
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
       zod:
         specifier: 4.6.5
         version: 4.6.5

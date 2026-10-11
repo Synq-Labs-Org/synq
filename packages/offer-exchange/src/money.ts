@@ -122,3 +122,32 @@ export function applyBps(m: Money, bps: number, round: 'up' | 'down' = 'down') {
   const v = round === 'up' && q * 10_000n !== n ? q + 1n : q;
   return money(v, m.currency, m.decimals);
 }
+
+const MINOR_UNITS: Readonly<Record<string, number>> = {
+  BHD: 3,
+  CLP: 0,
+  ISK: 0,
+  JOD: 3,
+  JPY: 0,
+  KRW: 0,
+  KWD: 3,
+  OMR: 3,
+  TND: 3,
+  VND: 0,
+  USDC: 6,
+  AUSD: 6,
+};
+export const currencyDecimals = (currency: string) =>
+  MINOR_UNITS[currency] ?? 2;
+
+/** Parses a provider decimal string exactly; excess precision must be zeros. */
+export function providerMoney(value: string | number, currency: string): Money {
+  const decimals = currencyDecimals(currency);
+  const text = typeof value === 'number' ? value.toFixed(decimals) : value;
+  const [whole = '0', frac = ''] = text.trim().split('.');
+  const extra = frac.slice(decimals);
+  if (/[^0]/.test(extra))
+    throw new Error(`MONEY_PRECISION: ${text} ${currency}`);
+  const kept = frac.slice(0, decimals);
+  return fromDecimal(kept ? `${whole}.${kept}` : whole, currency, decimals);
+}
