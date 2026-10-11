@@ -4,6 +4,7 @@ import type {
   Mandate,
   MarketQuote,
   NetworkProfile,
+  ProviderHealthEntry,
   RiskState,
   VerifiedApproval,
   WorkflowStatus,
@@ -119,4 +120,21 @@ export class InMemoryRiskStateSource implements RiskStateSource {
     if (!this.observation) throw new Error('RISK_SOURCE_EMPTY');
     return structuredClone(this.observation);
   }
+}
+
+export type ProviderHealthView = {
+  providerId: string;
+  status: ProviderHealthEntry['status'];
+  environment: ProviderHealthEntry['environment'];
+  authState: ProviderHealthEntry['authState'];
+  circuit: ProviderHealthEntry['circuit'];
+  verbs: readonly string[];
+  latencyMs: number | null;
+  lastSuccessfulAt: number | null;
+  lastCheckedAt: number | null;
+  lastError: string | null;
+};
+/** Web2/x402 provider capability graph (Offer Exchange) health feed. */
+export interface ProviderHealthReader {
+  health(now: number): readonly ProviderHealthView[];
 }

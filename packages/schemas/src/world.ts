@@ -271,6 +271,31 @@ export const PluginHealthEntrySchema = z.strictObject({
   checkedAt: TimestampSchema.nullable(),
   reason: z.string().max(200).nullable(),
 });
+export const ProviderHealthEntrySchema = z.strictObject({
+  providerId: IdSchema,
+  status: z.enum([
+    'READY',
+    'MISSING_CREDENTIALS',
+    'PARTNER_GATED',
+    'DEGRADED',
+    'DOWN',
+    'BLOCKED',
+  ]),
+  environment: z.enum([
+    'SANDBOX',
+    'PRODUCTION',
+    'MAINNET_READ_ONLY',
+    'FIXTURE',
+  ]),
+  authState: z.enum(['READY', 'MISSING_CREDENTIALS', 'EXPIRED', 'BLOCKED']),
+  circuit: z.enum(['CLOSED', 'OPEN']),
+  verbs: z.array(z.string().min(1).max(32)),
+  latencyMs: z.number().int().nonnegative().nullable(),
+  lastSuccessfulAt: TimestampSchema.nullable(),
+  lastCheckedAt: TimestampSchema.nullable(),
+  lastError: z.string().max(200).nullable(),
+});
+export type ProviderHealthEntry = z.output<typeof ProviderHealthEntrySchema>;
 export const ReadModelFreshnessSchema = z.strictObject({
   indexedThroughBlock: z.number().int().nonnegative(),
   headBlock: z.number().int().nonnegative(),
@@ -308,6 +333,7 @@ export const WorldModelSnapshotSchema = z.strictObject({
   pendingExecutions: observedField(z.array(WorldGrantSchema)),
   recentExecutions: observedField(z.array(WorldExecutionSchema)),
   pluginHealth: observedField(z.array(PluginHealthEntrySchema)),
+  providerHealth: observedField(z.array(ProviderHealthEntrySchema)).optional(),
   capabilities: observedField(CapabilityGraphViewSchema),
   workflows: observedField(z.array(WorkflowStatusSchema)),
   marketSnapshots: observedField(z.array(MarketQuoteSchema)),

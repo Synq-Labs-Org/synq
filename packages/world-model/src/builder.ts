@@ -37,6 +37,7 @@ import type {
   KernelStateReader,
   KernelStateSnapshot,
   MarketDataSource,
+  ProviderHealthReader,
   RiskStateSource,
   WorkflowStatusReader,
 } from './ports.js';
@@ -61,6 +62,7 @@ export type WorldSources = {
   localAssets?: readonly Asset[];
   workflowMaxAgeSeconds?: number;
   capabilityFacts?: CapabilityFactsFile;
+  providers?: ProviderHealthReader;
 };
 export type WorldTarget = { groupId: string; chainGroupId?: string };
 
@@ -478,6 +480,7 @@ export class WorldSnapshotBuilder {
       capabilities.meta.reason ?? null,
     );
 
+    const providerHealth = this.providerHealth(now, note);
     const workflows = await this.workflows(target.groupId, now, note);
     const marketSnapshots = await this.market(now, note);
     const riskState = await this.risk(target.groupId, now, note);
@@ -528,6 +531,7 @@ export class WorldSnapshotBuilder {
       pendingExecutions,
       recentExecutions,
       pluginHealth,
+      ...(providerHealth ? { providerHealth } : {}),
       capabilities,
       workflows,
       marketSnapshots,
@@ -613,6 +617,57 @@ export class WorldSnapshotBuilder {
             : {}),
       }),
     );
+  }
+
+  private providerHealth(
+    now: number,
+    note: (
+      s: string,
+      p: SourceFreshness['provenance'],
+      f: FieldFreshness,
+      o: number | null,
+      r?: string | null,
+    ) => void,
+  ): WorldModelSnapshot['providerHealth'] {
+    const reader = this.sources.providers;
+    if (!reader) return undefined;
+    try {
+      const entries = reader.health(now).map((h) => ({
+        providerId: h.providerId,
+        status: h.status,
+        environment: h.environment,
+        authState: h.authState,
+        circuit: h.circuit,
+        verbs: [...h.verbs],
+        latencyMs: h.latencyMs === null ? null : Math.round(h.latencyMs),
+        lastSuccessfulAt: h.lastSuccessfulAt,
+        lastCheckedAt: h.lastCheckedAt,
+        lastError: h.lastError,
+      }));
+      const checks = entries.map((e) => e.lastCheckedAt);
+      const oldest =
+        checks.length && checks.every((c) => c !== null)
+          ? Math.min(...(checks as number[]))
+          : null;
+      const freshness = ageFreshness(oldest, now, 300);
+      const reason =
+        oldest === null ? 'some providers have never been checked' : null;
+      note('provider-capability-graph', 'PLUGIN', freshness, oldest, reason);
+      return observed(
+        entries,
+        fieldMeta({
+          provenance: 'PLUGIN',
+          source: 'provider-capability-graph',
+          observedAt: oldest,
+          freshness,
+          ...(reason ? { reason } : {}),
+        }),
+      );
+    } catch (error) {
+      const reason = errorCode(error);
+      note('provider-capability-graph', 'PLUGIN', 'UNKNOWN', null, reason);
+      return unknownField([], 'PLUGIN', 'provider-capability-graph', reason);
+    }
   }
 
   private async workflows(

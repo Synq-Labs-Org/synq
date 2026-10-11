@@ -1,0 +1,15 @@
+{
+  "name": "@synq/offer-exchange",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/domain": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "zod": "4.6.5"
+  }
+}
