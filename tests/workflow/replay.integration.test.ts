@@ -16,7 +16,7 @@ type WebpackCompiler = {
   webpack: {
     NormalModuleReplacementPlugin: new (
       pattern: RegExp,
-      replace: (resource: { request: string }) => void,
+      replace: (resource: { request: string; context: string }) => void,
     ) => { apply(compiler: WebpackCompiler): void };
   };
 };
@@ -47,6 +47,11 @@ async function bundle(versionsModule?: string) {
               new compiler.webpack.NormalModuleReplacementPlugin(
                 /[\\/]versions\.js$/,
                 (r) => {
+                  if (
+                    resolve(r.context, r.request) !==
+                    resolve('workers/workflow/src/workflows/versions.js')
+                  )
+                    return;
                   r.request = resolve(
                     'tests/workflow/fixtures/versions',
                     versionsModule,
