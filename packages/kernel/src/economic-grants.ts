@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { recoverTypedDataAddress } from 'viem';
 import { z } from 'zod';
 import {
   AddressSchema,
@@ -9,9 +10,12 @@ import {
   MemberIdSchema,
   TimestampSchema,
   VerifiedApprovalSchema,
+  type ApprovalLedger,
+  type MembershipDirectory,
   type VerifiedApproval,
 } from '@synq/schemas';
 import { artifactHash } from './canonical.js';
+import { canonicalSignature } from './approvals.js';
 
 const MoneySchema = z.strictObject({
   amount: AmountSchema,
@@ -173,6 +177,26 @@ export function economicRequestHash(raw: EconomicAuthorizationRequest) {
   const r = EconomicAuthorizationRequestSchema.parse(raw);
   return artifactHash({ kind: 'EconomicAuthorizationRequest', ...r });
 }
+/** What an approving member signs (EIP-712) for an economic request. */
+export function economicApprovalTypedData(input: {
+  groupId: string;
+  mandateId: string;
+  requestHash: `0x${string}`;
+}) {
+  return {
+    domain: { name: 'Synq Economic Approval', version: '1' },
+    types: {
+      EconomicApproval: [
+        { name: 'groupId', type: 'string' },
+        { name: 'mandateId', type: 'string' },
+        { name: 'requestHash', type: 'bytes32' },
+      ],
+    },
+    primaryType: 'EconomicApproval' as const,
+    message: input,
+  };
+}
+
 export const executionHash = (x: EconomicExecution) =>
   artifactHash({ kind: 'EconomicExecution', ...x });
 
@@ -288,15 +312,96 @@ export class EconomicGrantAuthority {
   private readonly key: Uint8Array;
   private readonly ledger: EconomicGrantLedger;
   private readonly reservations: EconomicReservationReader;
+  private readonly approvalPorts: {
+    ledger: ApprovalLedger;
+    directory: MembershipDirectory;
+  };
   constructor(input: {
     key: Uint8Array;
     reservations: EconomicReservationReader;
-    ledger?: EconomicGrantLedger;
+    ledger: EconomicGrantLedger;
+    approvals: { ledger: ApprovalLedger; directory: MembershipDirectory };
   }) {
     if (input.key.length < 32) throw new Error('GRANT_KEY_TOO_SHORT');
+    if (!input.ledger || !input.approvals || !input.reservations)
+      throw new Error('ECONOMIC_AUTHORITY_PORTS_REQUIRED');
     this.key = input.key;
     this.reservations = input.reservations;
-    this.ledger = input.ledger ?? new MemoryEconomicGrantLedger();
+    this.ledger = input.ledger;
+    this.approvalPorts = input.approvals;
+  }
+
+  /**
+   * Mirrors ApprovalCalculator: request binding, eligible kind, mandate
+   * member, canonical signature recovered to the member signer, identity
+   * ledger consumption, active directory member and current epoch, no reuse.
+   */
+  private async verifiedApprovers(
+    m: EconomicMandate,
+    groupId: string,
+    requestHash: `0x${string}`,
+    approvals: readonly unknown[],
+  ): Promise<{ approvers: string[]; outsider: string | null }> {
+    const members = new Set<string>(m.members);
+    const kinds = new Set<string>(m.approverKinds);
+    const typed = economicApprovalTypedData({
+      groupId,
+      mandateId: m.mandateId,
+      requestHash,
+    });
+    const seen = new Set<string>();
+    const approvers = new Set<string>();
+    for (const raw of approvals) {
+      const parsed = VerifiedApprovalSchema.safeParse(raw);
+      if (!parsed.success) continue;
+      const a: VerifiedApproval = parsed.data;
+      if (a.draftDigest !== requestHash || a.groupId !== groupId) continue;
+      if (!MATCHING_KINDS.has(a.principalKind) || !kinds.has(a.principalKind))
+        continue;
+      if (!members.has(a.memberId))
+        return { approvers: [], outsider: a.memberId };
+      if (!canonicalSignature(a.signature)) continue;
+      let recovered: string;
+      try {
+        recovered = (
+          await recoverTypedDataAddress({ ...typed, signature: a.signature })
+        ).toLowerCase();
+      } catch {
+        continue;
+      }
+      if (recovered !== a.signer) continue;
+      const keys = [
+        `member:${a.memberId}`,
+        `signer:${a.signer}`,
+        `principal:${a.principalId}`,
+        `challenge:${a.challengeId}`,
+        `approval:${a.approvalId}`,
+      ];
+      if (keys.some((k) => seen.has(k))) continue;
+      const consumed = await this.approvalPorts.ledger
+        .isConsumed(a)
+        .catch(() => false);
+      if (consumed !== true) continue;
+      const member = await this.approvalPorts.directory
+        .activeMember(groupId, a.memberId)
+        .catch(() => null);
+      if (
+        !member ||
+        member.role !== 'APPROVER' ||
+        member.principalId !== a.principalId ||
+        member.principalKind !== a.principalKind ||
+        member.signer.toLowerCase() !== a.signer ||
+        member.membershipEpoch !== a.membershipEpoch
+      )
+        continue;
+      const epoch = await this.approvalPorts.directory
+        .membershipEpoch(groupId)
+        .catch(() => null);
+      if (epoch !== a.membershipEpoch) continue;
+      keys.forEach((k) => seen.add(k));
+      approvers.add(a.memberId);
+    }
+    return { approvers: [...approvers].sort(), outsider: null };
   }
 
   private mac(grantId: string) {
@@ -371,21 +476,15 @@ export class EconomicGrantAuthority {
       return reject('RESERVATION_MISMATCH', `reservation ${res.state}`);
 
     const requestHash = economicRequestHash(r);
-    const members = new Set<string>(m.members);
-    const kinds = new Set<string>(m.approverKinds);
-    const approvers = new Set<string>();
-    for (const a of approvals) {
-      const parsed = VerifiedApprovalSchema.safeParse(a);
-      if (!parsed.success) continue;
-      const v: VerifiedApproval = parsed.data;
-      if (v.draftDigest !== requestHash || v.groupId !== r.groupId) continue;
-      if (!MATCHING_KINDS.has(v.principalKind) || !kinds.has(v.principalKind))
-        continue;
-      if (!members.has(v.memberId))
-        return reject('APPROVER_NOT_MEMBER', v.memberId);
-      approvers.add(v.memberId);
-    }
-    const unique = [...approvers].sort();
+    const verified = await this.verifiedApprovers(
+      m,
+      r.groupId,
+      requestHash,
+      approvals,
+    );
+    if (verified.outsider)
+      return reject('APPROVER_NOT_MEMBER', verified.outsider);
+    const unique = verified.approvers;
     const required = amount <= BigInt(m.autoApproveMax.amount) ? 0 : m.quorum;
     if (unique.length < required)
       return {

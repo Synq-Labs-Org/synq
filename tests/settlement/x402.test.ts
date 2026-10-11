@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { approvalPorts, memoryLedger } from '../kernel/economic-fixtures.js';
 import { recoverTypedDataAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { officialAssets } from '@synq/chain-registry';
@@ -132,6 +133,8 @@ async function setup(
   const authority = new EconomicGrantAuthority({
     key: new Uint8Array(32).fill(8),
     reservations,
+    ledger: memoryLedger(),
+    approvals: approvalPorts(['alice']),
   });
   const unit = { currency: 'USDC', decimals: 6 };
   await authority.install({

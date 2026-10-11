@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { approvalPorts, memoryLedger } from '../kernel/economic-fixtures.js';
 import { officialAssets } from '@synq/chain-registry';
 import {
   ConversionError,
@@ -256,6 +257,8 @@ describe('conversion routes', () => {
     const authority = new EconomicGrantAuthority({
       key: new Uint8Array(32).fill(3),
       reservations,
+      ledger: memoryLedger(),
+      approvals: approvalPorts(['alice']),
     });
     const unit = { currency: 'AUSD', decimals: 6 };
     await authority.install({

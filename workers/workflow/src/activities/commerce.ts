@@ -19,6 +19,7 @@ import {
   type CheckoutDecision,
   type CheckoutRecipient,
 } from '@synq/plugin-commerce';
+import type { TreasuryReservationStore } from '@synq/settlement';
 
 export type CommerceCheckoutResult =
   | { kind: 'RECEIPT'; receipt: FulfillmentReceipt }
@@ -70,6 +71,7 @@ export function commerceExecution(input: {
 export async function executeCommerceCheckout(
   deps: {
     authority: EconomicGrantAuthority;
+    reservations: TreasuryReservationStore;
     resolveRecipient(ref: string, purpose: string): Promise<CheckoutRecipient>;
     now: () => number;
   },
@@ -102,6 +104,24 @@ export async function executeCommerceCheckout(
       reservation: input.reservation,
       recipientRef: input.recipientRef,
     });
+    for (const id of [
+      input.reservation.reservationId,
+      `${input.reservation.reservationId}-edge`,
+    ]) {
+      if (
+        id !== input.reservation.reservationId &&
+        !(await deps.reservations.get(id))
+      )
+        continue;
+      await deps.reservations.beginExecution(
+        id,
+        {
+          groupId: input.grant.groupId,
+          settlementPlanHash: input.reservation.planHash,
+        },
+        now,
+      );
+    }
     await deps.authority.consume(input.grant, actual, now);
   } catch (e) {
     return {

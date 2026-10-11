@@ -93,7 +93,7 @@ export type BookingActivityDeps = {
 const clean = (text: string) => redact(text).slice(0, 200);
 const subjectHash = (offer: EconomicOffer) =>
   artifactHash({ subject: offer.subject, providerRef: offer.providerRef });
-const legsOf = (reservationId: string) => [
+export const legsOf = (reservationId: string) => [
   reservationId,
   `${reservationId}-edge`,
 ];
@@ -320,11 +320,18 @@ export function createBookingActivities(
       try {
         assertExecutable(offer, now, 900);
         const landed = landedTotal(offer, input.grant.execution.maxAmount);
-        await deps.reservations.beginExecution(
-          input.reservationId,
-          { groupId: input.grant.groupId, settlementPlanHash: input.planHash },
-          now,
-        );
+        for (const id of legsOf(input.reservationId)) {
+          if (id !== input.reservationId && !(await deps.reservations.get(id)))
+            continue;
+          await deps.reservations.beginExecution(
+            id,
+            {
+              groupId: input.grant.groupId,
+              settlementPlanHash: input.planHash,
+            },
+            now,
+          );
+        }
         await deps.authority.consume(
           input.grant,
           execution(deps, offer, landed, input),

@@ -6,7 +6,12 @@ import {
   type EconomicExecution,
   type EconomicGrant,
 } from '@synq/kernel';
-import { approval, reservationsWith } from './economic-fixtures.js';
+import {
+  approval,
+  reservationsWith,
+  approvalPorts,
+  memoryLedger,
+} from './economic-fixtures.js';
 
 const T = 1_780_000_000;
 const KEY = new Uint8Array(32).fill(7);
@@ -73,19 +78,25 @@ const holds = ['res-1', 'res-2', 'res-3', 'res-4'].map((reservationId) => ({
 }));
 async function authority(m: object = mandate) {
   const reservations = await reservationsWith('group-1', ASSET, holds, T);
-  const a = new EconomicGrantAuthority({ key: KEY, reservations });
+  const a = new EconomicGrantAuthority({
+    key: KEY,
+    reservations,
+    ledger: memoryLedger(),
+    approvals: approvalPorts(['alice', 'bob', 'carol']),
+  });
   await a.install(m as typeof mandate);
   return { a, reservations };
 }
-const quorum = (r: EconomicAuthorizationRequest) => [
-  approval('alice', economicRequestHash(r)),
-  approval('bob', economicRequestHash(r)),
+const M = { mandateId: 'web2-1' };
+const quorum = async (r: EconomicAuthorizationRequest) => [
+  await approval('alice', economicRequestHash(r), M),
+  await approval('bob', economicRequestHash(r), M),
 ];
 async function grantOf(
   a: EconomicGrantAuthority,
   r = request(),
 ): Promise<EconomicGrant> {
-  const d = await a.authorize(r, quorum(r), T);
+  const d = await a.authorize(r, await quorum(r), T);
   if (d.status !== 'AUTHORIZED') throw new Error(JSON.stringify(d));
   return d.grant;
 }
@@ -95,7 +106,10 @@ describe('EconomicGrantAuthority', () => {
     const { a } = await authority();
     const r = request();
     const h = economicRequestHash(r);
-    expect(await a.authorize(r, [approval('alice', h)], T)).toMatchObject({
+    const bob = await approval('bob', h, M);
+    expect(
+      await a.authorize(r, [await approval('alice', h, M)], T),
+    ).toMatchObject({
       status: 'PENDING_APPROVAL',
       requiredApprovals: 2,
       requestHash: h,
@@ -108,14 +122,14 @@ describe('EconomicGrantAuthority', () => {
     expect(
       await a.authorize(
         r,
-        [approval('alice', other), approval('bob', other)],
+        [await approval('alice', other, M), await approval('bob', other, M)],
         T,
       ),
     ).toMatchObject({ status: 'PENDING_APPROVAL', approvals: [] });
     expect(
       await a.authorize(
         r,
-        [approval('alice', h, 'group-2'), approval('bob', h)],
+        [await approval('alice', h, { ...M, groupId: 'group-2' }), bob],
         T,
       ),
     ).toMatchObject({ approvals: ['bob'] });
@@ -123,26 +137,82 @@ describe('EconomicGrantAuthority', () => {
       await a.authorize(
         r,
         [
-          approval('alice', h, 'group-1', 'DYNAMIC_OPERATOR'),
-          approval('bob', h),
+          await approval('alice', h, {
+            ...M,
+            principalKind: 'DYNAMIC_OPERATOR',
+          }),
+          bob,
         ],
         T,
       ),
     ).toMatchObject({ approvals: ['bob'] });
     expect(
-      await a.authorize(r, [approval('mallory', h), approval('bob', h)], T),
+      await a.authorize(r, [await approval('mallory', h, M), bob], T),
     ).toMatchObject({ code: 'APPROVER_NOT_MEMBER' });
-    expect((await a.authorize(r, quorum(r), T)).status).toBe('AUTHORIZED');
+    expect((await a.authorize(r, await quorum(r), T)).status).toBe(
+      'AUTHORIZED',
+    );
     const small = request(
       { intentId: 'small' },
       execution({ maxAmount: usd(900), reservationId: 'res-2' }),
     );
     expect((await a.authorize(small, [], T)).status).toBe('AUTHORIZED');
   });
+  it('regression: approvals must carry a real member signature, current epoch, active membership and identity consumption', async () => {
+    const r = request();
+    const h = economicRequestHash(r);
+    const reservations = await reservationsWith('group-1', ASSET, holds, T);
+    const make = async (ports: ReturnType<typeof approvalPorts>) => {
+      const a = new EconomicGrantAuthority({
+        key: KEY,
+        reservations,
+        ledger: memoryLedger(),
+        approvals: ports,
+      });
+      await a.install(mandate);
+      return a;
+    };
+    const a = await make(approvalPorts(['alice', 'bob', 'carol']));
+    const alice = await approval('alice', h, M);
+    const dummy = { ...alice, signature: `0x${'11'.repeat(65)}` };
+    expect(
+      await a.authorize(r, [dummy, await approval('bob', h, M)], T),
+    ).toMatchObject({ approvals: ['bob'] });
+    const forged = await approval('alice', h, { ...M, signAs: 'mallory' });
+    expect(
+      await a.authorize(r, [forged, await approval('bob', h, M)], T),
+    ).toMatchObject({ approvals: ['bob'] });
+    expect(
+      await a.authorize(r, [alice, { ...alice, approvalId: 'apr-x' }], T),
+    ).toMatchObject({ approvals: ['alice'] });
+    const stale = await make(
+      approvalPorts(['alice', 'bob', 'carol'], { epoch: 2 }),
+    );
+    expect(
+      await stale.authorize(r, [alice, await approval('bob', h, M)], T),
+    ).toMatchObject({ approvals: [] });
+    const inactive = await make(
+      approvalPorts(['alice', 'bob', 'carol'], { inactive: ['alice'] }),
+    );
+    expect(
+      await inactive.authorize(r, [alice, await approval('bob', h, M)], T),
+    ).toMatchObject({ approvals: ['bob'] });
+    const unconsumed = await make(
+      approvalPorts(['alice', 'bob', 'carol'], {
+        consumed: (x) => x.memberId !== 'alice',
+      }),
+    );
+    expect(
+      await unconsumed.authorize(r, [alice, await approval('bob', h, M)], T),
+    ).toMatchObject({ approvals: ['bob'] });
+    expect(
+      () => new EconomicGrantAuthority({ key: KEY, reservations } as never),
+    ).toThrow(/PORTS_REQUIRED/);
+  });
   it('reads the reservation itself: missing, released, mismatched or under-funded holds are refused', async () => {
     const { a, reservations } = await authority();
     const code = async (r: EconomicAuthorizationRequest) => {
-      const d = await a.authorize(r, quorum(r), T);
+      const d = await a.authorize(r, await quorum(r), T);
       return d.status === 'REJECTED' ? d.code : d.status;
     };
     expect(await code(request({}, execution({ reservationId: 'nope' })))).toBe(
@@ -165,7 +235,7 @@ describe('EconomicGrantAuthority', () => {
   it('refuses unrevalidated, expired and out-of-mandate requests', async () => {
     const { a } = await authority();
     const code = async (r: EconomicAuthorizationRequest) => {
-      const d = await a.authorize(r, quorum(r), T);
+      const d = await a.authorize(r, await quorum(r), T);
       return d.status === 'REJECTED' ? d.code : d.status;
     };
     expect(await code(request({ revalidatedAt: null }))).toBe(
@@ -205,7 +275,9 @@ describe('EconomicGrantAuthority', () => {
     expect((await grantOf(a)).grantId).toBe(g1.grantId);
     expect(await a.spentFor('web2-1')).toBe(30_000n);
     await a.consume(g1, execution(), T);
-    expect(await a.authorize(request(), quorum(request()), T)).toMatchObject({
+    expect(
+      await a.authorize(request(), await quorum(request()), T),
+    ).toMatchObject({
       code: 'INTENT_ALREADY_EXECUTED',
     });
     const r2 = request(
@@ -218,7 +290,7 @@ describe('EconomicGrantAuthority', () => {
       { intentId: 'intent-2' },
       execution({ reservationId: 'res-2', maxAmount: usd(29_999) }),
     );
-    expect(await a.authorize(r2b, quorum(r2b), T)).toMatchObject({
+    expect(await a.authorize(r2b, await quorum(r2b), T)).toMatchObject({
       code: 'BUDGET_EXHAUSTED',
     });
     await a.consume(g2, execution({ reservationId: 'res-2' }), T);
@@ -226,7 +298,7 @@ describe('EconomicGrantAuthority', () => {
       { intentId: 'intent-3' },
       execution({ reservationId: 'res-3', maxAmount: usd(20_000) }),
     );
-    expect(await a.authorize(r3, quorum(r3), T)).toMatchObject({
+    expect(await a.authorize(r3, await quorum(r3), T)).toMatchObject({
       code: 'BUDGET_EXHAUSTED',
     });
     expect(await a.spentFor('web2-1')).toBe(60_000n);
@@ -280,6 +352,8 @@ describe('EconomicGrantAuthority', () => {
     const other = new EconomicGrantAuthority({
       key: new Uint8Array(32).fill(9),
       reservations,
+      ledger: memoryLedger(),
+      approvals: approvalPorts(['alice', 'bob', 'carol']),
     });
     await other.install(mandate);
     await expect(other.consume(g, execution(), T)).rejects.toThrow(/GRANT_MAC/);
@@ -295,7 +369,12 @@ describe('EconomicGrantAuthority', () => {
     );
     expect(
       () =>
-        new EconomicGrantAuthority({ key: new Uint8Array(8), reservations }),
+        new EconomicGrantAuthority({
+          key: new Uint8Array(8),
+          reservations,
+          ledger: memoryLedger(),
+          approvals: approvalPorts(['alice', 'bob', 'carol']),
+        }),
     ).toThrow();
   });
 });

@@ -84,6 +84,16 @@ export class PostgresReservationStore implements TreasuryReservationStore {
       state text NOT NULL CHECK (state IN ('ACTIVE','EXECUTING','HELD','CAPTURED','SETTLED','RELEASED')),
       expires_at bigint NOT NULL, request jsonb NOT NULL, reason text,
       created_at bigint NOT NULL, updated_at bigint NOT NULL)`);
+    // Tables created before EXECUTING/HELD existed carry the old inline CHECK; replace it in place.
+    await this.pool.query(
+      `ALTER TABLE ${this.s}.synq_treasury_reservations DROP CONSTRAINT IF EXISTS synq_treasury_reservations_state_check`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.s}.synq_treasury_reservations ADD CONSTRAINT synq_treasury_reservations_state_check CHECK (state IN ('ACTIVE','EXECUTING','HELD','CAPTURED','SETTLED','RELEASED'))`,
+    );
+    await this.pool.query(
+      `DROP INDEX IF EXISTS ${this.s}.synq_treasury_reservations_holding`,
+    );
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS synq_treasury_reservations_holding ON ${this.s}.synq_treasury_reservations (group_id, asset_id) WHERE state IN ('ACTIVE','EXECUTING','HELD','CAPTURED')`,
     );

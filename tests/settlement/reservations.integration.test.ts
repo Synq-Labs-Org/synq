@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { approvalPorts } from '../kernel/economic-fixtures.js';
 import type pg from 'pg';
 import {
   PostgresEconomicGrantLedger,
@@ -143,6 +144,7 @@ describe('durable Kernel grant ledger (Postgres)', () => {
       key: w.key,
       reservations: w.reservations,
       ledger: w.ledger,
+      approvals: approvalPorts(['alice']),
     });
     await a.install(mandate);
     const r = {
@@ -160,6 +162,7 @@ describe('durable Kernel grant ledger (Postgres)', () => {
       key: w.key,
       reservations: w.reservations,
       ledger: new PostgresEconomicGrantLedger(pool, schemas.at(-1)!),
+      approvals: approvalPorts(['alice']),
     });
     await expect(restarted.install(mandate)).rejects.toThrow(
       /MANDATE_VERSION_NOT_NEWER/,
@@ -184,6 +187,7 @@ describe('durable Kernel grant ledger (Postgres)', () => {
       key: w.key,
       reservations: w.reservations,
       ledger: w.ledger,
+      approvals: approvalPorts(['alice']),
     });
     await a.install(mandate);
     const d = await a.authorize(
@@ -205,5 +209,39 @@ describe('durable Kernel grant ledger (Postgres)', () => {
       ),
     );
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+  });
+});
+
+describe('reservation schema upgrade', () => {
+  it('migrate() upgrades a pre-EXECUTING state CHECK so older tables accept EXECUTING and HELD', async () => {
+    const schema = `p11_old_${process.pid}`;
+    schemas.push(schema);
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    await pool.query(`CREATE TABLE "${schema}".synq_treasury_reservations (
+      reservation_id text PRIMARY KEY, group_id text NOT NULL, asset_id text NOT NULL,
+      amount numeric(78,0) NOT NULL CHECK (amount > 0), captured numeric(78,0) NOT NULL DEFAULT 0 CHECK (captured <= amount),
+      state text NOT NULL CHECK (state IN ('ACTIVE','CAPTURED','SETTLED','RELEASED')),
+      expires_at bigint NOT NULL, request jsonb NOT NULL, reason text, created_at bigint NOT NULL, updated_at bigint NOT NULL)`);
+    const store = new PostgresReservationStore(pool, schema);
+    await store.migrate();
+    await store.setConfirmedBalance({
+      groupId: 'group-1',
+      assetId: AUSD,
+      confirmed: 1_000n,
+      asOf: T0,
+    });
+    const r = await store.reserve(
+      req({ amount: '10', settlementPlanHash: '0xp' }),
+      T0,
+    );
+    await store.beginExecution(
+      r.reservationId,
+      { groupId: 'group-1', settlementPlanHash: '0xp' },
+      T0,
+    );
+    expect((await store.hold(r.reservationId, 'unknown', T0)).state).toBe(
+      'HELD',
+    );
+    expect((await store.get(r.reservationId))?.state).toBe('HELD');
   });
 });

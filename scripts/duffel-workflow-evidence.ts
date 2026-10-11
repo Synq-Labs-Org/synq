@@ -4,7 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { DefaultLogger, Runtime, Worker } from '@temporalio/worker';
 import { officialAssets } from '@synq/chain-registry';
-import { EconomicGrantAuthority } from '@synq/kernel';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import {
+  EconomicGrantAuthority,
+  MemoryEconomicGrantLedger,
+  economicApprovalTypedData,
+} from '@synq/kernel';
 import {
   EconomicIntentSchema,
   ProviderCapabilityGraph,
@@ -55,24 +60,58 @@ const realFetch: HttpFetch = async (url, init) => {
 };
 
 let approvalSeq = 0;
-/** Identity-ledger shaped approval from the stub verifier (LOCAL_FIXTURE, not a passkey). */
-function fixtureApproval(
+// Ephemeral fixture member keys: approvals are really signed (EIP-712) but by LOCAL_FIXTURE principals, not passkeys.
+const memberKeys = new Map(
+  ['alice', 'bob', 'carol'].map((m) => [
+    m,
+    privateKeyToAccount(generatePrivateKey()),
+  ]),
+);
+const fixtureDirectory = (groupId: string) => ({
+  ledger: { isConsumed: async () => true },
+  directory: {
+    membershipEpoch: async (g: string) => (g === groupId ? 1 : null),
+    activeMember: async (g: string, memberId: string) => {
+      const acct = memberKeys.get(memberId);
+      return g === groupId && acct
+        ? {
+            groupId,
+            memberId,
+            principalId: `fixture-${memberId}`,
+            principalKind: 'LOCAL_FIXTURE' as const,
+            role: 'APPROVER' as const,
+            signer: acct.address.toLowerCase() as `0x${string}`,
+            membershipEpoch: 1,
+            ownerOfAccount: true,
+          }
+        : null;
+    },
+  },
+});
+async function fixtureApproval(
   memberId: string,
   requestHash: string,
   groupId: string,
 ) {
-  approvalSeq++;
+  const id = ++approvalSeq;
+  const acct = memberKeys.get(memberId)!;
   return {
     schemaVersion: 1,
-    approvalId: `fixture-apr-${approvalSeq}`,
-    challengeId: `fixture-chl-${approvalSeq}`,
+    approvalId: `fixture-apr-${id}`,
+    challengeId: `fixture-chl-${id}`,
     groupId,
     memberId,
     principalId: `fixture-${memberId}`,
     principalKind: 'LOCAL_FIXTURE',
-    signer: `0x${String(approvalSeq).padStart(40, '0')}`,
+    signer: acct.address.toLowerCase(),
     draftDigest: requestHash,
-    signature: `0x${'11'.repeat(65)}`,
+    signature: await acct.signTypedData(
+      economicApprovalTypedData({
+        groupId,
+        mandateId: 'travel-evidence',
+        requestHash: requestHash as `0x${string}`,
+      }),
+    ),
     membershipEpoch: 1,
     verifiedAt: Math.floor(Date.now() / 1000),
   };
@@ -99,6 +138,8 @@ async function main() {
   const authority = new EconomicGrantAuthority({
     key: new Uint8Array(randomBytes(32)),
     reservations,
+    ledger: new MemoryEconomicGrantLedger(),
+    approvals: fixtureDirectory('evidence-group'),
   });
   await authority.install({
     approverKinds: ['LOCAL_FIXTURE'],
@@ -195,12 +236,14 @@ async function main() {
     authority,
     approvals: {
       verify: async ({ tokens, requestHash, groupId }) =>
-        tokens.flatMap((t) => {
-          const [kind, member, hash] = t.split(':');
-          return kind === 'fixture-verified' && member && hash === requestHash
-            ? [fixtureApproval(member, requestHash, groupId)]
-            : [];
-        }),
+        Promise.all(
+          tokens.flatMap((t) => {
+            const [kind, member, hash] = t.split(':');
+            return kind === 'fixture-verified' && member && hash === requestHash
+              ? [fixtureApproval(member, requestHash, groupId)]
+              : [];
+          }),
+        ),
     },
     travelers: {
       resolve: async ({ groupId, refs, purpose }) =>
