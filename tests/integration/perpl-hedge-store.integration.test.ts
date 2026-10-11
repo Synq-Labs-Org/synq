@@ -3,6 +3,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { GrantDraftSchema } from '@synq/schemas';
 import {
   HedgePolicy,
+  MandateResolver,
+  artifactHash,
   HedgeIntentSchema,
   hedgeIntentHash,
   onchainMandateId,
@@ -12,6 +14,7 @@ import {
   DurableHedgeGrantAuthority,
   PerplHedgeExecutor,
   PostgresHedgeStore,
+  PostgresHedgeMandateSource,
   type TrustedHedgeState,
 } from '@synq/perpl-executor';
 import {
@@ -567,4 +570,55 @@ describe('durable hedge authority and executor on isolated PostgreSQL, SIMULATIO
     );
     expect(v.orders.every((o) => o.t === 5)).toBe(true);
   });
+});
+
+it('P10-N5 resolves persisted hedge versions through the governed parent commitment', async () => {
+  const first = hedgeMandate();
+  const parent = parentMandate({ hedgePolicyHash: artifactHash(first) });
+  const governance = new MandateResolver([parent]);
+  const make = () =>
+    new PostgresHedgeMandateSource({
+      pool,
+      parents: {
+        current: async (groupId) =>
+          governance.current(groupId, parent.mandateId),
+      },
+    });
+  await make().migrate();
+  await pool.query(
+    'DELETE FROM synq_hedge_mandate_artifacts WHERE group_id=$1',
+    [parent.groupId],
+  );
+  await make().publish(first);
+  expect((await make().current(parent.groupId)).hedgeMandate.version).toBe(1);
+  await expect(make().publish({ ...first, maxNotional: '1' })).rejects.toThrow(
+    'current parent governance',
+  );
+  const second = hedgeMandate({
+    version: 2,
+    parentMandateVersion: 2,
+    maxNotional: '4000000',
+  });
+  const next = parentMandate({
+    version: 2,
+    hedgePolicyHash: artifactHash(second),
+  });
+  expect(() =>
+    governance.supersede(next, { securitySensitive: false }),
+  ).toThrow('NARROWING_REQUIRES_INVALIDATION');
+  governance.supersede(next, { securitySensitive: true });
+  await expect(make().current(parent.groupId)).rejects.toThrow(
+    'artifact missing',
+  );
+  await expect(make().publish(first)).rejects.toThrow(
+    'current parent governance',
+  );
+  await make().publish(second);
+  expect(await make().current(parent.groupId)).toMatchObject({
+    mandate: { version: 2 },
+    hedgeMandate: { version: 2 },
+  });
+  governance.revoke(parent.groupId, parent.mandateId);
+  expect((await make().current(parent.groupId)).mandate.status).toBe('REVOKED');
+  await expect(make().publish(second)).rejects.toThrow('parent revoked');
 });

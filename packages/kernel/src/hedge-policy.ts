@@ -277,6 +277,12 @@ export class HedgePolicy {
     let rejection: HedgeDecision['rejection'] = null;
     try {
       check(
+        'hedge-mandate.governance',
+        mandate.hedgePolicyHash === undefined ||
+          mandate.hedgePolicyHash === artifactHash(hm),
+        'MANDATE_VERSION',
+      );
+      check(
         'group',
         intent.groupId === hm.groupId && hm.groupId === mandate.groupId,
         'GROUP_MISMATCH',

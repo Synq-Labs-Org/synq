@@ -107,6 +107,11 @@ export class PreparedSwapStore {
     this.swaps.set(swap.calldataHash, swap);
   }
   forGrant(context: PluginContext, grant: ExecutionGrant): PreparedAction[] {
+    requireKuru(
+      context.now >= grant.validAfter && context.now < grant.validUntil,
+      'QUOTE_EXPIRED',
+      'grant deadline',
+    );
     const swap = this.swaps.get(grant.calldataHash);
     requireKuru(
       swap !== undefined,

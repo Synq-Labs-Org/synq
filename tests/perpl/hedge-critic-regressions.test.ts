@@ -92,6 +92,18 @@ describe('economic fields are derived from trusted evidence, never from the inte
   it('baseline evidence authorizes only the derived size', () => {
     expect(withRisk(fixtureRisk()).rejection).toBeNull();
   });
+  it('P10-N5 independently rejects a hedge-policy hash different from the approved parent', () => {
+    expect(
+      evaluate(
+        {},
+        { hedgePolicyHash: artifactHash(hedgeMandate({ maxNotional: '1' })) },
+      ).decision.rejection?.code,
+    ).toBe('MANDATE_VERSION');
+    expect(
+      evaluate({}, { hedgePolicyHash: artifactHash(hedgeMandate()) }).decision
+        .status,
+    ).not.toBe('REJECTED');
+  });
   it('F1 rejects a forged size that keeps the reported notional', () => {
     const real = hedgeIntent();
     expect(

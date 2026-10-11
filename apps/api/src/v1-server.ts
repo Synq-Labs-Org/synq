@@ -2,6 +2,18 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { Client, Connection } from '@temporalio/client';
+import { WorldSnapshotBuilder } from '@synq/world-model';
+import { StoreIdentityDirectoryReader } from './brain-runtime.js';
+import {
+  VenueMarketSource,
+  productionRegistryRisk,
+  TemporalWorkflowStatusSource,
+  CombinedRiskSource,
+  PostgresPortfolioRiskSource,
+} from './world-sources.js';
+import { PerplRestClient } from '@synq/plugin-perpl';
+import { perplNetwork } from '@synq/chain-registry';
 import { z } from 'zod';
 import {
   AddressSchema,
@@ -325,6 +337,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
         kernelStore: pool,
       })
     : null;
+  let temporalConnection: Connection | undefined;
   const app = createV1Api({
     store,
     config: {
@@ -354,6 +367,71 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
   });
   if (readModel && intents) {
     const kernel = intents instanceof DurableKernel ? intents.kernel : intents;
+    const network = profileConfiguration(config.SYNQ_PROFILE).network;
+    const now = () => Math.floor(Date.now() / 1000);
+    const temporalStatus = new TemporalWorkflowStatusSource(
+      {
+        async *list() {
+          temporalConnection ??= await Connection.connect({
+            address: env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
+          });
+          const temporal = new Client({
+            connection: temporalConnection,
+            namespace: env.TEMPORAL_NAMESPACE ?? 'default',
+          });
+          for await (const execution of temporal.workflow.list())
+            yield execution;
+        },
+        async nextEvent(workflowId) {
+          if (!temporalConnection) throw new Error('TEMPORAL_UNAVAILABLE');
+          return new Client({
+            connection: temporalConnection,
+            namespace: env.TEMPORAL_NAMESPACE ?? 'default',
+          }).workflow
+            .getHandle(workflowId)
+            .query<{ at: number | null }>('nextScheduledEvent');
+        },
+      },
+      now,
+    );
+    const world = new WorldSnapshotBuilder({
+      network,
+      now,
+      readModel,
+      kernel,
+      identity: new StoreIdentityDirectoryReader(store, pool),
+      mainnetBroadcastAllowed: false,
+      market: new VenueMarketSource(
+        network,
+        readModel.client,
+        new PerplRestClient({ network: perplNetwork(config.SYNQ_PROFILE) }),
+      ),
+      risk: new CombinedRiskSource(
+        productionRegistryRisk(network, readModel.client, now),
+        new PostgresPortfolioRiskSource(
+          pool,
+          now,
+          config.SYNQ_PROFILE === 'local/anvil' ? 'SIMULATION' : 'REAL_TESTNET',
+        ),
+      ),
+      workflows: temporalStatus,
+    });
+    app.get('/v1/world/:groupId', async (request, reply) => {
+      const { groupId } = z
+        .object({ groupId: z.string().min(1).max(128) })
+        .parse(request.params);
+      const session = await store.transaction((tx) => tx.getGroup(groupId));
+      if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
+      const supplied = createHash('sha256')
+        .update(request.headers.authorization ?? '')
+        .digest();
+      const expected = createHash('sha256')
+        .update(`Bearer ${config.SYNQ_API_ADMIN_TOKEN}`)
+        .digest();
+      if (!timingSafeEqual(supplied, expected))
+        return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      return world.build({ groupId });
+    });
     const registered = await registerProductionSend({
       app,
       pool,
@@ -412,6 +490,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
     });
   }
   app.addHook('onClose', async () => {
+    await temporalConnection?.close();
     await readModel?.close();
     await pool.end();
   });

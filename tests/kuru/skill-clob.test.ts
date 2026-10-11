@@ -11,6 +11,7 @@ import { PluginRegistry } from '@synq/plugin-sdk';
 import type { ProfileName } from '@synq/domain';
 import {
   KuruCapabilities,
+  reconcileSwapBalances,
   KuruClobAdapter,
   KuruError,
   KuruSkillAdapter,
@@ -489,9 +490,18 @@ describe('Kuru capabilities and plugin contract', () => {
       outputToken: WMON.address,
       maxInputAmount: '1000000',
       minOutputAmount: prepared.minOutput.toString(),
+      validAfter: Math.floor(T0 / 1000),
       validUntil: Math.floor(T0 / 1000) + 60,
       intentHash: `0x${'ab'.repeat(32)}`,
     } as never as Parameters<PreparedSwapStore['forGrant']>[1];
+    expect(
+      code(() => store.forGrant({ ...context, now: grant.validUntil }, grant)),
+    ).toBe('QUOTE_EXPIRED');
+    expect(
+      code(() =>
+        store.forGrant({ ...context, now: grant.validAfter - 1 }, grant),
+      ),
+    ).toBe('QUOTE_EXPIRED');
     const actions = store.forGrant(context, grant);
     expect(actions).toHaveLength(1);
     expect(actions[0]).toMatchObject({
@@ -518,5 +528,93 @@ describe('Kuru capabilities and plugin contract', () => {
         store.forGrant({ ...context, now: Math.floor(T0 / 1000) + 31 }, grant),
       ),
     ).toBe('QUOTE_EXPIRED');
+  });
+});
+
+describe('Kuru route and partial receipt boundaries', () => {
+  it('compares the same direct pair: Skill rejects a non-USDC pair while Flow prepares only its verified route', async () => {
+    const { adapter } = recordedFlow();
+    const request = {
+      profile: 'proof/monad-mainnet' as const,
+      account: ACCOUNT,
+      tokenIn: AUSD.address,
+      tokenOut: WMON.address,
+      amountIn: 1_000_000n,
+      slippageBps: 75,
+    };
+    expect(
+      code(() =>
+        KuruSkillAdapter.assertSkillPair(
+          request.profile,
+          request.tokenIn,
+          request.tokenOut,
+        ),
+      ),
+    ).toBe('UNSUPPORTED_PAIR');
+    const quote = await adapter.quote(request, T0);
+    const prepared = adapter.prepare(quote, {
+      maxSlippageBps: 75,
+      maxInputAmount: 1_000_000n,
+      now: T0,
+    });
+    expect(prepared).toMatchObject({
+      tokenIn: AUSD.address,
+      tokenOut: WMON.address,
+      amountIn: 1_000_000n,
+    });
+  });
+  it('reconciles exact partial deltas, preserves remaining input, and rejects over-spend and below-floor proceeds', async () => {
+    const { adapter } = recordedFlow();
+    const quote = await adapter.quote(
+      {
+        profile: 'proof/monad-mainnet',
+        account: ACCOUNT,
+        tokenIn: AUSD.address,
+        tokenOut: WMON.address,
+        amountIn: 1_000_000n,
+        slippageBps: 75,
+      },
+      T0,
+    );
+    const swap = adapter.prepare(quote, {
+      maxSlippageBps: 75,
+      maxInputAmount: 1_000_000n,
+      now: T0,
+    });
+    const receipt = {
+      chainId: swap.chainId,
+      account: swap.account,
+      transactionSucceeded: true,
+      confirmed: true,
+      inputBefore: swap.amountIn,
+      inputAfter: swap.amountIn / 2n,
+      outputBefore: 0n,
+      outputAfter: (swap.minOutput + 1n) / 2n,
+    };
+    expect(reconcileSwapBalances(swap, receipt)).toMatchObject({
+      state: 'PARTIAL',
+      inputSpent: '500000',
+      remainingInput: '500000',
+    });
+    expect(
+      reconcileSwapBalances(swap, {
+        ...receipt,
+        inputAfter: 0n,
+        outputAfter: swap.minOutput,
+      }).state,
+    ).toBe('FILLED');
+    expect(
+      reconcileSwapBalances(swap, { ...receipt, confirmed: false }).state,
+    ).toBe('PENDING');
+    expect(
+      reconcileSwapBalances(swap, { ...receipt, transactionSucceeded: false })
+        .state,
+    ).toBe('REVERTED');
+    expect(
+      code(() => reconcileSwapBalances(swap, { ...receipt, inputAfter: -1n })),
+    ).toBe('MAX_INPUT_BREACH');
+    expect(
+      code(() => reconcileSwapBalances(swap, { ...receipt, outputAfter: 0n })),
+    ).toBe('MIN_OUTPUT_BREACH');
   });
 });

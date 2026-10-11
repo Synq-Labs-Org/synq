@@ -203,13 +203,20 @@ export type MarketEvidence = {
   evidenceHash: Hex;
   referencePrice: string;
   quotedOutputAmount: string;
+  quotedInputAmount?: string;
+  minOutputAmount?: string;
   quoteExpiresAt: number;
   riskStatus: 'HEALTHY' | 'DEGRADED' | 'UNKNOWN' | 'STALE';
   observedAt: number;
 };
 
 export type DcaEvaluation =
-  | { decision: 'EXECUTE'; amount: string; reasons: string[] }
+  | {
+      decision: 'EXECUTE';
+      amount: string;
+      reasons: string[];
+      evidence?: MarketEvidence;
+    }
   | { decision: 'SKIP'; reasons: string[] }
   | { decision: 'ESCALATE'; reasons: string[] };
 

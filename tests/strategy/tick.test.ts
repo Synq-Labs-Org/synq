@@ -189,6 +189,70 @@ describe('engine-bound evaluateDca activity', () => {
     });
   });
 
+  const dipContext = () =>
+    context({
+      market: { ...context().market, trailingReferencePrice: price(30_000n) },
+    });
+  const multipliedQuote = () => ({
+    amountIn: '37500000',
+    quotedOutputAmount: (1500n * 10n ** 18n).toString(),
+    minOutputAmount: ((1500n * 10n ** 18n * 9925n) / 10000n).toString(),
+    quoteExpiresAt: NOW + 60,
+    observedAt: NOW,
+    evidenceHash: evidence.evidenceHash,
+    riskStatus: 'HEALTHY' as const,
+  });
+  it('P09-N2 requotes the multiplied input and forwards the exact minimum output', async () => {
+    const amounts: string[] = [];
+    const evaluate = engineDcaEvaluator({
+      context: async () => dipContext(),
+      requote: async ({ amount }) => {
+        amounts.push(amount);
+        return multipliedQuote();
+      },
+    });
+    const result = await evaluate({ strategy, state, evidence });
+    expect(amounts).toEqual(['37500000']);
+    expect(result).toMatchObject({
+      decision: 'EXECUTE',
+      amount: '37500000',
+      evidence: {
+        quotedInputAmount: '37500000',
+        minOutputAmount: multipliedQuote().minOutputAmount,
+        quotedOutputAmount: multipliedQuote().quotedOutputAmount,
+      },
+    });
+  });
+  it('P09-N2 refuses to reuse a base-tranche quote without a requote source', async () => {
+    expect(
+      await engineDcaEvaluator({ context: async () => dipContext() })({
+        strategy,
+        state,
+        evidence,
+      }),
+    ).toEqual({ decision: 'ESCALATE', reasons: ['REQUOTE_REQUIRED'] });
+  });
+  it.each([
+    [{ amountIn: '25000000' }, 'EXECUTION_QUOTE_MISMATCH_OR_STALE'],
+    [{ minOutputAmount: '1' }, 'MIN_OUTPUT_FLOOR'],
+    [{ observedAt: NOW + 1 }, 'EXECUTION_QUOTE_MISMATCH_OR_STALE'],
+    [{ quoteExpiresAt: NOW }, 'EXECUTION_QUOTE_MISMATCH_OR_STALE'],
+    [{ riskStatus: 'UNKNOWN' as const }, 'EXECUTION_QUOTE_MISMATCH_OR_STALE'],
+    [
+      {
+        quotedOutputAmount: (1000n * 10n ** 18n).toString(),
+        minOutputAmount: (1000n * 10n ** 18n).toString(),
+      },
+      'REQUOTE_AMOUNT_CHANGED',
+    ],
+  ])('P09-N2 refuses unusable requote %o', async (patch, reason) => {
+    const result = await engineDcaEvaluator({
+      context: async () => dipContext(),
+      requote: async () => ({ ...multipliedQuote(), ...patch }),
+    })({ strategy, state, evidence });
+    expect(result).toMatchObject({ decision: 'ESCALATE', reasons: [reason] });
+  });
+
   it('a mandate version change escalates', async () => {
     await expect(
       activities(context()).evaluateDca({

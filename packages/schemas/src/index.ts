@@ -149,6 +149,7 @@ export const MandateSchema = z
     maxGrantTtlSeconds: z.number().int().positive(),
     minIntervalSeconds: z.number().int().nonnegative(),
     maxExecutions: z.number().int().positive(),
+    hedgePolicyHash: HashSchema.optional(),
   })
   .superRefine((v, ctx) => {
     const issue = (path: (string | number)[], message: string) =>

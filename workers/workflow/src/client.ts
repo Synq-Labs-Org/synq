@@ -62,6 +62,10 @@ export async function startActionExecution(
         workflowId,
         taskQueue: config.taskQueues.economic,
         args: [input, tuning],
+        memo: {
+          synqGroupId: input.intent.groupId,
+          synqIntentId: canonicalIntentId(input.intent),
+        },
         ...SINGLE_EXECUTION,
       },
     );
@@ -88,6 +92,7 @@ export async function startMandateApproval(
         workflowId,
         taskQueue: config.taskQueues.approval,
         args: [input, tuning],
+        memo: { synqGroupId: input.mandateRef.groupId },
         ...SINGLE_EXECUTION,
       },
     );
@@ -126,6 +131,7 @@ export async function createDcaSchedule(
       workflowId: `${scheduleId}.tick`,
       taskQueue: config.taskQueues.strategy,
       args: [{ executionTaskQueue: config.taskQueues.economic, ...tick }],
+      memo: { synqGroupId: input.strategy.groupId },
     },
     policies: {
       overlap:
@@ -149,6 +155,7 @@ export async function startEmergencyPause(
       workflowId: `synq.emergency-pause.${input.groupId}.${input.incidentId}`,
       taskQueue: config.taskQueues.operations,
       args: [input],
+      memo: { synqGroupId: input.groupId },
       ...SINGLE_EXECUTION,
     },
   );

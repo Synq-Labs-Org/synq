@@ -8,7 +8,10 @@ import {
   minimumOutput,
   narrowedFields,
 } from '../../packages/kernel/src/index.js';
-import type { Mandate } from '../../packages/schemas/src/index.js';
+import {
+  MandateSchema,
+  type Mandate,
+} from '../../packages/schemas/src/index.js';
 import {
   ACCOUNT,
   OPERATOR,
@@ -238,10 +241,11 @@ describe('F2 supersession narrowing is defined over every mandate field', () => 
     ['maxGrantTtlSeconds', { maxGrantTtlSeconds: 19 }],
     ['minIntervalSeconds', { minIntervalSeconds: 6 }],
     ['maxExecutions', { maxExecutions: 9 }],
+    ['hedgePolicyHash', { hedgePolicyHash: hash(901) }],
   ];
   it('every mandate field has an explicit widening rule', () => {
     expect(Object.keys(WIDENING_RULES).sort()).toEqual(
-      Object.keys(base).sort(),
+      Object.keys(MandateSchema.shape).sort(),
     );
   });
   it.each(narrowing.map(([k, p], i) => [`${i}:${k}`, k, p] as const))(

@@ -29,9 +29,11 @@ export function evaluateDcaDeterministic(input: {
   if (evidence.riskStatus !== 'HEALTHY')
     return { decision: 'SKIP', reasons: [`RISK_${evidence.riskStatus}`] };
   const reasons: string[] = [];
+  if (evidence.observedAt > state.observedAt)
+    return { decision: 'ESCALATE', reasons: ['EVIDENCE_FUTURE'] };
   if (state.ticksExecuted >= strategy.maxTicks)
     reasons.push('MAX_TICKS_REACHED');
-  if (evidence.quoteExpiresAt <= evidence.observedAt)
+  if (evidence.quoteExpiresAt <= state.observedAt)
     reasons.push('QUOTE_EXPIRED');
   if (
     Math.abs(evidence.observedAt - state.observedAt) >

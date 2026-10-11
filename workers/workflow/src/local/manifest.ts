@@ -17,6 +17,15 @@ export const LocalWorkflowManifestSchema = z.strictObject({
   schemaVersion: z.literal(1),
   executionMode: z.literal('SIMULATION'),
   rpcUrl: z.url(),
+  riskAttestation: z
+    .strictObject({
+      registry: AddressSchema,
+      forwarder: AddressSchema,
+      workflowId: HashSchema,
+      sourceConfigHash: HashSchema,
+      assetId: HashSchema,
+    })
+    .optional(),
   factory: AddressSchema,
   registry: AddressSchema,
   module: AddressSchema,

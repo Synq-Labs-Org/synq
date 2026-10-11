@@ -158,6 +158,35 @@ const inputArb = fc
     };
   });
 
+const executableArb = inputArb.map(
+  (input): DcaEvaluationInput => ({
+    ...input,
+    now: START,
+    policy: {
+      ...input.policy,
+      budget: input.policy.maxTranche * 100n,
+      maxDeployment: input.policy.maxTranche * 100n,
+      maxAllocationBps: 10_000,
+      pause: { ...input.policy.pause, paused: false },
+    },
+    market: {
+      ...input.market,
+      asOf: START,
+      referenceStatus: 'HEALTHY',
+      sourcesConflict: false,
+      venueHealthy: true,
+      liquidityMaxInput: input.policy.maxTranche * 100n,
+      change24hBps: 0,
+    },
+    treasury: {
+      freeBudgetAsset: input.policy.maxTranche * 100n,
+      totalValueInBudgetAsset: input.policy.maxTranche * 100n,
+      targetPositionValueInBudgetAsset: 0n,
+    },
+    history: { executions: [], exitedPrincipal: 0n },
+  }),
+);
+
 const spentOf = (input: DcaEvaluationInput) =>
   input.history.executions
     .filter((e) => e.status !== 'FAILED')
@@ -173,40 +202,43 @@ describe('DCA evaluator properties', () => {
   it('every EXECUTE respects tranche, budget, deployment, balance, allocation and liquidity bounds', () => {
     let executed = 0;
     fc.assert(
-      fc.property(inputArb, (input) => {
-        const d = evaluateDca(input);
-        if (d.kind !== 'EXECUTE') return;
-        executed++;
-        const { policy: p, treasury: t, market: m } = input;
-        const amt = d.tranche!.amountIn;
-        const spent = spentOf(input);
-        const deployed = spent - input.history.exitedPrincipal;
-        expect(amt).toBeGreaterThanOrEqual(p.minTranche);
-        expect(amt).toBeLessThanOrEqual(p.maxTranche);
-        expect(amt).toBeLessThanOrEqual(p.budget - spent);
-        expect(amt).toBeLessThanOrEqual(
-          p.maxDeployment - (deployed > 0n ? deployed : 0n),
-        );
-        expect(amt).toBeLessThanOrEqual(t.freeBudgetAsset);
-        expect(amt).toBeLessThanOrEqual(m.liquidityMaxInput);
-        expect(
-          (t.targetPositionValueInBudgetAsset +
-            input.history.executions
-              .filter((e) => e.status === 'PENDING')
-              .reduce((total, e) => total + e.amountIn, 0n) +
-            amt) *
-            10_000n,
-        ).toBeLessThanOrEqual(
-          BigInt(p.maxAllocationBps) * t.totalValueInBudgetAsset,
-        );
-        expect(d.diagnostics.allocationAfterBps!).toBeLessThanOrEqual(
-          p.maxAllocationBps,
-        );
-        expect(d.tranche!.maxSlippageBps).toBe(p.maxSlippageBps);
-        expect(d.tranche!.minOutputFloor).toBeLessThanOrEqual(
-          d.tranche!.indicativeOutput,
-        );
-      }),
+      fc.property(
+        fc.oneof({ weight: 4, arbitrary: inputArb }, executableArb),
+        (input) => {
+          const d = evaluateDca(input);
+          if (d.kind !== 'EXECUTE') return;
+          executed++;
+          const { policy: p, treasury: t, market: m } = input;
+          const amt = d.tranche!.amountIn;
+          const spent = spentOf(input);
+          const deployed = spent - input.history.exitedPrincipal;
+          expect(amt).toBeGreaterThanOrEqual(p.minTranche);
+          expect(amt).toBeLessThanOrEqual(p.maxTranche);
+          expect(amt).toBeLessThanOrEqual(p.budget - spent);
+          expect(amt).toBeLessThanOrEqual(
+            p.maxDeployment - (deployed > 0n ? deployed : 0n),
+          );
+          expect(amt).toBeLessThanOrEqual(t.freeBudgetAsset);
+          expect(amt).toBeLessThanOrEqual(m.liquidityMaxInput);
+          expect(
+            (t.targetPositionValueInBudgetAsset +
+              input.history.executions
+                .filter((e) => e.status === 'PENDING')
+                .reduce((total, e) => total + e.amountIn, 0n) +
+              amt) *
+              10_000n,
+          ).toBeLessThanOrEqual(
+            BigInt(p.maxAllocationBps) * t.totalValueInBudgetAsset,
+          );
+          expect(d.diagnostics.allocationAfterBps!).toBeLessThanOrEqual(
+            p.maxAllocationBps,
+          );
+          expect(d.tranche!.maxSlippageBps).toBe(p.maxSlippageBps);
+          expect(d.tranche!.minOutputFloor).toBeLessThanOrEqual(
+            d.tranche!.indicativeOutput,
+          );
+        },
+      ),
       RUNS,
     );
     expect(executed).toBeGreaterThan(RUNS.numRuns / 20);

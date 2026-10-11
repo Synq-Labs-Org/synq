@@ -6,3 +6,4 @@ export * from './activities.js';
 export * from './durable.js';
 export * from './evidence.js';
 export * from './service.js';
+export * from './mandate-source.js';

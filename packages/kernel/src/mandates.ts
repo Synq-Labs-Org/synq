@@ -163,6 +163,7 @@ export const WIDENING_RULES: { readonly [K in keyof Mandate]-?: Rule } = {
   maxGrantTtlSeconds: (p, n) => n.maxGrantTtlSeconds >= p.maxGrantTtlSeconds,
   minIntervalSeconds: (p, n) => n.minIntervalSeconds <= p.minIntervalSeconds,
   maxExecutions: (p, n) => n.maxExecutions >= p.maxExecutions,
+  hedgePolicyHash: (p, n) => p.hedgePolicyHash === n.hedgePolicyHash,
 };
 
 export function narrowedFields(previous: Mandate, next: Mandate): string[] {

@@ -184,6 +184,15 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/plugin-chainlink-cre':
+        specifier: workspace:*
+        version: link:../../plugins/chainlink-cre
+      '@synq/plugin-kuru':
+        specifier: workspace:*
+        version: link:../../plugins/kuru
+      '@synq/plugin-perpl':
+        specifier: workspace:*
+        version: link:../../plugins/perpl
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model
@@ -193,6 +202,9 @@ importers:
       '@synq/world-model':
         specifier: workspace:*
         version: link:../../packages/world-model
+      '@temporalio/client':
+        specifier: 1.24.0
+        version: 1.24.0
       fastify:
         specifier: 5.12.5
         version: 5.12.5
@@ -699,6 +711,9 @@ importers:
       '@synq/perpl-executor':
         specifier: workspace:*
         version: link:../perpl-executor
+      '@synq/plugin-chainlink-cre':
+        specifier: workspace:*
+        version: link:../../plugins/chainlink-cre
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

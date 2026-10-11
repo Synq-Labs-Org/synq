@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import pg from 'pg';
-import { createTestClient, http } from 'viem';
+import { createTestClient, createWalletClient, http, type Hex } from 'viem';
 import {
   generatePrivateKey,
   privateKeyToAccount,
@@ -23,6 +23,11 @@ import { tokenAbi } from '@synq/execution-worker/abi';
 import { startAnvil } from '@synq/demo/src/anvil.js';
 import { deployLocalSynq, type LocalSynq } from '@synq/demo/src/safe.js';
 import { enrolLocalGroup, ensureDatabase, localGateway } from './identity.js';
+import {
+  canonicalAssetKey,
+  encodeAttestationReport,
+} from '@synq/plugin-chainlink-cre';
+import { riskAttestationRegistryAbi } from '@synq/plugin-chainlink-cre';
 import type { LocalWorkflowManifest } from './manifest.js';
 
 export const LOCAL_GROUP_ID = 'wf_local_group';
@@ -178,11 +183,61 @@ export async function bootstrapLocalEnvironment(input: {
       executor: executor.address,
       threshold: 2,
     });
+    const forwarder = chain.executor.address.toLowerCase() as Hex;
+    const wallet = createWalletClient({
+      chain: anvil,
+      account: chain.executor,
+      transport: http(node.url),
+    });
+    const artifact = JSON.parse(
+      readFileSync(
+        'contracts/out/RiskAttestationRegistry.sol/RiskAttestationRegistry.json',
+        'utf8',
+      ),
+    ) as { abi: readonly unknown[]; bytecode: { object: Hex } };
+    const deployment = await wallet.deployContract({
+      abi: artifact.abi,
+      bytecode: artifact.bytecode.object,
+      args: [forwarder],
+    });
+    const registry = (
+      await chain.client.waitForTransactionReceipt({ hash: deployment })
+    ).contractAddress!;
+    const workflowId = `0x${'11'.repeat(32)}` as Hex;
+    const sourceConfigHash = `0x${'22'.repeat(32)}` as Hex;
+    const assetId = canonicalAssetKey(LOCAL_CHAIN_ID, chain.token);
+    const timestamp = (await chain.client.getBlock()).timestamp;
+    const reportTx = await wallet.writeContract({
+      address: registry,
+      abi: riskAttestationRegistryAbi,
+      functionName: 'onReport',
+      args: [
+        (workflowId + '00'.repeat(30)) as Hex,
+        encodeAttestationReport({
+          assetId,
+          timestamp,
+          referencePrice: 100_000_000n,
+          deviationBps: 0,
+          stalenessSec: 0n,
+          status: 'HEALTHY',
+          sourceConfigHash,
+          reasons: ['LOCAL_SIMULATION'],
+        }),
+      ],
+    });
+    await chain.client.waitForTransactionReceipt({ hash: reportTx });
     const runId = `${Date.now()}-${process.pid}`;
     const manifest: LocalWorkflowManifest = {
       schemaVersion: 1,
       executionMode: 'SIMULATION',
       rpcUrl: node.url,
+      riskAttestation: {
+        registry: registry.toLowerCase() as Hex,
+        forwarder,
+        workflowId,
+        sourceConfigHash,
+        assetId,
+      },
       factory: chain.factory.toLowerCase() as `0x${string}`,
       registry: chain.registry.toLowerCase() as `0x${string}`,
       module: chain.module.toLowerCase() as `0x${string}`,

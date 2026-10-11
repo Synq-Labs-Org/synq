@@ -322,7 +322,7 @@ async function testnetFlowEvidence() {
   } catch (error) {
     raw = failure(error);
   }
-  write('flow-testnet-probe.json', 'REAL_TESTNET', {
+  write('flow-testnet-probe.json', 'MAINNET_READ_ONLY', {
     description:
       'Kuru Flow API asked for a testnet USDC->MON quote; Flow has no testnet entrypoint in the registry and the capability report says UNAVAILABLE_IN_NETWORK_PROFILE',
     response: raw,

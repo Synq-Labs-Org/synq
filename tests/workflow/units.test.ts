@@ -158,7 +158,7 @@ describe('deterministic DCA evaluator', () => {
     quotedOutputAmount: '99',
     quoteExpiresAt: 1_300,
     riskStatus: 'HEALTHY',
-    observedAt: 1_010,
+    observedAt: 1_000,
   };
   const evaluate = (
     s: Partial<DcaFreshState> = {},
@@ -170,6 +170,15 @@ describe('deterministic DCA evaluator', () => {
       evidence: { ...evidence, ...e },
     });
 
+  it('future evidence and a quote already expired at the state time never execute', () => {
+    expect(evaluate({}, { observedAt: 1001 })).toMatchObject({
+      decision: 'ESCALATE',
+      reasons: ['EVIDENCE_FUTURE'],
+    });
+    expect(
+      evaluate({}, { observedAt: 990, quoteExpiresAt: 999 }),
+    ).toMatchObject({ decision: 'SKIP', reasons: ['QUOTE_EXPIRED'] });
+  });
   it('executes within policy and is a pure function of its inputs', () => {
     expect(evaluate()).toEqual({
       decision: 'EXECUTE',
@@ -193,14 +202,14 @@ describe('deterministic DCA evaluator', () => {
     expect(evaluate({ ticksExecuted: 5 }).reasons).toContain(
       'MAX_TICKS_REACHED',
     );
-    expect(evaluate({}, { quoteExpiresAt: 1_010 }).reasons).toContain(
+    expect(evaluate({}, { quoteExpiresAt: 1_000 }).reasons).toContain(
       'QUOTE_EXPIRED',
     );
     expect(
       evaluate(
         {},
         {
-          observedAt: 1_000 + DCA_EVIDENCE_MAX_AGE_SECONDS + 1,
+          observedAt: 1_000 - DCA_EVIDENCE_MAX_AGE_SECONDS - 1,
           quoteExpiresAt: 9_999,
         },
       ).reasons,

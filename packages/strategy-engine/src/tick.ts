@@ -22,6 +22,7 @@ export const DcaTickFactsSchema = z.strictObject({
   remainingBudget: UintSchema,
   observedAt: z.number().int().nonnegative(),
   quotedOutputAmount: UintSchema,
+  quotedInputAmount: UintSchema.optional(),
   quoteExpiresAt: z.number().int().nonnegative(),
   riskStatus: ReferenceStatusSchema,
   evidenceObservedAt: z.number().int().nonnegative(),
@@ -103,7 +104,7 @@ export function assembleDcaEvaluationInput(
     return verdict('ESCALATE', ['NO_OUTPUT_QUOTED']);
   const { budgetAsset, targetAsset } = policy.data;
   const price =
-    (facts.inputAmountPerTick *
+    ((facts.quotedInputAmount ?? facts.inputAmountPerTick) *
       10n ** BigInt(targetAsset.decimals) *
       PRICE_SCALE) /
     (facts.quotedOutputAmount * 10n ** BigInt(budgetAsset.decimals));

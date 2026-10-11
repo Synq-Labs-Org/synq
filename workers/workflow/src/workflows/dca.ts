@@ -103,12 +103,13 @@ export async function DCAWorkflow(input: DcaTickInput): Promise<DcaTickResult> {
     evidence,
   });
   if (evaluation.decision !== 'EXECUTE') return record(evaluation);
+  result.evidence = evaluation.evidence ?? evidence;
 
   const built = await acts.buildDcaAction({
     strategy: input.strategy,
     tickKey,
     amount: evaluation.amount,
-    evidence,
+    evidence: evaluation.evidence ?? evidence,
   });
   result.childWorkflowId = built.workflowId;
   try {

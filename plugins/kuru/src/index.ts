@@ -10,3 +10,4 @@ export * from './simulate.js';
 export * from './capabilities.js';
 export * from './plugins.js';
 export * from './canary.js';
+export * from './reconciliation.js';

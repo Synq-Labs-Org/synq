@@ -61,6 +61,9 @@ export type PersistedHedge = {
 export class PostgresHedgeStore {
   constructor(readonly pool: Pool) {}
   async initialize(): Promise<void> {
+    await this.pool
+      .query(`CREATE TABLE IF NOT EXISTS synq_portfolio_observations (
+      group_id text PRIMARY KEY, execution_mode text NOT NULL, evidence jsonb NOT NULL)`);
     await this.pool.query(`CREATE TABLE IF NOT EXISTS synq_hedge_intents (
       intent_id text PRIMARY KEY, intent_hash text NOT NULL UNIQUE,
       group_id text NOT NULL, account_key text NOT NULL,
@@ -69,6 +72,14 @@ export class PostgresHedgeStore {
       group_id text NOT NULL, hedge_id text NOT NULL,
       intent_id text NOT NULL UNIQUE, client_order_id text UNIQUE,
       record jsonb NOT NULL, PRIMARY KEY (group_id, hedge_id))`);
+  }
+  async observePortfolio(groupId: string, evidence: HedgeEvidence) {
+    await this.pool.query(
+      `INSERT INTO synq_portfolio_observations(group_id,execution_mode,evidence) VALUES($1,$2,$3)
+      ON CONFLICT(group_id) DO UPDATE SET execution_mode=EXCLUDED.execution_mode,evidence=EXCLUDED.evidence
+      WHERE (synq_portfolio_observations.evidence->'risk'->>'asOf')::bigint <= (EXCLUDED.evidence->'risk'->>'asOf')::bigint`,
+      [groupId, evidence.executionMode, JSON.stringify(evidence)],
+    );
   }
   // First writer wins: a retried planning step returns the persisted proposal.
   async proposeOnce(record: HedgeProposalRecord): Promise<HedgeProposalRecord> {

@@ -22,6 +22,7 @@ import {
   hedgeMarketFrom,
   type PerplHedgeEvidenceReader,
 } from './evidence.js';
+import { PostgresHedgeMandateSource } from './mandate-source.js';
 import type { HedgeExecutionReceipt, PerplHedgeExecutor } from './executor.js';
 
 export type HedgeMandates = { mandate: Mandate; hedgeMandate: HedgeMandate };
@@ -84,12 +85,21 @@ export class PerplHedgeService {
   ) {
     if (deps.reader.executionMode !== deps.authority.executionMode)
       throw new HedgeGrantError('GRANT_BINDING', 'reader/authority mode');
+    if (
+      deps.reader.executionMode === 'REAL_TESTNET' &&
+      !(deps.mandates instanceof PostgresHedgeMandateSource)
+    )
+      throw new HedgeGrantError(
+        'GRANT_BINDING',
+        'live hedge mandates require governed artifacts',
+      );
     this.now = deps.now ?? Date.now;
   }
 
   async snapshot(groupId: string) {
     const { hedgeMandate } = await this.deps.mandates.current(groupId);
     const e = await this.deps.reader.read();
+    await this.deps.store.observePortfolio(groupId, e);
     const asset = e.risk.assets.find(
       (a) => a.asset === hedgeMandate.hedgedAsset,
     );
@@ -119,6 +129,7 @@ export class PerplHedgeService {
       };
     const intentId = scopedHedgeIntentId(input.groupId, input.hedgeId);
     const evidence = await this.deps.reader.read();
+    await this.deps.store.observePortfolio(input.groupId, evidence);
     const now = this.now();
     const p = proposeHedge(
       evidence.risk,

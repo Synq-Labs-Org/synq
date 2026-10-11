@@ -11,6 +11,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { anvil } from 'viem/chains';
 import { Context } from '@temporalio/activity';
 import { localProfile } from '@synq/chain-registry';
+import { RegistryRiskSource } from '@synq/plugin-chainlink-cre';
+import { RpcRiskAttestationReader } from '@synq/plugin-chainlink-cre';
 import { artifactHash, intentHash, onchainMandateId } from '@synq/kernel';
 import { PostgresIdentityStore } from '@synq/identity';
 import { PluginRegistry } from '@synq/plugin-sdk';
@@ -468,6 +470,31 @@ export async function openLocalRuntime(
     notify: outboxNotifier(manifest.outboxFile),
   });
   const ticks = new FileTickStore(manifest.ticksFile);
+  const binding = manifest.riskAttestation;
+  const riskSource = binding
+    ? new RegistryRiskSource(
+        {
+          reader: new RpcRiskAttestationReader(client, {
+            confirmationDepth: 1,
+            trustedForwarder: binding.forwarder,
+            forwarderKind: 'CRE_MOCK_FORWARDER',
+            trustedWorkflowId: binding.workflowId,
+          }),
+          chainId,
+          registry: binding.registry,
+          assets: [{ address: manifest.token, assetId: binding.assetId }],
+          maxAttestationAgeSeconds: 1200,
+          maxReferenceStalenessSeconds: 1200,
+          maxHealthyDeviationBps: 50,
+          trustedSourceConfigHash: binding.sourceConfigHash,
+          trustedForwarder: binding.forwarder,
+          forwarderKind: 'CRE_MOCK_FORWARDER',
+          trustedWorkflowId: binding.workflowId,
+        },
+        () => localNow(client),
+        manifest.token,
+      )
+    : null;
   const strategy = createStrategyActivities({
     async freshState(strategy) {
       const mandate = kernel.kernel.mandate(
@@ -498,6 +525,7 @@ export async function openLocalRuntime(
     async marketEvidence(strategy) {
       const now = await localNow(client);
       const block = await client.getBlock();
+      const risk = await riskSource?.current(strategy.groupId);
       return {
         evidenceHash: artifactHash({
           blockHash: block.hash,
@@ -506,7 +534,7 @@ export async function openLocalRuntime(
         referencePrice: '1',
         quotedOutputAmount: strategy.inputAmountPerTick,
         quoteExpiresAt: now + 300,
-        riskStatus: 'HEALTHY',
+        riskStatus: risk?.state.status ?? 'UNKNOWN',
         observedAt: now,
       };
     },

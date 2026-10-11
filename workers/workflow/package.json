@@ -34,7 +34,8 @@
     "@temporalio/workflow": "1.24.0",
     "pg": "8.18.0",
     "viem": "2.57.4",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/plugin-chainlink-cre": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "1.24.0"
