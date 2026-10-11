@@ -3,6 +3,7 @@ export * from './errors.js';
 export * from './mandates.js';
 export * from './policy.js';
 export * from './risk.js';
+export * from './risk-attestation.js';
 export * from './freshness.js';
 export * from './delegation.js';
 export * from './approvals.js';

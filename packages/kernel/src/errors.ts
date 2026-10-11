@@ -67,6 +67,7 @@ export const RISK_FAILURES: ReadonlySet<Failure> = new Set<Failure>([
   'QUOTE_REQUIRED',
   'MIN_OUTPUT_TOO_LOW',
   'ALLOCATION_CAP',
+  'STABLE_RISK_UNAVAILABLE',
 ]);
 export const SIMULATION_FAILURES: ReadonlySet<Failure> = new Set<Failure>([
   'SIMULATION_FAILED',
@@ -94,6 +95,7 @@ export const REFRESHABLE_FAILURES: ReadonlySet<Failure> = new Set<Failure>([
   'DIRECT_VERIFICATION_FAILED',
   'DRAFT_EXPIRED',
   'AUDIT_UNAVAILABLE',
+  'STABLE_RISK_UNAVAILABLE',
 ]);
 
 export type DecisionStatus = Extract<

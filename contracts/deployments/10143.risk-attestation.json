@@ -1,0 +1,9 @@
+{
+  "RiskAttestationRegistry": "0x4fdC5927B05DDAf5278F7564B519B539E8C1ECf7",
+  "chainId": 10143,
+  "deployer": "0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD",
+  "forwarder": "0xB9F79d863261869B234c481D1f9A7af84AeAd192",
+  "forwarderKind": "CRE_MOCK_FORWARDER",
+  "forwarderRegistryKey": "testnetCreMockForwarder",
+  "simulatedAtBlock": 69858736
+}

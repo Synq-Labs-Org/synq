@@ -1,0 +1,11 @@
+# CRE project settings for the Synq AUSD risk workflow. RPC URLs come from the environment
+# (scripts in this package default them from the chain registry profiles) so no endpoint is pinned here.
+monad-testnet-simulation:
+  rpcs:
+    - chain-name: monad-testnet
+      url: ${SYNQ_MONAD_TESTNET_RPC_URL}
+
+monad-mainnet-simulation:
+  rpcs:
+    - chain-name: monad-mainnet
+      url: ${SYNQ_MONAD_MAINNET_RPC_URL}

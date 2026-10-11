@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Bible section 23 policy over real Chainlink MON/USD history > runs weekly with AUSD treated at its 1 USD accounting target and keeps every invariant 1`] = `
+[
+  "dca-mon-ausd:0 px=2280071 chg=239 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:1 px=2120654 chg=-164 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:2 px=2136248 chg=370 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:3 px=2097928 chg=256 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:4 px=2097658 chg=51 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:5 px=2028000 chg=-288 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:6 px=3039779 chg=807 SKIP - SPIKE",
+  "dca-mon-ausd:7 px=2658140 chg=-51 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:8 px=2709914 chg=868 SKIP - SPIKE",
+  "dca-mon-ausd:9 px=2265456 chg=-214 EXECUTE 37500000 DIP_MULTIPLIER",
+  "dca-mon-ausd:10 px=2498273 chg=68 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:11 px=2809791 chg=488 EXECUTE 25000000 SCHEDULED",
+  "dca-mon-ausd:12 px=3334600 chg=-156 EXECUTE 25000000 SCHEDULED",
+]
+`;

@@ -15,6 +15,8 @@ import { trackedFiles } from '../../scripts/secrets.mjs';
 const ALLOWED_PATHS = [
   /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
   /^sources\/chain_registry\.json$/,
+  /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
+  /^bounty-evidence\//,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
   /^sources\/research\/2026-10-10-(?:perpl-intents-ausd|kuru-chainlink-cre|mastra-temporal-models)\.md$/,

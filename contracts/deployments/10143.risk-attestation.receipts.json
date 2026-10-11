@@ -1,0 +1,20 @@
+{
+  "chainId": 10143,
+  "profile": "sandbox/monad-testnet",
+  "contract": "RiskAttestationRegistry",
+  "transactions": [
+    {
+      "hash": "0xb8f259659198996e4fbab6d73f5375857b470e288a757330b1563987ee7afffc",
+      "blockNumber": 69858764,
+      "status": 1,
+      "gasUsed": 992447,
+      "from": "0x6bd6db75b56ace65019aa08fcad4778808da08bd",
+      "to": null,
+      "contractAddress": "0x4fdc5927b05ddaf5278f7564b519b539e8c1ecf7"
+    }
+  ],
+  "explorer": "https://testnet.monadvision.com/tx/0xb8f259659198996e4fbab6d73f5375857b470e288a757330b1563987ee7afffc",
+  "executionMode": "REAL_TESTNET",
+  "sourceVerification": "sourcify-api-monad.blockvision.org: exact_match (runtime) 2026-10-10 (contracts/evidence/sourcify-verify-10143-risk-attestation.txt)",
+  "note": "Forwarder is the CRE MockKeystoneForwarder (simulation only). A production deployment needs the KeystoneForwarder and CRE deploy access."
+}

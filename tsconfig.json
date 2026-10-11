@@ -1,5 +1,5 @@
 {
   "compilerOptions": {"target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noUncheckedIndexedAccess": true, "esModuleInterop": true, "skipLibCheck": true, "resolveJsonModule": true, "noEmit": true, "types": ["node"]},
   "include": ["packages/**/*.ts", "apps/**/*.ts", "workers/**/*.ts", "plugins/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "indexer/envio/generated", "apps/web"]
+  "exclude": ["node_modules", "indexer/envio/generated", "apps/web", "plugins/chainlink-cre/synq-ausd-risk"]
 }
