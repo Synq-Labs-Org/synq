@@ -254,6 +254,7 @@ it('chat /propose → OpenAI Brain (replay) → Kernel gateway → mandate propo
     linkedAt: now,
     status: 'ACTIVE',
     confirmTokenHash: null,
+    chatAdmin: true,
   });
 
   const before = local.kernel.listMandates().length;

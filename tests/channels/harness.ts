@@ -21,6 +21,12 @@ export class FakeAdapter implements ChannelAdapter {
   sent: { chat: string; message: OutboundMessage }[] = [];
   failing = false;
   acks: string[] = [];
+  admins = new Set<string>();
+  async chatRole(chat: string, user: string) {
+    return this.admins.has(`${chat}:${user}`) || this.admins.has(`*:${user}`)
+      ? ('ADMIN' as const)
+      : ('MEMBER' as const);
+  }
   deepLink(payload: string) {
     return `https://t.me/synq_bot?start=${payload}`;
   }
@@ -40,7 +46,12 @@ export class FakeAdapter implements ChannelAdapter {
 
 export function fixture(
   now = 1_800_000_000,
-  options: { requireTelegramProof?: boolean; chatLinkQuorum?: number } = {},
+  options: {
+    requireTelegramProof?: boolean;
+    chatLinkQuorum?: number;
+    requireChatAdmin?: boolean;
+    pendingLinkTtlSeconds?: number;
+  } = {},
 ) {
   const clock = { t: now };
   const store = new MemoryChannelStore();
@@ -99,6 +110,10 @@ export function fixture(
     brainCooldownSeconds: 0,
     requireExternalProof: { telegram: options.requireTelegramProof ?? false },
     chatLinkQuorum: options.chatLinkQuorum ?? 1,
+    requireChatAdmin: { telegram: options.requireChatAdmin ?? false },
+    ...(options.pendingLinkTtlSeconds
+      ? { pendingLinkTtlSeconds: options.pendingLinkTtlSeconds }
+      : {}),
     onEvent: (event, o) =>
       events.push({ event, status: o.status, code: o.code }),
   });

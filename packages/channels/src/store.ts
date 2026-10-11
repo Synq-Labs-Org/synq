@@ -18,6 +18,8 @@ export type UserLink = {
   principalId: string;
   linkedAt: number;
   status: LinkStatus;
+  /** The chat user was a chat creator/administrator when they confirmed. */
+  chatAdmin: boolean;
 };
 export type LinkCodeRecord = {
   codeHash: string;
@@ -91,6 +93,8 @@ export interface ChannelStore {
     principalId: string;
     confirmTokenHash: string;
     now: number;
+    /** A PENDING chat link created at or before this time is expired and may be replaced. */
+    pendingExpiresBefore: number;
   }): Promise<RedeemOutcome>;
   /** Activates a PENDING user link when its own chat user presents the confirm token. */
   confirmUserLink(input: {
@@ -98,6 +102,7 @@ export interface ChannelStore {
     externalUserId: string;
     confirmTokenHash: string;
     now: number;
+    chatAdmin: boolean;
   }): Promise<UserLink | null>;
   /** PENDING → ACTIVE once `minPrincipals` distinct confirmed members of the bound group exist. */
   activateGroupLink(
@@ -105,6 +110,19 @@ export interface ChannelStore {
     externalGroupId: string,
     minPrincipals: number,
     now: number,
+    options: { requireChatAdmin: boolean; pendingExpiresBefore: number },
+  ): Promise<GroupLink | null>;
+  setChatAdmin(
+    channel: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+    chatAdmin: boolean,
+  ): Promise<void>;
+  /** Unlinks a chat: the chat link and every member link in that chat become REVOKED. */
+  revokeGroupLink(
+    channel: ChannelId,
+    externalGroupId: string,
+    at: number,
   ): Promise<GroupLink | null>;
   revokeUser(
     channel: ChannelId,
@@ -215,6 +233,7 @@ export class MemoryChannelStore implements ChannelStore {
     principalId: string;
     confirmTokenHash: string;
     now: number;
+    pendingExpiresBefore: number;
   }): Promise<RedeemOutcome> {
     const code = this.codes.get(input.codeHash);
     if (!code) return { status: 'CODE_INVALID' };
@@ -222,14 +241,20 @@ export class MemoryChannelStore implements ChannelStore {
     if (code.expiresAt <= input.now) return { status: 'CODE_EXPIRED' };
     const gKey = k(code.channel, code.externalGroupId);
     const uKey = k(code.channel, code.externalGroupId, code.externalUserId);
-    const existingGroup = this.groups.get(gKey);
+    const stored = this.groups.get(gKey);
+    const existingGroup =
+      stored?.status === 'PENDING' &&
+      stored.linkedAt <= input.pendingExpiresBefore
+        ? undefined
+        : stored;
     if (
       existingGroup &&
       existingGroup.status !== 'REVOKED' &&
       existingGroup.groupId !== input.groupId
     )
       return { status: 'GROUP_LINK_CONFLICT' };
-    const existingUser = this.users.get(uKey);
+    const priorUser = this.users.get(uKey);
+    const existingUser = stored && !existingGroup ? undefined : priorUser;
     if (
       existingUser &&
       existingUser.status !== 'REVOKED' &&
@@ -237,6 +262,15 @@ export class MemoryChannelStore implements ChannelStore {
     )
       return { status: 'USER_LINK_CONFLICT' };
     code.consumedAt = input.now;
+    if (stored && !existingGroup)
+      for (const u of this.users.values())
+        if (
+          u.channel === code.channel &&
+          u.externalGroupId === code.externalGroupId
+        ) {
+          u.status = 'REVOKED';
+          u.confirmTokenHash = null;
+        }
     const group: GroupLink =
       existingGroup && existingGroup.status !== 'REVOKED'
         ? existingGroup
@@ -260,6 +294,8 @@ export class MemoryChannelStore implements ChannelStore {
           : ('PENDING' as const),
       confirmTokenHash:
         existingUser?.status === 'ACTIVE' ? null : input.confirmTokenHash,
+      chatAdmin:
+        existingUser?.status === 'ACTIVE' ? existingUser.chatAdmin : false,
     };
     this.groups.set(gKey, group);
     this.users.set(uKey, user);
@@ -271,6 +307,7 @@ export class MemoryChannelStore implements ChannelStore {
     externalUserId: string;
     confirmTokenHash: string;
     now: number;
+    chatAdmin: boolean;
   }) {
     for (const u of this.users.values())
       if (
@@ -280,6 +317,7 @@ export class MemoryChannelStore implements ChannelStore {
         u.confirmTokenHash === input.confirmTokenHash
       ) {
         u.status = 'ACTIVE';
+        u.chatAdmin = input.chatAdmin;
         u.confirmTokenHash = null;
         u.linkedAt = input.now;
         const { confirmTokenHash: _t, ...link } = u;
@@ -291,22 +329,46 @@ export class MemoryChannelStore implements ChannelStore {
     channel: ChannelId,
     externalGroupId: string,
     minPrincipals: number,
+    _now: number,
+    options: { requireChatAdmin: boolean; pendingExpiresBefore: number },
   ) {
     const g = this.groups.get(k(channel, externalGroupId));
     if (!g || g.status === 'REVOKED') return null;
     if (g.status === 'PENDING') {
-      const principals = new Set(
-        [...this.users.values()]
-          .filter(
-            (u) =>
-              u.channel === channel &&
-              u.externalGroupId === externalGroupId &&
-              u.status === 'ACTIVE',
-          )
-          .map((u) => u.principalId),
+      if (g.linkedAt <= options.pendingExpiresBefore) return { ...g };
+      const active = [...this.users.values()].filter(
+        (u) =>
+          u.channel === channel &&
+          u.externalGroupId === externalGroupId &&
+          u.status === 'ACTIVE',
       );
-      if (principals.size >= minPrincipals) g.status = 'ACTIVE';
+      const principals = new Set(active.map((u) => u.principalId));
+      if (
+        principals.size >= minPrincipals &&
+        (!options.requireChatAdmin || active.some((u) => u.chatAdmin))
+      )
+        g.status = 'ACTIVE';
     }
+    return { ...g };
+  }
+  async setChatAdmin(
+    channel: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+    chatAdmin: boolean,
+  ) {
+    const u = this.users.get(k(channel, externalGroupId, externalUserId));
+    if (u) u.chatAdmin = chatAdmin;
+  }
+  async revokeGroupLink(channel: ChannelId, externalGroupId: string) {
+    const g = this.groups.get(k(channel, externalGroupId));
+    if (!g) return null;
+    g.status = 'REVOKED';
+    for (const u of this.users.values())
+      if (u.channel === channel && u.externalGroupId === externalGroupId) {
+        u.status = 'REVOKED';
+        u.confirmTokenHash = null;
+      }
     return { ...g };
   }
   async revokeUser(

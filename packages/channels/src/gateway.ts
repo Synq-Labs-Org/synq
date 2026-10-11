@@ -116,6 +116,10 @@ export type ChannelGatewayOptions = {
   eventLeaseSeconds?: number;
   /** Distinct confirmed members required before a new chat speaks for a group. */
   chatLinkQuorum?: number;
+  /** A pending chat link that is not activated within this window expires (default 24h). */
+  pendingLinkTtlSeconds?: number;
+  /** Activation needs a confirmed member who is a chat creator/administrator (default: Telegram on). */
+  requireChatAdmin?: Partial<Record<ChannelId, boolean>>;
   /** Channels whose link redemption must carry a verified provider identity. */
   requireExternalProof?: Partial<Record<ChannelId, boolean>>;
   onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
@@ -298,6 +302,8 @@ export class ChannelGateway {
       });
     if (parsed.kind === 'COMMAND' && parsed.name === 'synq')
       return this.link(envelope);
+    if (parsed.kind === 'COMMAND' && parsed.name === 'unlink')
+      return this.unlink(envelope);
 
     const access = await this.access(envelope);
     if ('refusal' in access) return access.refusal;
@@ -357,6 +363,11 @@ export class ChannelGateway {
     );
     if (!group || group.status === 'REVOKED')
       return { refusal: this.result('UNAUTHORIZED', 'GROUP_NOT_LINKED') };
+    if (
+      group.status === 'PENDING' &&
+      group.linkedAt <= this.options.now() - this.pendingTtl()
+    )
+      return { refusal: this.result('UNAUTHORIZED', 'GROUP_LINK_EXPIRED') };
     if (group.status === 'PENDING')
       return {
         refusal: await this.replyOutcome(
@@ -538,6 +549,7 @@ export class ChannelGateway {
       principalId: input.principalId,
       confirmTokenHash: hashConfirm(confirmToken),
       now: this.options.now(),
+      pendingExpiresBefore: this.options.now() - this.pendingTtl(),
     });
     if (outcome.status !== 'LINKED') return outcome;
     const about = await this.describeGroup(outcome.group.groupId);
@@ -565,8 +577,23 @@ export class ChannelGateway {
           externalUserId: envelope.externalUserId!,
           confirmTokenHash: hashConfirm(token.trim()),
           now,
+          chatAdmin: false,
         })
       : null;
+    if (
+      user &&
+      (await this.isChatAdmin(
+        user.channel,
+        user.externalGroupId,
+        user.externalUserId,
+      ))
+    )
+      await store.setChatAdmin(
+        user.channel,
+        user.externalGroupId,
+        user.externalUserId,
+        true,
+      );
     if (!user)
       return this.replyOutcome(envelope, 'REFUSED', 'CONFIRM_INVALID', {
         text: 'Nothing to confirm with that code. Send /synq in your group chat to start again.',
@@ -577,6 +604,10 @@ export class ChannelGateway {
       user.externalGroupId,
       this.options.chatLinkQuorum ?? 2,
       now,
+      {
+        requireChatAdmin: this.requiresChatAdmin(user.channel),
+        pendingExpiresBefore: now - this.pendingTtl(),
+      },
     );
     const member = group
       ? await this.options.ports.activeMember(group.groupId, user.principalId)
@@ -590,12 +621,78 @@ export class ChannelGateway {
             ? `Linked: this chat now speaks for Synq group ${about}, confirmed by ${this.options.chatLinkQuorum ?? 2} members. Approvals still require each member's passkey.`
             : group.status === 'ACTIVE'
               ? `Linked: ${who} confirmed with a passkey and from their private chat.`
-              : `${who} confirmed. Waiting for another member of Synq group ${about} to link and confirm before this chat is active.`,
+              : `${who} confirmed. Waiting for ${this.options.chatLinkQuorum ?? 2} members of Synq group ${about}${this.requiresChatAdmin(user.channel) ? ', including a chat admin,' : ''} to link and confirm before this chat is active.`,
       });
     }
     return this.replyOutcome(envelope, 'HANDLED', 'LINK_CONFIRMED', {
       text: `Confirmed as ${who}.`,
     });
+  }
+
+  private pendingTtl() {
+    return this.options.pendingLinkTtlSeconds ?? 86_400;
+  }
+  private requiresChatAdmin(channel: ChannelId) {
+    return this.options.requireChatAdmin?.[channel] ?? channel === 'telegram';
+  }
+  private async isChatAdmin(channel: ChannelId, chat: string, user: string) {
+    const role = await this.adapters
+      .get(channel)
+      ?.chatRole?.(chat, user)
+      .catch(() => 'NONE' as const);
+    return role === 'OWNER' || role === 'ADMIN';
+  }
+
+  /** `/unlink` in a chat, honoured only for the chat's creator or administrators. */
+  private async unlink(envelope: Envelope): Promise<GatewayOutcome> {
+    if (
+      !(await this.isChatAdmin(
+        envelope.channel,
+        envelope.externalGroupId,
+        envelope.externalUserId!,
+      ))
+    )
+      return this.replyOutcome(envelope, 'REFUSED', 'UNLINK_ADMIN_ONLY', {
+        text: 'Only a chat admin can unlink this chat from its Synq group.',
+      });
+    const g = await this.options.store.revokeGroupLink(
+      envelope.channel,
+      envelope.externalGroupId,
+      this.options.now(),
+    );
+    return this.replyOutcome(envelope, 'HANDLED', 'UNLINKED', {
+      text: g
+        ? 'Unlinked: this chat no longer speaks for any Synq group, and every member link in it was removed. Members can /synq again.'
+        : 'This chat was not linked to a Synq group.',
+    });
+  }
+
+  /** Web/API unlink by an authenticated member of the group the chat is bound to. */
+  async unlinkChat(input: {
+    channel: ChannelId;
+    externalGroupId: string;
+    groupId: string;
+    principalId: string;
+  }): Promise<'UNLINKED' | 'NOT_LINKED' | 'NOT_A_MEMBER'> {
+    const g = await this.options.store.groupLink(
+      input.channel,
+      input.externalGroupId,
+    );
+    if (!g || g.status === 'REVOKED' || g.groupId !== input.groupId)
+      return 'NOT_LINKED';
+    if (
+      !(await this.options.ports.activeMember(input.groupId, input.principalId))
+    )
+      return 'NOT_A_MEMBER';
+    await this.options.store.revokeGroupLink(
+      input.channel,
+      input.externalGroupId,
+      this.options.now(),
+    );
+    await this.post(input.channel, input.externalGroupId, {
+      text: 'Unlinked by a member from the Synq web app: this chat no longer speaks for that Synq group.',
+    });
+    return 'UNLINKED';
   }
 
   private async describeGroup(groupId: string) {
@@ -644,8 +741,8 @@ export class ChannelGateway {
       command === 'balance'
         ? `Treasury ${t.symbol}: total ${t.total}, free ${t.free}, reserved ${t.reserved}, pending ${t.pending} (as of ${t.asOf}).`
         : command === 'wallet'
-          ? `Group treasury account ${t.account} on chain ${t.chainId}. Holdings: ${t.total} ${t.symbol}.`
-          : `To contribute, send ${t.symbol} on chain ${t.chainId} to the treasury account ${t.account} from your linked member wallet. It is credited after confirmation and indexing.`;
+          ? `This chat is bound to the treasury account ${t.account} on chain ${t.chainId}. Holdings: ${t.total} ${t.symbol}. Not your group's treasury? A chat admin can send /unlink.`
+          : `To contribute, send ${t.symbol} on chain ${t.chainId} to the treasury account ${t.account} this chat is bound to, from your linked member wallet. It is credited after confirmation and indexing. Not your group's treasury? Do not send; a chat admin can send /unlink.`;
     return this.replyOutcome(envelope, 'HANDLED', command.toUpperCase(), {
       text,
     });
@@ -773,6 +870,15 @@ export class ChannelGateway {
     )
       return this.result('REFUSED', 'BRAIN_RATE_LIMITED');
     this.lastBrain.set(key, now);
+    if (
+      !(await this.options.store.claimNotification(
+        envelope.channel,
+        envelope.externalGroupId,
+        `effect:brain:${envelope.eventId}`,
+        now,
+      ))
+    )
+      return this.result('IGNORED', 'BRAIN_ALREADY_RUN_FOR_EVENT');
     let reply: BrainReply;
     try {
       reply = await brain({

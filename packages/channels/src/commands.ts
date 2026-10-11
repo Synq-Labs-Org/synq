@@ -10,6 +10,7 @@ export const COMMANDS = [
   'help',
   'start',
   'confirm',
+  'unlink',
 ] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
@@ -67,5 +68,6 @@ export const HELP_TEXT = [
   '/mandates - active spending mandates',
   '/propose <text> - ask the Brain to draft a proposal for the Kernel',
   '/status - pending approvals and receipts',
+  "/unlink - chat admins only: remove this chat's link to its Synq group",
   'Approvals only happen on the Synq web page with your passkey. Replying "yes" in chat never approves anything.',
 ].join('\n');

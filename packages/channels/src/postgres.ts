@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS synq_channel_member_link (
   status text NOT NULL CHECK (status IN ('PENDING','ACTIVE','REVOKED')),
   confirm_token_hash text UNIQUE,
   PRIMARY KEY (channel, external_group_id, external_user_id));
+ALTER TABLE synq_channel_member_link ADD COLUMN IF NOT EXISTS chat_admin boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS synq_channel_link_code (
   code_hash text PRIMARY KEY, channel text NOT NULL, external_group_id text NOT NULL,
   external_user_id text NOT NULL, display_name text, created_at bigint NOT NULL,
@@ -68,6 +69,7 @@ const userRow = (r: Record<string, unknown>): UserLink => ({
   principalId: String(r.principal_id),
   linkedAt: Number(r.linked_at),
   status: status(r.status),
+  chatAdmin: r.chat_admin === true,
 });
 
 export class PostgresChannelStore implements ChannelStore {
@@ -187,6 +189,7 @@ export class PostgresChannelStore implements ChannelStore {
     principalId: string;
     confirmTokenHash: string;
     now: number;
+    pendingExpiresBefore: number;
   }): Promise<RedeemOutcome> {
     const client = await this.pool.connect();
     try {
@@ -208,18 +211,28 @@ export class PostgresChannelStore implements ChannelStore {
       const c = channel(code.channel);
       const chat = String(code.external_group_id);
       const user = String(code.external_user_id);
-      const existingGroup = (
+      const storedGroup = (
         await client.query(
           'SELECT * FROM synq_channel_chat_link WHERE channel=$1 AND external_group_id=$2 FOR UPDATE',
           [c, chat],
         )
       ).rows[0];
+      const existingGroup =
+        storedGroup?.status === 'PENDING' &&
+        Number(storedGroup.linked_at) <= input.pendingExpiresBefore
+          ? undefined
+          : storedGroup;
       if (
         existingGroup &&
         existingGroup.status !== 'REVOKED' &&
         existingGroup.group_id !== input.groupId
       )
         return done({ status: 'GROUP_LINK_CONFLICT' });
+      if (storedGroup && !existingGroup)
+        await client.query(
+          "UPDATE synq_channel_member_link SET status='REVOKED', confirm_token_hash=NULL WHERE channel=$1 AND external_group_id=$2",
+          [c, chat],
+        );
       const existingUser = (
         await client.query(
           'SELECT * FROM synq_channel_member_link WHERE channel=$1 AND external_group_id=$2 AND external_user_id=$3 FOR UPDATE',
@@ -257,7 +270,7 @@ export class PostgresChannelStore implements ChannelStore {
                 `INSERT INTO synq_channel_member_link (channel, external_group_id, external_user_id, principal_id, linked_at, status, confirm_token_hash)
                  VALUES ($1,$2,$3,$4,$5,'PENDING',$6)
                  ON CONFLICT (channel, external_group_id, external_user_id) DO UPDATE SET principal_id=EXCLUDED.principal_id,
-                   linked_at=EXCLUDED.linked_at, status='PENDING', confirm_token_hash=EXCLUDED.confirm_token_hash
+                   linked_at=EXCLUDED.linked_at, status='PENDING', confirm_token_hash=EXCLUDED.confirm_token_hash, chat_admin=false
                  RETURNING *`,
                 [
                   c,
@@ -287,11 +300,18 @@ export class PostgresChannelStore implements ChannelStore {
     externalUserId: string;
     confirmTokenHash: string;
     now: number;
+    chatAdmin: boolean;
   }) {
     const r = await this.pool.query(
-      `UPDATE synq_channel_member_link SET status='ACTIVE', confirm_token_hash=NULL, linked_at=$4
+      `UPDATE synq_channel_member_link SET status='ACTIVE', confirm_token_hash=NULL, linked_at=$4, chat_admin=$5
        WHERE channel=$1 AND external_user_id=$2 AND confirm_token_hash=$3 AND status='PENDING' RETURNING *`,
-      [input.channel, input.externalUserId, input.confirmTokenHash, input.now],
+      [
+        input.channel,
+        input.externalUserId,
+        input.confirmTokenHash,
+        input.now,
+        input.chatAdmin,
+      ],
     );
     return r.rows[0] ? userRow(r.rows[0]) : null;
   }
@@ -300,6 +320,7 @@ export class PostgresChannelStore implements ChannelStore {
     externalGroupId: string,
     minPrincipals: number,
     now: number,
+    options: { requireChatAdmin: boolean; pendingExpiresBefore: number },
   ) {
     return this.tx(async (client) => {
       const g = (
@@ -310,13 +331,19 @@ export class PostgresChannelStore implements ChannelStore {
       ).rows[0];
       if (!g || g.status === 'REVOKED') return null;
       if (g.status === 'ACTIVE') return groupRow(g);
-      const n = (
+      if (Number(g.linked_at) <= options.pendingExpiresBefore)
+        return groupRow(g);
+      const counts = (
         await client.query(
-          "SELECT count(DISTINCT principal_id)::int AS n FROM synq_channel_member_link WHERE channel=$1 AND external_group_id=$2 AND status='ACTIVE'",
+          "SELECT count(DISTINCT principal_id)::int AS n, bool_or(chat_admin) AS admin FROM synq_channel_member_link WHERE channel=$1 AND external_group_id=$2 AND status='ACTIVE'",
           [c, externalGroupId],
         )
-      ).rows[0]!.n as number;
-      if (n < minPrincipals) return groupRow(g);
+      ).rows[0]!;
+      if (
+        (counts.n as number) < minPrincipals ||
+        (options.requireChatAdmin && counts.admin !== true)
+      )
+        return groupRow(g);
       const updated = (
         await client.query(
           "UPDATE synq_channel_chat_link SET status='ACTIVE', linked_at=$3 WHERE channel=$1 AND external_group_id=$2 RETURNING *",
@@ -324,6 +351,32 @@ export class PostgresChannelStore implements ChannelStore {
         )
       ).rows[0]!;
       return groupRow(updated);
+    });
+  }
+  async setChatAdmin(
+    c: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+    chatAdmin: boolean,
+  ) {
+    await this.pool.query(
+      'UPDATE synq_channel_member_link SET chat_admin=$4 WHERE channel=$1 AND external_group_id=$2 AND external_user_id=$3',
+      [c, externalGroupId, externalUserId, chatAdmin],
+    );
+  }
+  async revokeGroupLink(c: ChannelId, externalGroupId: string, at: number) {
+    return this.tx(async (client) => {
+      const g = (
+        await client.query(
+          "UPDATE synq_channel_chat_link SET status='REVOKED', linked_at=$3 WHERE channel=$1 AND external_group_id=$2 RETURNING *",
+          [c, externalGroupId, at],
+        )
+      ).rows[0];
+      await client.query(
+        "UPDATE synq_channel_member_link SET status='REVOKED', confirm_token_hash=NULL WHERE channel=$1 AND external_group_id=$2",
+        [c, externalGroupId],
+      );
+      return g ? groupRow(g) : null;
     });
   }
   async revokeUser(
