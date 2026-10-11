@@ -7,9 +7,11 @@ import {
 } from '@temporalio/workflow';
 import type {
   HedgeActivities,
+  HedgeApprovalView,
   HedgeOrderView,
   HedgePlan,
 } from '../activities/types.js';
+import { hedgeApprovalGate } from './versions.js';
 import {
   cancelUpdate,
   nextScheduledEventQuery,
@@ -25,11 +27,13 @@ export type HedgeInput = {
   hedgeId: string;
   pollSeconds?: number;
   maxPolls?: number;
+  maxApprovalPolls?: number;
   activityTimeoutSeconds?: number;
 };
 export type HedgeState = {
   hedgeId: string;
   plan: HedgePlan | null;
+  approvals: HedgeApprovalView | null;
   clientOrderId: string | null;
   order: HedgeOrderView | null;
   cancelRequested: boolean;
@@ -67,6 +71,7 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   const s: HedgeState = {
     hedgeId: input.hedgeId,
     plan: null,
+    approvals: null,
     clientOrderId: null,
     order: null,
     cancelRequested: false,
@@ -112,6 +117,20 @@ export async function HedgeWorkflow(input: HedgeInput): Promise<HedgeState> {
   s.plan = plan;
   if (plan.action === 'NONE' || s.cancelRequested) return done('NO_ACTION');
   s.clientOrderId = `synq.${input.groupId}.${input.hedgeId}.${plan.action.toLowerCase()}`;
+  if (hedgeApprovalGate()) {
+    for (let i = 0; i < (input.maxApprovalPolls ?? 360); i++) {
+      s.approvals = await acts.hedgeApprovals({
+        groupId: input.groupId,
+        clientOrderId: s.clientOrderId,
+      });
+      if (s.approvals.rejected) return done('REJECTED');
+      if (s.approvals.satisfied || s.cancelRequested) break;
+      s.nextEvent = { kind: 'HEDGE_POLL', at: Date.now() + poll * 1000 };
+      await condition(() => s.cancelRequested, seconds(poll));
+    }
+    if (s.cancelRequested) return done('CANCELLED');
+    if (!s.approvals?.satisfied) return done('REJECTED');
+  }
   try {
     s.order = await mutations.submitHedgeOrder({
       groupId: input.groupId,

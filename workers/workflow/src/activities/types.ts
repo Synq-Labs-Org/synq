@@ -259,6 +259,13 @@ export type HedgeOrderView = {
   filledSize: string;
 };
 
+export type HedgeApprovalView = {
+  rejected: boolean;
+  required: number;
+  satisfied: boolean;
+  draftDigest: string | null;
+};
+
 /** Hedge execution ports; the venue client fills these in. */
 export interface HedgeActivities {
   hedgeRiskSnapshot(input: { groupId: string; hedgeId: string }): Promise<{
@@ -272,6 +279,11 @@ export interface HedgeActivities {
     exposure: string;
     riskStatus: MarketEvidence['riskStatus'];
   }): Promise<HedgePlan>;
+  /** Verified approval state for the planned hedge; registers its approval draft once. */
+  hedgeApprovals(input: {
+    groupId: string;
+    clientOrderId: string;
+  }): Promise<HedgeApprovalView>;
   submitHedgeOrder(input: {
     groupId: string;
     clientOrderId: string;

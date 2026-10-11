@@ -452,3 +452,4 @@ export * from './identity.js';
 export * from './workflow.js';
 export * from './world.js';
 export * from './evidence.js';
+export * from './hedge.js';

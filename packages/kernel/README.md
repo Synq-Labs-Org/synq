@@ -17,6 +17,7 @@ Deterministic authorization. Agents propose; only this policy authorizes. The Ke
 | `snapshot.ts` | Snapshot and verified restore |
 | `decisions.ts` | Authorization request and decision types, refusal payload and decision shaping |
 | `nonce-status.ts` | `NonceStatusReader` port and the echo-checked nonce status read |
+| `hedge-policy.ts` | `HedgePolicy` (hedge mandate, `HedgeIntent`, close-only fallback, leverage/notional/ratio/liquidation-buffer/collateral caps) and `HedgeGrantAuthority` (one-time HMAC-bound grants the Perpl executor verifies). No hedge kind can withdraw or transfer. |
 | `kernel.ts` | Orchestration. Authorizations run one at a time, and the mandate and ledger are rechecked after every await. |
 
 ## Flow

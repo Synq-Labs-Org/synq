@@ -61,6 +61,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:packages/kernel
+      '@synq/perpl-executor':
+        specifier: workspace:*
+        version: link:workers/perpl-executor
       '@synq/plugin-agora':
         specifier: workspace:*
         version: link:plugins/agora
@@ -73,6 +76,9 @@ importers:
       '@synq/plugin-layerzero':
         specifier: workspace:*
         version: link:plugins/layerzero
+      '@synq/plugin-perpl':
+        specifier: workspace:*
+        version: link:plugins/perpl
       '@synq/plugin-qwen':
         specifier: workspace:*
         version: link:plugins/qwen
@@ -82,6 +88,9 @@ importers:
       '@synq/read-model':
         specifier: workspace:*
         version: link:packages/read-model
+      '@synq/risk-engine':
+        specifier: workspace:*
+        version: link:packages/risk-engine
       '@synq/schemas':
         specifier: workspace:*
         version: link:packages/schemas
@@ -115,6 +124,9 @@ importers:
       '@types/pg':
         specifier: 8.16.0
         version: 8.16.0
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       eslint:
         specifier: 10.12.0
         version: 10.12.0
@@ -139,6 +151,9 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@22.19.7)(vite@7.3.7(@types/node@22.19.7)(terser@5.51.2)(tsx@4.23.15))
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
 
   apps/api:
     dependencies:
@@ -418,6 +433,18 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  packages/risk-engine:
+    dependencies:
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   packages/schemas:
     dependencies:
       viem:
@@ -505,6 +532,24 @@ importers:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
 
+  plugins/perpl:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@synq/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   plugins/qwen:
     dependencies:
       '@ai-sdk/openai-compatible':
@@ -541,6 +586,39 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  workers/perpl-executor:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@synq/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+      '@synq/plugin-perpl':
+        specifier: workspace:*
+        version: link:../../plugins/perpl
+      '@synq/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      pg:
+        specifier: 8.18.0
+        version: 8.18.0
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   workers/workflow:
     dependencies:
       '@synq/api':
@@ -564,6 +642,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/perpl-executor':
+        specifier: workspace:*
+        version: link:../perpl-executor
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
@@ -1881,6 +1962,9 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@typescript-eslint/eslint-plugin@8.71.1':
     resolution: {integrity: sha512-nNlBf6HuotqMgZvSkWD5hNdemiBIxQ2NmrlgfcUIeZRs+BbakjscCQRq/Hb74EFVnFiSWWdL12JruqwBy3ERDw==}
@@ -4987,6 +5071,10 @@ snapshots:
       csstype: 3.2.3
 
   '@types/unist@3.0.3': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 22.19.7
 
   '@typescript-eslint/eslint-plugin@8.71.1(@typescript-eslint/parser@8.71.1(eslint@10.12.0)(typescript@5.9.3))(eslint@10.12.0)(typescript@5.9.3)':
     dependencies:

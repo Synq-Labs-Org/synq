@@ -1,0 +1,140 @@
+{
+  "_source": "GET /api/v1/pub/context snapshot captured 2026-10-10 (trimmed to two markets)",
+  "chain": {
+    "ver": 272,
+    "chain_id": 10143,
+    "name": "Monad Testnet"
+  },
+  "instances": [
+    {
+      "ver": 272,
+      "id": 12,
+      "address": "$registry:testnetPerplExchange",
+      "collateral_token_id": 1,
+      "min_account_open_amount": "100000000",
+      "min_deposit_amount": "10000000",
+      "min_withdraw_amount": "10000",
+      "max_account_trigger_orders": 16
+    }
+  ],
+  "tokens": [
+    {
+      "ver": 272,
+      "id": 1,
+      "address": "$registry:testnetAUSD",
+      "symbol": "AUSD",
+      "name": "AUSD",
+      "decimals": 6,
+      "display_precision": 2,
+      "usd_index": "<index_name>"
+    }
+  ],
+  "markets": [
+    {
+      "ver": 272,
+      "id": 16,
+      "instance_id": 12,
+      "perpetual_id": 16,
+      "symbol": "BTC",
+      "name": "BTC Perp",
+      "size_units": "BTC",
+      "icon": "",
+      "funding_interval_sec": 2580,
+      "funding_interval_blocks": 8571,
+      "order_ttl_blocks": 20,
+      "order_retry_blocks": 22,
+      "order_max_market_slippage_bps": 1000,
+      "order_max_neg_pnl_collat_bps": 1000,
+      "config": {
+        "at": {
+          "b": 69090219,
+          "t": 1791412373000
+        },
+        "is_open": true,
+        "price_decimals": 1,
+        "size_decimals": 5,
+        "min_posting_amount": "0",
+        "min_settle_amount": "0",
+        "funding_sum_scaling_exp": 0,
+        "initial_margin": 1500,
+        "maintenance_margin": 2500,
+        "maker_fee": 45,
+        "taker_fee": 345,
+        "maker_fees": [45, 25, 15, 0, 0, 0, 0, 0],
+        "taker_fees": [345, 300, 250, 210, 175, 150, 125, 0],
+        "recycle_fee": "100000",
+        "contract_version": [1, 7, 5]
+      },
+      "state": {
+        "at": {
+          "b": 69855049,
+          "t": 1791644304000
+        },
+        "orl": 829177,
+        "mrk": 829361,
+        "lst": 829200,
+        "mid": 829150,
+        "bid": 829000,
+        "ask": 829300,
+        "prv": 829936,
+        "dv": 5592133,
+        "dva": "4624680579051",
+        "oi": 2033194,
+        "tvl": "356529530335"
+      }
+    },
+    {
+      "ver": 272,
+      "id": 64,
+      "instance_id": 12,
+      "perpetual_id": 64,
+      "symbol": "MON",
+      "name": "MON Perp",
+      "size_units": "MON",
+      "icon": "",
+      "funding_interval_sec": 2580,
+      "funding_interval_blocks": 8571,
+      "order_ttl_blocks": 20,
+      "order_retry_blocks": 22,
+      "order_max_market_slippage_bps": 100,
+      "order_max_neg_pnl_collat_bps": 1000,
+      "config": {
+        "at": {
+          "b": 69090219,
+          "t": 1791412373000
+        },
+        "is_open": true,
+        "price_decimals": 5,
+        "size_decimals": 0,
+        "min_posting_amount": "0",
+        "min_settle_amount": "0",
+        "funding_sum_scaling_exp": 3,
+        "initial_margin": 300,
+        "maintenance_margin": 500,
+        "maker_fee": 45,
+        "taker_fee": 345,
+        "maker_fees": [45, 25, 15, 0, 0, 0, 0, 0],
+        "taker_fees": [345, 300, 250, 210, 175, 150, 125, 0],
+        "recycle_fee": "100000",
+        "contract_version": [1, 7, 5]
+      },
+      "state": {
+        "at": {
+          "b": 69855049,
+          "t": 1791644304000
+        },
+        "orl": 2469,
+        "mrk": 2469,
+        "lst": 2459,
+        "mid": 2469,
+        "bid": 2467,
+        "ask": 2471,
+        "prv": 2470,
+        "dv": 3740486,
+        "dva": "92227820690",
+        "oi": 2841731,
+        "tvl": "44541239181"
+      }
+    }
+  ]
+}

@@ -11,6 +11,11 @@ const PLANNER =
 const DETERMINISTIC = /^packages\/(domain|schemas|kernel)$/;
 const SIGNER_PACKAGES = /^(workers\/execution|packages\/wallet-core)$/;
 const HUMAN_SIGNING_BOUNDARY = /^packages\/identity$/;
+// Perpl API-key signer, key-file loader and test operator wallet live only in
+// execution infrastructure; planner zones may not reach them or name their keys.
+const PERPL_SIGNER = /^workers\/perpl-executor$/;
+const PERPL_KEY_MATERIAL =
+  /SYNQ_PERPL_[A-Z_]*KEY[A-Z_]*|SYNQ_TESTNET_KEY_FILE|perpl\/(read|trade)\.key/;
 const SIGNING_PRIMITIVE_MODULES =
   /^(viem\/accounts|ethers\/wallet|@noble\/(curves|secp256k1|ed25519)(\/.*)?|@scure\/bip(32|39)(\/.*)?|@synq\/(execution-worker|wallet-core)(\/.*)?)$/;
 const VIEM_MODULES = /^viem(\/actions|\/wallet)?$/;
@@ -404,11 +409,14 @@ export function checkArchitecture(root) {
   };
   const graph = new Map(packages.map((p) => [p.dir, new Set()]));
   const signers = new Set(
-    packages.filter((p) => SIGNER_PACKAGES.test(p.dir)).map((p) => p.dir),
+    packages
+      .filter((p) => SIGNER_PACKAGES.test(p.dir) || PERPL_SIGNER.test(p.dir))
+      .map((p) => p.dir),
   );
   for (const pkg of packages)
     for (const file of sourceFiles(join(root, pkg.dir))) {
       const name = posix(relative(root, file));
+      const text = readFileSync(file, 'utf8');
       const {
         imports,
         identifiers,
@@ -417,10 +425,14 @@ export function checkArchitecture(root) {
         anyCount,
         rawChainIds,
         dynamic,
-      } = analyze(name, readFileSync(file, 'utf8'));
+      } = analyze(name, text);
       const ui = UI.test(pkg.dir);
       const planner = PLANNER.test(pkg.dir) || ui;
       const deterministic = DETERMINISTIC.test(pkg.dir);
+      if (planner && PERPL_KEY_MATERIAL.test(text))
+        errors.push(
+          `${name}: planner references Perpl or operator key material`,
+        );
       if (identifiers.size && !SIGNER_PACKAGES.test(pkg.dir)) {
         if (planner)
           errors.push(
@@ -470,6 +482,8 @@ export function checkArchitecture(root) {
             errors.push(`${name}: unknown workspace package ${specifier}`);
         }
         if (target && target !== pkg.dir) graph.get(pkg.dir).add(target);
+        if (planner && target && PERPL_SIGNER.test(target))
+          errors.push(`${name}: planner imports the Perpl signer ${specifier}`);
         const signs =
           signingImport(specifier, names) ||
           (target !== null && SIGNER_PACKAGES.test(target));

@@ -34,6 +34,7 @@
     "test:report": "node scripts/test-report.mjs",
     "test:schema-compat": "vitest run tests/domain/schema-compat.test.ts",
     "test:plugins": "vitest run tests/plugins",
+    "test:live:p10": "SYNQ_P10_LIVE=1 vitest run --config tests/perpl/vitest.live.config.ts",
     "sources:resolve": "node scripts/resolve-sources.mjs",
     "registry:probe": "node --import tsx scripts/testnet-probe.ts",
     "indexer:env": "node --import tsx scripts/envio-env.ts",
@@ -65,6 +66,8 @@
     "@synq/funding": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/perpl-executor": "workspace:*",
+    "@synq/plugin-perpl": "workspace:*",
     "@synq/plugin-kimi": "workspace:*",
     "@synq/plugin-qwen": "workspace:*",
     "@synq/plugin-agora": "workspace:*",
@@ -72,6 +75,7 @@
     "@synq/plugin-layerzero": "workspace:*",
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",
+    "@synq/risk-engine": "workspace:*",
     "@synq/schemas": "workspace:*",
     "@synq/workflow-worker": "workspace:*",
     "@temporalio/activity": "1.24.0",
@@ -83,6 +87,7 @@
     "@synq/world-model": "workspace:*",
     "@types/node": "22.19.7",
     "@types/pg": "8.16.0",
+    "@types/ws": "8.18.1",
     "eslint": "10.12.0",
     "fast-check": "4.5.3",
     "prettier": "3.8.1",
@@ -90,6 +95,7 @@
     "turbo": "2.11.7",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "ws": "8.22.0"
   }
 }

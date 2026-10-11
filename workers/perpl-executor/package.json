@@ -1,0 +1,22 @@
+{
+  "name": "@synq/perpl-executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/plugin-perpl": "workspace:*",
+    "@synq/risk-engine": "workspace:*",
+    "viem": "2.57.4",
+    "zod": "4.6.5",
+    "@synq/identity": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "pg": "8.18.0"
+  }
+}

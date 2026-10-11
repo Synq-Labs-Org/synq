@@ -1,0 +1,141 @@
+{
+  "_source": "GET /api/v1/pub/context snapshot captured 2026-10-10 (trimmed to two markets)",
+  "chain": {
+    "ver": 300,
+    "chain_id": 143,
+    "name": "Monad"
+  },
+  "instances": [
+    {
+      "ver": 300,
+      "id": 1,
+      "address": "$registry:mainnetPerplExchange",
+      "collateral_token_id": 1,
+      "min_account_open_amount": "10000000",
+      "min_deposit_amount": "10000000",
+      "min_withdraw_amount": "10000",
+      "max_account_equity": "1000000000000",
+      "max_account_trigger_orders": 16
+    }
+  ],
+  "tokens": [
+    {
+      "ver": 300,
+      "id": 1,
+      "address": "$registry:mainnetAUSD",
+      "symbol": "AUSD",
+      "name": "AUSD",
+      "decimals": 6,
+      "display_precision": 2,
+      "usd_index": "<index_name>"
+    }
+  ],
+  "markets": [
+    {
+      "ver": 300,
+      "id": 1,
+      "instance_id": 1,
+      "perpetual_id": 1,
+      "symbol": "",
+      "name": "BTC",
+      "size_units": "BTC",
+      "icon": "",
+      "funding_interval_sec": 2580,
+      "funding_interval_blocks": 8571,
+      "order_ttl_blocks": 20,
+      "order_retry_blocks": 22,
+      "order_max_market_slippage_bps": 100,
+      "order_max_neg_pnl_collat_bps": 300,
+      "config": {
+        "at": {
+          "b": 111929335,
+          "t": 1791558903000
+        },
+        "is_open": true,
+        "price_decimals": 1,
+        "size_decimals": 5,
+        "min_posting_amount": "0",
+        "min_settle_amount": "0",
+        "funding_sum_scaling_exp": 0,
+        "initial_margin": 1500,
+        "maintenance_margin": 2500,
+        "maker_fee": 45,
+        "taker_fee": 345,
+        "maker_fees": [45, 25, 15, 0, 0, 0, 0, 0],
+        "taker_fees": [345, 300, 250, 210, 175, 150, 125, 0],
+        "recycle_fee": "0",
+        "contract_version": [1, 7, 5]
+      },
+      "state": {
+        "at": {
+          "b": 112212142,
+          "t": 1791644280000
+        },
+        "orl": 829177,
+        "mrk": 829317,
+        "lst": 829111,
+        "mid": 829111,
+        "bid": 829111,
+        "ask": 829112,
+        "prv": 829980,
+        "dv": 7633939,
+        "dva": "6310383121332",
+        "oi": 850290,
+        "tvl": "229869552453"
+      }
+    },
+    {
+      "ver": 300,
+      "id": 10,
+      "instance_id": 1,
+      "perpetual_id": 10,
+      "symbol": "",
+      "name": "MON",
+      "size_units": "MON",
+      "icon": "",
+      "funding_interval_sec": 2580,
+      "funding_interval_blocks": 8571,
+      "order_ttl_blocks": 20,
+      "order_retry_blocks": 22,
+      "order_max_market_slippage_bps": 100,
+      "order_max_neg_pnl_collat_bps": 300,
+      "config": {
+        "at": {
+          "b": 111929335,
+          "t": 1791558903000
+        },
+        "is_open": true,
+        "price_decimals": 6,
+        "size_decimals": 0,
+        "min_posting_amount": "0",
+        "min_settle_amount": "0",
+        "funding_sum_scaling_exp": 2,
+        "initial_margin": 1000,
+        "maintenance_margin": 2000,
+        "maker_fee": 45,
+        "taker_fee": 345,
+        "maker_fees": [45, 25, 15, 0, 0, 0, 0, 0],
+        "taker_fees": [345, 300, 250, 210, 175, 150, 125, 0],
+        "recycle_fee": "0",
+        "contract_version": [1, 7, 5]
+      },
+      "state": {
+        "at": {
+          "b": 112212224,
+          "t": 1791644305000
+        },
+        "orl": 24699,
+        "mrk": 24687,
+        "lst": 24687,
+        "mid": 24689,
+        "bid": 24682,
+        "ask": 24696,
+        "prv": 24724,
+        "dv": 30097173,
+        "dva": "740449686873",
+        "oi": 3032644,
+        "tvl": "63801800450"
+      }
+    }
+  ]
+}

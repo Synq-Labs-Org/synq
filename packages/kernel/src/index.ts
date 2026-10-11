@@ -14,3 +14,4 @@ export * from './snapshot.js';
 export * from './decisions.js';
 export * from './nonce-status.js';
 export * from './kernel.js';
+export * from './hedge-policy.js';
