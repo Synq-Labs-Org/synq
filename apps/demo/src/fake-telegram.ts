@@ -13,6 +13,8 @@ export class FakeTelegram {
   readonly answered: string[] = [];
   readonly getUpdatesOffsets: (number | undefined)[] = [];
   outage = false;
+  /** `${chatId}:${userId}` pairs reported as chat creator by getChatMember. */
+  readonly creators = new Set<string>();
   private updates: { update_id: number }[] = [];
   private nextId = 1;
   private server: Server | null = null;
@@ -73,6 +75,15 @@ export class FakeTelegram {
             result: { message_id: 1000 + this.sent.length },
           });
         }
+        if (method === 'getChatMember')
+          return reply(200, {
+            ok: true,
+            result: {
+              status: this.creators.has(`${body.chat_id}:${body.user_id}`)
+                ? 'creator'
+                : 'member',
+            },
+          });
         if (method === 'answerCallbackQuery') {
           this.answered.push(body.callback_query_id);
           return reply(200, { ok: true, result: true });

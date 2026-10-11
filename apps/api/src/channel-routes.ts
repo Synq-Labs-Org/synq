@@ -151,6 +151,33 @@ export async function channelRoutes(
     );
   });
 
+  api.post('/v1/channels/links/unlink', async (request, reply) => {
+    const body = z
+      .strictObject({
+        groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+        channel: z.enum(['telegram', 'linq']),
+        externalGroupId: z.string().min(1).max(200),
+      })
+      .safeParse(json(request.body));
+    if (!body.success)
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const header = request.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const groupId = body.data.groupId.toLowerCase();
+    const session = token ? await deps.memberSession(token, groupId) : null;
+    if (!session)
+      return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
+    const outcome = await deps.gateway.unlinkChat({
+      channel: body.data.channel,
+      externalGroupId: body.data.externalGroupId,
+      groupId,
+      principalId: session.principalId,
+    });
+    return reply
+      .code(outcome === 'UNLINKED' ? 200 : outcome === 'NOT_LINKED' ? 404 : 403)
+      .send(outcome === 'UNLINKED' ? { status: outcome } : { error: outcome });
+  });
+
   api.get('/v1/channels/capabilities', async () =>
     channelCapabilities(deps.env ?? {}),
   );

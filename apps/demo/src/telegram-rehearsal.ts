@@ -13,6 +13,7 @@ export async function rehearseTelegram() {
   await telegram.start();
   process.env.TELEGRAM_BOT_TOKEN = telegram.token;
   const CHAT = -100555;
+  telegram.creators.add(`${CHAT}:1001`);
   const nowS = () => Math.floor(Date.now() / 1000);
   const say = (
     from: number,

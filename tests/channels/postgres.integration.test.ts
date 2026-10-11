@@ -43,6 +43,7 @@ const redeem = (
     principalId,
     confirmTokenHash: token,
     now: NOW + 1,
+    pendingExpiresBefore: 0,
   });
 
 describe('postgres channel store', () => {
@@ -96,6 +97,7 @@ describe('postgres channel store', () => {
         externalUserId: '999',
         confirmTokenHash: 't_h1',
         now: NOW,
+        chatAdmin: false,
       }),
     ).toBeNull();
     expect(
@@ -104,6 +106,7 @@ describe('postgres channel store', () => {
         externalUserId: '111',
         confirmTokenHash: 'wrong',
         now: NOW,
+        chatAdmin: false,
       }),
     ).toBeNull();
     expect(
@@ -113,6 +116,7 @@ describe('postgres channel store', () => {
           externalUserId: '111',
           confirmTokenHash: 't_h1',
           now: NOW,
+          chatAdmin: false,
         })
       )?.status,
     ).toBe('ACTIVE');
@@ -122,10 +126,16 @@ describe('postgres channel store', () => {
         externalUserId: '111',
         confirmTokenHash: 't_h1',
         now: NOW,
+        chatAdmin: false,
       }),
     ).toBeNull();
     expect(
-      (await store.activateGroupLink('telegram', '-100', 2, NOW))?.status,
+      (
+        await store.activateGroupLink('telegram', '-100', 2, NOW, {
+          requireChatAdmin: false,
+          pendingExpiresBefore: 0,
+        })
+      )?.status,
     ).toBe('PENDING');
     await store.createLinkCode(code('h2', { externalUserId: '222' }));
     expect((await redeem('h2', '0xg1', 'p_bob')).status).toBe('LINKED');
@@ -134,9 +144,15 @@ describe('postgres channel store', () => {
       externalUserId: '222',
       confirmTokenHash: 't_h2',
       now: NOW,
+      chatAdmin: false,
     });
     expect(
-      (await store.activateGroupLink('telegram', '-100', 2, NOW))?.status,
+      (
+        await store.activateGroupLink('telegram', '-100', 2, NOW, {
+          requireChatAdmin: false,
+          pendingExpiresBefore: 0,
+        })
+      )?.status,
     ).toBe('ACTIVE');
     expect(
       (await store.groupLinks('0xg1')).map((g) => g.externalGroupId),
@@ -189,5 +205,79 @@ describe('postgres channel store', () => {
       'SELECT length(reason) AS n FROM synq_channel_delivery_failure',
     );
     expect(Number(rows.rows[0].n)).toBe(500);
+  });
+
+  it('expires squatted pending chats, gates activation on a chat admin, and unlinks a chat', async () => {
+    await store.createLinkCode(
+      code('s1', { externalGroupId: '-300', externalUserId: '666' }),
+    );
+    expect((await redeem('s1', '0xevil', 'p_mallory')).status).toBe('LINKED');
+    await store.createLinkCode(
+      code('s2', {
+        externalGroupId: '-300',
+        externalUserId: '111',
+        expiresAt: NOW + 20_000,
+      }),
+    );
+    expect((await redeem('s2', '0xg1', 'p_alice')).status).toBe(
+      'GROUP_LINK_CONFLICT',
+    );
+    const late = (h: string, user: string, principal: string) =>
+      store.redeemLinkCode({
+        codeHash: h,
+        groupId: '0xg1',
+        principalId: principal,
+        confirmTokenHash: `t_${h}`,
+        now: NOW + 10_000,
+        pendingExpiresBefore: NOW + 10_000 - 3600,
+      });
+    expect((await late('s2', '111', 'p_alice')).status).toBe('LINKED');
+    expect((await store.userLink('telegram', '-300', '666'))?.status).toBe(
+      'REVOKED',
+    );
+    await store.confirmUserLink({
+      channel: 'telegram',
+      externalUserId: '111',
+      confirmTokenHash: 't_s2',
+      now: NOW + 10_001,
+      chatAdmin: false,
+    });
+    await store.createLinkCode(
+      code('s3', {
+        externalGroupId: '-300',
+        externalUserId: '222',
+        expiresAt: NOW + 20_000,
+      }),
+    );
+    expect((await late('s3', '222', 'p_bob')).status).toBe('LINKED');
+    await store.confirmUserLink({
+      channel: 'telegram',
+      externalUserId: '222',
+      confirmTokenHash: 't_s3',
+      now: NOW + 10_002,
+      chatAdmin: false,
+    });
+    const gate = {
+      requireChatAdmin: true,
+      pendingExpiresBefore: NOW + 10_002 - 3600,
+    };
+    expect(
+      (await store.activateGroupLink('telegram', '-300', 2, NOW + 10_002, gate))
+        ?.status,
+    ).toBe('PENDING');
+    await store.setChatAdmin('telegram', '-300', '222', true);
+    expect(
+      (await store.activateGroupLink('telegram', '-300', 2, NOW + 10_003, gate))
+        ?.status,
+    ).toBe('ACTIVE');
+    expect(
+      (await store.revokeGroupLink('telegram', '-300', NOW + 10_004))?.status,
+    ).toBe('REVOKED');
+    expect((await store.userLink('telegram', '-300', '111'))?.status).toBe(
+      'REVOKED',
+    );
+    expect(
+      (await store.groupLinks('0xg1')).map((g) => g.externalGroupId),
+    ).toEqual(['-100']);
   });
 });

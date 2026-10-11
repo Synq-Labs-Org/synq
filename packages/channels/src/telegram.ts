@@ -234,6 +234,28 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.bot;
   }
 
+  /** getChatMember status: creator → OWNER, administrator → ADMIN. */
+  async chatRole(
+    chatId: string,
+    userId: string,
+  ): Promise<'OWNER' | 'ADMIN' | 'MEMBER' | 'NONE'> {
+    if (!/^-?[0-9]{1,20}$/.test(chatId) || !/^[0-9]{1,20}$/.test(userId))
+      return 'NONE';
+    const member = z.looseObject({ status: z.string() }).parse(
+      await this.options.api.call('getChatMember', {
+        chat_id: Number(chatId),
+        user_id: Number(userId),
+      }),
+    );
+    return member.status === 'creator'
+      ? 'OWNER'
+      : member.status === 'administrator'
+        ? 'ADMIN'
+        : member.status === 'member' || member.status === 'restricted'
+          ? 'MEMBER'
+          : 'NONE';
+  }
+
   deepLink(payload: string): string | null {
     if (!this.bot || !/^[A-Za-z0-9_-]{1,64}$/.test(payload)) return null;
     return `https://t.me/${this.bot.username}?start=${payload}`;

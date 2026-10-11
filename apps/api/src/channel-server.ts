@@ -35,6 +35,12 @@ const ChannelEnvSchema = z.object({
   LINQ_WEBHOOK_SECRET: z.string().optional(),
   LINQ_BASE_URL: z.string().url().optional(),
   SYNQ_TELEGRAM_LOGIN_REQUIRED: z.enum(['0', '1']).default('0'),
+  SYNQ_TELEGRAM_REQUIRE_CHAT_ADMIN: z.enum(['0', '1']).default('1'),
+  SYNQ_CHAT_LINK_PENDING_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .default(86_400),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
 });
 
@@ -129,6 +135,10 @@ export async function registerChannels(input: {
     ...(telegram?.botUsername
       ? { botUsernames: { telegram: telegram.botUsername } }
       : {}),
+    requireChatAdmin: {
+      telegram: env.SYNQ_TELEGRAM_REQUIRE_CHAT_ADMIN === '1',
+    },
+    pendingLinkTtlSeconds: env.SYNQ_CHAT_LINK_PENDING_TTL_SECONDS,
     requireExternalProof: {
       telegram: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
     },

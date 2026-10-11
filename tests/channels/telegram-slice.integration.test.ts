@@ -92,6 +92,7 @@ beforeAll(async () => {
   const { startLocalVertical } = await import('../../apps/demo/src/local.js');
   local = await startLocalVertical();
   telegram = new FakeTelegram();
+  telegram.creators.add(`${CHAT}:1001`);
   await telegram.start();
   pool = await freshChannelDatabase(CHANNEL_DB);
   const store = new PostgresChannelStore(pool);
@@ -261,9 +262,7 @@ it('Telegram group → link → balance → Send → web approvals → Kernel gr
     await waitFor(() => telegram.sent.slice(n).some((m) => m.chat_id === CHAT));
     const chatNote = telegram.sent.slice(n).find((m) => m.chat_id === CHAT)!;
     expect(chatNote.text).toMatch(
-      userId === 1001
-        ? /Waiting for another member/
-        : /now speaks for Synq group/,
+      userId === 1001 ? /Waiting for 2 members/ : /now speaks for Synq group/,
     );
   }
 

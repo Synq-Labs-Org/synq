@@ -362,4 +362,22 @@ describe('telegram adapter', () => {
     );
     expect(a.deepLink('bad payload')).toBeNull();
   });
+
+  it('maps getChatMember status to chat roles', async () => {
+    const statuses = ['creator', 'administrator', 'member', 'left'];
+    let i = 0;
+    const { a, calls } = adapter(() => ({
+      body: { ok: true, result: { status: statuses[i++] } },
+    }));
+    expect(await a.chatRole('-100', '111')).toBe('OWNER');
+    expect(await a.chatRole('-100', '111')).toBe('ADMIN');
+    expect(await a.chatRole('-100', '111')).toBe('MEMBER');
+    expect(await a.chatRole('-100', '111')).toBe('NONE');
+    expect(await a.chatRole('-100; x', '111')).toBe('NONE');
+    expect(calls[0]).toEqual({
+      method: 'getChatMember',
+      body: { chat_id: -100, user_id: 111 },
+    });
+    expect(calls).toHaveLength(4);
+  });
 });

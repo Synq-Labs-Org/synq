@@ -142,4 +142,9 @@ export interface ChannelAdapter {
   acknowledgeAction?(callbackId: string, text: string): Promise<void>;
   /** URL that opens a private chat with the bot carrying `payload`; null if unsupported. */
   deepLink?(payload: string): string | null;
+  /** The user's role in the chat as the provider reports it; absent if unsupported. */
+  chatRole?(
+    externalGroupId: string,
+    externalUserId: string,
+  ): Promise<'OWNER' | 'ADMIN' | 'MEMBER' | 'NONE'>;
 }
