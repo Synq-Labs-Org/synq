@@ -5,3 +5,4 @@ export { HedgeWorkflow } from './hedge.js';
 export { FundingWorkflow } from './funding.js';
 export { ReconciliationWorkflow } from './reconciliation.js';
 export { EmergencyPauseWorkflow } from './emergency-pause.js';
+export { BookingWorkflow } from './booking.js';

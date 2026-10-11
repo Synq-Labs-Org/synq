@@ -64,6 +64,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:packages/kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:packages/offer-exchange
       '@synq/perpl-executor':
         specifier: workspace:*
         version: link:workers/perpl-executor
@@ -76,6 +79,12 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:plugins/chainlink-cre
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:plugins/commerce
+      '@synq/plugin-duffel':
+        specifier: workspace:*
+        version: link:plugins/duffel
       '@synq/plugin-kimi':
         specifier: workspace:*
         version: link:plugins/kimi
@@ -94,6 +103,9 @@ importers:
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:packages/plugin-sdk
+      '@synq/profile-vault':
+        specifier: workspace:*
+        version: link:packages/profile-vault
       '@synq/read-model':
         specifier: workspace:*
         version: link:packages/read-model
@@ -103,6 +115,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:packages/schemas
+      '@synq/settlement':
+        specifier: workspace:*
+        version: link:packages/settlement
       '@synq/strategy-engine':
         specifier: workspace:*
         version: link:packages/strategy-engine
@@ -451,6 +466,18 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  packages/offer-exchange:
+    dependencies:
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   packages/plugin-sdk:
     dependencies:
       '@synq/domain':
@@ -459,6 +486,12 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas
+
+  packages/profile-vault:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/read-model:
     dependencies:
@@ -492,6 +525,27 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/settlement:
+    dependencies:
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/funding':
+        specifier: workspace:*
+        version: link:../funding
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../offer-exchange
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -567,6 +621,24 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  plugins/commerce:
+    dependencies:
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  plugins/duffel:
+    dependencies:
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -729,12 +801,18 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
       '@synq/perpl-executor':
         specifier: workspace:*
         version: link:../perpl-executor
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:../../plugins/chainlink-cre
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:../../plugins/commerce
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
@@ -744,6 +822,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       '@synq/strategy-engine':
         specifier: workspace:*
         version: link:../../packages/strategy-engine

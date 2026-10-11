@@ -1,0 +1,42 @@
+{
+  "total": 3,
+  "itemSummaries": [
+    {
+      "itemId": "v1|110000000001|0",
+      "title": "Acme Phone 12 128GB Blue Unlocked - New",
+      "price": { "value": "749.00", "currency": "USD" },
+      "condition": "New",
+      "conditionId": "1000",
+      "seller": { "username": "acme_store", "feedbackPercentage": "99.6" },
+      "shippingOptions": [
+        {
+          "shippingCost": { "value": "0.00", "currency": "USD" },
+          "maxEstimatedDeliveryDate": "2026-10-16T07:00:00.000Z"
+        }
+      ],
+      "epid": "9000000001"
+    },
+    {
+      "itemId": "v1|110000000002|0",
+      "title": "Acme Phone 12 128GB Blue - Certified Refurbished",
+      "price": { "value": "520.00", "currency": "USD" },
+      "condition": "Certified - Refurbished",
+      "conditionId": "2000",
+      "seller": { "username": "refurb_hub", "feedbackPercentage": "98.1" },
+      "shippingOptions": [
+        { "shippingCost": { "value": "9.99", "currency": "USD" } }
+      ]
+    },
+    {
+      "itemId": "v1|110000000003|0",
+      "title": "Acme Phone 12 128GB Blue New",
+      "price": { "value": "740.00", "currency": "USD" },
+      "condition": "New",
+      "conditionId": "1000",
+      "seller": { "username": "cheap_deals", "feedbackPercentage": "91.0" },
+      "shippingOptions": [
+        { "shippingCost": { "value": "25.00", "currency": "USD" } }
+      ]
+    }
+  ]
+}

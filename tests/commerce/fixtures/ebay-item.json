@@ -1,0 +1,28 @@
+{
+  "itemId": "v1|110000000001|0",
+  "title": "Acme Phone 12 128GB Blue Unlocked - New",
+  "price": { "value": "749.00", "currency": "USD" },
+  "condition": "New",
+  "conditionId": "1000",
+  "gtin": "0012345678905",
+  "mpn": "AP12-128-BL",
+  "brand": "Acme",
+  "color": "Blue",
+  "seller": { "username": "acme_store", "feedbackPercentage": "99.6" },
+  "shippingOptions": [
+    {
+      "shippingCost": { "value": "0.00", "currency": "USD" },
+      "maxEstimatedDeliveryDate": "2026-10-16T07:00:00.000Z"
+    }
+  ],
+  "localizedAspects": [
+    { "name": "Storage Capacity", "value": "128 GB" },
+    { "name": "Model", "value": "Phone 12" }
+  ],
+  "estimatedAvailabilities": [
+    {
+      "estimatedAvailabilityStatus": "IN_STOCK",
+      "estimatedAvailableQuantity": 10
+    }
+  ]
+}

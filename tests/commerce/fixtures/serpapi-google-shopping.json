@@ -1,0 +1,19 @@
+{
+  "shopping_results": [
+    {
+      "position": 1,
+      "product_id": "1234567890",
+      "title": "Acme Phone 12 128GB Blue",
+      "source": "Example Electronics",
+      "extracted_price": 779.0,
+      "rating": 4.5
+    },
+    {
+      "position": 2,
+      "product_id": "1234567891",
+      "title": "Acme Phone 12 Blue 128GB - Used",
+      "source": "Reseller",
+      "extracted_price": 450.0
+    }
+  ]
+}
