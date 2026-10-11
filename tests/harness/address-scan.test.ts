@@ -18,6 +18,7 @@ const ALLOWED_PATHS = [
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
   /^sources\/research\/2026-10-10-(?:perpl-intents-ausd|kuru-chainlink-cre|mastra-temporal-models)\.md$/,
+  /^bounty-evidence\//,
   /^adrs\//,
   /^docs\//,
   /(^|\/)README\.md$/,

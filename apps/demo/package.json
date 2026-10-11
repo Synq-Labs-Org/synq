@@ -12,6 +12,7 @@
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
+    "@synq/funding": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/plugin-sdk": "workspace:*",
