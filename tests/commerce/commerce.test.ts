@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EconomicGrantAuthority, economicRequestHash } from '@synq/kernel';
-import { approval, reservationsWith } from '../kernel/economic-fixtures.js';
+import {
+  approval,
+  reservationsWith,
+  approvalPorts,
+  memoryLedger,
+} from '../kernel/economic-fixtures.js';
 import {
   EconomicIntentSchema,
   ProviderCapabilityGraph,
@@ -225,8 +230,9 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     ]);
   }
   const RES_ASSET = 'eip155:10143/erc20:ausd';
+  let reservations: Awaited<ReturnType<typeof reservationsWith>>;
   async function authority() {
-    const reservations = await reservationsWith(
+    reservations = await reservationsWith(
       'group-1',
       RES_ASSET,
       [
@@ -242,6 +248,8 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     const a = new EconomicGrantAuthority({
       key: new Uint8Array(32).fill(5),
       reservations,
+      ledger: memoryLedger(),
+      approvals: approvalPorts(['alice', 'bob']),
     });
     await a.install({
       mandateId: 'gifts',
@@ -295,7 +303,7 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     };
     const d = await a.authorize(
       r,
-      [approval('alice', economicRequestHash(r))],
+      [await approval('alice', economicRequestHash(r), { mandateId: 'gifts' })],
       T,
     );
     if (d.status !== 'AUTHORIZED') throw new Error(JSON.stringify(d));
@@ -328,6 +336,7 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     const recipients: string[] = [];
     const deps = {
       authority: a,
+      reservations,
       now,
       resolveRecipient: async (ref: string) => (
         recipients.push(ref),
@@ -360,7 +369,45 @@ describe('commerce checkout (simulation through the Kernel)', () => {
       },
     });
     expect(recipients).toEqual([]);
+    expect((await reservations.get('res-gift'))?.state).toBe('EXECUTING');
     expect(await run()).toMatchObject({ kind: 'REFUSED' });
+  });
+  it('commerce checkout moves the reservation to EXECUTING before consuming the grant', async () => {
+    const { offer, landed } = await revalidated();
+    const decision = router().decide(offer, ['NATIVE_API']);
+    if (decision.kind === 'HANDOFF') throw new Error('handoff');
+    const a = await authority();
+    const grant = await granted(
+      a,
+      offer,
+      landed,
+      decision.route.host,
+      decision.route.providerId,
+      'i-exec',
+    );
+    await reservations.release('res-gift', 'expired elsewhere', T);
+    const deps = {
+      authority: a,
+      reservations,
+      now,
+      resolveRecipient: async () => {
+        throw new Error('must not decrypt');
+      },
+    };
+    const out = await executeCommerceCheckout(deps, {
+      intentId: 'i-exec',
+      decision,
+      offer,
+      grant,
+      reservation,
+      recipientRef: 'recipient:ref:1',
+      idempotencyKey: 'gift-exec-key',
+    });
+    expect(out).toMatchObject({
+      kind: 'REFUSED',
+      reason: expect.stringMatching(/INVALID_RESERVATION_TRANSITION/),
+    });
+    expect(await a.isConsumed(grant.grantId)).toBe(false);
   });
   it('COM-008/COM-009/COM-001 the checked execution is rebuilt from the offer and route actually used', async () => {
     const { offer, landed } = await revalidated();
@@ -377,6 +424,7 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     );
     const deps = {
       authority: a,
+      reservations,
       now,
       resolveRecipient: async () => {
         throw new Error('must not decrypt');
@@ -471,6 +519,7 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     const out = await executeCommerceCheckout(
       {
         authority: a,
+        reservations,
         now,
         resolveRecipient: async () => ({
           name: 'x',

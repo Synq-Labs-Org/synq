@@ -4,7 +4,10 @@ import { randomBytes } from 'node:crypto';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { officialAssets } from '@synq/chain-registry';
-import { EconomicGrantAuthority } from '@synq/kernel';
+import {
+  EconomicGrantAuthority,
+  MemoryEconomicGrantLedger,
+} from '@synq/kernel';
 import { X402AuthorizationSigner } from '@synq/execution-worker';
 import {
   MemoryReservationStore,
@@ -131,6 +134,14 @@ async function main() {
   const authority = new EconomicGrantAuthority({
     key: new Uint8Array(randomBytes(32)),
     reservations,
+    ledger: new MemoryEconomicGrantLedger(),
+    approvals: {
+      ledger: { isConsumed: async () => false },
+      directory: {
+        activeMember: async () => null,
+        membershipEpoch: async () => null,
+      },
+    },
   });
   const unit = { currency: 'USDC', decimals: 6 };
   await authority.install({

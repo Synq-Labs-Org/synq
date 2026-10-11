@@ -27,7 +27,11 @@ import type { Asset } from '@synq/schemas';
 import { createBookingActivities } from '../../workers/workflow/src/activities/booking.js';
 import type { BookingWorkflowState } from '../../workers/workflow/src/workflows/booking.js';
 import { FakeDuffel } from '../duffel/fake-duffel.js';
-import { approval } from '../kernel/economic-fixtures.js';
+import {
+  approval,
+  approvalPorts,
+  memoryLedger,
+} from '../kernel/economic-fixtures.js';
 import {
   HmacHumanProofVerifier,
   MerchantAuthBroker,
@@ -107,6 +111,8 @@ function world(
   const authority = new EconomicGrantAuthority({
     key: new Uint8Array(32).fill(3),
     reservations,
+    ledger: memoryLedger(),
+    approvals: approvalPorts(['alice', 'bob', 'carol']),
   });
   const ready = authority.install({
     approverKinds: ['LOCAL_FIXTURE'],
@@ -175,12 +181,14 @@ function world(
     authority,
     approvals: {
       verify: async ({ tokens, requestHash }) =>
-        tokens.flatMap((t) => {
-          const [kind, member, hash] = t.split(':');
-          return kind === 'verified' && member && hash === requestHash
-            ? [approval(member, requestHash)]
-            : [];
-        }),
+        Promise.all(
+          tokens.flatMap((t) => {
+            const [kind, member, hash] = t.split(':');
+            return kind === 'verified' && member && hash === requestHash
+              ? [approval(member, requestHash, { mandateId: 'travel' })]
+              : [];
+          }),
+        ),
     },
     travelers: {
       resolve: async ({ refs, purpose }) => {

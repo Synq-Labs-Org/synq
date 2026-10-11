@@ -102,9 +102,29 @@ async function activities(edgeFree: bigint) {
     confirmed: edgeFree,
     asOf: T,
   });
+  const consumed: string[] = [];
   const acts = createBookingActivities({
     now: () => T,
     reservations,
+    authority: {
+      consume: async (g: { grantId: string }) => void consumed.push(g.grantId),
+    },
+    ports: {
+      p: {
+        providerId: 'p',
+        host: 'shop.example.com',
+        find: async () => null,
+        book: async () => ({
+          status: 'CONFIRMED',
+          providerRef: 'ord',
+          reference: null,
+          charged: null,
+        }),
+        cancel: async () => ({ confirmed: false, refund: null, reason: null }),
+      },
+    },
+    travelers: { resolve: async () => [] },
+    receipts: { write: async () => undefined },
     settlement: {
       treasury: async () => ({
         account: '0x00000000000000000000000000000000000a11ce',
@@ -172,6 +192,91 @@ describe('booking reservations follow the settlement plan legs', () => {
       assetId: USDC.canonicalAssetId,
       amount: '20000000',
       state: 'ACTIVE',
+    });
+  });
+});
+
+describe('every reservation leg moves together', () => {
+  it('executeBooking, hold and settle cover the edge leg as well as the core leg', async () => {
+    const { acts, reservations } = await activities(20_000_000n);
+    const r = await acts.reserveBookingFunds({
+      bookingId: 'b3',
+      intent,
+      offer,
+      landed: usd(5_000),
+      approvedMax: usd(5_000),
+    });
+    if (r.status !== 'RESERVED') throw new Error(r.status);
+    const grant = {
+      grantId: 'gr',
+      groupId: 'g',
+      execution: { maxAmount: usd(5_000) },
+    } as never;
+    const out = await acts.executeBooking({
+      bookingId: 'b3',
+      offer,
+      grant,
+      reservationId: r.reservationId,
+      planHash: r.planHash,
+      reservedAssetId: r.reservedAssetId,
+      reservedAmount: r.reservedAmount,
+      travelerRefs: [],
+      idempotencyKey: 'idem-b3-key',
+    });
+    expect(out.status).toBe('CONFIRMED');
+    expect((await reservations.get('bk-b3'))?.state).toBe('EXECUTING');
+    expect((await reservations.get('bk-b3-edge'))?.state).toBe('EXECUTING');
+    await acts.holdBookingFunds({ reservationId: 'bk-b3', reason: 'unknown' });
+    expect((await reservations.get('bk-b3-edge'))?.state).toBe('HELD');
+    const settled = await acts.settleBooking({
+      bookingId: 'b3',
+      intent,
+      offer,
+      reservationId: 'bk-b3',
+      coreAmount: r.coreAmount,
+      providerRef: 'ord',
+      reference: null,
+      charged: null,
+      grantId: 'gr',
+      idempotencyKey: 'idem-b3-key',
+    });
+    expect(settled.status).toBe('SETTLED');
+    expect((await reservations.get('bk-b3'))?.state).toBe('CAPTURED');
+    expect(await reservations.get('bk-b3-edge')).toMatchObject({
+      state: 'CAPTURED',
+      captured: '20000000',
+    });
+  });
+  it('a released edge leg blocks execution before the provider is called', async () => {
+    const { acts, reservations } = await activities(20_000_000n);
+    const r = await acts.reserveBookingFunds({
+      bookingId: 'b4',
+      intent,
+      offer,
+      landed: usd(5_000),
+      approvedMax: usd(5_000),
+    });
+    if (r.status !== 'RESERVED') throw new Error(r.status);
+    await reservations.release('bk-b4-edge', 'gone', T);
+    const grant = {
+      grantId: 'gr',
+      groupId: 'g',
+      execution: { maxAmount: usd(5_000) },
+    } as never;
+    const out = await acts.executeBooking({
+      bookingId: 'b4',
+      offer,
+      grant,
+      reservationId: r.reservationId,
+      planHash: r.planHash,
+      reservedAssetId: r.reservedAssetId,
+      reservedAmount: r.reservedAmount,
+      travelerRefs: [],
+      idempotencyKey: 'idem-b4-key',
+    });
+    expect(out).toMatchObject({
+      status: 'FAILED',
+      reason: expect.stringMatching(/INVALID_RESERVATION_TRANSITION/),
     });
   });
 });
