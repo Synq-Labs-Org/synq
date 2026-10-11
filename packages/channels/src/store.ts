@@ -35,7 +35,9 @@ export type RedeemOutcome =
         | 'CODE_EXPIRED'
         | 'CODE_CONSUMED'
         | 'GROUP_LINK_CONFLICT'
-        | 'USER_LINK_CONFLICT';
+        | 'USER_LINK_CONFLICT'
+        | 'EXTERNAL_PROOF_REQUIRED'
+        | 'EXTERNAL_IDENTITY_MISMATCH';
     };
 export type DeliveryFailure = {
   channel: ChannelId;
@@ -64,6 +66,8 @@ export interface ChannelStore {
   ): Promise<UserLink | null>;
   createLinkCode(record: LinkCodeRecord): Promise<void>;
   linkCode(codeHash: string): Promise<LinkCodeView | null>;
+  /** Marks an unexpired, unconsumed code consumed; true only for the first caller. */
+  consumeLinkCode(codeHash: string, now: number): Promise<boolean>;
   redeemLinkCode(input: {
     codeHash: string;
     groupId: string;
@@ -132,6 +136,12 @@ export class MemoryChannelStore implements ChannelStore {
     if (!c) return null;
     const { codeHash: _hash, ...view } = c;
     return view;
+  }
+  async consumeLinkCode(codeHash: string, now: number) {
+    const c = this.codes.get(codeHash);
+    if (!c || c.consumedAt !== null || c.expiresAt <= now) return false;
+    c.consumedAt = now;
+    return true;
   }
   async redeemLinkCode(input: {
     codeHash: string;

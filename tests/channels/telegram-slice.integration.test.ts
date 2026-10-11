@@ -224,7 +224,25 @@ it('Telegram group → link → balance → Send → web approvals → Kernel gr
     n = sentCount();
     say(userId, name, '/synq');
     const reply = await nextReply(n);
-    const url = new URL(reply.reply_markup!.inline_keyboard[0]![0]!.url);
+    expect(reply.chat_id).toBe(CHAT);
+    const deep = new URL(reply.reply_markup!.inline_keyboard[0]![0]!.url);
+    expect(deep.origin + deep.pathname).toBe('https://t.me/synq_test_bot');
+    if (userId === 1002) {
+      n = sentCount();
+      say(1001, 'alice', `/start ${deep.searchParams.get('start')}`, {
+        chat: { id: 1001, type: 'private' },
+      });
+      const refused = await nextReply(n);
+      expect(refused.chat_id).toBe(1001);
+      expect(refused.text).toMatch(/another member/);
+    }
+    n = sentCount();
+    say(userId, name, `/start ${deep.searchParams.get('start')}`, {
+      chat: { id: userId, type: 'private' },
+    });
+    const dm = await nextReply(n);
+    expect(dm.chat_id).toBe(userId);
+    const url = new URL(dm.reply_markup!.inline_keyboard[0]![0]!.url);
     expect(url.origin + url.pathname).toBe(`${WEB}/channels/link`);
     const outcome = await gateway.redeemLinkCode({
       code: url.searchParams.get('code')!,

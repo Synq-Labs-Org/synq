@@ -31,10 +31,7 @@ describe('channel gateway linking', () => {
 
   it('stores only a hash of the link code and expires it', async () => {
     const f = fixture();
-    await f.gateway.handle(f.message('/synq'));
-    const code = new URL(f.adapter.last()!.buttons![0]!.url).searchParams.get(
-      'code',
-    )!;
+    const { code } = await f.issueCode(CHAT_A, '111');
     expect([...f.store.codes.keys()].some((k) => k.includes(code))).toBe(false);
     f.clock.t += 901;
     expect(
@@ -67,6 +64,69 @@ describe('channel gateway linking', () => {
     await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');
     const again = await f.link(CHAT_B, '111', GROUP_B, 'principal_carol');
     expect(again.outcome.status).toBe('USER_LINK_CONFLICT');
+  });
+});
+
+describe('private link binding', () => {
+  it('never shows a redeemable web code in the group, only a private deep link', async () => {
+    const f = fixture();
+    await f.gateway.handle(f.message('/synq'));
+    const reply = f.adapter.last()!;
+    expect(reply.text).not.toContain('/channels/link');
+    expect(reply.buttons?.[0]?.url).toMatch(
+      /^https:\/\/t\.me\/synq_bot\?start=[A-Za-z0-9_-]{32}$/,
+    );
+    expect(f.adapter.sent.at(-1)!.chat).toBe(CHAT_A);
+  });
+
+  it("another member opening someone else's deep link gets nothing, and the owner still can", async () => {
+    const f = fixture();
+    const stolen = await f.issueCode(CHAT_A, '111', '222');
+    expect(stolen.outcome.code).toBe('START_NOT_YOURS');
+    expect(stolen.code).toBe('');
+    expect(stolen.dm?.chat).toBe('222');
+    const own = await f.gateway.handle(
+      f.message(`/start ${stolen.start}`, {
+        externalGroupId: '111',
+        chatKind: 'DIRECT',
+        userId: '111',
+      }),
+    );
+    expect(own.code).toBe('LINK_CODE_ISSUED');
+    expect(f.adapter.sent.at(-1)!.chat).toBe('111');
+    const replay = await f.gateway.handle(
+      f.message(`/start ${stolen.start}`, {
+        externalGroupId: '111',
+        chatKind: 'DIRECT',
+        userId: '111',
+      }),
+    );
+    expect(replay.code).toBe('START_INVALID');
+  });
+
+  it('with Telegram Login required, a member cannot redeem a code issued to another chat user', async () => {
+    const f = fixture(1_800_000_000, { requireTelegramProof: true });
+    const { code } = await f.issueCode(CHAT_A, '111');
+    const redeem = (provenExternalUserId?: string) =>
+      f.gateway.redeemLinkCode({
+        code,
+        groupId: GROUP_A,
+        principalId: 'principal_bob',
+        ...(provenExternalUserId ? { provenExternalUserId } : {}),
+      });
+    expect((await redeem()).status).toBe('EXTERNAL_PROOF_REQUIRED');
+    expect((await redeem('222')).status).toBe('EXTERNAL_IDENTITY_MISMATCH');
+    expect(await f.store.userLink('telegram', '111')).toBeNull();
+    expect((await redeem('111')).status).toBe('LINKED');
+  });
+
+  it('refuses to link on a channel without private delivery', async () => {
+    const f = fixture();
+    (f.adapter as { deepLink?: unknown }).deepLink = undefined;
+    expect((await f.gateway.handle(f.message('/synq'))).code).toBe(
+      'PRIVATE_LINK_UNAVAILABLE',
+    );
+    expect(f.store.codes.size).toBe(0);
   });
 });
 

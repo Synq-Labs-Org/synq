@@ -4,6 +4,8 @@ import {
   OutboundLimiter,
   TelegramAdapter,
   TelegramBotApi,
+  signTelegramLoginForTest,
+  verifyTelegramLogin,
 } from '@synq/channels';
 
 const TOKEN = '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
@@ -294,5 +296,34 @@ describe('telegram adapter', () => {
     expect(() => new TelegramBotApi({ token: 'nope' })).toThrow(
       'TELEGRAM_TOKEN_MALFORMED',
     );
+  });
+
+  it('verifies Telegram Login data with the bot-token-derived key and freshness', () => {
+    const now = 1_800_000_000;
+    const login = signTelegramLoginForTest(
+      { id: 111, first_name: 'Alice', username: 'alice', auth_date: now - 5 },
+      TOKEN,
+    );
+    expect(verifyTelegramLogin(login, TOKEN, now)).toBe('111');
+    expect(verifyTelegramLogin({ ...login, id: 222 }, TOKEN, now)).toBeNull();
+    expect(
+      verifyTelegramLogin(
+        login,
+        '999999:ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ',
+        now,
+      ),
+    ).toBeNull();
+    expect(verifyTelegramLogin(login, TOKEN, now + 3600)).toBeNull();
+    expect(
+      verifyTelegramLogin({ ...login, extra: 'x' }, TOKEN, now),
+    ).toBeNull();
+  });
+
+  it('builds t.me deep links only for safe payloads', () => {
+    const { a } = adapter(() => ({ body: { ok: true } }));
+    expect(a.deepLink('abc_DEF-123')).toBe(
+      'https://t.me/synq_bot?start=abc_DEF-123',
+    );
+    expect(a.deepLink('bad payload')).toBeNull();
   });
 });

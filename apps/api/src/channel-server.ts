@@ -33,6 +33,7 @@ const ChannelEnvSchema = z.object({
   LINQ_API_KEY: z.string().optional(),
   LINQ_WEBHOOK_SECRET: z.string().optional(),
   LINQ_BASE_URL: z.string().url().optional(),
+  SYNQ_TELEGRAM_LOGIN_REQUIRED: z.enum(['0', '1']).default('0'),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
 });
 
@@ -123,6 +124,9 @@ export async function registerChannels(input: {
     ...(telegram?.botUsername
       ? { botUsernames: { telegram: telegram.botUsername } }
       : {}),
+    requireExternalProof: {
+      telegram: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
+    },
     onEvent: (event, outcome) =>
       input.log('channel event', {
         type: event.type,
@@ -139,6 +143,16 @@ export async function registerChannels(input: {
     memberSession: async (token, groupId) =>
       memberAccess ? memberAccess.session(token, groupId) : null,
     now,
+    ...(telegram && telegram.botId !== null
+      ? {
+          telegramLogin: {
+            botId: telegram.botId,
+            required: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
+            verify: (raw: unknown, at: number) =>
+              telegram!.verifyLogin(raw, at),
+          },
+        }
+      : {}),
     env: input.env,
   });
   const controller = new AbortController();

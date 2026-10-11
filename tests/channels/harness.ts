@@ -21,6 +21,9 @@ export class FakeAdapter implements ChannelAdapter {
   sent: { chat: string; message: OutboundMessage }[] = [];
   failing = false;
   acks: string[] = [];
+  deepLink(payload: string) {
+    return `https://t.me/synq_bot?start=${payload}`;
+  }
   async send(chat: string, message: OutboundMessage) {
     if (this.failing)
       throw new ChannelDeliveryError('PROVIDER_UNAVAILABLE', 3, 'outage');
@@ -35,7 +38,10 @@ export class FakeAdapter implements ChannelAdapter {
   }
 }
 
-export function fixture(now = 1_800_000_000) {
+export function fixture(
+  now = 1_800_000_000,
+  options: { requireTelegramProof?: boolean } = {},
+) {
   const clock = { t: now };
   const store = new MemoryChannelStore();
   const adapter = new FakeAdapter();
@@ -91,6 +97,7 @@ export function fixture(now = 1_800_000_000) {
     now: () => clock.t,
     botUsernames: { telegram: 'synq_bot' },
     brainCooldownSeconds: 0,
+    requireExternalProof: { telegram: options.requireTelegramProof ?? false },
     onEvent: (event, o) =>
       events.push({ event, status: o.status, code: o.code }),
   });
@@ -132,15 +139,40 @@ export function fixture(now = 1_800_000_000) {
     };
   };
   /** Issues a link code in `chat` for `userId` and redeems it as `principalId` for `groupId`. */
+  /** Group `/synq`, then the private `/start` deep link; returns the DM'd web code. */
+  const issueCode = async (chat: string, userId: string, startAs = userId) => {
+    await gateway.handle(message('/synq', { externalGroupId: chat, userId }));
+    const deep = adapter.last()?.buttons?.[0]?.url ?? '';
+    const start = deep.startsWith('https://t.me/')
+      ? (new URL(deep).searchParams.get('start') ?? '')
+      : '';
+    const before = adapter.sent.length;
+    const outcome = await gateway.handle(
+      message(`/start ${start}`, {
+        externalGroupId: startAs,
+        chatKind: 'DIRECT',
+        userId: startAs,
+      }),
+    );
+    const dm = adapter.sent.slice(before).at(-1);
+    const url = dm?.message.buttons?.[0]?.url ?? '';
+    return {
+      start,
+      outcome,
+      dm,
+      code: url.includes('/channels/link?code=')
+        ? (new URL(url).searchParams.get('code') ?? '')
+        : '',
+    };
+  };
+  /** Issues a private link code for `userId` and redeems it as `principalId` for `groupId`. */
   const link = async (
     chat: string,
     userId: string,
     groupId: string,
     principalId: string,
   ) => {
-    await gateway.handle(message('/synq', { externalGroupId: chat, userId }));
-    const url = adapter.last()?.buttons?.[0]?.url ?? '';
-    const code = new URL(url).searchParams.get('code') ?? '';
+    const { code } = await issueCode(chat, userId);
     return {
       code,
       outcome: await gateway.redeemLinkCode({ code, groupId, principalId }),
@@ -159,5 +191,6 @@ export function fixture(now = 1_800_000_000) {
     events,
     message,
     link,
+    issueCode,
   };
 }

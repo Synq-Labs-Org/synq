@@ -136,6 +136,13 @@ export class PostgresChannelStore implements ChannelStore {
         }
       : null;
   }
+  async consumeLinkCode(codeHash: string, now: number) {
+    const r = await this.pool.query(
+      'UPDATE synq_channel_link_code SET consumed_at=$2 WHERE code_hash=$1 AND consumed_at IS NULL AND expires_at > $2',
+      [codeHash, now],
+    );
+    return r.rowCount === 1;
+  }
   async redeemLinkCode(input: {
     codeHash: string;
     groupId: string;

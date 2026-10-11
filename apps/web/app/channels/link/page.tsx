@@ -15,7 +15,25 @@ const PreviewSchema = z.looseObject({
   displayName: z.string().nullable(),
   expiresAt: z.number(),
   groupLinked: z.boolean(),
+  telegramLogin: z
+    .looseObject({ botId: z.number(), required: z.boolean() })
+    .nullable()
+    .optional(),
 });
+
+function telegramLoginFromFragment(): Record<string, unknown> | null {
+  const m = /tgAuthResult=([A-Za-z0-9_\-=+/]+)/.exec(window.location.hash);
+  if (!m) return null;
+  try {
+    const json = atob(m[1]!.replace(/-/g, '+').replace(/_/g, '/'));
+    const parsed: unknown = JSON.parse(json);
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
 const AccessSessionSchema = z.looseObject({
   token: z.string(),
   memberId: z.string(),
@@ -37,9 +55,14 @@ export default function ChannelLinkPage() {
   const [done, setDone] = useState<z.output<typeof LinkedSchema> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [telegramLogin, setTelegramLogin] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   useEffect(() => {
     setRecord(loadCredential());
+    setTelegramLogin(telegramLoginFromFragment());
     const c = new URLSearchParams(window.location.search).get('code') ?? '';
     setCode(c);
     if (c)
@@ -68,7 +91,7 @@ export default function ChannelLinkPage() {
         await api.post(
           '/v1/channels/links/redeem',
           LinkedSchema,
-          { code, groupId },
+          { code, groupId, ...(telegramLogin ? { telegramLogin } : {}) },
           session.token,
         ),
       );
@@ -78,6 +101,13 @@ export default function ChannelLinkPage() {
       setBusy(false);
     }
   }
+
+  function verifyTelegram(botId: number) {
+    const back = window.location.href.split('#')[0]!;
+    window.location.href = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent(window.location.origin)}&request_access=write&return_to=${encodeURIComponent(back)}`;
+  }
+  const needsTelegram =
+    !!preview?.telegramLogin?.required && telegramLogin === null;
 
   return (
     <>
@@ -118,9 +148,26 @@ export default function ChannelLinkPage() {
             />
             This is my chat account
           </label>
+          {preview.telegramLogin && (
+            <p>
+              {telegramLogin
+                ? 'Telegram account verified for this link.'
+                : 'Prove this Telegram account is yours: '}
+              {!telegramLogin && (
+                <button
+                  data-testid="link-telegram"
+                  onClick={() => verifyTelegram(preview.telegramLogin!.botId)}
+                >
+                  Verify with Telegram
+                </button>
+              )}
+            </p>
+          )}
           <button
             data-testid="link-confirm"
-            disabled={busy || !confirmed || !groupId || !record}
+            disabled={
+              busy || !confirmed || !groupId || !record || needsTelegram
+            }
             onClick={link}
           >
             {busy ? 'Waiting for passkey…' : 'Link with passkey'}
