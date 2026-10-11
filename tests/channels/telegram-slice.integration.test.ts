@@ -15,7 +15,7 @@ import {
 } from '@synq/channels';
 import { PostgresChannelStore } from '@synq/channels/postgres';
 import { freshChannelDatabase } from './db.js';
-import { FakeTelegram } from './fake-telegram.js';
+import { FakeTelegram } from '../../apps/demo/src/fake-telegram.js';
 
 process.env.SYNQ_DEMO_DATABASE_URL ??=
   'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_demo';

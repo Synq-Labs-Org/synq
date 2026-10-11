@@ -126,7 +126,7 @@ export type SendRunOptions = {
   executionMode?: 'REAL_TESTNET' | 'SIMULATION';
 };
 
-function sendMandate(input: {
+export function sendMandate(input: {
   chainGroupId: Hex;
   account: Address;
   executor: Address;

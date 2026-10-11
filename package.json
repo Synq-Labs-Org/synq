@@ -49,7 +49,9 @@
     "funding:evidence": "node --import tsx scripts/funding-evidence.ts",
     "demo:cross-phase": "tsx scripts/cross-phase-demo.ts",
     "test:gauntlet": "tsx scripts/security-gauntlet.ts",
-    "channels:telegram:poll": "node --import tsx apps/api/src/channels-poll.ts"
+    "channels:telegram:poll": "node --import tsx apps/api/src/channels-poll.ts",
+    "demo:telegram": "node --import tsx apps/demo/src/telegram.ts",
+    "demo:telegram:rehearse": "node --import tsx apps/demo/src/telegram-rehearsal.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
