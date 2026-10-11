@@ -335,6 +335,46 @@ describe('channel gateway adversarial ingress', () => {
     );
   });
 
+  it('posts mandate proposal counts, quorum and invalidation with the mandate review page', async () => {
+    const f = fixture();
+    await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');
+    const base = {
+      intentHash: HASH('aa'),
+      draftDigest: HASH('bb'),
+      label: 'mandate m v1 (new)',
+      required: 2,
+      kind: 'MANDATE' as const,
+      reviewPath: `/mandates/${HASH('bb')}`,
+    };
+    f.approvals.set(GROUP_A, [{ ...base, counted: 1, status: 'PENDING' }]);
+    await f.gateway.notify();
+    expect(f.adapter.last()?.text).toContain(
+      '1/2 verified passkey owner approvals',
+    );
+    expect(f.adapter.last()?.buttons?.[0]?.url).toBe(
+      `https://synq.example/mandates/${HASH('bb')}`,
+    );
+    await f.gateway.handle(f.message('/mandates'));
+    expect(f.adapter.last()?.text).toContain(
+      'Proposed: mandate m v1 (new): 1/2',
+    );
+    f.approvals.set(GROUP_A, [{ ...base, counted: 2, status: 'SATISFIED' }]);
+    await f.gateway.notify();
+    expect(f.adapter.last()?.text).toMatch(/Safe governance transaction/);
+    f.approvals.set(GROUP_A, [
+      {
+        ...base,
+        counted: 0,
+        status: 'INVALIDATED',
+        reason: 'Safe nonce moved',
+      },
+    ]);
+    await f.gateway.notify();
+    expect(f.adapter.last()?.text).toContain(
+      'no longer valid (Safe nonce moved)',
+    );
+  });
+
   it('turns /send into a passkey-confirmation link and never into an execution', async () => {
     const f = fixture();
     await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');

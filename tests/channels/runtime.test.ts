@@ -157,7 +157,75 @@ describe('production channel ports', () => {
         status: 'PENDING_APPROVAL',
         code: 'QUORUM',
         intentHash: H('11'),
+        reviewPath: null,
       },
+    ]);
+  });
+
+  it('turns a Kernel-checked Brain mandate proposal into a mandate review link', async () => {
+    const proposed: unknown[] = [];
+    const brain = brainChannelPort({
+      run: async () => ({
+        status: 'COMPLETED',
+        items: [
+          {
+            kind: 'MANDATE',
+            status: 'ESCALATED',
+            normalized: {
+              kind: 'MANDATE',
+              change: 'NEW',
+              mandate: { mandateId: 'm' },
+            },
+            decision: {
+              kind: 'MANDATE',
+              status: 'REQUIRES_HUMAN_APPROVAL',
+              code: 'NEW_MANDATE',
+              draftDigest: null,
+            },
+          },
+          {
+            kind: 'MANDATE',
+            status: 'REJECTED',
+            normalized: {
+              kind: 'MANDATE',
+              change: 'NEW',
+              mandate: { mandateId: 'x' },
+            },
+            decision: {
+              kind: 'MANDATE',
+              status: 'REJECTED',
+              code: 'INVALID_MANDATE',
+              draftDigest: null,
+            },
+          },
+        ],
+        findings: [],
+      }),
+      drafts: async () => [],
+      proposeMandate: async (input) => {
+        proposed.push(input);
+        return H('77');
+      },
+    });
+    const reply = await brain({
+      groupId: G,
+      memberId: 'member_0',
+      principalId: 'p_alice',
+      text: 'x',
+      runId: 'r',
+      intent: 'PROPOSE',
+    });
+    expect(proposed).toEqual([
+      {
+        groupId: G,
+        memberId: 'member_0',
+        mandate: { mandateId: 'm' },
+        change: 'NEW',
+      },
+    ]);
+    expect(reply.proposals.map((p) => p.reviewPath)).toEqual([
+      `/mandates/${H('77')}`,
+      null,
     ]);
   });
 });

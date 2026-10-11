@@ -37,6 +37,10 @@ export type ApprovalSummary = {
   counted: number;
   required: number;
   status: 'PENDING' | 'SATISFIED' | 'INVALIDATED';
+  kind?: 'SEND' | 'ACTION' | 'MANDATE';
+  /** Web path of the authenticated review page; defaults to /intents/<intentHash>. */
+  reviewPath?: string;
+  reason?: string | null;
 };
 export type ReceiptSummary = {
   intentHash: string;
@@ -50,6 +54,7 @@ export type BrainProposalSummary = {
   status: string;
   code: string | null;
   intentHash: string | null;
+  reviewPath?: string | null;
 };
 export type BrainReply = { text: string; proposals: BrainProposalSummary[] };
 
@@ -547,8 +552,24 @@ export class ChannelGateway {
               `${m.mandateId} v${m.version} ${m.status}: per action ${m.perActionCap} ${m.symbol}, budget ${m.cumulativeBudget}, spent ${m.spent}`,
           )
           .join('\n')
-      : 'No mandates. Use /propose to ask the Brain to draft one; it must be approved before it has any authority.';
-    return this.replyOutcome(envelope, 'HANDLED', 'MANDATES', { text });
+      : 'No active mandates. Use /propose to ask the Brain to draft one; it must be approved before it has any authority.';
+    const proposals = (
+      await this.options.ports.approvals(group.groupId).catch(() => [])
+    ).filter((a) => a.kind === 'MANDATE' && a.status !== 'INVALIDATED');
+    const lines = [
+      text,
+      ...proposals.map(
+        (a) =>
+          `Proposed: ${a.label}: ${a.counted}/${a.required} verified owner approvals`,
+      ),
+    ];
+    return this.replyOutcome(envelope, 'HANDLED', 'MANDATES', {
+      text: lines.join('\n'),
+      buttons: proposals.slice(0, 3).map((a) => ({
+        label: `Review ${a.label}`.slice(0, 64),
+        url: this.web(reviewPath(a)),
+      })),
+    });
   }
 
   private async status(envelope: Envelope, group: GroupLink) {
@@ -580,7 +601,7 @@ export class ChannelGateway {
         .slice(0, 3)
         .map((a) => ({
           label: `Review ${short(a.intentHash)}`,
-          url: this.web(`/intents/${a.intentHash}`),
+          url: this.web(reviewPath(a)),
         })),
     });
   }
@@ -661,11 +682,14 @@ export class ChannelGateway {
     return this.replyOutcome(envelope, 'HANDLED', 'BRAIN', {
       text: lines.join('\n'),
       buttons: reply.proposals
-        .filter((p) => p.intentHash && p.status === 'PENDING_APPROVAL')
+        .filter(
+          (p) =>
+            p.reviewPath || (p.intentHash && p.status === 'PENDING_APPROVAL'),
+        )
         .slice(0, 3)
         .map((p) => ({
           label: 'Review and approve',
-          url: this.web(`/intents/${p.intentHash}`),
+          url: this.web(p.reviewPath ?? `/intents/${p.intentHash}`),
         })),
     });
   }
@@ -683,27 +707,37 @@ export class ChannelGateway {
       ]);
       const messages: { key: string; message: OutboundMessage }[] = [];
       for (const a of approvals) {
-        if (a.status === 'INVALIDATED') continue;
+        const what = a.kind === 'MANDATE' ? 'passkey owner' : 'passkey';
         messages.push(
-          a.status === 'SATISFIED'
+          a.status === 'INVALIDATED'
             ? {
-                key: `approval:${a.draftDigest}:satisfied`,
+                key: `approval:${a.draftDigest}:invalidated`,
                 message: {
-                  text: `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified passkey approvals. The Kernel issues the grant; execution follows.`,
+                  text: `${a.label} is no longer valid${a.reason ? ` (${a.reason})` : ''}. Nothing will execute.`,
                 },
               }
-            : {
-                key: `approval:${a.draftDigest}:${a.counted}`,
-                message: {
-                  text: `Approval needed for ${a.label}: ${a.counted}/${a.required} verified passkey approvals.`,
-                  buttons: [
-                    {
-                      label: 'Review and approve',
-                      url: this.web(`/intents/${a.intentHash}`),
-                    },
-                  ],
+            : a.status === 'SATISFIED'
+              ? {
+                  key: `approval:${a.draftDigest}:satisfied`,
+                  message: {
+                    text:
+                      a.kind === 'MANDATE'
+                        ? `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals. The Safe governance transaction is submitted next.`
+                        : `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals. The Kernel issues the grant; execution follows.`,
+                  },
+                }
+              : {
+                  key: `approval:${a.draftDigest}:${a.counted}`,
+                  message: {
+                    text: `Approval needed for ${a.label}: ${a.counted}/${a.required} verified ${what} approvals.`,
+                    buttons: [
+                      {
+                        label: 'Review and approve',
+                        url: this.web(reviewPath(a)),
+                      },
+                    ],
+                  },
                 },
-              },
         );
       }
       for (const r of receipts)
@@ -790,6 +824,10 @@ export class ChannelGateway {
       return false;
     }
   }
+}
+
+function reviewPath(a: ApprovalSummary) {
+  return a.reviewPath ?? `/intents/${a.intentHash}`;
 }
 
 function stripMention(text: string) {

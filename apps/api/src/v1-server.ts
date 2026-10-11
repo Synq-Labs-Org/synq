@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import type { Address } from 'viem';
 import { Client, Connection } from '@temporalio/client';
 import { WorldSnapshotBuilder } from '@synq/world-model';
 import {
@@ -46,9 +47,17 @@ import {
   DynamicAdapter,
   GrantApprovalGateway,
   PostgresIdentityStore,
+  StoreMembershipDirectory,
   PrivyAdapter,
 } from '@synq/identity/server';
 import { registerChannels } from './channel-server.js';
+import {
+  MandateProposalService,
+  PostgresMandateProposalStore,
+  kernelMandateCheck,
+  safeReader,
+} from './mandate-proposals.js';
+import { mandateRoutes } from './mandate-routes.js';
 import {
   MIN_ADMIN_TOKEN_LENGTH,
   createV1Api,
@@ -312,6 +321,16 @@ export function mandateReader(snapshots: {
   };
 }
 
+export function registryFor(chainId: number, deploymentsDir: string): Address {
+  return z
+    .object({ chainId: z.literal(chainId), MandateRegistry: AddressSchema })
+    .parse(
+      JSON.parse(
+        readFileSync(resolve(deploymentsDir, `${chainId}.json`), 'utf8'),
+      ),
+    ).MandateRegistry as Address;
+}
+
 export function executionModuleFor(
   chainId: number,
   deploymentsDir: string,
@@ -539,12 +558,47 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       { executionModules, localAssets: [] },
     );
     const directoryReader = new StoreIdentityDirectoryReader(store, pool);
+    const mandateStore = new PostgresMandateProposalStore(pool);
+    await mandateStore.migrate();
+    const mandateProposals = new MandateProposalService({
+      store: mandateStore,
+      directory: new StoreMembershipDirectory(store),
+      group: async (groupId) => {
+        const g = await store.transaction((tx) => tx.getGroup(groupId));
+        return g
+          ? {
+              account: g.account,
+              owners: g.owners,
+              threshold: g.threshold,
+              chainId: g.chainId,
+            }
+          : null;
+      },
+      safe: safeReader(readModel.client),
+      registry: registryFor(chainId, config.SYNQ_DEPLOYMENTS_DIR),
+      chainId,
+      kernelCheck: kernelMandateCheck(() => kernel.listMandates()),
+      now,
+    });
+    await app.register(mandateRoutes, {
+      service: mandateProposals,
+      adminToken: config.SYNQ_API_ADMIN_TOKEN,
+    });
     const qwen = qwenOptionsFromEnv(env);
     const authorizer = intents;
     const brain =
       qwen.mode === 'LIVE'
         ? brainChannelPort({
             drafts: (groupId) => directoryReader.drafts(groupId),
+            proposeMandate: async ({ groupId, memberId, mandate, change }) =>
+              (
+                await mandateProposals.propose({
+                  groupId,
+                  mandate,
+                  change,
+                  proposedBy: { memberId, source: 'BRAIN' },
+                })
+              ).proposalId,
             run: async ({ runId, groupId, memberId, text }) => {
               const snapshot = await world.build({ groupId });
               const proposals = new KernelProposalGateway({
@@ -617,6 +671,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       executionMode:
         config.SYNQ_PROFILE === LOCAL_PROFILE ? 'SIMULATION' : 'REAL_TESTNET',
       ...(brain ? { brain } : {}),
+      mandateProposals,
       log: (message, fields) => app.log.info(fields ?? {}, message),
     });
   }

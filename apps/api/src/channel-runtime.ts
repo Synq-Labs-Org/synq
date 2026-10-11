@@ -8,6 +8,13 @@ import type {
   ReceiptSummary,
 } from '@synq/channels';
 import type { SendRouteDeps } from './send-routes.js';
+import type {
+  MandateProposal,
+  MandateProposalService,
+} from './mandate-proposals.js';
+
+const mandateLabel = (p: MandateProposal) =>
+  `mandate ${p.mandate.mandateId} v${p.mandate.version} (${p.change === 'NEW' ? 'new' : 'change'})`;
 
 export const MONAD_TESTNET_EXPLORER_TX =
   'https://testnet.monadexplorer.com/tx/';
@@ -46,6 +53,7 @@ export function productionChannelPorts(input: {
   executed?: ChannelExecutionSource;
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
   brain?: ChannelPorts['brain'];
+  mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
 }): ChannelPorts {
   const { send } = input;
   return {
@@ -113,6 +121,29 @@ export function productionChannelPorts(input: {
                 : 'PENDING',
         });
       }
+      for (const p of (await input.mandateProposals?.list(groupId)) ?? []) {
+        if (p.state === 'EXECUTED') continue;
+        const counted =
+          p.state === 'PENDING' || p.state === 'READY'
+            ? (await input.mandateProposals!.counted(p)).length
+            : 0;
+        out.push({
+          intentHash: p.safeTxHash,
+          draftDigest: p.proposalId,
+          label: mandateLabel(p),
+          counted,
+          required: p.required,
+          status:
+            p.state === 'STALE' || p.state === 'REJECTED'
+              ? 'INVALIDATED'
+              : counted >= p.required
+                ? 'SATISFIED'
+                : 'PENDING',
+          kind: 'MANDATE',
+          reviewPath: `/mandates/${p.proposalId}`,
+          reason: p.reason,
+        });
+      }
       return out;
     },
     receipts: async (groupId) => {
@@ -131,6 +162,15 @@ export function productionChannelPorts(input: {
           label: sendLabel(s),
           executionMode: input.executionMode,
         }));
+      for (const p of (await input.mandateProposals?.list(groupId)) ?? [])
+        if (p.state === 'EXECUTED' && p.executionTx)
+          out.push({
+            intentHash: p.proposalId,
+            transactionHash: p.executionTx,
+            state: 'CONFIRMED',
+            label: `${mandateLabel(p)} activated by Safe owners`,
+            executionMode: input.executionMode,
+          });
       for (const e of (await input.executed
         ?.executed(groupId)
         .catch(() => [])) ?? [])
@@ -164,6 +204,11 @@ export function productionChannelPorts(input: {
 type BrainItem = {
   kind: string;
   status: string;
+  normalized?: {
+    kind: string;
+    change?: 'NEW' | 'SUPERSEDE';
+    mandate?: unknown;
+  } | null;
   decision: {
     kind: 'ACTION' | 'MANDATE';
     status: string;
@@ -184,6 +229,13 @@ export function brainChannelPort(input: {
     findings: readonly { kind: string }[];
   }>;
   drafts(groupId: string): Promise<DraftRow[]>;
+  /** Persists a Kernel-checked mandate proposal for owner approval; returns its id. */
+  proposeMandate?(input: {
+    groupId: string;
+    memberId: string;
+    mandate: unknown;
+    change: 'NEW' | 'SUPERSEDE';
+  }): Promise<string | null>;
 }): NonNullable<ChannelPorts['brain']> {
   return async (request): Promise<BrainReply> => {
     const result = await input.run({
@@ -196,16 +248,37 @@ export function brainChannelPort(input: {
           : request.text,
     });
     const drafts = await input.drafts(request.groupId).catch(() => []);
-    const proposals = result.items
-      .filter((i) => i.decision)
-      .map((i) => ({
-        kind: i.decision!.kind,
-        status: i.decision!.status,
-        code: i.decision!.code,
+    const proposals = [];
+    for (const i of result.items) {
+      if (!i.decision) continue;
+      let reviewPath: string | null = null;
+      if (
+        i.decision.kind === 'MANDATE' &&
+        i.decision.status === 'REQUIRES_HUMAN_APPROVAL' &&
+        i.normalized?.kind === 'MANDATE' &&
+        i.normalized.mandate &&
+        input.proposeMandate
+      ) {
+        const id = await input
+          .proposeMandate({
+            groupId: request.groupId,
+            memberId: request.memberId,
+            mandate: i.normalized.mandate,
+            change: i.normalized.change ?? 'NEW',
+          })
+          .catch(() => null);
+        reviewPath = id ? `/mandates/${id}` : null;
+      }
+      proposals.push({
+        kind: i.decision.kind,
+        status: i.decision.status,
+        code: i.decision.code,
         intentHash:
           drafts.find((d) => d.draftDigest === i.decision!.draftDigest)
             ?.intentHash ?? null,
-      }));
+        reviewPath,
+      });
+    }
     const findings = [...new Set(result.findings.map((f) => f.kind))];
     return {
       text: `Brain ${result.status}: ${result.items.length} item(s)${findings.length ? `; findings ${findings.join(', ')}` : ''}. Proposals go to the Kernel; nothing executes without passkey approvals.`,

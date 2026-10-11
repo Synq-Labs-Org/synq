@@ -22,6 +22,7 @@ import {
   type ChannelExecutionSource,
 } from './channel-runtime.js';
 import type { SendRouteDeps } from './send-routes.js';
+import type { MandateProposalService } from './mandate-proposals.js';
 
 const ChannelEnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
@@ -54,6 +55,7 @@ export async function registerChannels(input: {
   executed?: ChannelExecutionSource;
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
   brain?: ChannelPorts['brain'];
+  mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
   log: ChannelLog;
   fetch?: typeof fetch;
   telegramBaseUrl?: string;
@@ -117,6 +119,9 @@ export async function registerChannels(input: {
       ...(input.executed ? { executed: input.executed } : {}),
       executionMode: input.executionMode,
       ...(input.brain ? { brain: input.brain } : {}),
+      ...(input.mandateProposals
+        ? { mandateProposals: input.mandateProposals }
+        : {}),
     }),
     webBaseUrl: env.SYNQ_WEB_BASE_URL ?? input.origin,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,
