@@ -103,6 +103,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:packages/schemas
+      '@synq/settlement':
+        specifier: workspace:*
+        version: link:packages/settlement
       '@synq/strategy-engine':
         specifier: workspace:*
         version: link:packages/strategy-engine
@@ -489,6 +492,24 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/settlement:
+    dependencies:
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../offer-exchange
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       zod:
         specifier: 4.6.5
         version: 4.6.5
