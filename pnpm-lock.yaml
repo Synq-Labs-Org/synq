@@ -46,6 +46,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:packages/chain-registry
+      '@synq/channels':
+        specifier: workspace:*
+        version: link:packages/channels
       '@synq/domain':
         specifier: workspace:*
         version: link:packages/domain
@@ -169,6 +172,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
+      '@synq/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -354,6 +360,12 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/channels:
+    dependencies:
       zod:
         specifier: 4.6.5
         version: 4.6.5

@@ -48,7 +48,8 @@
     "test:live:p08": "SYNQ_LIVE_P08=1 vitest run tests/funding/p08.live.test.ts",
     "funding:evidence": "node --import tsx scripts/funding-evidence.ts",
     "demo:cross-phase": "tsx scripts/cross-phase-demo.ts",
-    "test:gauntlet": "tsx scripts/security-gauntlet.ts"
+    "test:gauntlet": "tsx scripts/security-gauntlet.ts",
+    "channels:telegram:poll": "node --import tsx apps/api/src/channels-poll.ts"
   },
   "dependencies": {
     "zod": "4.6.5",
@@ -102,6 +103,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vitest": "4.1.11",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "@synq/channels": "workspace:*"
   }
 }
