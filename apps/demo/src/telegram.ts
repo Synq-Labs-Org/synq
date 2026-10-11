@@ -108,7 +108,7 @@ export const LOCAL_DIR = resolve('.synq-local/telegram');
 export const EXPLORER = 'https://testnet.monadexplorer.com/tx/';
 const DB_URL =
   process.env.SYNQ_TELEGRAM_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_telegram_demo';
+  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_telegram_e2e';
 const sha = (v: string) =>
   createHash('sha256').update(v).digest('hex').slice(0, 16);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
