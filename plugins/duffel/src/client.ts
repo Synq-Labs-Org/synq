@@ -57,11 +57,16 @@ type Json = Record<string, unknown>;
 export class DuffelClient {
   readonly environment = 'SANDBOX' as const;
   private readonly token: string;
+  readonly evidence: 'PROVIDER_SANDBOX' | 'MOCKED';
+  private readonly baseUrl: string;
+  /** PROVIDER_SANDBOX only when talking to the real test-mode API; doubles say MOCKED. */
   constructor(
     token: string,
     private readonly fetchImpl: HttpFetch,
-    private readonly baseUrl = DUFFEL_API,
+    options: { evidence: 'PROVIDER_SANDBOX' | 'MOCKED'; baseUrl?: string },
   ) {
+    this.evidence = options.evidence;
+    this.baseUrl = options.baseUrl ?? DUFFEL_API;
     if (!/^duffel_test_[A-Za-z0-9_-]+$/.test(token))
       throw new LiveKeyRefusedError();
     this.token = token;

@@ -1,5 +1,15 @@
-import { providerMoney, type Money } from '@synq/offer-exchange';
-import { DuffelClient, DuffelError } from './client.js';
+import {
+  providerMoney,
+  toDecimal,
+  type EconomicOffer,
+  type Money,
+  type ProviderBookingOutcome,
+  type ProviderBookingPort,
+  type TravelerPii,
+} from '@synq/offer-exchange';
+import { DUFFEL_HOST, DuffelClient, DuffelError } from './client.js';
+import { DUFFEL_FLIGHTS } from './flights.js';
+import { DUFFEL_STAYS } from './stays.js';
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json =>
@@ -9,17 +19,6 @@ const str = (v: unknown): string | undefined =>
   typeof v === 'string' ? v : undefined;
 
 export const IDEMPOTENCY_METADATA_KEY = 'synq_idempotency_key';
-
-/** Minimum traveler fields, resolved by the execution worker from ProfileVault. */
-export type TravelerPii = {
-  givenName: string;
-  familyName: string;
-  bornOn: string;
-  email: string;
-  phone: string;
-  title?: 'mr' | 'ms' | 'mrs' | 'miss' | 'dr';
-  gender?: 'm' | 'f';
-};
 
 export type BookingOutcome =
   | {
@@ -289,4 +288,88 @@ export class DuffelBookingExecutor {
       refundTo: str(r.data.refund_to) ?? null,
     };
   }
+}
+
+function toPort(o: BookingOutcome): ProviderBookingOutcome {
+  if (o.status === 'FAILED') return { status: 'FAILED', reason: o.code };
+  if (o.status === 'UNKNOWN') return { status: 'UNKNOWN', reason: o.detail };
+  return {
+    status: o.status,
+    providerRef: o.providerRef,
+    reference: o.reference,
+    charged: o.charged,
+  };
+}
+
+/** Domain-agnostic booking ports used by the execution worker. */
+export function duffelBookingPorts(
+  exec: DuffelBookingExecutor,
+  flights: { passengerIds(offerId: string): Promise<string[]> },
+): Record<string, ProviderBookingPort> {
+  const stays: ProviderBookingPort = {
+    providerId: DUFFEL_STAYS,
+    host: DUFFEL_HOST,
+    book: async ({ offer, travelers, idempotencyKey }) =>
+      toPort(
+        await exec.bookStay({
+          quoteId: offer.providerRef,
+          guests: travelers,
+          idempotencyKey,
+        }),
+      ),
+    find: async ({ idempotencyKey }) => {
+      const o = await exec.findStayBooking(idempotencyKey);
+      return o ? toPort(o) : null;
+    },
+    cancel: async ({ providerRef }) => {
+      const c = await exec.cancelStay(providerRef);
+      return { confirmed: c.confirmed, refund: c.refund, reason: null };
+    },
+  };
+  const air: ProviderBookingPort = {
+    providerId: DUFFEL_FLIGHTS,
+    host: DUFFEL_HOST,
+    book: async ({ offer, travelers, idempotencyKey }) => {
+      const total = totalOf(offer);
+      return toPort(
+        await exec.bookFlight({
+          offerId: offer.providerRef,
+          passengerIds: await flights.passengerIds(offer.providerRef),
+          passengers: travelers,
+          amount: total,
+          amountDecimal: toDecimal(total),
+          idempotencyKey,
+        }),
+      );
+    },
+    find: async ({ idempotencyKey }) => {
+      const o = await exec.findFlightOrder(idempotencyKey);
+      return o ? toPort(o) : null;
+    },
+    cancel: async ({ providerRef }) => {
+      const quote = await exec.quoteFlightCancellation(providerRef);
+      if (!quote.cancellationId)
+        return {
+          confirmed: false,
+          refund: null,
+          reason: 'no cancellation quote',
+        };
+      const done = await exec.confirmFlightCancellation(quote.cancellationId);
+      return { confirmed: done.confirmed, refund: done.refund, reason: null };
+    },
+  };
+  return { [DUFFEL_STAYS]: stays, [DUFFEL_FLIGHTS]: air };
+}
+
+function totalOf(offer: EconomicOffer): Money {
+  const p = offer.price;
+  return {
+    ...p.base,
+    amount: String(
+      BigInt(p.base.amount) +
+        BigInt(p.tax.amount) +
+        BigInt(p.fees.amount) +
+        BigInt(p.shipping.amount),
+    ),
+  };
 }

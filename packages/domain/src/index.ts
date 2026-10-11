@@ -20,6 +20,7 @@ export * from '@synq/schemas';
 export * from './errors.js';
 export * from './kernel-errors.js';
 export * from './lifecycle.js';
+export * from './booking.js';
 
 export type BrandedId<K extends IdKind> = IdOf<K>;
 export function newId<K extends IdKind>(kind: K): IdOf<K> {

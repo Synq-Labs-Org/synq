@@ -762,6 +762,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
       '@synq/perpl-executor':
         specifier: workspace:*
         version: link:../perpl-executor
@@ -777,6 +780,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       '@synq/strategy-engine':
         specifier: workspace:*
         version: link:../../packages/strategy-engine

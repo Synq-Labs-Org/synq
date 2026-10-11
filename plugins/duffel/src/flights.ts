@@ -195,8 +195,8 @@ export class DuffelFlightsProvider implements OfferProvider {
         requiresStepUp: false,
         piiFields: ['TRAVELER_NAME', 'DOB', 'EMAIL', 'PHONE'],
       },
-      environment: 'SANDBOX',
-      evidence: 'PROVIDER_SANDBOX',
+      environment: this.client.evidence === 'MOCKED' ? 'FIXTURE' : 'SANDBOX',
+      evidence: this.client.evidence,
       retrievedAt: now,
       executable: false,
     };

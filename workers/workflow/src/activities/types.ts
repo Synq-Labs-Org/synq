@@ -1,3 +1,4 @@
+import type { BookingActivities } from './booking-types.js';
 import type { Actor, ControlAuthorization } from '../workflows/messages.js';
 import type {
   ActionState,
@@ -394,6 +395,7 @@ export interface ControlActivities {
 }
 
 export type SynqActivities = ControlActivities &
+  BookingActivities &
   EconomicActivities &
   ApprovalActivities &
   StrategyActivities &

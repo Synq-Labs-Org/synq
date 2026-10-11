@@ -84,7 +84,7 @@ function flightIntent(): EconomicIntent {
 const env = { DUFFEL_TEST_TOKEN: TOKEN };
 const setup = () => {
   const fake = new FakeDuffel(now);
-  const client = new DuffelClient(TOKEN, fake.fetch);
+  const client = new DuffelClient(TOKEN, fake.fetch, { evidence: 'MOCKED' });
   const graph = new ProviderCapabilityGraph(travelCapabilities(env));
   return {
     fake,
@@ -98,7 +98,10 @@ const setup = () => {
 describe('Duffel client and capabilities', () => {
   it('refuses live keys outright', () => {
     expect(
-      () => new DuffelClient('duffel_live_abc', new FakeDuffel().fetch),
+      () =>
+        new DuffelClient('duffel_live_abc', new FakeDuffel().fetch, {
+          evidence: 'MOCKED',
+        }),
     ).toThrow(LiveKeyRefusedError);
     const caps = travelCapabilities({ DUFFEL_TEST_TOKEN: 'duffel_live_abc' });
     expect(caps.find((c) => c.providerId === 'duffel-stays')?.status).toBe(
@@ -130,7 +133,7 @@ describe('Duffel Stays', () => {
     expect(r.offers).toHaveLength(3);
     const first = r.offers[0]!;
     expect(first.price).toMatchObject({ base: gbp(20_000), tax: gbp(4_000) });
-    expect(first.evidence).toBe('PROVIDER_SANDBOX');
+    expect(first.evidence).toBe('MOCKED');
     const sel = selectOffers({ intent, search: r, now: T });
     expect(sel.selected?.offer.providerRef).toBe('rat_0000UNAVAILABLE');
     expect(sel.rejected.map((x) => x.offerId)).toContain(
