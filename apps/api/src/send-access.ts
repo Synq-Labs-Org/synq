@@ -7,25 +7,20 @@ import {
   type SendAccessChallenge,
 } from '@synq/identity/server';
 import type { SendGroupContext } from './send-routes.js';
+import {
+  DevelopmentSendAccessStore,
+  type SendAccessStore,
+} from './send-access-store.js';
 
 export function createSendMemberAccess(input: {
   directory: MembershipDirectory;
   context(groupId: string): Promise<SendGroupContext | null>;
   now(): number;
+  store?: SendAccessStore;
 }) {
-  const challenges = new Map<string, SendAccessChallenge>();
-  const sessions = new Map<
-    string,
-    { challenge: SendAccessChallenge; expiresAt: number }
-  >();
+  const store = input.store ?? new DevelopmentSendAccessStore();
   const hash = (token: string) =>
     createHash('sha256').update(token).digest('hex');
-  function prune() {
-    const now = input.now();
-    for (const [id, c] of challenges)
-      if (c.expiresAt <= now) challenges.delete(id);
-    for (const [id, s] of sessions) if (s.expiresAt <= now) sessions.delete(id);
-  }
   async function current(c: SendAccessChallenge) {
     const member = await input.directory.activeMember(c.groupId, c.memberId);
     const context = await input.context(c.groupId);
@@ -41,7 +36,7 @@ export function createSendMemberAccess(input: {
   }
   return {
     async challenge(groupId: string, principalId: string) {
-      prune();
+      await store.prune(input.now());
       const context = await input.context(groupId);
       const m = context?.members.find((m) => m.principalId === principalId);
       const member = m
@@ -68,16 +63,11 @@ export function createSendMemberAccess(input: {
         issuedAt: now,
         expiresAt: now + 120,
       });
-      // One outstanding challenge per member bounds unauthenticated growth.
-      for (const [id, o] of challenges)
-        if (o.groupId === c.groupId && o.memberId === c.memberId)
-          challenges.delete(id);
-      challenges.set(c.challengeId, c);
-      return c;
+      return store.createChallenge(c);
     },
     async issue(challengeId: string, signature: Hex) {
-      prune();
-      const c = challenges.get(challengeId);
+      await store.prune(input.now());
+      const c = await store.challenge(challengeId);
       if (!c || !(await current(c))) return null;
       let valid = false;
       try {
@@ -89,11 +79,15 @@ export function createSendMemberAccess(input: {
       } catch {
         return null;
       }
-      if (!valid || challenges.get(challengeId) !== c) return null;
-      challenges.delete(challengeId);
+      if (
+        !valid ||
+        c.expiresAt <= input.now() ||
+        !(await store.consumeChallenge(challengeId))
+      )
+        return null;
       const token = randomBytes(32).toString('base64url');
       const expiresAt = input.now() + 300;
-      sessions.set(hash(token), { challenge: c, expiresAt });
+      await store.saveSession(hash(token), { challenge: c, expiresAt });
       return {
         token,
         expiresAt,
@@ -104,10 +98,11 @@ export function createSendMemberAccess(input: {
       };
     },
     async verify(token: string, groupId: string) {
-      prune();
-      const session = sessions.get(hash(token));
+      await store.prune(input.now());
+      const session = await store.session(hash(token));
       return (
         !!session &&
+        session.expiresAt > input.now() &&
         session.challenge.groupId === groupId.toLowerCase() &&
         (await current(session.challenge))
       );

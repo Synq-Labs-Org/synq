@@ -90,7 +90,14 @@ export function assembleDcaEvaluationInput(
     return verdict('ESCALATE', ['STRATEGY_POLICY_MISMATCH']);
   if (facts.ticksExecuted >= facts.maxTicks)
     return verdict('SKIP', ['MAX_TICKS_REACHED']);
-  const now = Math.max(facts.observedAt, facts.evidenceObservedAt);
+  const now = facts.observedAt;
+  if (facts.evidenceObservedAt > now)
+    return verdict('ESCALATE', ['EVIDENCE_FUTURE']);
+  if (
+    now - facts.evidenceObservedAt >
+    Math.min(300, policy.data.maxMarketDataAgeSeconds)
+  )
+    return verdict('SKIP', ['EVIDENCE_STALE']);
   if (facts.quoteExpiresAt <= now) return verdict('SKIP', ['QUOTE_EXPIRED']);
   if (facts.quotedOutputAmount <= 0n)
     return verdict('ESCALATE', ['NO_OUTPUT_QUOTED']);

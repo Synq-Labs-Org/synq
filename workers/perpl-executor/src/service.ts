@@ -2,6 +2,7 @@ import { IdSchema, type Mandate } from '@synq/schemas';
 import {
   HedgeGrantError,
   HedgeIntentSchema,
+  artifactHash,
   type HedgeGrant,
   type HedgeIntent,
   type HedgeMandate,
@@ -27,6 +28,9 @@ export type HedgeMandates = { mandate: Mandate; hedgeMandate: HedgeMandate };
 // Current Kernel-held mandates for a group; read again at every issuance.
 export interface HedgeMandateSource {
   current(groupId: string): Promise<HedgeMandates>;
+}
+export function scopedHedgeIntentId(groupId: string, hedgeId: string): string {
+  return IdSchema.parse(`hedge.${artifactHash({ groupId, hedgeId }).slice(2)}`);
 }
 type Network = Parameters<typeof factsFromEvidence>[1];
 
@@ -113,7 +117,7 @@ export class PerplHedgeService {
         proposal: existing,
         maxSlippageBps: hedgeMandate.maxSlippageBps,
       };
-    const intentId = IdSchema.parse(`hedge.${input.hedgeId}`);
+    const intentId = scopedHedgeIntentId(input.groupId, input.hedgeId);
     const evidence = await this.deps.reader.read();
     const now = this.now();
     const p = proposeHedge(

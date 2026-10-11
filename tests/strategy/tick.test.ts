@@ -70,6 +70,20 @@ describe('DCA tick input assembly', () => {
       decisionId: `${policy.strategyId}:0`,
     });
   });
+  it('P09-N1 future evidence cannot advance a weekly slot or expire the strategy', () => {
+    const result = evaluateDcaTick(
+      facts({
+        evidenceObservedAt: NOW + 7 * 86400,
+        quoteExpiresAt: NOW + 7 * 86400 + 60,
+      }),
+      context(),
+    );
+    expect(result).toEqual({
+      decision: 'ESCALATE',
+      reasons: ['EVIDENCE_FUTURE'],
+      decisionId: null,
+    });
+  });
 
   it('pending lots from the read model count against budget and slot', () => {
     const v = evaluateDcaTick(
@@ -107,6 +121,8 @@ describe('DCA tick input assembly', () => {
     [{}, { policy: { nope: true } }, 'ESCALATE', 'INVALID_STRATEGY_POLICY'],
     [{ ticksExecuted: 26 }, {}, 'SKIP', 'MAX_TICKS_REACHED'],
     [{ quoteExpiresAt: NOW }, {}, 'SKIP', 'QUOTE_EXPIRED'],
+    [{ evidenceObservedAt: NOW + 1 }, {}, 'ESCALATE', 'EVIDENCE_FUTURE'],
+    [{ evidenceObservedAt: NOW - 301 }, {}, 'SKIP', 'EVIDENCE_STALE'],
     [{ quotedOutputAmount: '0' }, {}, 'ESCALATE', 'NO_OUTPUT_QUOTED'],
     [{ riskStatus: 'DEGRADED' }, {}, 'ESCALATE', 'AUSD_RISK_DEGRADED'],
     [{ riskStatus: 'UNKNOWN' }, {}, 'ESCALATE', 'AUSD_RISK_UNKNOWN'],

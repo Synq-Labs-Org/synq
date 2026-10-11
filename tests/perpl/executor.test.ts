@@ -291,7 +291,7 @@ describe('Perpl hedge executor', () => {
         kind: 'CLOSE',
         leverageHundredths: 0,
         collateral: '0',
-        limitPrice: '2600',
+        limitPrice: '2500',
       }),
     );
     expect(orders.map((o) => o.rq)).toEqual([11, 12]);

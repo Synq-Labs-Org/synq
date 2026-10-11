@@ -49,12 +49,6 @@ export function proposeHedge(
 ): HedgeProposal {
   const mandate = HedgeMandateSchema.parse(rawMandate);
   const riskPacketHash = portfolioRiskHash(risk);
-  if (risk.blocked)
-    return {
-      action: 'BLOCKED',
-      reason: risk.blockReasons.join('; '),
-      riskPacketHash,
-    };
   if (market.base !== mandate.hedgedAsset)
     return {
       action: 'BLOCKED',
@@ -74,6 +68,18 @@ export function proposeHedge(
   const desired =
     spot <= 0n ? 0n : floorDiv(spot * BigInt(mandate.targetHedgeRatioBps), BPS);
   const delta = desired - currentShort;
+  if (
+    market.mark <= 0n ||
+    market.at > ctx.now ||
+    risk.asOf > ctx.now ||
+    (delta >= 0n &&
+      (risk.blocked || ctx.now - market.at > mandate.maxMarketDataAgeMs))
+  )
+    return {
+      action: 'BLOCKED',
+      reason: risk.blockReasons.join('; ') || 'market evidence unavailable',
+      riskPacketHash,
+    };
   const minAdjust = BigInt(mandate.minAdjustNotional);
   if ((delta >= 0n ? delta : -delta) < minAdjust || delta === 0n)
     return { action: 'NONE', reason: 'hedge within tolerance', riskPacketHash };
@@ -124,7 +130,10 @@ export function proposeHedge(
         riskPacketHash,
       };
     const closing = size === BigInt(position.size);
-    const limitPrice = ceilDiv(market.ask * (BPS + slip), BPS);
+    const limitPrice = min(
+      ceilDiv(market.ask * (BPS + slip), BPS),
+      floorDiv(market.mark * (BPS + slip), BPS),
+    );
     const after = currentShort - sizeToNotional(size, market.mark);
     return {
       action: 'PROPOSE',

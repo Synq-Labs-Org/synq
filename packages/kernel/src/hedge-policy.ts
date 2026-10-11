@@ -422,6 +422,33 @@ export class HedgePolicy {
         'RISK_PACKET_MISMATCH',
       );
       const mark = BigInt(market.mark);
+      check(
+        'market.time-binding',
+        market.at === intent.marketDataAt &&
+          market.at <= facts.nowMs &&
+          risk.asOf <= facts.nowMs,
+        'STALE_MARKET',
+      );
+      closeOnly(
+        'risk.fresh',
+        !risk.blocked &&
+          facts.nowMs - risk.asOf <=
+            Math.min(hm.maxMarketDataAgeMs, mandate.evidenceTtlSeconds * 1000),
+        'STALE_MARKET',
+      );
+      if (reducing) {
+        const slip = BigInt(
+          Math.min(hm.maxSlippageBps, mandate.maxSlippageBps),
+        );
+        const limit = BigInt(intent.limitPrice);
+        check(
+          'reduction.price',
+          mark > 0n &&
+            limit >= (mark * (10000n - slip) + 9999n) / 10000n &&
+            limit <= (mark * (10000n + slip)) / 10000n,
+          'ECONOMIC_MISMATCH',
+        );
+      }
       const unit = 10n ** BigInt(market.sizeDecimals + market.priceDecimals);
       const valueUnit = 10n ** BigInt(risk.valueDecimals);
       const size = BigInt(intent.size);

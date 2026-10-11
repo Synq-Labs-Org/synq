@@ -639,4 +639,43 @@ describe('Synq Send API routes with fake Kernel/index ports', () => {
       ).statusCode,
     ).toBe(401);
   });
+  it('P08 recovered grants rerun the guard before exposing execution authority', async () => {
+    const p = (
+      await req('POST', '/v1/send/previews', {
+        groupId: GROUP,
+        recipientId: `contact:${CONTACT}`,
+        amount: '0.25',
+      })
+    ).json() as SendPreview;
+    const record = (
+      await req('POST', '/v1/send', await confirmBody(p))
+    ).json() as SendRecord;
+    const decision = await deps.kernel.authorize({ approvals: [{}, {}] });
+    deps.kernel.recover = async () => ({ status: 'RECOVERED', decision });
+    const before = calls.length;
+    try {
+      frozen = true;
+      const blocked = await req(
+        'POST',
+        `/v1/send/${record.sendId}/authorize`,
+        {},
+        true,
+      );
+      expect(blocked.statusCode).toBe(423);
+      expect(blocked.json().error).toBe('AUSD_GUARD_BLOCKED');
+      expect((await store.get(record.sendId))?.state).toBe('PENDING_APPROVAL');
+      frozen = false;
+      const recovered = await req(
+        'POST',
+        `/v1/send/${record.sendId}/authorize`,
+        {},
+        true,
+      );
+      expect(recovered.json().grant.grantId).toBe(hex('9a', 32));
+      expect(calls.length).toBe(before);
+    } finally {
+      frozen = false;
+      delete deps.kernel.recover;
+    }
+  });
 });

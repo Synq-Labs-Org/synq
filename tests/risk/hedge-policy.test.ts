@@ -12,6 +12,7 @@ import { officialAsset } from '@synq/chain-registry';
 import {
   GRANT_KEY,
   T0,
+  facts,
   factsFor,
   fixtureRisk,
   hedgeIntent,
@@ -193,7 +194,7 @@ describe('Kernel hedge policy with bound exact economic evidence', () => {
     ]) {
       expect(run({}, opts).status).toBe('REJECTED');
       expect(
-        run({ kind: 'CLOSE', leverageHundredths: 0, limitPrice: '2600' }, opts),
+        run({ kind: 'CLOSE', leverageHundredths: 0, limitPrice: '2500' }, opts),
       ).toMatchObject({
         status: 'AUTHORIZED',
         mode: 'CLOSE_ONLY',
@@ -201,12 +202,15 @@ describe('Kernel hedge policy with bound exact economic evidence', () => {
       });
     }
     expect(
-      run({
-        kind: 'CLOSE',
-        leverageHundredths: 0,
-        limitPrice: '2600',
-        marketDataAt: T0 * 1000 - 200000,
-      }).status,
+      run(
+        {
+          kind: 'CLOSE',
+          leverageHundredths: 0,
+          limitPrice: '2500',
+          marketDataAt: T0 * 1000 - 200000,
+        },
+        { facts: { market: { ...facts().market!, at: T0 * 1000 - 200000 } } },
+      ).status,
     ).toBe('AUTHORIZED');
     expect(run({}, { hm: { status: 'REVOKED' } }).rejection?.code).toBe(
       'MANDATE_REVOKED',
@@ -218,6 +222,50 @@ describe('Kernel hedge policy with bound exact economic evidence', () => {
       run(
         { kind: 'CLOSE', leverageHundredths: 0 },
         { facts: { risk: fixtureRisk() } },
+      ).status,
+    ).toBe('REJECTED');
+  });
+  it.each(['CLOSE', 'REDUCE', 'CANCEL'])(
+    'P10-N1 bounds %s prices to the mark slippage band',
+    (kind) => {
+      for (const limitPrice of ['1', '2600', '999999999'])
+        expect(
+          run({ kind, orderId: '10', leverageHundredths: 0, limitPrice })
+            .rejection?.code,
+        ).toBe('ECONOMIC_MISMATCH');
+      expect(
+        run({ kind, orderId: '10', leverageHundredths: 0, limitPrice: '2500' })
+          .status,
+      ).toBe('AUTHORIZED');
+    },
+  );
+  it('P10-N2 permits bounded stale reductions but refuses stale opens and all future evidence', () => {
+    const at = T0 * 1000 - 600000;
+    const opts = { facts: { market: { ...facts().market!, at } } };
+    expect(
+      run(
+        {
+          kind: 'CLOSE',
+          leverageHundredths: 0,
+          limitPrice: '2500',
+          marketDataAt: at,
+        },
+        opts,
+      ),
+    ).toMatchObject({ status: 'AUTHORIZED', mode: 'CLOSE_ONLY' });
+    expect(run({ marketDataAt: at }, opts).rejection?.code).toBe(
+      'STALE_MARKET',
+    );
+    const future = T0 * 1000 + 1;
+    expect(
+      run(
+        {
+          kind: 'CLOSE',
+          leverageHundredths: 0,
+          limitPrice: '2500',
+          marketDataAt: future,
+        },
+        { facts: { market: { ...facts().market!, at: future } } },
       ).status,
     ).toBe('REJECTED');
   });
@@ -391,7 +439,7 @@ describe('SIMULATION-only fixture grants', () => {
       intentId: 'close1',
       kind: 'CLOSE',
       leverageHundredths: 0,
-      limitPrice: '2600',
+      limitPrice: '2500',
     });
     expect(() =>
       a.authorizeOrder(
@@ -403,7 +451,7 @@ describe('SIMULATION-only fixture grants', () => {
     expect(
       a.authorizeOrder(
         close,
-        { t: 4, mkt: 64, acc: 1058, s: 40, p: 2600, lv: 0 },
+        { t: 4, mkt: 64, acc: 1058, s: 40, p: 2500, lv: 0 },
         T0 + 1,
       ).reduceOnly,
     ).toBe(true);

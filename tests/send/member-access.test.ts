@@ -191,6 +191,8 @@ describe('Mera-scoped Send member reads and previews (SIMULATION)', () => {
         return response.json();
       };
       const challenge = await requestChallenge();
+      // An unauthenticated repeat cannot replace the signed challenge.
+      expect(await requestChallenge()).toEqual(challenge);
       const signature = await signMeraSendAccess(enrolled.record, challenge, {
         webAuthnClient: authenticator,
       });
@@ -284,21 +286,7 @@ describe('Mera-scoped Send member reads and previews (SIMULATION)', () => {
       const proof = await signMeraSendAccess(enrolled.record, fresh, {
         webAuthnClient: authenticator,
       });
-      // A newer challenge supersedes the outstanding one for the same member.
-      expect(
-        (
-          await api.inject({
-            method: 'POST',
-            url: '/v1/send/access',
-            payload: {
-              challengeId: stale.challengeId,
-              signature: await signMeraSendAccess(enrolled.record, stale, {
-                webAuthnClient: authenticator,
-              }),
-            },
-          })
-        ).statusCode,
-      ).toBe(401);
+      expect(fresh).toEqual(stale);
       await identity.transaction((tx) =>
         tx.revokeMembership(groupId, 'alice', clock),
       );

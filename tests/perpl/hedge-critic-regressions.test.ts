@@ -7,7 +7,7 @@ import {
   HedgePolicy,
 } from '@synq/kernel';
 import { MarketCatalog, PerplRestClient } from '@synq/plugin-perpl';
-import { PerplHedgeExecutor } from '@synq/perpl-executor';
+import { PerplHedgeExecutor, scopedHedgeIntentId } from '@synq/perpl-executor';
 import { contextFixture } from './context-fixture.js';
 import { FakePerplRest, testSigner } from './fake-perpl.js';
 import {
@@ -58,6 +58,37 @@ const withRisk = (
   });
 };
 describe('economic fields are derived from trusted evidence, never from the intent', () => {
+  it('P10-N3 derives simulation from a custom transport without a caller flag', () => {
+    const server = new FakePerplRest(
+      testnetPerpl.chainId,
+      testnetPerpl.restUrl,
+    );
+    expect(
+      new PerplRestClient({ network: testnetPerpl, fetch: server.fetch })
+        .executionMode,
+    ).toBe('SIMULATION');
+    expect(
+      new PerplRestClient({
+        network: testnetPerpl,
+        fetch: server.fetch,
+        simulation: false,
+      }).executionMode,
+    ).toBe('SIMULATION');
+    expect(new PerplRestClient({ network: testnetPerpl }).executionMode).toBe(
+      'REAL_TESTNET',
+    );
+  });
+  it('P10-N4 scopes hedge identities to unambiguous group and hedge tuples', () => {
+    expect(scopedHedgeIntentId('a', 'same')).not.toBe(
+      scopedHedgeIntentId('b', 'same'),
+    );
+    expect(scopedHedgeIntentId('a.b', 'c')).not.toBe(
+      scopedHedgeIntentId('a', 'b.c'),
+    );
+    expect(scopedHedgeIntentId('a', 'same')).toBe(
+      scopedHedgeIntentId('a', 'same'),
+    );
+  });
   it('baseline evidence authorizes only the derived size', () => {
     expect(withRisk(fixtureRisk()).rejection).toBeNull();
   });

@@ -145,7 +145,7 @@ describe('HedgeIntent from exposure', () => {
     expect(over.action === 'PROPOSE' && over.intent.kind).toBe('REDUCE');
     if (over.action === 'PROPOSE') {
       expect(over.intent.size).toBe('20');
-      expect(over.intent.limitPrice).toBe('2578');
+      expect(over.intent.limitPrice).toBe('2575');
     }
     const flat = proposeHedge(
       evaluatePortfolio(inputs(80n, 40n)),
@@ -161,6 +161,32 @@ describe('HedgeIntent from exposure', () => {
       ctx(),
     );
     expect(unwind.action === 'PROPOSE' && unwind.intent.kind).toBe('CLOSE');
+  });
+  it('P10-N2 proposes bounded reductions on stale risk but refuses increases', () => {
+    const staleInputs = (short: bigint) => ({
+      ...inputs(80n, short),
+      prices: [{ ...inputs(80n).prices[0]!, at: NOW - 600000 }],
+    });
+    const staleMarket = {
+      ...market,
+      at: NOW - 600000,
+      ask: market.mark * 100n,
+    };
+    const risk = evaluatePortfolio(staleInputs(60n));
+    expect(risk.blocked).toBe(true);
+    const reduction = proposeHedge(risk, hedgeMandate(), staleMarket, ctx());
+    expect(reduction.action).toBe('PROPOSE');
+    if (reduction.action !== 'PROPOSE') throw new Error('expected reduction');
+    expect(reduction.intent.kind).toBe('REDUCE');
+    expect(reduction.intent.limitPrice).toBe('2575');
+    expect(
+      proposeHedge(
+        evaluatePortfolio(staleInputs(0n)),
+        hedgeMandate(),
+        staleMarket,
+        ctx(),
+      ).action,
+    ).toBe('BLOCKED');
   });
 
   it('refuses to propose from a blocked risk packet or the wrong market', () => {

@@ -80,11 +80,12 @@ export class PerplRestClient {
         'INVALID_REQUEST',
         'simulation needs an isolated transport',
       );
-    this.executionMode = options.simulation
-      ? 'SIMULATION'
-      : options.network.profile === 'sandbox/monad-testnet'
-        ? 'REAL_TESTNET'
-        : 'MAINNET_READ_ONLY';
+    this.executionMode =
+      options.fetch && options.fetch !== fetch
+        ? 'SIMULATION'
+        : options.network.profile === 'sandbox/monad-testnet'
+          ? 'REAL_TESTNET'
+          : 'MAINNET_READ_ONLY';
     this.fetcher = options.fetch ?? (fetch as unknown as FetchLike);
     this.signer = options.signer;
     this.clock = options.clock ?? new ServerClock();

@@ -141,7 +141,35 @@ export class PostgresFundingSessionStore implements FundingSessionStore {
   }
 }
 
-const sendLockQueues = new WeakMap<FundingSqlPool, Promise<void>>();
+const sendLockQueues = new WeakMap<
+  FundingSqlPool,
+  Map<string, Promise<void>>
+>();
+const sendLockCapacity = new WeakMap<
+  FundingSqlPool,
+  { active: number; waiters: (() => void)[] }
+>();
+async function withLockCapacity<T>(
+  pool: FundingSqlPool,
+  run: () => Promise<T>,
+): Promise<T> {
+  let state = sendLockCapacity.get(pool);
+  if (!state) {
+    state = { active: 0, waiters: [] };
+    sendLockCapacity.set(pool, state);
+  }
+  const capacity = Math.max(1, (pool.options?.max ?? 10) - 1);
+  if (state.active >= capacity)
+    await new Promise<void>((resolve) => state!.waiters.push(resolve));
+  else state.active++;
+  try {
+    return await run();
+  } finally {
+    const next = state.waiters.shift();
+    if (next) next();
+    else state.active--;
+  }
+}
 export class PostgresSendStore implements SendStore {
   /** Callbacks query the shared pool, which must provide at least two connections. */
   constructor(readonly pool: FundingSqlPool) {
@@ -149,16 +177,28 @@ export class PostgresSendStore implements SendStore {
       throw new Error('Send store requires pool capacity >= 2');
   }
   async withConfirmationLock<T>(id: string, run: () => Promise<T>): Promise<T> {
-    const before = sendLockQueues.get(this.pool) ?? Promise.resolve();
+    const record = await this.get(id);
+    const scope = record
+      ? JSON.stringify([
+          record.preview.chainId,
+          record.preview.account,
+          record.preview.groupId,
+        ])
+      : id;
+    let queues = sendLockQueues.get(this.pool);
+    if (!queues) {
+      queues = new Map();
+      sendLockQueues.set(this.pool, queues);
+    }
+    const before = queues.get(scope) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     const queued = before.then(() => gate);
-    sendLockQueues.set(this.pool, queued);
+    queues.set(scope, queued);
     void queued.then(() => {
-      if (sendLockQueues.get(this.pool) === queued)
-        sendLockQueues.delete(this.pool);
+      if (queues.get(scope) === queued) queues.delete(scope);
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -178,7 +218,9 @@ export class PostgresSendStore implements SendStore {
         }),
       ]);
       if (timer) clearTimeout(timer);
-      return await this.lockedConfirmation(id, run);
+      return await withLockCapacity(this.pool, () =>
+        this.lockedConfirmation(scope, run),
+      );
     } finally {
       if (timer) clearTimeout(timer);
       release();

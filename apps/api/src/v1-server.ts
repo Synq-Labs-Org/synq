@@ -45,6 +45,7 @@ import {
   type FundingActivities,
 } from '@synq/funding';
 import { sendRoutes, type SendRouteDeps } from './send-routes.js';
+import { PostgresSendAccessStore } from './send-access-store.js';
 import { fundingReceipt, productionSendPorts } from './send-runtime.js';
 import { DurableKernel } from './kernel-runtime.js';
 import { indexedContributions } from '@synq/read-model';
@@ -61,6 +62,7 @@ export async function registerProductionSend(input: {
   const sends = new PostgresSendStore(input.pool);
   const funding = new PostgresFundingSessionStore(input.pool);
   await sends.migrate();
+  await new PostgresSendAccessStore(input.pool).migrate();
   await funding.migrate();
   const ports = await input.ports({ sends, funding });
   await input.app.register(sendRoutes, { ...ports, store: sends });

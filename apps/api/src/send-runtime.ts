@@ -32,6 +32,7 @@ import type { IdentityConfig } from '@synq/identity';
 import type { ReadModelRuntime } from './server.js';
 import { mandateFromArtifact } from './kernel-runtime.js';
 import { createSendMemberAccess } from './send-access.js';
+import { PostgresSendAccessStore } from './send-access-store.js';
 import type { SendRouteDeps, SendProposal } from './send-routes.js';
 
 export async function fundingReceipt(
@@ -212,6 +213,7 @@ export function productionSendPorts(input: {
   };
   return {
     memberAccess: createSendMemberAccess({
+      store: new PostgresSendAccessStore(input.sends.pool),
       directory,
       context,
       now: () => Math.floor(Date.now() / 1000),

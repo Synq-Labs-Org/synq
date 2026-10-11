@@ -647,6 +647,7 @@ export async function sendRoutes(
           recovery?.status === 'RECOVERED' &&
           recovery.decision.status === 'AUTHORIZED'
         ) {
+          await requireGuard(record.preview);
           const decision = recovery.decision;
           if (
             record.state !== 'PENDING_APPROVAL' &&

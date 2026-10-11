@@ -14,7 +14,12 @@ import {
   advanceSend,
   newSendRecord,
 } from '@synq/funding';
-import { sendConfirmationTypedData } from '@synq/identity/server';
+import {
+  sendConfirmationTypedData,
+  sendAccessTypedData,
+} from '@synq/identity/server';
+import { PostgresSendAccessStore } from '../../apps/api/src/send-access-store.js';
+import { createSendMemberAccess } from '../../apps/api/src/send-access.js';
 import {
   sendRoutes,
   confirmationOf,
@@ -106,9 +111,56 @@ beforeAll(async () => {
     await admin.query(`CREATE DATABASE ${name}`);
   await admin.end();
   await new PostgresSendStore(pool).migrate();
+  await new PostgresSendAccessStore(pool).migrate();
   await pool.query('TRUNCATE synq_sends,synq_send_previews');
+  await pool.query(
+    'TRUNCATE synq_send_access_challenges,synq_send_access_sessions',
+  );
 });
 afterAll(() => pool.end());
+
+it('P08 access challenges and sessions survive restart, resist replacement, and issue only once', async () => {
+  let clock = NOW;
+  const context = async () => ({
+    groupId: group.groupId,
+    mandate: sandboxMandate(group, NOW),
+    members: group.members.map((m) => ({
+      ...m,
+      principalId: `mera:${m.signer}`,
+    })),
+    contacts: [],
+  });
+  const access = () =>
+    createSendMemberAccess({
+      directory,
+      context,
+      now: () => clock,
+      store: new PostgresSendAccessStore(pool),
+    });
+  const c = await access().challenge(
+    group.groupId,
+    `mera:${group.members[0]!.signer}`,
+  );
+  if (!c) throw new Error('challenge missing');
+  expect(await access().challenge(group.groupId, c.principalId)).toEqual(c);
+  const signature = await owners[0]!.signTypedData(sendAccessTypedData(c));
+  const results = await Promise.all([
+    access().issue(c.challengeId, signature),
+    access().issue(c.challengeId, signature),
+  ]);
+  expect(results.filter(Boolean)).toHaveLength(1);
+  const session = results.find(Boolean)!;
+  expect(await access().verify(session.token, group.groupId)).toBe(true);
+  expect(await access().verify(session.token, hash(799))).toBe(false);
+  expect(await access().issue(c.challengeId, signature)).toBeNull();
+  const rows = await pool.query(
+    'SELECT token_hash,data FROM synq_send_access_sessions',
+  );
+  expect(rows.rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
+  expect(JSON.stringify(rows.rows)).not.toContain(session.token);
+  clock = session.expiresAt;
+  expect(await access().verify(session.token, group.groupId)).toBe(false);
+});
 
 async function open(
   kernel: Kernel,

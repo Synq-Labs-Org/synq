@@ -130,22 +130,31 @@ describe('durable Send and funding stores (SIMULATION)', () => {
     const b = new PostgresSendStore(pool);
     let active = 0;
     let maximum = 0;
+    let sharedActive = 0;
+    let sharedMaximum = 0;
     await Promise.all(
       Array.from({ length: 24 }, (_, i) =>
         (i % 2 ? a : b).withConfirmationLock(
           i < 12 ? 'shared' : `send-${i}`,
           async () => {
             active++;
+            if (i < 12) {
+              sharedActive++;
+              sharedMaximum = Math.max(sharedMaximum, sharedActive);
+            }
             maximum = Math.max(maximum, active);
             const row = await pool.query('SELECT 1 AS alive');
             expect(row.rows[0].alive).toBe(1);
             await new Promise((resolve) => setTimeout(resolve, 5));
             active--;
+            if (i < 12) sharedActive--;
           },
         ),
       ),
     );
-    expect(maximum).toBe(1);
+    expect(sharedMaximum).toBe(1);
+    expect(maximum).toBeGreaterThan(1);
+    expect(maximum).toBeLessThanOrEqual(pool.options.max! - 1);
     expect(
       () => new PostgresSendStore({ ...pool, options: { max: 1 } } as never),
     ).toThrow('capacity');
