@@ -137,8 +137,9 @@ export function matchProduct(
     const w = want.variant[key];
     const g = got.variant[key];
     if (w === undefined) continue;
-    if (g === undefined) mismatches.push(`${key} unknown`);
-    else if (norm(w) !== norm(g)) mismatches.push(`${key} ${g} != ${w}`);
+    if (g === undefined) {
+      if (basis !== 'GTIN') mismatches.push(`${key} unknown`);
+    } else if (norm(w) !== norm(g)) mismatches.push(`${key} ${g} != ${w}`);
   }
   if (want.seller && got.seller && norm(want.seller) !== norm(got.seller))
     mismatches.push('seller differs');

@@ -17,6 +17,8 @@ export type RevalidatedQuote = {
 
 export interface OfferProvider {
   readonly providerId: string;
+  /** Fulfillment providers whose live price/availability this provider is authoritative for. */
+  readonly revalidatesFor?: readonly string[];
   search(
     intent: EconomicIntent,
     signal: AbortSignal,

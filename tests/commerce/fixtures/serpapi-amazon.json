@@ -1,0 +1,29 @@
+{
+  "search_metadata": { "status": "Success" },
+  "organic_results": [
+    {
+      "position": 1,
+      "asin": "B0TESTPH01",
+      "title": "Acme Phone 12 128GB Blue (US)",
+      "link": "https://www.amazon.com/dp/B0TESTPH01",
+      "extracted_price": 799.0,
+      "rating": 4.6,
+      "reviews": 1201
+    },
+    {
+      "position": 2,
+      "asin": "B0TESTPH02",
+      "title": "Acme Phone 12 128GB Blue (Renewed)",
+      "link": "https://www.amazon.com/dp/B0TESTPH02",
+      "extracted_price": 589.99,
+      "rating": 4.1
+    },
+    {
+      "position": 3,
+      "asin": "B0TESTCASE",
+      "title": "Case for Acme Phone 12",
+      "extracted_price": 12.99
+    },
+    { "position": 4, "title": "Sponsored without ASIN", "extracted_price": 1.0 }
+  ]
+}

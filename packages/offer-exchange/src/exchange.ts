@@ -296,8 +296,14 @@ export async function revalidateOffer(input: {
 }): Promise<RevalidationOutcome> {
   const { intent, candidate, provider, graph } = input;
   const offer = candidate.offer;
-  if (provider.providerId !== offer.fulfillmentProviderId)
-    return { status: 'MISMATCH', reason: 'provider is not the fulfiller' };
+  if (
+    provider.providerId !== offer.fulfillmentProviderId &&
+    !provider.revalidatesFor?.includes(offer.fulfillmentProviderId)
+  )
+    return {
+      status: 'MISMATCH',
+      reason: 'provider cannot revalidate for the fulfiller',
+    };
   if (!provider.revalidate)
     return { status: 'NO_REVALIDATION', reason: 'provider cannot revalidate' };
   if (!graph.usable(provider.providerId, 'QUOTE', input.now()))

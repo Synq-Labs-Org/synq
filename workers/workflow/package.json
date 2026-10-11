@@ -37,7 +37,8 @@
     "zod": "4.6.5",
     "@synq/plugin-chainlink-cre": "workspace:*",
     "@synq/offer-exchange": "workspace:*",
-    "@synq/settlement": "workspace:*"
+    "@synq/settlement": "workspace:*",
+    "@synq/plugin-commerce": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "1.24.0"

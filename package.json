@@ -105,6 +105,7 @@
     "ws": "8.22.0",
     "@synq/offer-exchange": "workspace:*",
     "@synq/settlement": "workspace:*",
-    "@synq/plugin-duffel": "workspace:*"
+    "@synq/plugin-duffel": "workspace:*",
+    "@synq/plugin-commerce": "workspace:*"
   }
 }

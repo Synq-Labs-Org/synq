@@ -76,6 +76,9 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:plugins/chainlink-cre
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:plugins/commerce
       '@synq/plugin-duffel':
         specifier: workspace:*
         version: link:plugins/duffel
@@ -595,6 +598,15 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  plugins/commerce:
+    dependencies:
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
   plugins/duffel:
     dependencies:
       '@synq/offer-exchange':
@@ -771,6 +783,9 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:../../plugins/chainlink-cre
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:../../plugins/commerce
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
