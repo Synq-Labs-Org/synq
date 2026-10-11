@@ -90,6 +90,7 @@ import {
   loadTestnetSigner,
   testnetRpcUrl,
   type OwnerSigner,
+  type TestnetChain,
 } from './testnet-chain.js';
 import { erc20TransferPlugin } from './transfer-plugin.js';
 import { transferVertical } from './vertical.js';
@@ -124,6 +125,20 @@ export type SendRunOptions = {
   workDirectory?: string;
   authenticatorStore?: string;
   executionMode?: 'REAL_TESTNET' | 'SIMULATION';
+  /** Whole-run gas cap; the cross-phase runner includes additional Safe governance and hedge gas. */
+  maxRunMon?: bigint;
+  afterSend?: (context: {
+    chain: TestnetChain;
+    owners: OwnerSigner[];
+    mandate: Mandate;
+    pool: pg.Pool;
+    identity: PostgresIdentityStore;
+    kernel: ReturnType<typeof createIntentKernel>;
+    plugins: PluginRegistry;
+    reader: ProjectionReader;
+    catchUp(): Promise<void>;
+    approvePending(intentHash: Hex): Promise<string>;
+  }) => Promise<unknown>;
 };
 
 function sendMandate(input: {
@@ -199,6 +214,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function runSendE2E(options: SendRunOptions = {}) {
   const runId = `${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}Z-${randomBytes(3).toString('hex')}`;
   const executionMode = options.executionMode ?? 'REAL_TESTNET';
+  const maxRunMon = options.maxRunMon ?? MAX_SEND_RUN_MON;
+  if (maxRunMon <= 0n || maxRunMon > 600_000_000_000_000_000n)
+    throw new Error('INVALID_TESTNET_GAS_CAP');
   const evidenceDirectory = resolve(
     options.evidenceDirectory ?? 'reports/evidence/synq-send',
   );
@@ -243,7 +261,7 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     log(
       `deployer ${deployer.address} MON=${formatDecimal(monBefore, 18)} AUSD=${formatDecimal(ausdBefore, ausd.decimals)}`,
     );
-    if (monBefore < MAX_SEND_RUN_MON)
+    if (monBefore < maxRunMon)
       throw new TestnetChainError('INSUFFICIENT_FUNDS', 'MON');
     if (ausdBefore < SEND_UNITS.memberAusd)
       throw new TestnetChainError('INSUFFICIENT_FUNDS', 'AUSD');
@@ -251,7 +269,7 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       monBefore - (await client.getBalance({ address: deployer.address }));
     const budget = async (step: string) => {
       const used = await spent();
-      if (used > MAX_SEND_RUN_MON)
+      if (used > maxRunMon)
         throw new TestnetChainError(
           'BUDGET_EXCEEDED',
           `${step}: ${formatDecimal(used, 18)} MON`,
@@ -1125,14 +1143,9 @@ export async function runSendE2E(options: SendRunOptions = {}) {
     await phase.app.close();
     phase = await startProductionApi();
     api = phase.api;
-    // Member sessions are process-local: a restart forces a fresh passkey proof.
-    try {
-      await api.get(`/v1/send/${proposed.sendId}`, member);
-      throw new Error('MEMBER_SESSION_SURVIVED_RESTART');
-    } catch (error) {
-      if (!(error instanceof ApiCallError) || error.status !== 401) throw error;
-      memberAccess.sessionAfterRestart = error.status;
-    }
+    // Production sessions are persisted; the same scoped proof survives restart.
+    await api.get(`/v1/send/${proposed.sendId}`, member);
+    memberAccess.sessionAfterRestart = 200;
     member = await memberSession('alice');
     const restoredSend = await api.get<SendRecord>(
       `/v1/send/${proposed.sendId}`,
@@ -1299,6 +1312,53 @@ export async function runSendE2E(options: SendRunOptions = {}) {
       `INDEXED: recipient delta ${indexed.receipt.recipientDelta}; submit->confirmed ${indexed.receipt.latencyMs.submitToConfirmed}ms; submit->indexed ${indexed.receipt.latencyMs.submitToIndexed}ms`,
     );
 
+    if (options.afterSend)
+      evidence.integration = await options.afterSend({
+        chain,
+        owners,
+        mandate,
+        pool,
+        identity: store,
+        kernel,
+        plugins,
+        reader,
+        catchUp,
+        approvePending: async (intentHash) => {
+          let view: ReturnType<typeof PendingIntentViewSchema.parse> | null =
+            null;
+          for (let attempt = 0; attempt < 300 && !view; attempt++) {
+            view = await api
+              .get(`/v1/intents/${intentHash}`)
+              .then((r) => PendingIntentViewSchema.parse(r))
+              .catch(() => null);
+            if (!view) await sleep(200);
+          }
+          if (!view) throw new Error('HEDGE_APPROVAL_DRAFT_MISSING');
+          for (const label of ['alice', 'bob']) {
+            const p = byLabel(label);
+            const signed = await approveGrantWithMera(
+              {
+                record: p.record,
+                memberId: memberId(label),
+                draft: view.draft,
+                asset: view.asset,
+                confirmedPreview: grantPreview(view.draft, view.asset),
+                requestChallenge: async (request) =>
+                  GrantApprovalChallengeSchema.parse(
+                    await api.post('/v1/approvals/challenges', request),
+                  ),
+              },
+              webAuthn(label),
+            );
+            await api.post('/v1/approvals', {
+              challengeId: signed.challenge.challengeId,
+              grantSignature: signed.grantSignature,
+              attestationSignature: signed.attestationSignature,
+            });
+          }
+          return view.draft.digest;
+        },
+      });
     const monAfter = await client.getBalance({ address: deployer.address });
     evidence.deployer = {
       address: deployer.address,

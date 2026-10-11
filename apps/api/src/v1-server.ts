@@ -432,6 +432,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
               network,
               readModel.client,
               new PerplRestClient({
+                transport: 'live',
                 network: perplNetwork(config.SYNQ_PROFILE),
               }),
             ),

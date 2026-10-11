@@ -59,8 +59,16 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           scope: 'trade',
           chainId: network.chainId,
         });
-      const restRead = new PerplRestClient({ network, signer: read.signer }),
-        restTrade = new PerplRestClient({ network, signer: trade.signer });
+      const restRead = new PerplRestClient({
+          transport: 'live',
+          network,
+          signer: read.signer,
+        }),
+        restTrade = new PerplRestClient({
+          transport: 'live',
+          network,
+          signer: trade.signer,
+        });
       expect(restTrade.executionMode).toBe('REAL_TESTNET');
       const context = await restRead.context(),
         market = new MarketCatalog(network, context, Date.now()).byBase('MON');

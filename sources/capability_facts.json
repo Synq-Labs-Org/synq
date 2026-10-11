@@ -1,10 +1,16 @@
 {
   "schemaVersion": 1,
-  "verifiedAt": "2026-10-10T18:00:00Z",
-  "flags": {
-    "mainnetBroadcast": "SYNQ_ALLOW_MAINNET_BROADCAST"
-  },
   "providers": [
+    {
+      "providerId": "AUSD_TRANSFER",
+      "pluginId": "ausd-transfer",
+      "kind": "PLUGIN",
+      "credentialEnv": [],
+      "sourceRefs": ["apps/demo/src/transfer-plugin.ts", "sources/research/2026-10-10-perpl-intents-ausd.md"],
+      "facts": [
+        {"action": "TRANSFER", "networks": ["sandbox/monad-testnet"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Grant-bound exact Agora AUSD transfer through the deployed Safe ExecutionModule; no unrestricted signer authority."}
+      ]
+    },
     {
       "providerId": "KURU_FLOW",
       "pluginId": "kuru-flow",
@@ -12,10 +18,10 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-kuru-chainlink-cre.md#kuru-flow-aggregator"],
       "facts": [
-        { "action": "QUOTE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Live AUSD->WMON quote observed; testnet returns no candidate paths." },
-        { "action": "PREPARE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Quote response carries unsigned calldata for the KuruFlowEntrypoint listed in the research note." },
-        { "action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Spot swap needs a Kernel grant and owner quorum." },
-        { "action": "BROADCAST", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Mainnet broadcast is disabled in this run." }
+        {"action": "QUOTE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Live AUSD->WMON quote observed; testnet returns no candidate paths."},
+        {"action": "PREPARE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Quote response carries unsigned calldata for the KuruFlowEntrypoint listed in the research note."},
+        {"action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Spot swap needs a Kernel grant and owner quorum."},
+        {"action": "BROADCAST", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Mainnet broadcast is disabled in this run."}
       ]
     },
     {
@@ -25,8 +31,8 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-kuru-chainlink-cre.md#packaged-trading-skill"],
       "facts": [
-        { "action": "PREPARE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "USDC-settled only: BUY is USDC->token, SELL is token->USDC; chain 143 hardcoded; the CLI quote command needs a private key and is not used." },
-        { "action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "USDC-settled spot trades only." }
+        {"action": "PREPARE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "USDC-settled only: BUY is USDC->token, SELL is token->USDC; chain 143 hardcoded; the CLI quote command needs a private key and is not used."},
+        {"action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "USDC-settled spot trades only."}
       ]
     },
     {
@@ -36,7 +42,7 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-kuru-chainlink-cre.md#kuru-clob"],
       "facts": [
-        { "action": "READ", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Testnet has only MON-USDC; mainnet MON-AUSD best bid/ask returned the empty sentinel at research time." }
+        {"action": "READ", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Testnet has only MON-USDC; mainnet MON-AUSD best bid/ask returned the empty sentinel at research time."}
       ]
     },
     {
@@ -46,10 +52,10 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-perpl-intents-ausd.md#perpl"],
       "facts": [
-        { "action": "READ", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Public context and market data on both networks." },
-        { "action": "TRADE", "networks": ["sandbox/monad-testnet"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Trade-scoped API key; collateral is Agora testnet AUSD." },
-        { "action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Mainnet collateral is AUSD; no mainnet orders in this run." },
-        { "action": "CANCEL", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": true, "requiresHuman": false, "disabledBy": null, "note": "Cancelling reduces exposure; trade keys can never withdraw." }
+        {"action": "READ", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Public context and market data on both networks."},
+        {"action": "TRADE", "networks": ["sandbox/monad-testnet"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Trade-scoped API key; collateral is Agora testnet AUSD."},
+        {"action": "TRADE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Mainnet collateral is AUSD; no mainnet orders in this run."},
+        {"action": "CANCEL", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": true, "requiresHuman": false, "disabledBy": null, "note": "Cancelling reduces exposure; trade keys can never withdraw."}
       ]
     },
     {
@@ -59,8 +65,8 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-perpl-intents-ausd.md#near-intents-1click-and-aurora-intents"],
       "facts": [
-        { "action": "QUOTE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Quote discovery only; no testnet; AUSD unsupported, MON/USDC/USDT0 supported." },
-        { "action": "FUND", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Deposit submission is a canary-only action." }
+        {"action": "QUOTE", "networks": ["proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "Quote discovery only; no testnet; AUSD unsupported, MON/USDC/USDT0 supported."},
+        {"action": "FUND", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Deposit submission is a canary-only action."}
       ]
     },
     {
@@ -70,8 +76,8 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/research/2026-10-10-kuru-chainlink-cre.md#chainlink-cre"],
       "facts": [
-        { "action": "SIMULATE", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "cre workflow simulate; requires cre login." },
-        { "action": "PRODUCTION_WRITE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Production on-chain writes are documented for Monad mainnet; testnet production is unverified." }
+        {"action": "SIMULATE", "networks": ["sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "cre workflow simulate; requires cre login."},
+        {"action": "PRODUCTION_WRITE", "networks": ["proof/monad-mainnet"], "mutating": true, "requiresHuman": true, "disabledBy": "SYNQ_ALLOW_MAINNET_BROADCAST", "note": "Production on-chain writes are documented for Monad mainnet; testnet production is unverified."}
       ]
     },
     {
@@ -81,7 +87,7 @@
       "credentialEnv": [],
       "sourceRefs": ["sources/plugin_registry.json#local-transfer"],
       "facts": [
-        { "action": "TRANSFER", "networks": ["local/anvil"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Grant-bound ERC20 transfer through the Safe ExecutionModule." }
+        {"action": "TRANSFER", "networks": ["local/anvil"], "mutating": true, "requiresHuman": true, "disabledBy": null, "note": "Grant-bound ERC20 transfer through the Safe ExecutionModule."}
       ]
     },
     {
@@ -91,7 +97,7 @@
       "credentialEnv": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
       "sourceRefs": ["sources/research/2026-10-10-mastra-temporal-models.md#qwen-alibaba-model-studio-openai-compatible"],
       "facts": [
-        { "action": "STRUCTURED_REASONING", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "qwen3.8-max intent and mandate compilation; output is untrusted until validated." }
+        {"action": "STRUCTURED_REASONING", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "qwen3.8-max intent and mandate compilation; output is untrusted until validated."}
       ]
     },
     {
@@ -101,8 +107,8 @@
       "credentialEnv": ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
       "sourceRefs": ["sources/research/2026-10-10-mastra-temporal-models.md#kimi-moonshot", "sources/research/2026-10-10-kimi-tools-api.md"],
       "facts": [
-        { "action": "WEB_RESEARCH", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "POST /v1/tools/search and /v1/tools/fetch; retrieved content is untrusted evidence." },
-        { "action": "CRITIQUE", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "kimi-k3 independent critique; evidence, not authorization." }
+        {"action": "WEB_RESEARCH", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "POST /v1/tools/search and /v1/tools/fetch; retrieved content is untrusted evidence."},
+        {"action": "CRITIQUE", "networks": ["local/anvil", "sandbox/monad-testnet", "proof/monad-mainnet"], "mutating": false, "requiresHuman": false, "disabledBy": null, "note": "kimi-k3 independent critique; evidence, not authorization."}
       ]
     }
   ]
