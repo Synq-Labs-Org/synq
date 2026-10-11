@@ -50,7 +50,8 @@ export function engineDcaEvaluator(
           maxSlippageBps: strategy.maxSlippageBps,
           maxTicks: strategy.maxTicks,
           mandateActive: state.mandateActive,
-          mandateVersionMatches: state.mandateVersion === strategy.mandateVersion,
+          mandateVersionMatches:
+            state.mandateVersion === strategy.mandateVersion,
           ticksExecuted: state.ticksExecuted,
           remainingBudget: state.remainingBudget,
           observedAt: state.observedAt,
