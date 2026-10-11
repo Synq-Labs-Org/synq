@@ -119,7 +119,9 @@ export class DuffelClient {
       ? (parsed.errors[0] as Json | undefined)
       : undefined;
     const code = String(first?.code ?? first?.type ?? 'unknown');
-    const message = String(first?.message ?? '').slice(0, 160);
+    const message = String(
+      first?.message ?? (Object.keys(parsed).length ? '' : text),
+    ).slice(0, 160);
     const kind: DuffelErrorKind =
       res.status === 401 || res.status === 403
         ? 'AUTH'
