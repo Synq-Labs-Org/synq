@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { labelEvidenceHex } from '@synq/funding';
 
 export const LIVE = process.env.SYNQ_P10_LIVE === '1';
 export const EVIDENCE_DIR = 'reports/evidence/perpl';
@@ -43,7 +44,7 @@ export function recordEvidence(
   const doc = {
     executionMode: mode,
     recordedAt: new Date().toISOString(),
-    ...(redact(body) as Record<string, unknown>),
+    ...(labelEvidenceHex(redact(body)) as Record<string, unknown>),
   };
   writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`);
   return path;

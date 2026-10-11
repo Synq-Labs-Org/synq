@@ -217,11 +217,6 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
             : null,
           receipt: record?.receipt ?? null,
         });
-        recordEvidence('testnet-hedge-workflow-progress', 'REAL_TESTNET', {
-          operatorAccountLabel: 'TEST_HARNESS_OPERATOR_ACCOUNT',
-          proofMode: harness.proofMode,
-          steps,
-        });
         return state;
       };
       let opened = false;
@@ -316,6 +311,13 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
           newFundingDeposited: '0',
           ws: { events: wsEvents, orders: wsOrders, fills: wsFills },
         });
+      } catch (error) {
+        recordEvidence('testnet-hedge-workflow-failure', 'REAL_TESTNET', {
+          status: 'INVESTIGATE',
+          error: error instanceof Error ? error.message : String(error),
+          steps,
+        });
+        throw error;
       } finally {
         if (opened) {
           try {
