@@ -114,7 +114,11 @@ function setup(
     domains: ['DATA'],
     providers: ['x402'],
     hosts: ['data.example.com'],
-    perActionCap: { amount: over.budget ?? '50000', currency: 'USDC', decimals: 6 },
+    perActionCap: {
+      amount: over.budget ?? '50000',
+      currency: 'USDC',
+      decimals: 6,
+    },
     cumulativeBudget: {
       amount: over.budget ?? '100000',
       currency: 'USDC',

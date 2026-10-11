@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type pg from 'pg';
-import { PostgresReservationStore } from '@synq/settlement';
+import {
+  PostgresRecourseStore,
+  PostgresReservationStore,
+} from '@synq/settlement';
+import { recourseScenarios } from './recourse-scenarios.js';
 import { ensureP08Database } from '../treasury/pg.js';
 import {
   AUSD,
@@ -62,4 +66,12 @@ describe('postgres reservation invariant under load', () => {
     expect(BigInt(free.free)).toBe(10_000n - reserved);
     expect(results.some((r) => r.status === 'rejected')).toBe(true);
   });
+});
+
+recourseScenarios('postgres', async () => {
+  const reservations = await fresh();
+  const schema = schemas.at(-1)!;
+  const store = new PostgresRecourseStore(pool, schema);
+  await store.migrate();
+  return { store, reservations };
 });
