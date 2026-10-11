@@ -243,7 +243,8 @@ export async function startLocalVertical() {
       gasLimitPercent: 200n,
       approve: identity.approve,
     });
-    const { authorize, execute, onchainRevert } = vertical;
+    const { authorize, execute, onchainRevert, propose, assertModuleDigest } =
+      vertical;
 
     return {
       node,
@@ -263,6 +264,8 @@ export async function startLocalVertical() {
       sync,
       project,
       authorize,
+      propose,
+      assertModuleDigest,
       execute,
       onchainRevert,
       balanceOf,

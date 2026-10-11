@@ -1,0 +1,717 @@
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  ChannelDeliveryError,
+  ChannelEventSchema,
+  type ChannelAdapter,
+  type ChannelEvent,
+  type ChannelId,
+  type Envelope,
+  type OutboundMessage,
+} from './events.js';
+import { HELP_TEXT, parseCommand, parseSendArgs } from './commands.js';
+import type { ChannelStore, GroupLink, RedeemOutcome } from './store.js';
+
+export type TreasurySummary = {
+  symbol: string;
+  total: string;
+  free: string;
+  reserved: string;
+  pending: string;
+  account: string;
+  chainId: number;
+  asOf: string;
+};
+export type MandateSummary = {
+  mandateId: string;
+  version: number;
+  status: string;
+  symbol: string;
+  perActionCap: string;
+  cumulativeBudget: string;
+  spent: string;
+};
+export type ApprovalSummary = {
+  intentHash: string;
+  draftDigest: string;
+  label: string;
+  counted: number;
+  required: number;
+  status: 'PENDING' | 'SATISFIED' | 'INVALIDATED';
+};
+export type ReceiptSummary = {
+  intentHash: string;
+  transactionHash: string;
+  state: 'CONFIRMED' | 'RECONCILED';
+  label: string;
+  executionMode: string;
+};
+export type BrainProposalSummary = {
+  kind: 'ACTION' | 'MANDATE';
+  status: string;
+  code: string | null;
+  intentHash: string | null;
+};
+export type BrainReply = { text: string; proposals: BrainProposalSummary[] };
+
+/**
+ * What the gateway may ask of Synq. Every port is read-only or proposes
+ * through the Kernel; none can approve, sign or broadcast.
+ */
+export interface ChannelPorts {
+  activeMember(
+    groupId: string,
+    principalId: string,
+  ): Promise<{ memberId: string } | null>;
+  groupLabel?(groupId: string): Promise<string | null>;
+  treasury(groupId: string): Promise<TreasurySummary | null>;
+  mandates(groupId: string): Promise<MandateSummary[]>;
+  approvals(groupId: string): Promise<ApprovalSummary[]>;
+  receipts(groupId: string): Promise<ReceiptSummary[]>;
+  sendRecipient?(
+    groupId: string,
+    query: string,
+  ): Promise<{ recipientId: string; label: string } | null>;
+  brain?(input: {
+    groupId: string;
+    memberId: string;
+    principalId: string;
+    text: string;
+    runId: string;
+    intent: 'ASK' | 'PROPOSE';
+  }): Promise<BrainReply>;
+}
+
+export type GatewayOutcome = {
+  status:
+    | 'DUPLICATE'
+    | 'STALE'
+    | 'IGNORED'
+    | 'REFUSED'
+    | 'UNAUTHORIZED'
+    | 'HANDLED'
+    | 'RECORDED';
+  code: string | null;
+  delivered: number;
+  failed: number;
+};
+
+export type ChannelGatewayOptions = {
+  store: ChannelStore;
+  ports: ChannelPorts;
+  adapters: readonly ChannelAdapter[];
+  webBaseUrl: string;
+  explorerTxUrl: string;
+  now: () => number;
+  botUsernames?: Partial<Record<ChannelId, string>>;
+  maxEventAgeSeconds?: number;
+  maxClockSkewSeconds?: number;
+  linkCodeTtlSeconds?: number;
+  brainCooldownSeconds?: number;
+  onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
+};
+
+const APPROVAL_WORDS =
+  /^(yes|yep|yeah|y|ok|okay|approve|approved|i approve|confirm|confirmed|lgtm|do it|go|\+1|👍|✅)[.! ]*$/i;
+const hashCode = (code: string) =>
+  createHash('sha256').update(`synq-channel-link:${code}`).digest('hex');
+const short = (v: string) =>
+  v.length > 14 ? `${v.slice(0, 8)}…${v.slice(-4)}` : v;
+
+export class ChannelGateway {
+  private readonly adapters: Map<ChannelId, ChannelAdapter>;
+  private readonly lastBrain = new Map<string, number>();
+  constructor(private readonly options: ChannelGatewayOptions) {
+    this.adapters = new Map(options.adapters.map((a) => [a.channel, a]));
+    if (!/^https?:\/\//.test(options.webBaseUrl))
+      throw new Error('CHANNEL_WEB_BASE_URL_INVALID');
+  }
+
+  private web(path: string) {
+    return `${this.options.webBaseUrl.replace(/\/$/, '')}${path}`;
+  }
+
+  async handle(raw: ChannelEvent): Promise<GatewayOutcome> {
+    const event = ChannelEventSchema.parse(raw);
+    const outcome = await this.dispatch(event);
+    this.options.onEvent?.(event, outcome);
+    return outcome;
+  }
+
+  private result(
+    status: GatewayOutcome['status'],
+    code: string | null = null,
+    delivered = 0,
+    failed = 0,
+  ): GatewayOutcome {
+    return { status, code, delivered, failed };
+  }
+
+  private async dispatch(event: ChannelEvent): Promise<GatewayOutcome> {
+    const now = this.options.now();
+    if (event.type === 'MESSAGE_DELIVERY_FAILED') {
+      await this.options.store.recordDeliveryFailure({
+        channel: event.channel,
+        externalGroupId: event.externalGroupId,
+        reason: event.reason,
+        attempts: event.attempts,
+        at: event.at,
+      });
+      return this.result('RECORDED', 'DELIVERY_FAILURE');
+    }
+    if (event.type === 'APPROVAL_LINK_OPENED')
+      return this.result('RECORDED', 'APPROVAL_LINK_OPENED');
+    const envelope = event.envelope;
+    if (
+      !(await this.options.store.recordEvent(
+        envelope.channel,
+        envelope.eventId,
+        now,
+      ))
+    )
+      return this.result('DUPLICATE');
+    const age = now - envelope.timestamp;
+    if (
+      age > (this.options.maxEventAgeSeconds ?? 600) ||
+      age < -(this.options.maxClockSkewSeconds ?? 60)
+    )
+      return this.result('STALE');
+    switch (event.type) {
+      case 'MEMBER_LEFT':
+        for (const m of event.members)
+          await this.options.store.revokeUser(
+            envelope.channel,
+            m.externalUserId,
+            now,
+          );
+        return this.result('RECORDED', 'MEMBER_LEFT');
+      case 'GROUP_CREATED':
+        return this.replyOutcome(envelope, 'HANDLED', 'GROUP_CREATED', {
+          text: 'Synq is here. A member can type /synq to link this chat to a Synq group. Approvals always happen on the Synq web page with a passkey.',
+        });
+      case 'MEMBER_JOINED': {
+        const humans = event.members.filter((m) => !m.isBot);
+        if (!humans.length) return this.result('IGNORED', 'BOT_JOINED');
+        return this.replyOutcome(envelope, 'HANDLED', 'MEMBER_JOINED', {
+          text: 'Welcome. Type /synq to link your Synq account; until then Synq ignores your financial commands.',
+        });
+      }
+      case 'ACTION_REQUESTED': {
+        await this.adapters
+          .get(envelope.channel)
+          ?.acknowledgeAction?.(
+            event.callbackId,
+            'Approvals happen only on the Synq web page with your passkey.',
+          )
+          .catch(() => undefined);
+        return this.result('REFUSED', 'CALLBACK_NOT_AN_APPROVAL');
+      }
+      case 'MESSAGE_RECEIVED':
+        return this.message(envelope);
+    }
+  }
+
+  private async message(envelope: Envelope): Promise<GatewayOutcome> {
+    if (envelope.verifiedSender.isBot || !envelope.externalUserId)
+      return this.result('IGNORED', 'NOT_A_HUMAN_SENDER');
+    const parsed = parseCommand(
+      envelope.body,
+      this.options.botUsernames?.[envelope.channel] ?? null,
+    );
+    if (!parsed) return this.result('IGNORED', 'OTHER_BOT_COMMAND');
+    if (parsed.kind === 'TEXT') {
+      if (!envelope.interaction.addressedToBot)
+        return this.result('IGNORED', 'NOT_ADDRESSED');
+      if (APPROVAL_WORDS.test(stripMention(parsed.text)))
+        return this.replyOutcome(
+          envelope,
+          'REFUSED',
+          'CHAT_TEXT_NOT_APPROVAL',
+          {
+            text: 'Chat messages never approve anything. Open the approval link and approve with your passkey.',
+          },
+        );
+    }
+    if (parsed.kind === 'UNKNOWN_COMMAND')
+      return this.replyOutcome(envelope, 'REFUSED', 'UNKNOWN_COMMAND', {
+        text: HELP_TEXT,
+      });
+    if (parsed.kind === 'COMMAND' && parsed.name === 'help')
+      return this.replyOutcome(envelope, 'HANDLED', 'HELP', {
+        text: HELP_TEXT,
+      });
+    if (envelope.chatKind !== 'GROUP')
+      return this.replyOutcome(envelope, 'REFUSED', 'GROUP_CHAT_REQUIRED', {
+        text: 'Use Synq from your group chat. Direct messages cannot act on a group treasury.',
+      });
+    if (parsed.kind === 'COMMAND' && parsed.name === 'synq')
+      return this.link(envelope);
+
+    const access = await this.access(envelope);
+    if ('refusal' in access) return access.refusal;
+    const { group, memberId, principalId } = access;
+    if (parsed.kind === 'TEXT')
+      return this.brain(
+        envelope,
+        group,
+        memberId,
+        principalId,
+        parsed.text,
+        'ASK',
+      );
+    switch (parsed.name) {
+      case 'balance':
+      case 'wallet':
+      case 'contribute':
+        return this.treasury(envelope, group, parsed.name);
+      case 'mandates':
+        return this.mandates(envelope, group);
+      case 'status':
+        return this.status(envelope, group);
+      case 'send':
+        return this.send(envelope, group, parsed.args);
+      case 'propose':
+        if (!parsed.args)
+          return this.replyOutcome(
+            envelope,
+            'REFUSED',
+            'PROPOSAL_TEXT_REQUIRED',
+            {
+              text: 'Usage: /propose <what the group wants to do>',
+            },
+          );
+        return this.brain(
+          envelope,
+          group,
+          memberId,
+          principalId,
+          parsed.args,
+          'PROPOSE',
+        );
+    }
+    return this.result('IGNORED', 'UNHANDLED_COMMAND');
+  }
+
+  private async access(
+    envelope: Envelope,
+  ): Promise<
+    | { group: GroupLink; memberId: string; principalId: string }
+    | { refusal: GatewayOutcome }
+  > {
+    const store = this.options.store;
+    const group = await store.groupLink(
+      envelope.channel,
+      envelope.externalGroupId,
+    );
+    if (!group || group.status !== 'ACTIVE')
+      return { refusal: this.result('UNAUTHORIZED', 'GROUP_NOT_LINKED') };
+    const user = await store.userLink(
+      envelope.channel,
+      envelope.externalUserId!,
+    );
+    if (!user || user.status !== 'ACTIVE')
+      return {
+        refusal: await this.replyOutcome(
+          envelope,
+          'UNAUTHORIZED',
+          'USER_NOT_LINKED',
+          {
+            text: 'Your chat account is not linked to a Synq member yet. Type /synq and confirm with your passkey.',
+          },
+        ),
+      };
+    const member = await this.options.ports.activeMember(
+      group.groupId,
+      user.principalId,
+    );
+    if (!member)
+      return {
+        refusal: await this.replyOutcome(
+          envelope,
+          'UNAUTHORIZED',
+          'NOT_A_MEMBER',
+          {
+            text: 'You are not an active member of this Synq group.',
+          },
+        ),
+      };
+    return { group, memberId: member.memberId, principalId: user.principalId };
+  }
+
+  private async link(envelope: Envelope): Promise<GatewayOutcome> {
+    const store = this.options.store;
+    const group = await store.groupLink(
+      envelope.channel,
+      envelope.externalGroupId,
+    );
+    const user = await store.userLink(
+      envelope.channel,
+      envelope.externalUserId!,
+    );
+    if (group?.status === 'ACTIVE' && user?.status === 'ACTIVE') {
+      const member = await this.options.ports.activeMember(
+        group.groupId,
+        user.principalId,
+      );
+      if (member) {
+        const label =
+          (await this.options.ports.groupLabel?.(group.groupId)) ??
+          short(group.groupId);
+        return this.replyOutcome(envelope, 'HANDLED', 'ALREADY_LINKED', {
+          text: `This chat is linked to Synq group ${label}. You are linked as ${member.memberId}.`,
+        });
+      }
+    }
+    const code = randomBytes(24).toString('base64url');
+    const now = this.options.now();
+    await store.createLinkCode({
+      codeHash: hashCode(code),
+      channel: envelope.channel,
+      externalGroupId: envelope.externalGroupId,
+      externalUserId: envelope.externalUserId!,
+      displayName: envelope.verifiedSender.displayName,
+      createdAt: now,
+      expiresAt: now + (this.options.linkCodeTtlSeconds ?? 900),
+    });
+    const who = envelope.verifiedSender.displayName ?? 'this chat account';
+    return this.replyOutcome(envelope, 'HANDLED', 'LINK_CODE_ISSUED', {
+      text: `${who}: open the link and confirm with your passkey to link this chat account${group?.status === 'ACTIVE' ? '' : ' and this chat'} to your Synq group. Only open it yourself; the code expires in ${Math.round((this.options.linkCodeTtlSeconds ?? 900) / 60)} minutes and works once.`,
+      buttons: [
+        {
+          label: 'Link with passkey',
+          url: this.web(`/channels/link?code=${code}`),
+        },
+      ],
+    });
+  }
+
+  /** Called only after the web page authenticated the member for `groupId`. */
+  async redeemLinkCode(input: {
+    code: string;
+    groupId: string;
+    principalId: string;
+  }): Promise<RedeemOutcome> {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(input.code))
+      return { status: 'CODE_INVALID' };
+    const member = await this.options.ports.activeMember(
+      input.groupId,
+      input.principalId,
+    );
+    if (!member) return { status: 'CODE_INVALID' };
+    const outcome = await this.options.store.redeemLinkCode({
+      codeHash: hashCode(input.code),
+      groupId: input.groupId,
+      principalId: input.principalId,
+      now: this.options.now(),
+    });
+    if (outcome.status === 'LINKED')
+      await this.post(outcome.group.channel, outcome.group.externalGroupId, {
+        text: `Linked: ${member.memberId} confirmed with a passkey. This chat now speaks for Synq group ${short(outcome.group.groupId)}; approvals still require each member's passkey.`,
+      });
+    return outcome;
+  }
+
+  async linkCodePreview(code: string) {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(code)) return null;
+    const view = await this.options.store.linkCode(hashCode(code));
+    if (
+      !view ||
+      view.consumedAt !== null ||
+      view.expiresAt <= this.options.now()
+    )
+      return null;
+    return {
+      channel: view.channel,
+      displayName: view.displayName,
+      expiresAt: view.expiresAt,
+      groupLinked:
+        (await this.options.store.groupLink(view.channel, view.externalGroupId))
+          ?.status === 'ACTIVE',
+    };
+  }
+
+  private async treasury(
+    envelope: Envelope,
+    group: GroupLink,
+    command: 'balance' | 'wallet' | 'contribute',
+  ) {
+    const t = await this.options.ports
+      .treasury(group.groupId)
+      .catch(() => null);
+    if (!t)
+      return this.replyOutcome(envelope, 'REFUSED', 'TREASURY_UNAVAILABLE', {
+        text: 'Treasury data is unavailable or stale right now; Synq will not guess a balance.',
+      });
+    const text =
+      command === 'balance'
+        ? `Treasury ${t.symbol}: total ${t.total}, free ${t.free}, reserved ${t.reserved}, pending ${t.pending} (as of ${t.asOf}).`
+        : command === 'wallet'
+          ? `Group treasury account ${t.account} on chain ${t.chainId}. Holdings: ${t.total} ${t.symbol}.`
+          : `To contribute, send ${t.symbol} on chain ${t.chainId} to the treasury account ${t.account} from your linked member wallet. It is credited after confirmation and indexing.`;
+    return this.replyOutcome(envelope, 'HANDLED', command.toUpperCase(), {
+      text,
+    });
+  }
+
+  private async mandates(envelope: Envelope, group: GroupLink) {
+    const list = await this.options.ports
+      .mandates(group.groupId)
+      .catch(() => null);
+    if (!list)
+      return this.replyOutcome(envelope, 'REFUSED', 'MANDATES_UNAVAILABLE', {
+        text: 'Mandates are unavailable right now.',
+      });
+    const text = list.length
+      ? list
+          .map(
+            (m) =>
+              `${m.mandateId} v${m.version} ${m.status}: per action ${m.perActionCap} ${m.symbol}, budget ${m.cumulativeBudget}, spent ${m.spent}`,
+          )
+          .join('\n')
+      : 'No mandates. Use /propose to ask the Brain to draft one; it must be approved before it has any authority.';
+    return this.replyOutcome(envelope, 'HANDLED', 'MANDATES', { text });
+  }
+
+  private async status(envelope: Envelope, group: GroupLink) {
+    const [approvals, receipts] = await Promise.all([
+      this.options.ports.approvals(group.groupId).catch(() => null),
+      this.options.ports.receipts(group.groupId).catch(() => null),
+    ]);
+    if (!approvals || !receipts)
+      return this.replyOutcome(envelope, 'REFUSED', 'STATUS_UNAVAILABLE', {
+        text: 'Status is unavailable right now.',
+      });
+    const pending = approvals.filter((a) => a.status !== 'INVALIDATED');
+    const lines = [
+      pending.length ? 'Pending approvals:' : 'No pending approvals.',
+      ...pending.map(
+        (a) => `- ${a.label}: ${a.counted}/${a.required} verified approvals`,
+      ),
+      ...receipts
+        .slice(0, 5)
+        .map(
+          (r) =>
+            `- ${r.label}: ${r.state} ${this.options.explorerTxUrl}${r.transactionHash}`,
+        ),
+    ];
+    return this.replyOutcome(envelope, 'HANDLED', 'STATUS', {
+      text: lines.join('\n'),
+      buttons: pending
+        .filter((a) => a.status === 'PENDING')
+        .slice(0, 3)
+        .map((a) => ({
+          label: `Review ${short(a.intentHash)}`,
+          url: this.web(`/intents/${a.intentHash}`),
+        })),
+    });
+  }
+
+  private async send(envelope: Envelope, group: GroupLink, args: string) {
+    const parsed = parseSendArgs(args);
+    if (!parsed)
+      return this.replyOutcome(envelope, 'REFUSED', 'SEND_ARGS_INVALID', {
+        text: 'Usage: /send <amount> <recipient>, for example /send 1.5 alice',
+      });
+    let recipientId = parsed.recipient;
+    let label = parsed.recipient;
+    if (this.options.ports.sendRecipient) {
+      const found = await this.options.ports
+        .sendRecipient(group.groupId, parsed.recipient)
+        .catch(() => null);
+      if (!found)
+        return this.replyOutcome(envelope, 'REFUSED', 'RECIPIENT_UNKNOWN', {
+          text: `"${parsed.recipient}" is not in the group's Send directory.`,
+        });
+      recipientId = found.recipientId;
+      label = found.label;
+    }
+    const query = new URLSearchParams({
+      groupId: group.groupId,
+      recipientId,
+      amount: parsed.amount,
+    });
+    return this.replyOutcome(envelope, 'HANDLED', 'SEND_LINK', {
+      text: `Send ${parsed.amount} AUSD to ${label}: open the link, review the Kernel preview and confirm with your passkey. Other members then approve on the web; Synq posts the approval count and the receipt here.`,
+      buttons: [
+        { label: 'Review and confirm', url: this.web(`/send?${query}`) },
+      ],
+    });
+  }
+
+  private async brain(
+    envelope: Envelope,
+    group: GroupLink,
+    memberId: string,
+    principalId: string,
+    text: string,
+    intent: 'ASK' | 'PROPOSE',
+  ) {
+    const brain = this.options.ports.brain;
+    if (!brain)
+      return this.replyOutcome(envelope, 'REFUSED', 'BRAIN_UNAVAILABLE', {
+        text: 'The Synq Brain is not configured in this deployment. Commands still work: /help',
+      });
+    const now = this.options.now();
+    const key = `${envelope.channel}:${envelope.externalUserId}`;
+    if (
+      now - (this.lastBrain.get(key) ?? -Infinity) <
+      (this.options.brainCooldownSeconds ?? 10)
+    )
+      return this.result('REFUSED', 'BRAIN_RATE_LIMITED');
+    this.lastBrain.set(key, now);
+    let reply: BrainReply;
+    try {
+      reply = await brain({
+        groupId: group.groupId,
+        memberId,
+        principalId,
+        text: stripMention(text),
+        runId: `chan_${envelope.channel}_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`,
+        intent,
+      });
+    } catch {
+      return this.replyOutcome(envelope, 'REFUSED', 'BRAIN_FAILED', {
+        text: 'The Brain could not answer right now. Nothing was proposed.',
+      });
+    }
+    const lines = [reply.text.slice(0, 3000)];
+    for (const p of reply.proposals)
+      lines.push(
+        `Kernel: ${p.kind} ${p.status}${p.code ? ` (${p.code})` : ''}`,
+      );
+    return this.replyOutcome(envelope, 'HANDLED', 'BRAIN', {
+      text: lines.join('\n'),
+      buttons: reply.proposals
+        .filter((p) => p.intentHash && p.status === 'PENDING_APPROVAL')
+        .slice(0, 3)
+        .map((p) => ({
+          label: 'Review and approve',
+          url: this.web(`/intents/${p.intentHash}`),
+        })),
+    });
+  }
+
+  /** Posts approval counts and receipts once per state for every linked chat. */
+  async notify(): Promise<{ delivered: number; failed: number }> {
+    let delivered = 0;
+    let failed = 0;
+    const store = this.options.store;
+    const now = this.options.now();
+    for (const link of await store.groupLinks()) {
+      const [approvals, receipts] = await Promise.all([
+        this.options.ports.approvals(link.groupId).catch(() => []),
+        this.options.ports.receipts(link.groupId).catch(() => []),
+      ]);
+      const messages: { key: string; message: OutboundMessage }[] = [];
+      for (const a of approvals) {
+        if (a.status === 'INVALIDATED') continue;
+        messages.push(
+          a.status === 'SATISFIED'
+            ? {
+                key: `approval:${a.draftDigest}:satisfied`,
+                message: {
+                  text: `Quorum reached for ${a.label}: ${a.counted}/${a.required} verified passkey approvals. The Kernel issues the grant; execution follows.`,
+                },
+              }
+            : {
+                key: `approval:${a.draftDigest}:${a.counted}`,
+                message: {
+                  text: `Approval needed for ${a.label}: ${a.counted}/${a.required} verified passkey approvals.`,
+                  buttons: [
+                    {
+                      label: 'Review and approve',
+                      url: this.web(`/intents/${a.intentHash}`),
+                    },
+                  ],
+                },
+              },
+        );
+      }
+      for (const r of receipts)
+        messages.push({
+          key: `receipt:${r.intentHash}:${r.state}`,
+          message: {
+            text: `${r.state === 'RECONCILED' ? 'Reconciled' : 'Confirmed'} on Monad testnet [${r.executionMode}]: ${r.label}\ntx ${r.transactionHash}`,
+            buttons: [
+              {
+                label: 'View on explorer',
+                url: `${this.options.explorerTxUrl}${r.transactionHash}`,
+              },
+            ],
+          },
+        });
+      for (const { key, message } of messages) {
+        if (
+          !(await store.claimNotification(
+            link.channel,
+            link.externalGroupId,
+            key,
+            now,
+          ))
+        )
+          continue;
+        const ok = await this.post(link.channel, link.externalGroupId, {
+          ...message,
+          idempotencyKey: createHash('sha256')
+            .update(`${link.externalGroupId}:${key}`)
+            .digest('hex')
+            .slice(0, 40),
+        });
+        if (ok) delivered++;
+        else {
+          failed++;
+          await store.releaseNotification(
+            link.channel,
+            link.externalGroupId,
+            key,
+          );
+        }
+      }
+    }
+    return { delivered, failed };
+  }
+
+  private async replyOutcome(
+    envelope: Envelope,
+    status: GatewayOutcome['status'],
+    code: string,
+    message: OutboundMessage,
+  ): Promise<GatewayOutcome> {
+    const ok = await this.post(envelope.channel, envelope.externalGroupId, {
+      ...message,
+      replyTo: envelope.messageId,
+    });
+    return this.result(status, code, ok ? 1 : 0, ok ? 0 : 1);
+  }
+
+  /** Delivery failures become MESSAGE_DELIVERY_FAILED events, never exceptions. */
+  async post(
+    channel: ChannelId,
+    externalGroupId: string,
+    message: OutboundMessage,
+  ) {
+    const adapter = this.adapters.get(channel);
+    try {
+      if (!adapter) throw new ChannelDeliveryError('CHANNEL_UNAVAILABLE', 0);
+      await adapter.send(externalGroupId, message);
+      return true;
+    } catch (error) {
+      const failure = {
+        type: 'MESSAGE_DELIVERY_FAILED' as const,
+        channel,
+        externalGroupId,
+        reason:
+          error instanceof ChannelDeliveryError
+            ? `${error.code}: ${error.message}`.slice(0, 500)
+            : 'UNEXPECTED_DELIVERY_ERROR',
+        attempts: error instanceof ChannelDeliveryError ? error.attempts : 1,
+        at: this.options.now(),
+      };
+      await this.handle(failure).catch(() => undefined);
+      return false;
+    }
+  }
+}
+
+function stripMention(text: string) {
+  return text.replace(/@[A-Za-z0-9_]{3,64}/g, '').trim();
+}

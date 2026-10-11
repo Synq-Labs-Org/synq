@@ -11,7 +11,9 @@
     "./kernel-store": "./src/kernel-store.ts",
     "./brain-runtime": "./src/brain-runtime.ts",
     "./send-routes": "./src/send-routes.ts",
-    "./send-runtime": "./src/send-runtime.ts"
+    "./send-runtime": "./src/send-runtime.ts",
+    "./channel-routes": "./src/channel-routes.ts",
+    "./channel-runtime": "./src/channel-runtime.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -35,6 +37,9 @@
     "@synq/plugin-chainlink-cre": "workspace:*",
     "@synq/plugin-kuru": "workspace:*",
     "@synq/plugin-perpl": "workspace:*",
-    "@synq/plugin-sdk": "workspace:*"
+    "@synq/plugin-sdk": "workspace:*",
+    "@synq/channels": "workspace:*",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/plugin-qwen": "workspace:*"
   }
 }
