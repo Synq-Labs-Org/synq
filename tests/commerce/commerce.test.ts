@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { EconomicGrantAuthority } from '@synq/kernel';
+import { EconomicGrantAuthority, economicRequestHash } from '@synq/kernel';
+import { approval, reservationsWith } from '../kernel/economic-fixtures.js';
 import {
   EconomicIntentSchema,
   ProviderCapabilityGraph,
@@ -223,9 +224,26 @@ describe('commerce checkout (simulation through the Kernel)', () => {
       }),
     ]);
   }
-  function authority() {
-    const a = new EconomicGrantAuthority(new Uint8Array(32).fill(5));
-    a.install({
+  const RES_ASSET = 'eip155:10143/erc20:ausd';
+  async function authority() {
+    const reservations = await reservationsWith(
+      'group-1',
+      RES_ASSET,
+      [
+        {
+          reservationId: 'res-gift',
+          amount: '1000',
+          planHash: '0xplan',
+          expiresAt: T + 3_600,
+        },
+      ],
+      T,
+    );
+    const a = new EconomicGrantAuthority({
+      key: new Uint8Array(32).fill(5),
+      reservations,
+    });
+    await a.install({
       mandateId: 'gifts',
       groupId: 'group-1',
       version: 1,
@@ -238,12 +256,50 @@ describe('commerce checkout (simulation through the Kernel)', () => {
       autoApproveMax: usd(0),
       quorum: 1,
       members: ['alice', 'bob'],
+      approverKinds: ['LOCAL_FIXTURE'],
       maxQuoteAgeSeconds: 300,
       grantTtlSeconds: 300,
       environment: 'SANDBOX',
       validUntil: T + 86_400,
     });
     return a;
+  }
+  const reservation = {
+    reservationId: 'res-gift',
+    planHash: '0xplan',
+    reservedAssetId: RES_ASSET,
+    reservedAmount: '1000',
+  };
+  async function granted(
+    a: EconomicGrantAuthority,
+    offer: EconomicOffer,
+    landed: { amount: string; currency: string; decimals: number },
+    host: string,
+    providerId: string,
+    intentId: string,
+  ) {
+    const r = {
+      intentId,
+      groupId: 'group-1',
+      mandateId: 'gifts',
+      execution: commerceExecution({
+        offer,
+        host,
+        providerId,
+        maxAmount: landed,
+        reservation,
+        recipientRef: 'recipient:ref:1',
+      }),
+      quoteExpiresAt: offer.price.expiresAt,
+      revalidatedAt: offer.price.revalidatedAt,
+    };
+    const d = await a.authorize(
+      r,
+      [approval('alice', economicRequestHash(r))],
+      T,
+    );
+    if (d.status !== 'AUTHORIZED') throw new Error(JSON.stringify(d));
+    return d.grant;
   }
   it('COM-007 revalidation via eBay getItem makes the offer executable', async () => {
     const { offer } = await revalidated();
@@ -260,30 +316,15 @@ describe('commerce checkout (simulation through the Kernel)', () => {
     expect(decision.kind).toBe('SIMULATE');
     if (decision.kind !== 'SIMULATE') return;
     expect(decision.route.providerId).toBe('ebay-order');
-    const a = authority();
-    const actual = commerceExecution({
+    const a = await authority();
+    const grant = await granted(
+      a,
       offer,
-      host: decision.route.host,
-      providerId: decision.route.providerId,
-      maxAmount: landed,
-      reservationId: 'res-gift',
-      planHash: '0xplan',
-      recipientRef: 'recipient:ref:1',
-    });
-    const d = a.authorize(
-      {
-        intentId: intent.id,
-        groupId: 'group-1',
-        mandateId: 'gifts',
-        execution: actual,
-        quoteExpiresAt: offer.price.expiresAt,
-        revalidatedAt: offer.price.revalidatedAt,
-        reservationHeld: true,
-      },
-      ['alice'],
-      T,
+      landed,
+      decision.route.host,
+      decision.route.providerId,
+      intent.id,
     );
-    if (d.status !== 'AUTHORIZED') throw new Error(d.status);
     const recipients: string[] = [];
     const deps = {
       authority: a,
@@ -300,15 +341,17 @@ describe('commerce checkout (simulation through the Kernel)', () => {
         }
       ),
     };
-    const out = await executeCommerceCheckout(deps, {
-      intentId: intent.id,
-      decision,
-      offer,
-      grant: d.grant,
-      actual,
-      idempotencyKey: 'gift-1-key',
-    });
-    expect(out).toMatchObject({
+    const run = () =>
+      executeCommerceCheckout(deps, {
+        intentId: intent.id,
+        decision,
+        offer,
+        grant,
+        reservation,
+        recipientRef: 'recipient:ref:1',
+        idempotencyKey: 'gift-1-key',
+      });
+    expect(await run()).toMatchObject({
       kind: 'RECEIPT',
       receipt: {
         state: 'SIMULATED_CHECKOUT',
@@ -317,45 +360,21 @@ describe('commerce checkout (simulation through the Kernel)', () => {
       },
     });
     expect(recipients).toEqual([]);
-    expect(
-      await executeCommerceCheckout(deps, {
-        intentId: intent.id,
-        decision,
-        offer,
-        grant: d.grant,
-        actual,
-        idempotencyKey: 'gift-1-key',
-      }),
-    ).toMatchObject({ kind: 'REFUSED' });
+    expect(await run()).toMatchObject({ kind: 'REFUSED' });
   });
-  it('COM-008/COM-009/COM-001 quantity, host or variant changes after approval invalidate the grant', async () => {
+  it('COM-008/COM-009/COM-001 the checked execution is rebuilt from the offer and route actually used', async () => {
     const { offer, landed } = await revalidated();
     const decision = router().decide(offer, ['NATIVE_API']);
     if (decision.kind === 'HANDOFF') throw new Error('handoff');
-    const a = authority();
-    const actual = commerceExecution({
+    const a = await authority();
+    const grant = await granted(
+      a,
       offer,
-      host: decision.route.host,
-      providerId: decision.route.providerId,
-      maxAmount: landed,
-      reservationId: 'r',
-      planHash: 'p',
-      recipientRef: 'ref',
-    });
-    const d = a.authorize(
-      {
-        intentId: 'i2',
-        groupId: 'group-1',
-        mandateId: 'gifts',
-        execution: actual,
-        quoteExpiresAt: offer.price.expiresAt,
-        revalidatedAt: T,
-        reservationHeld: true,
-      },
-      ['bob'],
-      T,
+      landed,
+      decision.route.host,
+      decision.route.providerId,
+      'i2',
     );
-    if (d.status !== 'AUTHORIZED') throw new Error(d.status);
     const deps = {
       authority: a,
       now,
@@ -363,43 +382,119 @@ describe('commerce checkout (simulation through the Kernel)', () => {
         throw new Error('must not decrypt');
       },
     };
-    const run = (x: typeof actual, o: EconomicOffer = offer) =>
+    const run = (
+      o: EconomicOffer,
+      d = decision,
+      recipientRef = 'recipient:ref:1',
+    ) =>
       executeCommerceCheckout(deps, {
         intentId: 'i2',
-        decision,
+        decision: d,
         offer: o,
-        grant: d.grant,
-        actual: x,
+        grant,
+        reservation,
+        recipientRef,
         idempotencyKey: 'k',
       });
-    expect(await run({ ...actual, quantity: 2 })).toMatchObject({
-      kind: 'REFUSED',
-      reason: expect.stringMatching(/quantity/),
-    });
-    expect(await run({ ...actual, host: 'evil.example.com' })).toMatchObject({
-      kind: 'REFUSED',
-    });
-    const red = {
-      ...offer,
-      subject: { ...(offer.subject as object), variant: { color: 'Red' } },
-    } as EconomicOffer;
+    const product = offer.subject as Extract<
+      EconomicOffer['subject'],
+      { kind: 'PRODUCT' }
+    >;
     expect(
-      await run(
-        commerceExecution({
-          offer: red,
-          host: actual.host,
-          providerId: actual.providerId,
-          maxAmount: landed,
-          reservationId: 'r',
-          planHash: 'p',
-          recipientRef: 'ref',
-        }),
-        red,
-      ),
+      await run({ ...offer, subject: { ...product, quantity: 2 } }),
+    ).toMatchObject({
+      kind: 'REFUSED',
+      reason: expect.stringMatching(/quantity|item/),
+    });
+    const evilRoute = Object.assign(
+      Object.create(Object.getPrototypeOf(decision.route)),
+      decision.route,
+      { host: 'evil.example.com' },
+    );
+    expect(await run(offer, { ...decision, route: evilRoute })).toMatchObject({
+      kind: 'REFUSED',
+      reason: expect.stringMatching(/merchant host/),
+    });
+    expect(
+      await run({
+        ...offer,
+        subject: { ...product, variant: { color: 'Red' } },
+      }),
     ).toMatchObject({ reason: expect.stringMatching(/item/) });
-    expect(
-      await run({ ...actual, recipientRef: 'other-address' }),
-    ).toMatchObject({ reason: expect.stringMatching(/recipient/) });
+    expect(await run(offer, decision, 'other-address')).toMatchObject({
+      reason: expect.stringMatching(/recipient/),
+    });
+    const pricier = {
+      ...offer,
+      price: {
+        ...offer.price,
+        shipping: { ...offer.price.shipping, amount: '500' },
+      },
+    };
+    expect(await run(pricier)).toMatchObject({
+      kind: 'REFUSED',
+      reason: 'landed price exceeds the grant',
+    });
+  });
+  it('CARD-010 a placed order charging more than the grant opens an incident', async () => {
+    const { offer, landed } = await revalidated();
+    const caps = commerceCapabilities(env);
+    const route = {
+      mode: 'STABLECOIN_CHECKOUT' as const,
+      providerId: 'crossmint',
+      host: 'staging.crossmint.com',
+      capability: {
+        ...caps.find((c) => c.providerId === 'crossmint')!,
+        status: 'READY' as const,
+      },
+      supports: () => true,
+      sandboxReady: () => true,
+      place: async () => ({
+        state: 'ORDER_PLACED' as const,
+        orderRef: 'ord-1',
+        charged: { ...landed, amount: String(BigInt(landed.amount) + 1n) },
+      }),
+    };
+    const decision = new CommerceExecutionRouter([route]).decide(offer, [
+      'STABLECOIN_CHECKOUT',
+    ]);
+    expect(decision.kind).toBe('EXECUTE');
+    const a = await authority();
+    const grant = await granted(
+      a,
+      offer,
+      landed,
+      route.host,
+      route.providerId,
+      'i3',
+    );
+    const out = await executeCommerceCheckout(
+      {
+        authority: a,
+        now,
+        resolveRecipient: async () => ({
+          name: 'x',
+          email: 'x@example.com',
+          line1: '1',
+          city: 'c',
+          postalCode: 'p',
+          country: 'US',
+        }),
+      },
+      {
+        intentId: 'i3',
+        decision,
+        offer,
+        grant,
+        reservation,
+        recipientRef: 'recipient:ref:1',
+        idempotencyKey: 'gift-k3-key',
+      },
+    );
+    expect(out).toMatchObject({
+      kind: 'INCIDENT',
+      reason: 'charged amount exceeds the grant',
+    });
   });
   it('COM-010 Crossmint unavailable: the ladder follows mandate policy down to handoff', async () => {
     const { sel } = await revalidated();

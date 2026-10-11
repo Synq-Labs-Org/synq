@@ -29,6 +29,15 @@ const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64');
 function server(opts: { accepts?: unknown[]; settle?: boolean } = {}) {
   const payments: { header: Record<string, unknown>; signer: string }[] = [];
   const f: X402Fetch = async (url, init) => {
+    if (url.includes('/redirect'))
+      return {
+        status: 302,
+        headers: {
+          get: (n: string) =>
+            n === 'location' ? 'https://evil.example.com/steal' : null,
+        },
+        text: async () => '',
+      };
     const reply = (
       status: number,
       body: string,
@@ -102,11 +111,30 @@ function server(opts: { accepts?: unknown[]; settle?: boolean } = {}) {
   return { f, payments };
 }
 
-function setup(
-  over: { maxPerRequest?: bigint; budget?: string; hosts?: string[] } = {},
+const ASSETS = [{ chainId: 10143, address: USDC.address, decimals: 6 }];
+const NETWORKS = new Map([['eip155:10143', 10143]]);
+
+async function setup(
+  over: {
+    maxPerRequest?: bigint;
+    budget?: string;
+    hosts?: string[];
+    confirmed?: bigint;
+  } = {},
 ) {
-  const authority = new EconomicGrantAuthority(new Uint8Array(32).fill(8));
-  authority.install({
+  const reservations = new MemoryReservationStore();
+  await reservations.setConfirmedBalance({
+    groupId: 'g',
+    assetId: USDC.canonicalAssetId,
+    confirmed: over.confirmed ?? 100_000n,
+    asOf: T,
+  });
+  const authority = new EconomicGrantAuthority({
+    key: new Uint8Array(32).fill(8),
+    reservations,
+  });
+  const unit = { currency: 'USDC', decimals: 6 };
+  await authority.install({
     mandateId: 'paid-data',
     groupId: 'g',
     version: 1,
@@ -114,17 +142,9 @@ function setup(
     domains: ['DATA'],
     providers: ['x402'],
     hosts: ['data.example.com'],
-    perActionCap: {
-      amount: over.budget ?? '50000',
-      currency: 'USDC',
-      decimals: 6,
-    },
-    cumulativeBudget: {
-      amount: over.budget ?? '100000',
-      currency: 'USDC',
-      decimals: 6,
-    },
-    autoApproveMax: { amount: '50000', currency: 'USDC', decimals: 6 },
+    perActionCap: { ...unit, amount: over.budget ?? '50000' },
+    cumulativeBudget: { ...unit, amount: over.budget ?? '100000' },
+    autoApproveMax: { ...unit, amount: '50000' },
     quorum: 1,
     members: ['alice'],
     maxQuoteAgeSeconds: 60,
@@ -132,11 +152,11 @@ function setup(
     environment: 'TESTNET',
     validUntil: T + 86_400,
   });
-  const reservations = new MemoryReservationStore();
   const signer = new X402AuthorizationSigner(
     account,
     authority,
-    new Map([['eip155:10143', 10143]]),
+    NETWORKS,
+    ASSETS,
   );
   return {
     authority,
@@ -153,8 +173,8 @@ function setup(
       now: () => T,
       allowance: {
         hosts: over.hosts ?? ['data.example.com'],
-        networks: ['eip155:10143'],
-        assets: [USDC.address],
+        networks: NETWORKS,
+        assets: ASSETS,
         payTo: [PAY_TO],
         maxPerRequest: over.maxPerRequest ?? 20_000n,
       },
@@ -162,15 +182,30 @@ function setup(
   };
 }
 
+const exec = (over: Record<string, unknown> = {}) => ({
+  domain: 'DATA' as const,
+  providerId: 'x402',
+  host: 'data.example.com',
+  offerId: 'u',
+  subjectHash: `0x${'aa'.repeat(32)}` as `0x${string}`,
+  quantity: 1,
+  maxAmount: { amount: '10000', currency: 'USDC', decimals: 6 },
+  reservationId: 'r',
+  reservedAssetId: USDC.canonicalAssetId,
+  reservedAmount: '10000',
+  settlementPlanHash: 'p',
+  recipientRef: PAY_TO,
+  payAsset: {
+    chainId: 10143,
+    address: USDC.address.toLowerCase() as `0x${string}`,
+    decimals: 6,
+  },
+  ...over,
+});
+
 describe('x402 paid data through the Kernel', () => {
   it('challenge -> allowance -> reservation -> grant -> EIP-3009 signature -> paid data -> receipt', async () => {
-    const s = setup();
-    await s.reservations.setConfirmedBalance({
-      groupId: 'g',
-      assetId: USDC.canonicalAssetId,
-      confirmed: 100_000n,
-      asOf: T,
-    });
+    const s = await setup();
     const srv = server();
     const r = await payForResource(
       s.deps(srv.f),
@@ -183,22 +218,27 @@ describe('x402 paid data through the Kernel', () => {
       body: '{"price":"1.00"}',
     });
     expect(srv.payments[0]!.signer).toBe(account.address);
-    expect(s.authority.isConsumed(r.grantId!)).toBe(true);
+    expect(await s.authority.isConsumed(r.grantId!)).toBe(true);
     expect(await s.reservations.free('g', USDC.canonicalAssetId)).toMatchObject(
       { held: '10000', free: '90000' },
     );
+    expect((await s.reservations.get(r.reservationId!))?.state).toBe(
+      'CAPTURED',
+    );
   });
-  it('refuses disallowed hosts, networks, payees and amounts before any signature', async () => {
-    const s = setup();
-    await s.reservations.setConfirmedBalance({
-      groupId: 'g',
-      assetId: USDC.canonicalAssetId,
-      confirmed: 100_000n,
-      asOf: T,
-    });
+  it('refuses disallowed hosts, redirects, networks, payees and amounts before any signature', async () => {
+    const s = await setup();
     expect(
       (await payForResource(s.deps(server().f), 'https://evil.example.com/x'))
         .reason,
+    ).toBe('HOST_NOT_ALLOWED');
+    expect(
+      (
+        await payForResource(
+          s.deps(server().f),
+          'https://data.example.com/redirect',
+        )
+      ).reason,
     ).toBe('HOST_NOT_ALLOWED');
     for (const accepts of [
       [requirement({ network: 'eip155:8453' })],
@@ -219,13 +259,7 @@ describe('x402 paid data through the Kernel', () => {
     ).toBe('OVER_ALLOWANCE');
   });
   it('the Kernel budget and the free edge balance both bound repeated payments', async () => {
-    const s = setup({ budget: '20000' });
-    await s.reservations.setConfirmedBalance({
-      groupId: 'g',
-      assetId: USDC.canonicalAssetId,
-      confirmed: 100_000n,
-      asOf: T,
-    });
+    const s = await setup({ budget: '20000' });
     const srv = server();
     await payForResource(s.deps(srv.f), 'https://data.example.com/a');
     await payForResource(s.deps(srv.f), 'https://data.example.com/b');
@@ -235,13 +269,7 @@ describe('x402 paid data through the Kernel', () => {
     );
     expect(third.reason).toBe('KERNEL_BUDGET_EXHAUSTED');
     expect(srv.payments).toHaveLength(2);
-    const poor = setup();
-    await poor.reservations.setConfirmedBalance({
-      groupId: 'g',
-      assetId: USDC.canonicalAssetId,
-      confirmed: 5_000n,
-      asOf: T,
-    });
+    const poor = await setup({ confirmed: 5_000n });
     expect(
       (
         await payForResource(
@@ -251,53 +279,108 @@ describe('x402 paid data through the Kernel', () => {
       ).reason,
     ).toBe('INSUFFICIENT_FREE_BALANCE');
   });
-  it('a failed settlement keeps the reservation held until the authorization expires', async () => {
-    const s = setup();
-    await s.reservations.setConfirmedBalance({
-      groupId: 'g',
-      assetId: USDC.canonicalAssetId,
-      confirmed: 100_000n,
-      asOf: T,
-    });
+  it('a failed settlement holds the reservation for recourse; the sweep never frees it', async () => {
+    const s = await setup();
     const r = await payForResource(
       s.deps(server({ settle: false }).f),
       'https://data.example.com/a',
     );
     expect(r.status).toBe('UNSETTLED');
-    expect((await s.reservations.get(r.reservationId!))?.state).toBe('ACTIVE');
+    await s.reservations.expireDue(T + 10_000);
+    expect((await s.reservations.get(r.reservationId!))?.state).toBe('HELD');
   });
-  it('the signer refuses without a valid grant or on a foreign network', async () => {
-    const s = setup();
-    const signer = new X402AuthorizationSigner(account, s.authority, new Map());
+  it('approvals come only from the identity verifier, bound to the request hash', async () => {
+    const s = await setup({ maxPerRequest: 20_000n });
+    const seen: string[] = [];
+    const r = await payForResource(
+      { ...s.deps(server().f), approvals: async (h) => (seen.push(h), []) },
+      'https://data.example.com/a',
+    );
+    expect(r.status).toBe('PAID');
+    expect(seen[0]).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+  it('the signer refuses foreign networks, mainnet, unbound assets, decimal mismatches and invalid grants', async () => {
+    const s = await setup();
     await expect(
-      signer.sign({
+      new X402AuthorizationSigner(account, s.authority, new Map(), ASSETS).sign(
+        {
+          grant: {} as never,
+          execution: {} as never,
+          requirement: requirement() as never,
+          now: T,
+        },
+      ),
+    ).rejects.toThrow(/NETWORK_NOT_ALLOWED/);
+    const mainnet = new X402AuthorizationSigner(
+      account,
+      s.authority,
+      new Map([['eip155:143', 143]]),
+      [{ chainId: 143, address: USDC.address, decimals: 6 }],
+    );
+    await expect(
+      mainnet.sign({
         grant: {} as never,
-        execution: {} as never,
-        requirement: requirement() as never,
+        execution: exec() as never,
+        requirement: requirement({ network: 'eip155:143' }) as never,
         now: T,
       }),
-    ).rejects.toThrow(/NETWORK_NOT_ALLOWED/);
+    ).rejects.toThrow(/MAINNET_BROADCAST_DISABLED/);
     const ok = new X402AuthorizationSigner(
       account,
       s.authority,
-      new Map([['eip155:10143', 10143]]),
+      NETWORKS,
+      ASSETS,
     );
-    const execution = {
-      domain: 'DATA' as const,
-      providerId: 'x402',
-      host: 'data.example.com',
-      offerId: 'u',
-      subjectHash: `0x${'aa'.repeat(32)}` as `0x${string}`,
-      quantity: 1,
-      maxAmount: { amount: '10000', currency: 'USDC', decimals: 6 },
-      reservationId: 'r',
-      settlementPlanHash: 'p',
-      recipientRef: PAY_TO,
-    };
+    await expect(
+      ok.sign({
+        grant: {} as never,
+        execution: exec({ payAsset: null }) as never,
+        requirement: requirement() as never,
+        now: T,
+      }),
+    ).rejects.toThrow(/ASSET_BINDING_MISMATCH/);
+    await expect(
+      ok.sign({
+        grant: {} as never,
+        execution: exec({
+          payAsset: {
+            chainId: 10143,
+            address: USDC.address.toLowerCase(),
+            decimals: 18,
+          },
+        }) as never,
+        requirement: requirement() as never,
+        now: T,
+      }),
+    ).rejects.toThrow(/ASSET_BINDING_MISMATCH/);
+    await expect(
+      ok.sign({
+        grant: {} as never,
+        execution: exec({
+          maxAmount: { amount: '10000', currency: 'USDC', decimals: 18 },
+        }) as never,
+        requirement: requirement() as never,
+        now: T,
+      }),
+    ).rejects.toThrow(/ASSET_BINDING_MISMATCH/);
+    const wrongDecimals = new X402AuthorizationSigner(
+      account,
+      s.authority,
+      NETWORKS,
+      [{ chainId: 10143, address: USDC.address, decimals: 18 }],
+    );
+    await expect(
+      wrongDecimals.sign({
+        grant: {} as never,
+        execution: exec() as never,
+        requirement: requirement() as never,
+        now: T,
+      }),
+    ).rejects.toThrow(/ASSET_BINDING_MISMATCH/);
     await expect(
       ok.sign({
         grant: { grantId: 'x' } as never,
-        execution,
+        execution: exec() as never,
         requirement: requirement() as never,
         now: T,
       }),

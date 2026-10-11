@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { officialAssets } from '@synq/chain-registry';
 import {
   ConversionError,
+  MemoryReservationStore,
   MainnetReadOnlyRoute,
   TestnetSettlementFixture,
   planSettlement,
@@ -12,6 +13,7 @@ import {
   type SettlementPolicy,
 } from '@synq/settlement';
 import type { Asset } from '@synq/schemas';
+import { EconomicGrantAuthority } from '@synq/kernel';
 
 const T = 1_780_000_000;
 const AUSD = officialAssets.testnetAUSD as Asset;
@@ -228,9 +230,110 @@ describe('conversion routes', () => {
     const route = new TestnetSettlementFixture();
     const q = await quoteConversion({ plan: conv(), route, policy, now: T });
     expect(q.label).toBe('SIMULATED');
-    const receipt = await route.execute(q.intent, T);
+    await expect(
+      route.execute(q.intent, T, undefined as never),
+    ).rejects.toMatchObject({ code: 'GRANT_REQUIRED' });
+    const reservations = new MemoryReservationStore();
+    await reservations.setConfirmedBalance({
+      groupId: 'g',
+      assetId: AUSD.canonicalAssetId,
+      confirmed: 10n ** 12n,
+      asOf: T,
+    });
+    await reservations.reserve(
+      {
+        reservationId: 'conv-1',
+        groupId: 'g',
+        assetId: AUSD.canonicalAssetId,
+        amount: q.intent.amountIn,
+        intentId: 'conv-1',
+        purpose: 'CONVERSION',
+        settlementPlanHash: '0xconv',
+        expiresAt: T + 600,
+      },
+      T,
+    );
+    const authority = new EconomicGrantAuthority({
+      key: new Uint8Array(32).fill(3),
+      reservations,
+    });
+    const unit = { currency: 'AUSD', decimals: 6 };
+    await authority.install({
+      mandateId: 'conv',
+      groupId: 'g',
+      version: 1,
+      status: 'ACTIVE',
+      domains: ['CONVERSION'],
+      providers: [route.venue],
+      hosts: ['testnet.synq.local'],
+      perActionCap: { ...unit, amount: '1000000000' },
+      cumulativeBudget: { ...unit, amount: '1000000000' },
+      autoApproveMax: { ...unit, amount: '1000000000' },
+      quorum: 1,
+      members: ['alice'],
+      maxQuoteAgeSeconds: 60,
+      grantTtlSeconds: 60,
+      environment: 'TESTNET',
+      validUntil: T + 600,
+    });
+    const execution = {
+      domain: 'CONVERSION' as const,
+      providerId: route.venue,
+      host: 'testnet.synq.local',
+      offerId: q.intent.conversionId,
+      subjectHash: q.intent.conversionId,
+      quantity: 1,
+      maxAmount: { ...unit, amount: q.intent.amountIn },
+      reservationId: 'conv-1',
+      reservedAssetId: AUSD.canonicalAssetId,
+      reservedAmount: q.intent.amountIn,
+      settlementPlanHash: '0xconv',
+      recipientRef: null,
+      payAsset: null,
+    };
+    const d = await authority.authorize(
+      {
+        intentId: 'conv-1',
+        groupId: 'g',
+        mandateId: 'conv',
+        execution,
+        quoteExpiresAt: T + 30,
+        revalidatedAt: T,
+      },
+      [],
+      T,
+    );
+    if (d.status !== 'AUTHORIZED') throw new Error(d.status);
+    await expect(
+      route.execute(q.intent, T, {
+        authority,
+        grant: d.grant,
+        execution: { ...execution, maxAmount: { ...unit, amount: '1' } },
+      }),
+    ).rejects.toMatchObject({ code: 'GRANT_REQUIRED' });
+    const receipt = await route.execute(q.intent, T, {
+      authority,
+      grant: d.grant,
+      execution,
+    });
     expect(receipt.transactionHash).toBeNull();
     expect(receipt.note).toMatch(/no swap was broadcast/);
+    await expect(
+      route.execute(q.intent, T, { authority, grant: d.grant, execution }),
+    ).rejects.toThrow(/GRANT_CONSUMED/);
+  });
+  it('policy basis points are validated', () => {
+    expect(plan({ policy: { ...policy, fxBufferBps: 10_000 } })).toMatchObject({
+      code: 'INVALID_POLICY',
+    });
+    expect(
+      plan({
+        policy: {
+          ...policy,
+          conversion: { ...policy.conversion, maxSlippageBps: -1 },
+        },
+      }),
+    ).toMatchObject({ code: 'INVALID_POLICY' });
   });
   it('SET-002 a route quote under minimum output is blocked', async () => {
     const route = new TestnetSettlementFixture(80);

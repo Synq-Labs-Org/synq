@@ -9,6 +9,7 @@ import {
   selectOffers,
   type EconomicIntent,
   type FulfillmentReceipt,
+  type ProviderBookingPort,
 } from '@synq/offer-exchange';
 import {
   DuffelBookingExecutor,
@@ -26,6 +27,7 @@ import type { Asset } from '@synq/schemas';
 import { createBookingActivities } from '../../workers/workflow/src/activities/booking.js';
 import type { BookingWorkflowState } from '../../workers/workflow/src/workflows/booking.js';
 import { FakeDuffel } from '../duffel/fake-duffel.js';
+import { approval } from '../kernel/economic-fixtures.js';
 import {
   HmacHumanProofVerifier,
   MerchantAuthBroker,
@@ -76,7 +78,16 @@ afterAll(async () => {
   await env?.teardown();
 });
 
-function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
+function world(
+  opts: {
+    coreFree?: bigint;
+    stepUp?: boolean;
+    wrapPorts?: (
+      ports: Record<string, ProviderBookingPort>,
+      reservations: MemoryReservationStore,
+    ) => Record<string, ProviderBookingPort>;
+  } = {},
+) {
   const broker = new MerchantAuthBroker(
     proofs,
     () => Math.floor(Date.now() / 1000),
@@ -93,8 +104,12 @@ function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
     travelCapabilities({ DUFFEL_TEST_TOKEN: 'duffel_test_fixture' }),
   );
   const reservations = new MemoryReservationStore();
-  const authority = new EconomicGrantAuthority(new Uint8Array(32).fill(3));
-  authority.install({
+  const authority = new EconomicGrantAuthority({
+    key: new Uint8Array(32).fill(3),
+    reservations,
+  });
+  const ready = authority.install({
+    approverKinds: ['LOCAL_FIXTURE'],
     mandateId: 'travel',
     groupId: 'group-1',
     version: 1,
@@ -113,12 +128,16 @@ function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
     validUntil: T + 86_400,
   });
   const receipts: FulfillmentReceipt[] = [];
+  const incidents: string[] = [];
   const decrypts: string[] = [];
   const activities = createBookingActivities({
     now,
     graph,
     providers: { 'duffel-stays': stays, 'duffel-flights': flights },
-    ports: duffelBookingPorts(new DuffelBookingExecutor(client), flights),
+    ports: (opts.wrapPorts ?? ((p) => p))(
+      duffelBookingPorts(new DuffelBookingExecutor(client), flights),
+      reservations,
+    ),
     reservations,
     settlement: {
       treasury: async (groupId) => ({
@@ -155,8 +174,13 @@ function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
     },
     authority,
     approvals: {
-      verify: async ({ tokens }) =>
-        tokens.filter((t) => t.startsWith('verified:')).map((t) => t.slice(9)),
+      verify: async ({ tokens, requestHash }) =>
+        tokens.flatMap((t) => {
+          const [kind, member, hash] = t.split(':');
+          return kind === 'verified' && member && hash === requestHash
+            ? [approval(member, requestHash)]
+            : [];
+        }),
     },
     travelers: {
       resolve: async ({ refs, purpose }) => {
@@ -171,6 +195,7 @@ function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
       },
     },
     receipts: { write: async (r) => void receipts.push(r) },
+    incidents: { open: async (i) => void incidents.push(i.code) },
     ...(opts.stepUp
       ? {
           stepUp: {
@@ -197,6 +222,8 @@ function world(opts: { coreFree?: bigint; stepUp?: boolean } = {}) {
     decrypts,
     activities,
     opts,
+    ready,
+    incidents,
     broker,
   };
 }
@@ -251,6 +278,7 @@ async function run(
   }) => Promise<void> = async () => undefined,
 ) {
   const config = testConfig('booking');
+  await w.ready;
   await w.reservations.setConfirmedBalance({
     groupId: 'group-1',
     assetId: AUSD.canonicalAssetId,
@@ -293,6 +321,23 @@ const waitFor = async (
   throw new Error(`state ${s} not reached`);
 };
 
+type Handle = {
+  signal: (name: string, arg?: unknown) => Promise<void>;
+  state: () => Promise<BookingWorkflowState>;
+};
+/** Approval tokens carry the Kernel request hash they were produced for. */
+const approve = async (h: Handle, member: string) => {
+  for (let i = 0; i < 200; i++) {
+    const hash = (await h.state()).requestHash;
+    if (hash)
+      return h.signal('bookingApproval', {
+        token: `verified:${member}:${hash}`,
+      });
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('no request hash');
+};
+
 describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
   it('re-ranks past an unavailable rate, waits for quorum, books once and reconciles', async () => {
     const w = world();
@@ -303,9 +348,9 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       { bookingId: 'happy', intent, candidates, approvedMax: usd(40_000) },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
+        await approve(h, 'alice');
         await h.signal('bookingApproval', { token: 'forged:carol' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'bob');
       },
     );
     expect(out.state).toBe('RECONCILED');
@@ -345,8 +390,8 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'alice');
+        await approve(h, 'bob');
       },
     );
     expect(out.history.map((e) => e.to)).toContain('UNKNOWN_PROVIDER_OUTCOME');
@@ -374,12 +419,15 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'alice');
+        await approve(h, 'bob');
       },
     );
     expect(out.state).toBe('UNKNOWN_PROVIDER_OUTCOME');
-    expect((await w.reservations.get('bk-lost'))?.state).toBe('ACTIVE');
+    expect((await w.reservations.get('bk-lost'))?.state).toBe('HELD');
+    expect(
+      await w.reservations.expireDue(Math.floor(Date.now() / 1000) + 100_000),
+    ).toEqual([]);
     expect(
       w.fake.calls.filter(
         (c) => c.method === 'POST' && c.path === '/stays/bookings',
@@ -401,8 +449,8 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'alice');
+        await approve(h, 'bob');
       },
     );
     expect(out.state).toBe('FAILED');
@@ -424,7 +472,7 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       async (h) => {
         await waitFor(h.state, 'RESERVED');
         await h.signal('bookingApproval', { token: 'forged:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'bob');
       },
     );
     expect(out.state).toBe('FAILED');
@@ -446,6 +494,199 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
     expect(out.notes.at(-1)).toMatch(/INSUFFICIENT_FREE_BALANCE/);
   });
 
+  it('an approval bound to a different request hash never counts', async () => {
+    const w = world();
+    const intent = stayIntent('stay-stale-hash');
+    const out = await run(
+      w,
+      {
+        bookingId: 'stalehash',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+        approvalTimeoutSeconds: 3,
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await approve(h, 'alice');
+        await h.signal('bookingApproval', {
+          token: `verified:bob:0x${'de'.repeat(32)}`,
+        });
+      },
+    );
+    expect(out.state).toBe('FAILED');
+    expect(w.fake.bookings.size).toBe(0);
+  });
+
+  it('a crashed booking activity is treated as unknown and reconciled, never re-submitted', async () => {
+    const w = world({
+      wrapPorts: (ports) => ({
+        ...ports,
+        'duffel-stays': {
+          ...ports['duffel-stays']!,
+          book: async (input) => {
+            await ports['duffel-stays']!.book(input);
+            throw new Error('worker crashed after the provider call');
+          },
+        },
+      }),
+    });
+    const intent = stayIntent('stay-crash');
+    const out = await run(
+      w,
+      {
+        bookingId: 'crash',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await approve(h, 'alice');
+        await approve(h, 'bob');
+      },
+    );
+    expect(out.history.map((e) => e.to)).toContain('UNKNOWN_PROVIDER_OUTCOME');
+    expect(out.state).toBe('RECONCILED');
+    expect(
+      w.fake.calls.filter(
+        (c) => c.method === 'POST' && c.path === '/stays/bookings',
+      ),
+    ).toHaveLength(1);
+    expect((await w.reservations.get('bk-crash'))?.state).toBe('CAPTURED');
+  });
+
+  it('a provider-canceled outcome releases when uncharged and goes to recourse when charged', async () => {
+    const canceled = (charged: boolean) =>
+      world({
+        wrapPorts: (ports) => ({
+          ...ports,
+          'duffel-stays': {
+            ...ports['duffel-stays']!,
+            book: async () => ({
+              status: 'CANCELED' as const,
+              providerRef: 'bok_x',
+              reference: null,
+              charged: charged
+                ? { amount: '24000', currency: 'GBP', decimals: 2 }
+                : null,
+            }),
+          },
+        }),
+      });
+    for (const [charged, id] of [
+      [false, 'cxa'],
+      [true, 'cxb'],
+    ] as const) {
+      const w = canceled(charged);
+      const intent = stayIntent(`stay-${id}`);
+      const out = await run(
+        w,
+        {
+          bookingId: id,
+          intent,
+          candidates: await stayCandidates(w, intent),
+          approvedMax: usd(40_000),
+        },
+        async (h) => {
+          await waitFor(h.state, 'RESERVED');
+          await approve(h, 'alice');
+          await approve(h, 'bob');
+        },
+      );
+      expect(out.history.map((e) => e.to)).not.toContain('CONFIRMED');
+      expect(w.receipts).toHaveLength(0);
+      if (!charged) {
+        expect(out.state).toBe('FAILED');
+        expect((await w.reservations.get(`bk-${id}`))?.state).toBe('RELEASED');
+      } else {
+        expect(out.state).toBe('REFUND_PENDING');
+        expect((await w.reservations.get(`bk-${id}`))?.state).toBe('HELD');
+      }
+    }
+  });
+
+  it('settlement without a capturable reservation opens an incident and writes no receipt', async () => {
+    const w = world({
+      wrapPorts: (ports, reservations) => ({
+        ...ports,
+        'duffel-stays': {
+          ...ports['duffel-stays']!,
+          book: async (input) => {
+            const out = await ports['duffel-stays']!.book(input);
+            await reservations.release(
+              'bk-noreserve',
+              'tampered',
+              Math.floor(Date.now() / 1000),
+            );
+            return out;
+          },
+        },
+      }),
+    });
+    const intent = stayIntent('stay-noreserve');
+    const out = await run(
+      w,
+      {
+        bookingId: 'noreserve',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await approve(h, 'alice');
+        await approve(h, 'bob');
+      },
+    );
+    expect(out.state).toBe('CONFIRMED');
+    expect(out.receipt).toBeNull();
+    expect(w.receipts).toHaveLength(0);
+    expect(w.incidents).toEqual(['SETTLE_WITHOUT_RESERVATION']);
+  });
+
+  it('executeBooking re-checks the reservation: released between approval and booking means no provider call', async () => {
+    const w = world({ stepUp: true });
+    const intent = stayIntent('stay-race');
+    const out = await run(
+      w,
+      {
+        bookingId: 'race',
+        intent,
+        candidates: await stayCandidates(w, intent),
+        approvedMax: usd(40_000),
+      },
+      async (h) => {
+        await waitFor(h.state, 'RESERVED');
+        await approve(h, 'alice');
+        await approve(h, 'bob');
+        await waitFor(h.state, 'APPROVED');
+        let st = await h.state();
+        for (let i = 0; i < 50 && !st.stepUp; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          st = await h.state();
+        }
+        await w.reservations.release(
+          'bk-race',
+          'expired elsewhere',
+          Math.floor(Date.now() / 1000),
+        );
+        await h.signal('bookingStepUp', {
+          challengeId: st.stepUp!.challengeId,
+          principalId: 'human:alice',
+          proof: proofs.issue(st.stepUp!, 'human:alice'),
+        });
+      },
+    );
+    expect(out.state).toBe('FAILED');
+    expect(out.notes.at(-1)).toMatch(/INVALID_RESERVATION_TRANSITION/);
+    expect(
+      w.fake.calls.filter(
+        (c) => c.method === 'POST' && c.path === '/stays/bookings',
+      ),
+    ).toHaveLength(0);
+  });
+
   it('CARD-008/AUTH-001 a 3DS step-up pauses the workflow until the cardholder completes it', async () => {
     const w = world({ stepUp: true });
     const intent = stayIntent('stay-3ds');
@@ -459,8 +700,8 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'alice');
+        await approve(h, 'bob');
         await waitFor(h.state, 'APPROVED');
         let st = await h.state();
         for (let i = 0; i < 50 && !st.stepUp; i++) {
@@ -512,8 +753,8 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:bob' });
+        await approve(h, 'alice');
+        await approve(h, 'bob');
       },
     );
     expect(out.state).toBe('FAILED');
@@ -569,8 +810,8 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
       },
       async (h) => {
         await waitFor(h.state, 'RESERVED');
-        await h.signal('bookingApproval', { token: 'verified:alice' });
-        await h.signal('bookingApproval', { token: 'verified:carol' });
+        await approve(h, 'alice');
+        await approve(h, 'carol');
         await waitFor(h.state, 'RECONCILED');
         await h.signal('bookingCancel');
       },

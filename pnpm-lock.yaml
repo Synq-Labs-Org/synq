@@ -846,6 +846,9 @@ importers:
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@synq/profile-vault':
+        specifier: workspace:*
+        version: link:../../packages/profile-vault
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model

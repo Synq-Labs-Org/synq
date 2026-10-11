@@ -210,6 +210,136 @@ export function reservationScenarios(
       });
       expect((await s.free('group-1', AUSD)).confirmed).toBe('500');
     });
+    it('EXECUTING and HELD keep the full hold; the sweep skips them; only recourse releases HELD', async () => {
+      const s = await fresh();
+      await s.setConfirmedBalance({
+        groupId: 'group-1',
+        assetId: AUSD,
+        confirmed: 1_000n,
+        asOf: T0,
+      });
+      const a = await s.reserve(
+        req({ amount: '400', expiresAt: T0 + 10, settlementPlanHash: '0xp' }),
+        T0,
+      );
+      expect(
+        await code(
+          s.beginExecution(
+            a.reservationId,
+            { groupId: 'group-1', settlementPlanHash: '0xother' },
+            T0,
+          ),
+        ),
+      ).toBe('RESERVATION_MISMATCH');
+      expect(
+        await code(
+          s.beginExecution(
+            a.reservationId,
+            { groupId: 'group-2', settlementPlanHash: '0xp' },
+            T0,
+          ),
+        ),
+      ).toBe('RESERVATION_MISMATCH');
+      await s.beginExecution(
+        a.reservationId,
+        { groupId: 'group-1', settlementPlanHash: '0xp' },
+        T0,
+      );
+      await s.hold(a.reservationId, 'unknown outcome', T0 + 1);
+      expect(await s.expireDue(T0 + 100)).toEqual([]);
+      expect(await s.free('group-1', AUSD)).toMatchObject({
+        held: '400',
+        free: '600',
+      });
+      expect(await code(s.release(a.reservationId, 'x', T0 + 100))).toBe(
+        'INVALID_RESERVATION_TRANSITION',
+      );
+      await s.releaseHeld(
+        a.reservationId,
+        'recourse: provider confirms no booking',
+        T0 + 100,
+      );
+      expect((await s.free('group-1', AUSD)).free).toBe('1000');
+      const b = await s.reserve(
+        req({ amount: '100', expiresAt: T0 + 10, settlementPlanHash: '0xp' }),
+        T0,
+      );
+      expect(
+        await code(
+          s.beginExecution(
+            b.reservationId,
+            { groupId: 'group-1', settlementPlanHash: '0xp' },
+            T0 + 10,
+          ),
+        ),
+      ).toBe('RESERVATION_EXPIRED');
+      const c = await s.reserve(
+        req({ amount: '100', settlementPlanHash: '0xp' }),
+        T0,
+      );
+      await s.release(c.reservationId, 'gone', T0);
+      expect(
+        await code(
+          s.beginExecution(
+            c.reservationId,
+            { groupId: 'group-1', settlementPlanHash: '0xp' },
+            T0,
+          ),
+        ),
+      ).toBe('INVALID_RESERVATION_TRANSITION');
+    });
+    it('reserves every leg of a plan atomically or none', async () => {
+      const s = await fresh();
+      const USDC_ID = 'eip155:10143/erc20:usdc';
+      await s.setConfirmedBalance({
+        groupId: 'group-1',
+        assetId: AUSD,
+        confirmed: 1_000n,
+        asOf: T0,
+      });
+      await s.setConfirmedBalance({
+        groupId: 'group-1',
+        assetId: USDC_ID,
+        confirmed: 50n,
+        asOf: T0,
+      });
+      expect(
+        await code(
+          s.reservePlan(
+            [req({ amount: '500' }), req({ amount: '60', assetId: USDC_ID })],
+            T0,
+          ),
+        ),
+      ).toBe('INSUFFICIENT_FREE_BALANCE');
+      expect(await s.free('group-1', AUSD)).toMatchObject({ held: '0' });
+      const legs = await s.reservePlan(
+        [req({ amount: '500' }), req({ amount: '50', assetId: USDC_ID })],
+        T0,
+      );
+      expect(legs.map((l) => l.state)).toEqual(['ACTIVE', 'ACTIVE']);
+      expect((await s.free('group-1', USDC_ID)).free).toBe('0');
+    });
+    it('settle requires a balance observation at or after the capture', async () => {
+      const s = await fresh();
+      await s.setConfirmedBalance({
+        groupId: 'group-1',
+        assetId: AUSD,
+        confirmed: 1_000n,
+        asOf: T0,
+      });
+      const r = await s.reserve(req({ amount: '300' }), T0);
+      await s.capture(r.reservationId, 300n, T0 + 5);
+      expect(await code(s.settle(r.reservationId, T0 + 6))).toBe(
+        'SETTLE_BEFORE_BALANCE_OBSERVED',
+      );
+      await s.setConfirmedBalance({
+        groupId: 'group-1',
+        assetId: AUSD,
+        confirmed: 700n,
+        asOf: T0 + 6,
+      });
+      expect((await s.settle(r.reservationId, T0 + 7)).state).toBe('SETTLED');
+    });
     it('SET-006 concurrent hotel + shopping + DCA cannot oversubscribe', async () => {
       const s = await fresh();
       await s.setConfirmedBalance({

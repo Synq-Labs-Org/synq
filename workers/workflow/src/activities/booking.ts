@@ -1,6 +1,8 @@
 import { ApplicationFailure } from '@temporalio/activity';
 import {
   artifactHash,
+  economicRequestHash,
+  type EconomicAuthorizationRequest,
   type EconomicExecution,
   type EconomicGrantAuthority,
 } from '@synq/kernel';
@@ -9,6 +11,7 @@ import {
   FulfillmentReceiptSchema,
   assertExecutable,
   convert,
+  landedTotal,
   rescale,
   revalidateOffer,
   type EconomicOffer,
@@ -19,11 +22,13 @@ import {
   type ProviderCapabilityGraph,
   type TravelerPii,
 } from '@synq/offer-exchange';
+import { redact } from '@synq/profile-vault';
 import {
   ReservationError,
   planSettlement,
   type RailDescriptor,
   type ReferencePrice,
+  type ReservationRequest,
   type SettlementPolicy,
   type TreasuryReservationStore,
   type TreasuryView,
@@ -48,13 +53,14 @@ export type BookingActivityDeps = {
     reservationTtlSeconds: number;
   };
   authority: EconomicGrantAuthority;
-  /** Identity layer: returns member ids whose approvals verify for this request. */
+  /** Identity layer: verified approval records bound to the Kernel request hash. */
   approvals: {
     verify(input: {
       bookingId: string;
       groupId: string;
+      requestHash: string;
       tokens: readonly string[];
-    }): Promise<string[]>;
+    }): Promise<readonly unknown[]>;
   };
   /** ProfileVault port: the only place traveler PII is decrypted. */
   travelers: {
@@ -75,14 +81,29 @@ export type BookingActivityDeps = {
     }): Promise<boolean>;
   };
   receipts: { write(receipt: FulfillmentReceipt): Promise<void> };
+  incidents?: {
+    open(input: {
+      bookingId: string;
+      code: string;
+      detail: string;
+    }): Promise<void>;
+  };
 };
 
+const clean = (text: string) => redact(text).slice(0, 200);
 const subjectHash = (offer: EconomicOffer) =>
   artifactHash({ subject: offer.subject, providerRef: offer.providerRef });
+const legsOf = (reservationId: string) => [
+  reservationId,
+  `${reservationId}-edge`,
+];
 
 function domainOf(offer: EconomicOffer): EconomicExecution['domain'] {
-  if (offer.domain === 'STAY' || offer.domain === 'FLIGHT') return offer.domain;
-  if (offer.domain === 'COMMERCE' || offer.domain === 'DATA')
+  if (
+    offer.domain === 'STAY' ||
+    offer.domain === 'FLIGHT' ||
+    offer.domain === 'COMMERCE'
+  )
     return offer.domain;
   throw ApplicationFailure.nonRetryable(
     `unsupported booking domain ${offer.domain}`,
@@ -94,8 +115,12 @@ function execution(
   deps: BookingActivityDeps,
   offer: EconomicOffer,
   landed: Money,
-  reservationId: string,
-  planHash: string,
+  reservation: {
+    reservationId: string;
+    planHash: string;
+    reservedAssetId: string;
+    reservedAmount: string;
+  },
 ): EconomicExecution {
   const port = deps.ports[offer.fulfillmentProviderId];
   if (!port)
@@ -111,15 +136,27 @@ function execution(
     subjectHash: subjectHash(offer),
     quantity: offer.subject.kind === 'PRODUCT' ? offer.subject.quantity : 1,
     maxAmount: landed,
-    reservationId,
-    settlementPlanHash: planHash,
+    reservationId: reservation.reservationId,
+    reservedAssetId: reservation.reservedAssetId,
+    reservedAmount: reservation.reservedAmount,
+    settlementPlanHash: reservation.planHash,
     recipientRef: null,
+    payAsset: null,
   };
 }
 
 export function createBookingActivities(
   deps: BookingActivityDeps,
 ): BookingActivities {
+  const eachLeg = async (
+    reservationId: string,
+    fn: (id: string, state: string) => Promise<void>,
+  ) => {
+    for (const id of legsOf(reservationId)) {
+      const r = await deps.reservations.get(id);
+      if (r) await fn(id, r.state);
+    }
+  };
   return {
     async revalidateBookingCandidate({ intent, candidate, approvedMax }) {
       const offer = EconomicOfferSchema.parse(candidate.offer);
@@ -140,7 +177,7 @@ export function createBookingActivities(
       });
       return r.status === 'EXECUTABLE'
         ? { status: 'EXECUTABLE', offer: r.offer, landed: r.landed }
-        : { status: 'BLOCKED', reason: `${r.status}: ${r.reason}` };
+        : { status: 'BLOCKED', reason: clean(`${r.status}: ${r.reason}`) };
     },
 
     async reserveBookingFunds({
@@ -151,12 +188,13 @@ export function createBookingActivities(
       approvedMax,
     }) {
       const now = deps.now();
+      const treasury = await deps.settlement.treasury(intent.groupId);
       const plan = planSettlement({
         intentId: intent.id,
         payable: landed,
         approvedMax,
         requirement: offer.settlement,
-        treasury: await deps.settlement.treasury(intent.groupId),
+        treasury,
         rails: deps.settlement.rails,
         policy: deps.settlement.policy,
         reference: await deps.settlement.reference(),
@@ -164,36 +202,48 @@ export function createBookingActivities(
       });
       if (plan.status === 'REFUSED')
         return { status: 'REFUSED', reason: `${plan.code}: ${plan.reason}` };
-      const treasury = await deps.settlement.treasury(intent.groupId);
       const expiresAt = Math.min(
         now + deps.settlement.reservationTtlSeconds,
         intent.validUntil,
       );
+      const purpose =
+        intent.domain === 'FLIGHT'
+          ? 'FLIGHT'
+          : intent.domain === 'STAY'
+            ? 'STAY'
+            : 'COMMERCE';
+      const legs = [
+        {
+          assetId: treasury.core.asset.canonicalAssetId,
+          amount: plan.coreReservation,
+        },
+        {
+          assetId: treasury.edge.asset.canonicalAssetId,
+          amount: plan.edgeReservation,
+        },
+      ].filter((l) => BigInt(l.amount) > 0n);
+      if (!legs.length)
+        return { status: 'REFUSED', reason: 'NOTHING_TO_RESERVE' };
+      const requests: ReservationRequest[] = legs.map((l, i) => ({
+        reservationId: i === 0 ? `bk-${bookingId}` : `bk-${bookingId}-edge`,
+        groupId: intent.groupId,
+        assetId: l.assetId,
+        amount: l.amount,
+        intentId: intent.id,
+        purpose,
+        settlementPlanHash: plan.planHash,
+        expiresAt,
+      }));
       try {
-        const r = await deps.reservations.reserve(
-          {
-            reservationId: `bk-${bookingId}`,
-            groupId: intent.groupId,
-            assetId: treasury.core.asset.canonicalAssetId,
-            amount: plan.coreReservation,
-            intentId: intent.id,
-            purpose:
-              intent.domain === 'FLIGHT'
-                ? 'FLIGHT'
-                : intent.domain === 'STAY'
-                  ? 'STAY'
-                  : 'COMMERCE',
-            settlementPlanHash: plan.planHash,
-            expiresAt,
-          },
-          now,
-        );
+        const [primary] = await deps.reservations.reservePlan(requests, now);
         return {
           status: 'RESERVED',
-          reservationId: r.reservationId,
+          reservationId: primary!.reservationId,
           planHash: plan.planHash,
-          coreAmount: r.amount,
-          expiresAt: r.expiresAt,
+          coreAmount: plan.coreReservation,
+          reservedAssetId: primary!.assetId,
+          reservedAmount: primary!.amount,
+          expiresAt: primary!.expiresAt,
         };
       } catch (e) {
         if (e instanceof ReservationError)
@@ -210,31 +260,22 @@ export function createBookingActivities(
       } catch (e) {
         return { status: 'REJECTED', reason: (e as Error).message };
       }
-      const held = await deps.reservations.get(input.reservationId);
-      const approvers = await deps.approvals.verify({
+      const request: EconomicAuthorizationRequest = {
+        intentId: input.intent.id,
+        groupId: input.intent.groupId,
+        mandateId: input.mandateId,
+        execution: execution(deps, offer, input.landed, input),
+        quoteExpiresAt: offer.price.expiresAt,
+        revalidatedAt: offer.price.revalidatedAt,
+      };
+      const requestHash = economicRequestHash(request);
+      const approvals = await deps.approvals.verify({
         bookingId: input.bookingId,
         groupId: input.intent.groupId,
+        requestHash,
         tokens: input.approvals.map((a) => a.token),
       });
-      const d = deps.authority.authorize(
-        {
-          intentId: input.intent.id,
-          groupId: input.intent.groupId,
-          mandateId: input.mandateId,
-          execution: execution(
-            deps,
-            offer,
-            input.landed,
-            input.reservationId,
-            input.planHash,
-          ),
-          quoteExpiresAt: offer.price.expiresAt,
-          revalidatedAt: offer.price.revalidatedAt,
-          reservationHeld: held?.state === 'ACTIVE' && held.expiresAt > now,
-        },
-        approvers,
-        now,
-      );
+      const d = await deps.authority.authorize(request, approvals, now);
       if (d.status === 'AUTHORIZED')
         return { status: 'AUTHORIZED', grant: d.grant };
       if (d.status === 'PENDING_APPROVAL')
@@ -242,6 +283,7 @@ export function createBookingActivities(
           status: 'PENDING_APPROVAL',
           requiredApprovals: d.requiredApprovals,
           approvals: d.approvals.length,
+          requestHash: d.requestHash,
         };
       return {
         status: 'REJECTED',
@@ -277,21 +319,21 @@ export function createBookingActivities(
         return prior;
       try {
         assertExecutable(offer, now, 900);
-        deps.authority.consume(
+        const landed = landedTotal(offer, input.grant.execution.maxAmount);
+        await deps.reservations.beginExecution(
+          input.reservationId,
+          { groupId: input.grant.groupId, settlementPlanHash: input.planHash },
+          now,
+        );
+        await deps.authority.consume(
           input.grant,
-          execution(
-            deps,
-            offer,
-            input.grant.execution.maxAmount,
-            input.reservationId,
-            input.planHash,
-          ),
+          execution(deps, offer, landed, input),
           now,
         );
       } catch (e) {
         return {
           status: 'FAILED',
-          reason: `KERNEL_REFUSED: ${(e as Error).message}`,
+          reason: clean(`KERNEL_REFUSED: ${(e as Error).message}`),
         };
       }
       const travelers = await deps.travelers.resolve({
@@ -299,10 +341,20 @@ export function createBookingActivities(
         refs: input.travelerRefs,
         purpose: `booking:${input.bookingId}`,
       });
-      return port.book({
+      const out = await port.book({
         offer,
         travelers,
         idempotencyKey: input.idempotencyKey,
+      });
+      return out.status === 'FAILED' || out.status === 'UNKNOWN'
+        ? { ...out, reason: clean(out.reason) }
+        : out;
+    },
+
+    async holdBookingFunds({ reservationId, reason }) {
+      await eachLeg(reservationId, async (id, state) => {
+        if (state === 'ACTIVE' || state === 'EXECUTING')
+          await deps.reservations.hold(id, clean(reason), deps.now());
       });
     },
 
@@ -313,23 +365,36 @@ export function createBookingActivities(
         const found = await port.find({ offer, idempotencyKey });
         if (!found) return { status: 'ABSENT' };
         if (found.status === 'FAILED' || found.status === 'UNKNOWN')
-          return { status: 'UNKNOWN', reason: found.reason };
+          return { status: 'UNKNOWN', reason: clean(found.reason) };
         return found;
       } catch (e) {
-        return {
-          status: 'UNKNOWN',
-          reason: (e as Error).message.slice(0, 200),
-        };
+        return { status: 'UNKNOWN', reason: clean((e as Error).message) };
       }
     },
 
     async settleBooking(input) {
       const now = deps.now();
-      const reserved = BigInt(input.coreAmount);
+      const existing = await deps.reservations.get(input.reservationId);
+      const capturable =
+        existing &&
+        ['ACTIVE', 'EXECUTING', 'HELD', 'CAPTURED'].includes(existing.state);
+      if (!existing || !capturable) {
+        const detail = `reservation ${existing?.state ?? 'missing'} at settlement of ${input.providerRef}`;
+        await deps.incidents?.open({
+          bookingId: input.bookingId,
+          code: 'SETTLE_WITHOUT_RESERVATION',
+          detail,
+        });
+        return { status: 'INCIDENT', reason: detail };
+      }
+      const reserved = BigInt(existing.amount);
       let capture = reserved;
       if (input.charged) {
-        const budget = input.intent.budget.max;
-        const inBudget = convert(input.charged, budget, input.offer.price.fx);
+        const inBudget = convert(
+          input.charged,
+          input.intent.budget.max,
+          input.offer.price.fx,
+        );
         const treasury = await deps.settlement.treasury(input.intent.groupId);
         const core = rescale(
           BigInt(inBudget.amount),
@@ -337,11 +402,30 @@ export function createBookingActivities(
           treasury.core.asset.decimals,
           'up',
         );
-        capture = core < reserved ? core : reserved;
+        if (core > reserved) {
+          const detail = `charged ${core} exceeds reserved ${reserved}`;
+          await deps.incidents?.open({
+            bookingId: input.bookingId,
+            code: 'CHARGE_EXCEEDS_RESERVATION',
+            detail,
+          });
+          capture = reserved;
+        } else capture = core;
       }
-      const existing = await deps.reservations.get(input.reservationId);
-      if (existing?.state === 'ACTIVE')
+      if (existing.state !== 'CAPTURED')
         await deps.reservations.capture(input.reservationId, capture, now);
+      await eachLeg(input.reservationId, async (id, state) => {
+        if (
+          id !== input.reservationId &&
+          state !== 'CAPTURED' &&
+          state !== 'RELEASED'
+        )
+          await deps.reservations.capture(
+            id,
+            BigInt((await deps.reservations.get(id))!.amount),
+            now,
+          );
+      });
       const receipt = FulfillmentReceiptSchema.parse({
         receiptId: `rcpt-${input.bookingId}`,
         intentId: input.intent.id,
@@ -359,13 +443,14 @@ export function createBookingActivities(
         createdAt: now,
       });
       await deps.receipts.write(receipt);
-      return receipt;
+      return { status: 'SETTLED', receipt };
     },
 
     async releaseBookingFunds({ reservationId, reason }) {
-      const r = await deps.reservations.get(reservationId);
-      if (r?.state === 'ACTIVE')
-        await deps.reservations.release(reservationId, reason, deps.now());
+      await eachLeg(reservationId, async (id, state) => {
+        if (state === 'ACTIVE' || state === 'EXECUTING')
+          await deps.reservations.release(id, clean(reason), deps.now());
+      });
     },
 
     async cancelProviderBooking({ offer, providerRef, reservationId }) {
@@ -401,7 +486,7 @@ export function createBookingActivities(
             });
         }
       }
-      return c;
+      return { ...c, reason: c.reason ? clean(c.reason) : null };
     },
   };
 }

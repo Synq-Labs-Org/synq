@@ -3,6 +3,8 @@ import { AmountSchema, IdSchema, TimestampSchema } from '@synq/schemas';
 
 export const RESERVATION_STATES = [
   'ACTIVE',
+  'EXECUTING',
+  'HELD',
   'CAPTURED',
   'SETTLED',
   'RELEASED',
@@ -11,6 +13,8 @@ export type ReservationState = (typeof RESERVATION_STATES)[number];
 /** States that still hold treasury value out of the free balance. */
 export const HOLDING_STATES: readonly ReservationState[] = [
   'ACTIVE',
+  'EXECUTING',
+  'HELD',
   'CAPTURED',
 ];
 
@@ -69,7 +73,9 @@ export type ReservationErrorCode =
   | 'RESERVATION_EXPIRED'
   | 'INVALID_RESERVATION_TRANSITION'
   | 'CAPTURE_EXCEEDS_RESERVATION'
-  | 'REFUND_EXCEEDS_CAPTURE';
+  | 'REFUND_EXCEEDS_CAPTURE'
+  | 'RESERVATION_MISMATCH'
+  | 'SETTLE_BEFORE_BALANCE_OBSERVED';
 
 export class ReservationError extends Error {
   constructor(
@@ -94,7 +100,29 @@ export interface TreasuryReservationStore {
     asOf: number;
   }): Promise<void>;
   reserve(raw: ReservationRequest, now: number): Promise<TreasuryReservation>;
+  /** Reserves every leg of a settlement plan atomically, or none. */
+  reservePlan(
+    raw: readonly ReservationRequest[],
+    now: number,
+  ): Promise<TreasuryReservation[]>;
   get(reservationId: string): Promise<TreasuryReservation | null>;
+  /** ACTIVE -> EXECUTING right before a provider call; rechecks group, plan and expiry. */
+  beginExecution(
+    reservationId: string,
+    expect: { groupId: string; settlementPlanHash: string },
+    now: number,
+  ): Promise<TreasuryReservation>;
+  /** Uncertain provider outcome: the expiry sweep skips HELD; only recourse resolves it. */
+  hold(
+    reservationId: string,
+    reason: string,
+    now: number,
+  ): Promise<TreasuryReservation>;
+  releaseHeld(
+    reservationId: string,
+    reason: string,
+    now: number,
+  ): Promise<TreasuryReservation>;
   /** Marks value as spent at the provider; any unspent remainder is released. */
   capture(
     reservationId: string,
@@ -139,7 +167,8 @@ export function sameRequest(
 }
 
 export function heldAmount(r: TreasuryReservation): bigint {
-  if (r.state === 'ACTIVE') return BigInt(r.amount);
+  if (r.state === 'ACTIVE' || r.state === 'EXECUTING' || r.state === 'HELD')
+    return BigInt(r.amount);
   if (r.state === 'CAPTURED') return BigInt(r.captured);
   return 0n;
 }
@@ -234,35 +263,54 @@ export class MemoryReservationStore implements TreasuryReservationStore {
   }
 
   async reserve(raw: ReservationRequest, now: number) {
-    const req = ReservationRequestSchema.parse(raw);
+    return (await this.reservePlan([raw], now))[0]!;
+  }
+
+  async reservePlan(raws: readonly ReservationRequest[], now: number) {
+    const reqs = raws.map((r) => ReservationRequestSchema.parse(r));
     return this.lock.run(() => {
       this.expireLocked(now);
-      const prior = this.reservations.get(req.reservationId);
-      if (prior) {
-        if (!sameRequest(prior, req))
-          throw new ReservationError('RESERVATION_CONFLICT', req.reservationId);
-        return prior;
+      const created: TreasuryReservation[] = [];
+      const out: TreasuryReservation[] = [];
+      try {
+        for (const req of reqs) {
+          const prior = this.reservations.get(req.reservationId);
+          if (prior) {
+            if (!sameRequest(prior, req))
+              throw new ReservationError(
+                'RESERVATION_CONFLICT',
+                req.reservationId,
+              );
+            out.push(prior);
+            continue;
+          }
+          if (req.expiresAt <= now)
+            throw new ReservationError('RESERVATION_EXPIRED');
+          if (!this.balances.has(this.key(req.groupId, req.assetId)))
+            throw new ReservationError('NO_CONFIRMED_BALANCE');
+          const free = BigInt(this.computeFree(req.groupId, req.assetId).free);
+          if (BigInt(req.amount) > free)
+            throw new ReservationError(
+              'INSUFFICIENT_FREE_BALANCE',
+              `requested ${req.amount}, free ${free}`,
+            );
+          const r: TreasuryReservation = {
+            ...req,
+            state: 'ACTIVE',
+            captured: '0',
+            createdAt: now,
+            updatedAt: now,
+            reason: null,
+          };
+          this.reservations.set(r.reservationId, r);
+          created.push(r);
+          out.push(r);
+        }
+      } catch (e) {
+        for (const r of created) this.reservations.delete(r.reservationId);
+        throw e;
       }
-      if (req.expiresAt <= now)
-        throw new ReservationError('RESERVATION_EXPIRED');
-      if (!this.balances.has(this.key(req.groupId, req.assetId)))
-        throw new ReservationError('NO_CONFIRMED_BALANCE');
-      const free = BigInt(this.computeFree(req.groupId, req.assetId).free);
-      if (BigInt(req.amount) > free)
-        throw new ReservationError(
-          'INSUFFICIENT_FREE_BALANCE',
-          `requested ${req.amount}, free ${free}`,
-        );
-      const r: TreasuryReservation = {
-        ...req,
-        state: 'ACTIVE',
-        captured: '0',
-        createdAt: now,
-        updatedAt: now,
-        reason: null,
-      };
-      this.reservations.set(r.reservationId, r);
-      return r;
+      return out;
     });
   }
 
@@ -287,10 +335,29 @@ export class MemoryReservationStore implements TreasuryReservationStore {
     return this.mutate(id, (r) => applyCapture(r, amount, now));
   }
   settle(id: string, now: number) {
-    return this.mutate(id, (r) => applySettle(r, now));
+    return this.mutate(id, (r) =>
+      applySettle(
+        r,
+        now,
+        this.balances.get(this.key(r.groupId, r.assetId))?.asOf ?? null,
+      ),
+    );
   }
   release(id: string, reason: string, now: number) {
     return this.mutate(id, (r) => applyRelease(r, reason, now));
+  }
+  beginExecution(
+    id: string,
+    expect: { groupId: string; settlementPlanHash: string },
+    now: number,
+  ) {
+    return this.mutate(id, (r) => applyBegin(r, expect, now));
+  }
+  hold(id: string, reason: string, now: number) {
+    return this.mutate(id, (r) => applyHold(r, reason, now));
+  }
+  releaseHeld(id: string, reason: string, now: number) {
+    return this.mutate(id, (r) => applyReleaseHeld(r, reason, now));
   }
   expireDue(now: number) {
     return this.lock.run(() => this.expireLocked(now));
@@ -360,7 +427,7 @@ export function applyCapture(
   now: number,
 ): TreasuryReservation {
   if (r.state === 'CAPTURED' && BigInt(r.captured) === amount) return r;
-  if (r.state !== 'ACTIVE')
+  if (r.state !== 'ACTIVE' && r.state !== 'EXECUTING' && r.state !== 'HELD')
     throw new ReservationError(
       'INVALID_RESERVATION_TRANSITION',
       `${r.state} -> CAPTURED`,
@@ -373,12 +440,18 @@ export function applyCapture(
 export function applySettle(
   r: TreasuryReservation,
   now: number,
+  balanceAsOf: number | null,
 ): TreasuryReservation {
   if (r.state === 'SETTLED') return r;
   if (r.state !== 'CAPTURED')
     throw new ReservationError(
       'INVALID_RESERVATION_TRANSITION',
       `${r.state} -> SETTLED`,
+    );
+  if (balanceAsOf === null || balanceAsOf < r.updatedAt)
+    throw new ReservationError(
+      'SETTLE_BEFORE_BALANCE_OBSERVED',
+      'confirmed balance predates the capture',
     );
   return { ...r, state: 'SETTLED', updatedAt: now };
 }
@@ -389,7 +462,63 @@ export function applyRelease(
   now: number,
 ): TreasuryReservation {
   if (r.state === 'RELEASED') return r;
+  if (r.state !== 'ACTIVE' && r.state !== 'EXECUTING')
+    throw new ReservationError(
+      'INVALID_RESERVATION_TRANSITION',
+      `${r.state} -> RELEASED`,
+    );
+  return {
+    ...r,
+    state: 'RELEASED',
+    updatedAt: now,
+    reason: reason.slice(0, 200),
+  };
+}
+
+export function applyBegin(
+  r: TreasuryReservation,
+  expect: { groupId: string; settlementPlanHash: string },
+  now: number,
+): TreasuryReservation {
+  if (
+    r.groupId !== expect.groupId ||
+    r.settlementPlanHash !== expect.settlementPlanHash
+  )
+    throw new ReservationError(
+      'RESERVATION_MISMATCH',
+      'group or settlement plan differs',
+    );
+  if (r.state === 'EXECUTING') return r;
   if (r.state !== 'ACTIVE')
+    throw new ReservationError(
+      'INVALID_RESERVATION_TRANSITION',
+      `${r.state} -> EXECUTING`,
+    );
+  if (r.expiresAt <= now) throw new ReservationError('RESERVATION_EXPIRED');
+  return { ...r, state: 'EXECUTING', updatedAt: now };
+}
+
+export function applyHold(
+  r: TreasuryReservation,
+  reason: string,
+  now: number,
+): TreasuryReservation {
+  if (r.state === 'HELD') return r;
+  if (r.state !== 'EXECUTING' && r.state !== 'ACTIVE')
+    throw new ReservationError(
+      'INVALID_RESERVATION_TRANSITION',
+      `${r.state} -> HELD`,
+    );
+  return { ...r, state: 'HELD', updatedAt: now, reason: reason.slice(0, 200) };
+}
+
+export function applyReleaseHeld(
+  r: TreasuryReservation,
+  reason: string,
+  now: number,
+): TreasuryReservation {
+  if (r.state === 'RELEASED') return r;
+  if (r.state !== 'HELD')
     throw new ReservationError(
       'INVALID_RESERVATION_TRANSITION',
       `${r.state} -> RELEASED`,
