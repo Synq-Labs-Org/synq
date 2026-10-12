@@ -55,7 +55,8 @@
     "demo:telegram:rehearse": "node --import tsx apps/demo/src/telegram-rehearsal.ts",
     "channels:imessage": "node --import tsx apps/api/src/imessage-bridge.ts",
     "channels:imessage:probe": "node --import tsx apps/api/src/imessage-bridge.ts --probe",
-    "channels:imessage:find-chat": "node --import tsx apps/api/src/imessage-bridge.ts --find-chat"
+    "channels:imessage:find-chat": "node --import tsx apps/api/src/imessage-bridge.ts --find-chat",
+    "ios:messages:check": "sh apps/ios-messages/check.sh"
   },
   "dependencies": {
     "zod": "4.6.5",

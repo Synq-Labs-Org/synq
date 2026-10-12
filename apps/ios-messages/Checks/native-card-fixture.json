@@ -1,0 +1,52 @@
+{
+  "schema": "synq.native-card/v1",
+  "card": {
+    "schema": "synq.card/v1",
+    "cardId": "card_2e5710584ec3b3380c7573f1",
+    "groupId": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "groupLabel": "Trip fund",
+    "issuedAt": 1800000000,
+    "actions": [
+      {
+        "kind": "REVIEW_APPROVE",
+        "label": "Review and approve",
+        "url": "https://synq.example/approve?p=0x1111111111111111111111111111111111111111111111111111111111111111&g=0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1&n=v1.r.tsk2ou.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB",
+        "style": "PRIMARY"
+      },
+      {
+        "kind": "REVIEW_REJECT",
+        "label": "Review and decline",
+        "url": "https://synq.example/approve?p=0x1111111111111111111111111111111111111111111111111111111111111111&g=0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1&n=v1.r.tsk2ou.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB",
+        "style": "SECONDARY"
+      }
+    ],
+    "type": "APPROVAL_PROPOSAL",
+    "proposalId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "proposalKind": "SEND",
+    "amount": {
+      "amount": "1.5",
+      "symbol": "AUSD"
+    },
+    "recipient": {
+      "label": "carol",
+      "address": null
+    },
+    "reason": "Send 1.5 AUSD to carol",
+    "quorum": {
+      "counted": 1,
+      "required": 2
+    },
+    "status": "PENDING",
+    "statusReason": null
+  },
+  "layout": {
+    "caption": "Approval needed for Send 1.5 AUSD to carol",
+    "subcaption": "Amount: 1.5 AUSD",
+    "trailingCaption": "1/2",
+    "trailingSubcaption": "approvals",
+    "imageTitle": "Trip fund",
+    "imageSubtitle": "Synq"
+  },
+  "openUrl": "https://synq.example/approve?p=0x1111111111111111111111111111111111111111111111111111111111111111&g=0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1&n=v1.r.tsk2ou.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB",
+  "messageUrl": "https://synq.example/approve?p=0x1111111111111111111111111111111111111111111111111111111111111111&g=0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1&n=v1.r.tsk2ou.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB&card=eyJzY2hlbWEiOiJzeW5xLmNhcmQvdjEiLCJjYXJkSWQiOiJjYXJkXzJlNTcxMDU4NGVjM2IzMzgwYzc1NzNmMSIsImdyb3VwSWQiOiIweGExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTEiLCJncm91cExhYmVsIjoiVHJpcCBmdW5kIiwiaXNzdWVkQXQiOjE4MDAwMDAwMDAsImFjdGlvbnMiOlt7ImtpbmQiOiJSRVZJRVdfQVBQUk9WRSIsImxhYmVsIjoiUmV2aWV3IGFuZCBhcHByb3ZlIiwidXJsIjoiaHR0cHM6Ly9zeW5xLmV4YW1wbGUvYXBwcm92ZT9wPTB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSZnPTB4YTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMSZuPXYxLnIudHNrMm91LkFBQUFBQUFBQUFBQUFBQUEuQkJCQkJCQkJCQkJCQkJCQkJCQkJCQiIsInN0eWxlIjoiUFJJTUFSWSJ9LHsia2luZCI6IlJFVklFV19SRUpFQ1QiLCJsYWJlbCI6IlJldmlldyBhbmQgZGVjbGluZSIsInVybCI6Imh0dHBzOi8vc3lucS5leGFtcGxlL2FwcHJvdmU_cD0weDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEmZz0weGExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTFhMWExYTEmbj12MS5yLnRzazJvdS5BQUFBQUFBQUFBQUFBQUFBLkJCQkJCQkJCQkJCQkJCQkJCQkJCQkIiLCJzdHlsZSI6IlNFQ09OREFSWSJ9XSwidHlwZSI6IkFQUFJPVkFMX1BST1BPU0FMIiwicHJvcG9zYWxJZCI6IjB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInByb3Bvc2FsS2luZCI6IlNFTkQiLCJhbW91bnQiOnsiYW1vdW50IjoiMS41Iiwic3ltYm9sIjoiQVVTRCJ9LCJyZWNpcGllbnQiOnsibGFiZWwiOiJjYXJvbCIsImFkZHJlc3MiOm51bGx9LCJyZWFzb24iOiJTZW5kIDEuNSBBVVNEIHRvIGNhcm9sIiwicXVvcnVtIjp7ImNvdW50ZWQiOjEsInJlcXVpcmVkIjoyfSwic3RhdHVzIjoiUEVORElORyIsInN0YXR1c1JlYXNvbiI6bnVsbH0"
+}
