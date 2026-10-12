@@ -17,7 +17,8 @@
     "./mandate-proposals": "./src/mandate-proposals.ts",
     "./mandate-routes": "./src/mandate-routes.ts",
     "./channel-server": "./src/channel-server.ts",
-    "./channel-brain": "./src/channel-brain.ts"
+    "./channel-brain": "./src/channel-brain.ts",
+    "./transfer-plugin": "./src/transfer-plugin.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

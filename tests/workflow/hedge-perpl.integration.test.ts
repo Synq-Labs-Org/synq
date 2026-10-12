@@ -133,7 +133,7 @@ function venue() {
       network: testnetPerpl,
       signer,
       fetch: server.fetch,
-      simulation: true,
+      transport: 'recorded',
       maxAttempts: 1,
       sleep: async () => {},
     });

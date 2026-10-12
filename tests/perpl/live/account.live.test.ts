@@ -21,7 +21,10 @@ const network = perplNetwork('sandbox/monad-testnet');
 
 describe.skipIf(!LIVE)('REAL_TESTNET Perpl operator account', () => {
   it('creates the test-harness account, enables forwarding and attempts key enrollment', async () => {
-    const rest = new PerplRestClient({ network });
+    const rest = new PerplRestClient({
+      transport: 'live',
+      network,
+    });
     const context = await rest.context();
     const collateral = new PerplCollateralAdapter(network).resolve(context);
     expect(collateral.address).toBe(officialAsset('testnetAUSD').address);

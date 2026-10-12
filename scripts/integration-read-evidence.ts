@@ -52,6 +52,7 @@ for (const hash of [historicalOpenTx, historicalCloseTx]) {
   });
 }
 const context = await new PerplRestClient({
+  transport: 'live',
   network: perplNetwork('proof/monad-mainnet'),
 }).context();
 const catalog = new MarketCatalog(
