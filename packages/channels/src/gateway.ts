@@ -10,6 +10,14 @@ import {
 } from './events.js';
 import { HELP_TEXT, parseCommand, parseSendArgs } from './commands.js';
 import type { ChannelStore, GroupLink, RedeemOutcome } from './store.js';
+import type { CardResolution, InteractiveCard } from '@synq/schemas';
+import { CardLinkIssuer } from './cards/links.js';
+import { InteractiveCardService, approvalProposalId } from './cards/service.js';
+import {
+  CHAT_NEVER_APPROVES,
+  REFRESH_CALLBACK,
+  renderCardForChannel,
+} from './cards/render.js';
 
 export type TreasurySummary = {
   symbol: string;
@@ -41,6 +49,11 @@ export type ApprovalSummary = {
   /** Web path of the authenticated review page; defaults to /intents/<intentHash>. */
   reviewPath?: string;
   reason?: string | null;
+  /** Id carried by card links; defaults to the mandate proposal id or the intent hash. */
+  proposalId?: string;
+  /** Exact amount and recipient being authorized, when the proposal has them. */
+  amount?: { amount: string; symbol: string };
+  recipient?: { label: string; address?: string | null };
 };
 export type ReceiptSummary = {
   intentHash: string;
@@ -123,7 +136,21 @@ export type ChannelGatewayOptions = {
   /** Channels whose link redemption must carry a verified provider identity. */
   requireExternalProof?: Partial<Record<ChannelId, boolean>>;
   onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
+  /** Render approvals, receipts and balances as interactive cards; links are group-bound when `links` is set. */
+  cards?: { links?: CardLinkIssuer | null };
 };
+
+export type CardLinkOutcome =
+  | CardResolution
+  | {
+      status:
+        | 'CARDS_DISABLED'
+        | 'LINK_MALFORMED'
+        | 'LINK_EXPIRED'
+        | 'LINK_INVALID'
+        | 'NOT_A_MEMBER'
+        | 'PROPOSAL_NOT_FOUND';
+    };
 
 const APPROVAL_WORDS =
   /^(yes|yep|yeah|y|ok|okay|approve|approved|i approve|confirm|confirmed|lgtm|do it|go|\+1|👍|✅)[.! ]*$/i;
@@ -140,10 +167,74 @@ const short = (v: string) =>
 export class ChannelGateway {
   private readonly adapters: Map<ChannelId, ChannelAdapter>;
   private readonly lastBrain = new Map<string, number>();
+  readonly cards: InteractiveCardService | null;
   constructor(private readonly options: ChannelGatewayOptions) {
     this.adapters = new Map(options.adapters.map((a) => [a.channel, a]));
     if (!/^https?:\/\//.test(options.webBaseUrl))
       throw new Error('CHANNEL_WEB_BASE_URL_INVALID');
+    this.cards = options.cards
+      ? new InteractiveCardService({
+          webBaseUrl: options.webBaseUrl,
+          explorerTxUrl: options.explorerTxUrl,
+          now: options.now,
+          links: options.cards.links ?? null,
+        })
+      : null;
+  }
+
+  private async label(groupId: string) {
+    return (
+      (await this.options.ports.groupLabel?.(groupId).catch(() => null)) ??
+      `Synq group ${short(groupId)}`
+    );
+  }
+
+  private review(groupId: string, a: ApprovalSummary) {
+    return this.cards
+      ? this.cards.reviewUrl(groupId, approvalProposalId(a), reviewPath(a))
+      : this.web(reviewPath(a));
+  }
+
+  private cardMessage(channel: ChannelId, card: InteractiveCard) {
+    return renderCardForChannel(channel, card);
+  }
+
+  /**
+   * Resolves a tapped card link for an authenticated member: checks the
+   * group-bound nonce, the member, and reads the canonical proposal of that
+   * group. It returns what will be authorized; it approves nothing.
+   */
+  async resolveCardLink(input: {
+    proposalId: string;
+    groupId: string;
+    nonce: string;
+    principalId: string;
+  }): Promise<CardLinkOutcome> {
+    const links = this.options.cards?.links;
+    if (!this.cards || !links) return { status: 'CARDS_DISABLED' };
+    const check = links.verify(input);
+    if (!check.ok) return { status: check.code };
+    const member = await this.options.ports.activeMember(
+      input.groupId,
+      input.principalId,
+    );
+    if (!member) return { status: 'NOT_A_MEMBER' };
+    const approvals = await this.options.ports.approvals(input.groupId);
+    const a = approvals.find((x) => approvalProposalId(x) === input.proposalId);
+    if (!a) return { status: 'PROPOSAL_NOT_FOUND' };
+    const card = this.cards.approval({
+      groupId: input.groupId,
+      groupLabel: await this.label(input.groupId),
+      approval: a,
+    });
+    return a.status === 'PENDING'
+      ? {
+          status: 'OK',
+          memberId: member.memberId,
+          card,
+          reviewPath: reviewPath(a),
+        }
+      : { status: 'NOT_PENDING', memberId: member.memberId, card };
   }
 
   private web(path: string) {
@@ -240,6 +331,11 @@ export class ChannelGateway {
         });
       }
       case 'ACTION_REQUESTED': {
+        const refresh = REFRESH_CALLBACK.exec(
+          event.envelope.interaction.callbackData ?? '',
+        );
+        if (refresh && this.cards)
+          return this.refreshCard(envelope, event.callbackId, refresh[1]!);
         await this.adapters
           .get(envelope.channel)
           ?.acknowledgeAction?.(
@@ -252,6 +348,48 @@ export class ChannelGateway {
       case 'MESSAGE_RECEIVED':
         return this.message(envelope);
     }
+  }
+
+  /** Read-only: answers a card's refresh button with the canonical quorum for this chat's group. */
+  private async refreshCard(
+    envelope: Envelope,
+    callbackId: string,
+    prefix: string,
+  ): Promise<GatewayOutcome> {
+    const adapter = this.adapters.get(envelope.channel);
+    const answer = (text: string) =>
+      adapter?.acknowledgeAction?.(callbackId, text).catch(() => undefined);
+    if (
+      !(await this.options.store.claimNotification(
+        envelope.channel,
+        envelope.externalGroupId,
+        `callback:${callbackId}`,
+        this.options.now(),
+      ))
+    )
+      return this.result('DUPLICATE', 'CALLBACK_ALREADY_ANSWERED');
+    const group = await this.options.store.groupLink(
+      envelope.channel,
+      envelope.externalGroupId,
+    );
+    if (group?.status !== 'ACTIVE') {
+      await answer('This chat is not linked to a Synq group.');
+      return this.result('UNAUTHORIZED', 'GROUP_NOT_LINKED');
+    }
+    const approvals = await this.options.ports
+      .approvals(group.groupId)
+      .catch(() => []);
+    const a = approvals.find((x) =>
+      approvalProposalId(x).toLowerCase().startsWith(`0x${prefix}`),
+    );
+    if (!a) {
+      await answer("That proposal is not open in this chat's Synq group.");
+      return this.result('REFUSED', 'CARD_NOT_IN_GROUP');
+    }
+    await answer(
+      `${a.label}: ${a.counted}/${a.required} verified approvals (${a.status.toLowerCase()}). ${CHAT_NEVER_APPROVES}`,
+    );
+    return this.result('HANDLED', 'CARD_REFRESHED');
   }
 
   private async message(envelope: Envelope): Promise<GatewayOutcome> {
@@ -737,6 +875,20 @@ export class ChannelGateway {
       return this.replyOutcome(envelope, 'REFUSED', 'TREASURY_UNAVAILABLE', {
         text: 'Treasury data is unavailable or stale right now; Synq will not guess a balance.',
       });
+    if (command === 'balance' && this.cards)
+      return this.replyOutcome(
+        envelope,
+        'HANDLED',
+        'BALANCE',
+        this.cardMessage(
+          envelope.channel,
+          this.cards.treasury({
+            groupId: group.groupId,
+            groupLabel: await this.label(group.groupId),
+            treasury: t,
+          }),
+        ),
+      );
     const text =
       command === 'balance'
         ? `Treasury ${t.symbol}: total ${t.total}, free ${t.free}, reserved ${t.reserved}, pending ${t.pending} (as of ${t.asOf}).`
@@ -778,7 +930,7 @@ export class ChannelGateway {
       text: lines.join('\n'),
       buttons: proposals.slice(0, 3).map((a) => ({
         label: `Review ${a.label}`.slice(0, 64),
-        url: this.web(reviewPath(a)),
+        url: this.review(group.groupId, a),
       })),
     });
   }
@@ -812,7 +964,7 @@ export class ChannelGateway {
         .slice(0, 3)
         .map((a) => ({
           label: `Review ${short(a.intentHash)}`,
-          url: this.web(reviewPath(a)),
+          url: this.review(group.groupId, a),
         })),
     });
   }
@@ -926,7 +1078,37 @@ export class ChannelGateway {
         this.options.ports.receipts(link.groupId).catch(() => []),
       ]);
       const messages: { key: string; message: OutboundMessage }[] = [];
-      for (const a of approvals) {
+      if (this.cards) {
+        const groupLabel = await this.label(link.groupId);
+        for (const a of approvals)
+          messages.push({
+            key:
+              a.status === 'PENDING'
+                ? `approval:${a.draftDigest}:${a.counted}`
+                : `approval:${a.draftDigest}:${a.status.toLowerCase()}`,
+            message: this.cardMessage(
+              link.channel,
+              this.cards.approval({
+                groupId: link.groupId,
+                groupLabel,
+                approval: a,
+              }),
+            ),
+          });
+        for (const r of receipts)
+          messages.push({
+            key: `receipt:${r.intentHash}:${r.state}`,
+            message: this.cardMessage(
+              link.channel,
+              this.cards.receipt({
+                groupId: link.groupId,
+                groupLabel,
+                receipt: r,
+              }),
+            ),
+          });
+      }
+      for (const a of this.cards ? [] : approvals) {
         const what = a.kind === 'MANDATE' ? 'passkey owner' : 'passkey';
         messages.push(
           a.status === 'INVALIDATED'
@@ -953,14 +1135,14 @@ export class ChannelGateway {
                     buttons: [
                       {
                         label: 'Review and approve',
-                        url: this.web(reviewPath(a)),
+                        url: this.review(link.groupId, a),
                       },
                     ],
                   },
                 },
         );
       }
-      for (const r of receipts)
+      for (const r of this.cards ? [] : receipts)
         messages.push({
           key: `receipt:${r.intentHash}:${r.state}`,
           message: {

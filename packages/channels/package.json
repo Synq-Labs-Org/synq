@@ -5,12 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./postgres": "./src/postgres.ts"
+    "./postgres": "./src/postgres.ts",
+    "./cards": "./src/cards/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/schemas": "workspace:*"
   }
 }

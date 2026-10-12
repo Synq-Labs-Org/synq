@@ -111,6 +111,19 @@ export function productionChannelPorts(input: {
           intentHash: d.intentHash,
           draftDigest: d.draftDigest,
           label: s ? sendLabel(s) : `intent ${d.intentHash.slice(0, 10)}`,
+          ...(s
+            ? {
+                kind: 'SEND' as const,
+                amount: {
+                  amount: s.preview.amountDecimal,
+                  symbol: s.preview.asset.symbol,
+                },
+                recipient: {
+                  label: s.preview.recipient.label,
+                  address: s.preview.recipient.address ?? null,
+                },
+              }
+            : {}),
           counted: q.counted.length,
           required: q.required,
           status:
@@ -140,6 +153,7 @@ export function productionChannelPorts(input: {
                 ? 'SATISFIED'
                 : 'PENDING',
           kind: 'MANDATE',
+          proposalId: p.proposalId,
           reviewPath: `/mandates/${p.proposalId}`,
           reason: p.reason,
         });

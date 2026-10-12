@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  CardLinkIssuer,
   ChannelGateway,
   LinqV3Adapter,
   TelegramAdapter,
@@ -41,6 +42,14 @@ const ChannelEnvSchema = z.object({
     .int()
     .min(60)
     .default(86_400),
+  SYNQ_CHANNEL_CARDS: z.enum(['0', '1']).default('1'),
+  SYNQ_CARD_LINK_KEY: z.string().min(32).optional(),
+  SYNQ_CARD_LINK_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(7 * 86_400)
+    .default(43_200),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
 });
 
@@ -115,6 +124,15 @@ export async function registerChannels(input: {
     : undefined;
   if (linq) adapters.push(linq);
   const now = () => Math.floor(Date.now() / 1000);
+  const webBaseUrl = env.SYNQ_WEB_BASE_URL ?? input.origin;
+  const cardLinks = env.SYNQ_CARD_LINK_KEY
+    ? new CardLinkIssuer({
+        key: env.SYNQ_CARD_LINK_KEY,
+        webBaseUrl,
+        now,
+        ttlSeconds: env.SYNQ_CARD_LINK_TTL_SECONDS,
+      })
+    : null;
   const gateway = new ChannelGateway({
     store,
     adapters,
@@ -129,9 +147,10 @@ export async function registerChannels(input: {
         ? { mandateProposals: input.mandateProposals }
         : {}),
     }),
-    webBaseUrl: env.SYNQ_WEB_BASE_URL ?? input.origin,
+    webBaseUrl,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,
     now,
+    ...(env.SYNQ_CHANNEL_CARDS === '1' ? { cards: { links: cardLinks } } : {}),
     ...(telegram?.botUsername
       ? { botUsernames: { telegram: telegram.botUsername } }
       : {}),

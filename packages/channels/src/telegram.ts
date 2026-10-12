@@ -456,6 +456,9 @@ export class TelegramAdapter implements ChannelAdapter {
       throw new ChannelDeliveryError('PROVIDER_REJECTED', 0, 'invalid chat id');
     const buttons = (message.buttons ?? []).filter((b) => !isLocalUrl(b.url));
     const inline = (message.buttons ?? []).filter((b) => isLocalUrl(b.url));
+    const callbacks = (message.callbacks ?? []).filter(
+      (c) => Buffer.byteLength(c.data) <= 64,
+    );
     const text = [message.text, ...inline.map((b) => `${b.label}: ${b.url}`)]
       .join('\n')
       .slice(0, 4096);
@@ -471,12 +474,17 @@ export class TelegramAdapter implements ChannelAdapter {
             },
           }
         : {}),
-      ...(buttons.length
+      ...(buttons.length || callbacks.length
         ? {
             reply_markup: {
-              inline_keyboard: buttons.map((b) => [
-                { text: b.label.slice(0, 64), url: b.url },
-              ]),
+              inline_keyboard: [
+                ...buttons.map((b) => [
+                  { text: b.label.slice(0, 64), url: b.url },
+                ]),
+                ...callbacks.map((c) => [
+                  { text: c.label.slice(0, 64), callback_data: c.data },
+                ]),
+              ],
             },
           }
         : {}),

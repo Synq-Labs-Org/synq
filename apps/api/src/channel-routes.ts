@@ -155,7 +155,7 @@ export async function channelRoutes(
     const body = z
       .strictObject({
         groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-        channel: z.enum(['telegram', 'linq']),
+        channel: z.enum(['telegram', 'linq', 'imessage']),
         externalGroupId: z.string().min(1).max(200),
       })
       .safeParse(json(request.body));
@@ -176,6 +176,44 @@ export async function channelRoutes(
     return reply
       .code(outcome === 'UNLINKED' ? 200 : outcome === 'NOT_LINKED' ? 404 : 403)
       .send(outcome === 'UNLINKED' ? { status: outcome } : { error: outcome });
+  });
+
+  const CardLinkSchema = z.strictObject({
+    proposalId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/),
+    groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+    nonce: z.string().min(1).max(200),
+  });
+  const CARD_STATUS: Record<string, number> = {
+    OK: 200,
+    NOT_PENDING: 200,
+    CARDS_DISABLED: 404,
+    LINK_MALFORMED: 400,
+    LINK_INVALID: 403,
+    LINK_EXPIRED: 410,
+    NOT_A_MEMBER: 403,
+    PROPOSAL_NOT_FOUND: 404,
+  };
+  /** A tapped card link: member-authenticated, group-bound, canonical read; never an approval. */
+  api.post('/v1/cards/resolve', async (request, reply) => {
+    const body = CardLinkSchema.safeParse(json(request.body));
+    if (!body.success)
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const header = request.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const groupId = body.data.groupId.toLowerCase();
+    const session = token ? await deps.memberSession(token, groupId) : null;
+    if (!session)
+      return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
+    const outcome = await deps.gateway.resolveCardLink({
+      proposalId: body.data.proposalId,
+      groupId,
+      nonce: body.data.nonce,
+      principalId: session.principalId,
+    });
+    const code = CARD_STATUS[outcome.status] ?? 403;
+    return reply
+      .code(code)
+      .send(code === 200 ? outcome : { error: outcome.status });
   });
 
   api.get('/v1/channels/capabilities', async () =>
