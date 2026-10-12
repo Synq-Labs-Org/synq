@@ -62,12 +62,14 @@ export class SearchApiDiscovery implements OfferProvider {
   private async call(
     params: Record<string, string>,
     signal: AbortSignal,
+    cacheable = true,
   ): Promise<Json> {
     const query = new URLSearchParams(
       Object.entries(params).sort(([a], [b]) => a.localeCompare(b)),
     );
     const key = query.toString();
-    const cached = await this.options.cache?.get(key);
+    const cache = cacheable ? this.options.cache : undefined;
+    const cached = await cache?.get(key);
     if (cached) return cached;
     const body = await getJson(
       this.fetchImpl,
@@ -80,7 +82,7 @@ export class SearchApiDiscovery implements OfferProvider {
     const status = str(obj(body.search_metadata).status);
     if (status && status !== 'Success')
       throw new Error(`SEARCHAPI_STATUS: ${status.slice(0, 60)}`);
-    await this.options.cache?.put(key, body);
+    await cache?.put(key, body);
     return body;
   }
 
@@ -164,6 +166,7 @@ export class SearchApiDiscovery implements OfferProvider {
     const body = await this.call(
       { engine: 'amazon_product', asin, amazon_domain: 'amazon.com' },
       signal,
+      false, // a revalidation is always a live read
     );
     const product = obj(body.product);
     const buybox = obj(product.buybox ?? body.buybox);
