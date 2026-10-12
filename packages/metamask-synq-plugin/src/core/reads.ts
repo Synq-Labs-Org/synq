@@ -1,7 +1,12 @@
 import { formatUnits, type Address } from 'viem';
 import { ausdBalance } from './chain.js';
 import { SynqPluginError, fail } from './errors.js';
-import { membershipStatus, verifiedGroup, type Deps } from './group.js';
+import {
+  memberApi,
+  membershipStatus,
+  verifiedGroup,
+  type Deps,
+} from './group.js';
 import type { ContributionJournal } from './journal.js';
 import { NETWORK, explorerTxUrl, sameAddress } from './network.js';
 
@@ -87,9 +92,11 @@ export async function treasury(
   deps: Deps,
   groupId: string,
 ): Promise<TreasurySummary> {
-  const { group, safe, client } = await verifiedGroup(deps, groupId);
+  const verified = await verifiedGroup(deps, groupId);
+  const { group, safe, client } = verified;
+  const api = await memberApi(deps, verified);
   const [view, onChain] = await Promise.all([
-    deps.api.treasury(group.chainGroupId),
+    api.treasury(group.chainGroupId),
     ausdBalance(client, safe),
   ]);
   if (!sameAddress(view.account, safe))
@@ -118,8 +125,8 @@ export async function treasury(
 }
 
 export async function risk(deps: Deps, groupId: string) {
-  await verifiedGroup(deps, groupId);
-  const w = await deps.api.world(groupId);
+  const verified = await verifiedGroup(deps, groupId);
+  const w = await (await memberApi(deps, verified)).world(groupId);
   return {
     groupId,
     snapshotId: w.snapshotId,
@@ -138,8 +145,8 @@ export async function risk(deps: Deps, groupId: string) {
 }
 
 export async function strategies(deps: Deps, groupId: string) {
-  await verifiedGroup(deps, groupId);
-  const w = await deps.api.world(groupId);
+  const verified = await verifiedGroup(deps, groupId);
+  const w = await (await memberApi(deps, verified)).world(groupId);
   return {
     groupId,
     snapshotId: w.snapshotId,
@@ -170,7 +177,8 @@ export async function receipts(
   journal: ContributionJournal,
   groupId: string,
 ) {
-  const { group } = await verifiedGroup(deps, groupId);
+  const verified = await verifiedGroup(deps, groupId);
+  const { group } = verified;
   const wallet = selectedOrNull(deps);
   const local = (await journal.list()).filter(
     (e) => e.groupId === group.groupId || e.chainGroupId === group.chainGroupId,
@@ -183,8 +191,9 @@ export async function receipts(
   }[] = [];
   let indexedError: string | null = null;
   try {
-    indexed = (await deps.api.treasury(group.chainGroupId)).contributions
-      .events;
+    indexed = (
+      await (await memberApi(deps, verified)).treasury(group.chainGroupId)
+    ).contributions.events;
   } catch (error) {
     if (!(error instanceof SynqPluginError)) throw error;
     indexedError = `${error.code}: ${error.message}`;

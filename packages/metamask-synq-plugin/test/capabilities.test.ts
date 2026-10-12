@@ -53,7 +53,10 @@ describe('plugin manifest and capabilities', () => {
     const submitters = Object.entries(declared).filter(([, caps]) =>
       caps.includes('wallet-submit'),
     );
-    expect(submitters.map(([id]) => id)).toEqual(['synq:contribute']);
+    expect(submitters.map(([id]) => id).sort()).toEqual([
+      'synq:contribute',
+      'synq:login',
+    ]);
     for (const c of pkg.mm.commands)
       expect(c.targetChains).toEqual([NETWORK.chainId]);
   });
@@ -76,7 +79,7 @@ describe('plugin manifest and capabilities', () => {
 
   it('a read-only command cannot reach the executor even if it tries', async () => {
     for (const id of Object.keys(COMMAND_CAPABILITIES) as SynqCommandId[]) {
-      if (id === 'synq:contribute') continue;
+      if (id === 'synq:contribute' || id === 'synq:login') continue;
       const chain = new FakeChain();
       const { ctx, log } = fakeHostContext(chain);
       const host = hostFromContext(ctx, fakeIo, id);

@@ -9,7 +9,13 @@ import { allows, type SynqCommandId } from './core/capabilities.js';
 import { SynqPluginError, fail } from './core/errors.js';
 import { FileJournal } from './core/journal.js';
 import type { Deps } from './core/group.js';
-import type { SynqHost, TxRequest, TxSubmission } from './core/host.js';
+import type {
+  SynqHost,
+  TxRequest,
+  TxSubmission,
+  TypedDataRequest,
+} from './core/host.js';
+import { FileSessionStore, MemberSessions } from './core/session.js';
 import { SynqApi, apiConfigFromEnv } from './core/synq-api.js';
 
 /** The slice of the Agent Wallet plugin context Synq touches. */
@@ -107,6 +113,27 @@ export function hostFromContext(
         failureDescription: result.failureDescription,
       };
     },
+    async signTypedData(request: TypedDataRequest): Promise<Hex> {
+      if (!allows(command, 'wallet-submit'))
+        fail('CAPABILITY_DENIED', `${command} cannot request signatures`);
+      const execute = await ctx.walletExecutor(io, command);
+      const result = await execute({
+        kind: 'typed-data',
+        chainId: request.chainId,
+        typedData: request.typedData,
+        intent: { summary: request.summary, action: 'custom' },
+      });
+      if (
+        result.kind !== 'signature' ||
+        result.failureCode ||
+        !/^0x[0-9a-fA-F]{130}$/.test(result.signature)
+      )
+        fail(
+          'SUBMISSION_FAILED',
+          `Agent Wallet did not sign (${result.status}${result.failureCode ? `: ${result.failureCode}` : ''})`,
+        );
+      return result.signature as Hex;
+    },
   };
 }
 
@@ -116,10 +143,20 @@ export function depsFor(
   command: SynqCommandId,
   env: Record<string, string | undefined> = process.env,
 ): Deps {
+  const host = hostFromContext(ctx, io, command);
+  const api = new SynqApi(apiConfigFromEnv(env));
+  const now = () => Date.now();
   return {
-    host: hostFromContext(ctx, io, command),
-    api: new SynqApi(apiConfigFromEnv(env)),
-    now: () => Date.now(),
+    host,
+    api,
+    sessions: new MemberSessions(
+      api,
+      FileSessionStore.fromEnv(env),
+      host,
+      now,
+      allows(command, 'wallet-submit'),
+    ),
+    now,
   };
 }
 

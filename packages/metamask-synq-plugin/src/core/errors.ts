@@ -17,6 +17,7 @@ export const SYNQ_ERROR_CODES = [
   'RECEIPT_MISMATCH',
   'SYNQ_API_ERROR',
   'SYNQ_API_UNAUTHORIZED',
+  'SESSION_REQUIRED',
   'CONFIG_INVALID',
   'INVALID_INPUT',
 ] as const;
@@ -49,7 +50,10 @@ const HINTS: Record<SynqErrorCode, string> = {
   RECEIPT_MISMATCH:
     'The mined transaction does not carry the expected AUSD transfer.',
   SYNQ_API_ERROR: 'Check SYNQ_API_URL and that the Synq API is running.',
-  SYNQ_API_UNAUTHORIZED: 'Set SYNQ_API_TOKEN to a valid Synq API token.',
+  SYNQ_API_UNAUTHORIZED:
+    'Your member session expired or was refused; run `mm synq login <group>`.',
+  SESSION_REQUIRED:
+    'Run `mm synq login <group>` to sign in as your member wallet.',
   CONFIG_INVALID: 'Check the SYNQ_* environment variables.',
   INVALID_INPUT: 'Check the command flags with --help.',
 };

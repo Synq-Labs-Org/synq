@@ -12,9 +12,12 @@ import {
   strategies,
   treasury,
 } from '../src/core/reads.js';
-import { SynqApi, apiConfigFromEnv } from '../src/core/synq-api.js';
-import { hostFromContext } from '../src/plugin-host.js';
-import { FakeSynqApi, TOKEN } from './fake-api.js';
+import { apiConfigFromEnv } from '../src/core/synq-api.js';
+import { FakeSynqApi } from './fake-api.js';
+import { makeDeps } from './deps.js';
+import { MemorySessionStore } from '../src/core/session.js';
+import { login } from '../src/core/group.js';
+import type { SynqCommandId } from '../src/core/capabilities.js';
 import {
   AUSD,
   CHAIN_GROUP_ID,
@@ -23,21 +26,23 @@ import {
   ROGUE_SAFE,
   SAFE,
   fakeHostContext,
-  fakeIo,
 } from './fakes.js';
 
 const NOW = 1_790_000_000_000;
-function setup(token: string | null = TOKEN) {
+function setup() {
   const chain = new FakeChain();
   const api = new FakeSynqApi(chain, () => NOW);
   const { ctx, log } = fakeHostContext(chain);
-  const deps = (id: Parameters<typeof hostFromContext>[2]): Deps => ({
-    host: hostFromContext(ctx, fakeIo, id),
-    api: new SynqApi({ baseUrl: 'http://127.0.0.1:3200', token }, api.fetch),
-    now: () => NOW,
-  });
-  return { chain, api, log, deps };
+  const store = new MemorySessionStore();
+  const deps = (id: SynqCommandId): Deps =>
+    makeDeps(ctx, api.fetch, id, store, () => NOW);
+  return { chain, api, log, deps, store };
 }
+const signedIn = async () => {
+  const t = setup();
+  await login(t.deps('synq:login'), GROUP_ID);
+  return t;
+};
 const mandate = () => ({
   schemaVersion: 2,
   mandateId: 'dca-weekly',
@@ -80,11 +85,13 @@ describe('read commands', () => {
     await expect(groups(t.deps('synq:groups'), [])).rejects.toMatchObject({
       code: 'INVALID_INPUT',
     });
-    expect(t.log).toHaveLength(0);
+    expect(
+      t.log.flatMap((l) => l.requests).filter((r) => r.kind === 'transaction'),
+    ).toHaveLength(0);
   });
 
   it('treasury cross-checks the indexed balance against the chain', async () => {
-    const t = setup();
+    const t = await signedIn();
     t.chain.balances.set(SAFE.toLowerCase(), 3_000_000n);
     const r = await treasury(t.deps('synq:treasury'), GROUP_ID);
     expect(r).toMatchObject({
@@ -100,7 +107,7 @@ describe('read commands', () => {
   });
 
   it('risk and strategies project the Synq world snapshot', async () => {
-    const t = setup();
+    const t = await signedIn();
     const r = await risk(t.deps('synq:risk'), GROUP_ID);
     expect(r).toMatchObject({
       status: 'HEALTHY',
@@ -118,7 +125,7 @@ describe('read commands', () => {
   });
 
   it('receipts joins local submissions with indexed deposits', async () => {
-    const t = setup();
+    const t = await signedIn();
     const journal = new MemoryJournal();
     const c = await contribute(
       t.deps('synq:contribute'),
@@ -136,11 +143,45 @@ describe('read commands', () => {
     );
   });
 
-  it('admin routes require a token and the API URL must be https or loopback', async () => {
-    const t = setup(null);
+  it('authenticated reads need a member session and never sign on their own', async () => {
+    const t = setup();
     await expect(
       treasury(t.deps('synq:treasury'), GROUP_ID),
-    ).rejects.toMatchObject({ code: 'SYNQ_API_UNAUTHORIZED' });
+    ).rejects.toMatchObject({ code: 'SESSION_REQUIRED' });
+    expect(t.log).toHaveLength(0);
+    const r = await login(t.deps('synq:login'), GROUP_ID);
+    expect(r).toMatchObject({ memberId: 'alice', scope: 'MEMBER_CONTRIBUTE' });
+    expect(t.log.flatMap((l) => l.requests).map((q) => q.kind)).toEqual([
+      'typed-data',
+    ]);
+    expect((await treasury(t.deps('synq:treasury'), GROUP_ID)).safe).toBe(SAFE);
+    expect(t.api.challengesIssued).toBe(1);
+  });
+
+  it('an expiring session is refused for reads instead of silently re-signing', async () => {
+    const t = setup();
+    let now = NOW;
+    const at = (id: SynqCommandId) =>
+      makeDeps(
+        fakeHostContext(t.chain).ctx,
+        t.api.fetch,
+        id,
+        t.store,
+        () => now,
+      );
+    await login(at('synq:login'), GROUP_ID);
+    now += 290_000;
+    await expect(treasury(at('synq:treasury'), GROUP_ID)).rejects.toMatchObject(
+      {
+        code: 'SESSION_REQUIRED',
+      },
+    );
+  });
+
+  it('refuses the operator token and plain-http remote API URLs', () => {
+    expect(() =>
+      apiConfigFromEnv({ SYNQ_API_TOKEN: 'operator-admin-token' }),
+    ).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
     expect(() =>
       apiConfigFromEnv({ SYNQ_API_URL: 'http://synq.example.com' }),
     ).toThrow(SynqPluginError);
@@ -152,7 +193,7 @@ describe('read commands', () => {
 
 describe('propose and dca', () => {
   it('propose posts a bound mandate and reports that quorum is still required', async () => {
-    const t = setup();
+    const t = await signedIn();
     const r = await propose(t.deps('synq:propose'), {
       groupId: GROUP_ID,
       mandate: mandate(),
@@ -164,11 +205,13 @@ describe('propose and dca', () => {
       approvals: { counted: 0, required: 2 },
     });
     expect(t.api.calls.some((c) => /approvals/.test(c.path))).toBe(false);
-    expect(t.log).toHaveLength(0);
+    expect(
+      t.log.flatMap((l) => l.requests).filter((r) => r.kind === 'transaction'),
+    ).toHaveLength(0);
   });
 
   it('propose rejects a mandate for another Safe, group or chain', async () => {
-    const t = setup();
+    const t = await signedIn();
     const d = t.deps('synq:propose');
     await expect(
       propose(d, {
@@ -200,7 +243,7 @@ describe('propose and dca', () => {
   });
 
   it('dca shapes a bounded cadence mandate and proposes it', async () => {
-    const t = setup();
+    const t = await signedIn();
     const until = NOW / 1000 + 86_400 * 60;
     const r = await dca(t.deps('synq:dca'), {
       groupId: GROUP_ID,

@@ -42,13 +42,20 @@ export function createSendMemberAccess(input: {
       stored.challenge.groupId === groupId.toLowerCase() &&
       (await current(stored.challenge))
       ? {
+          groupId: stored.challenge.groupId,
           memberId: stored.challenge.memberId,
           principalId: stored.challenge.principalId,
+          signer: stored.challenge.signer,
+          scope: stored.challenge.scope,
         }
       : null;
   }
   return {
-    async challenge(groupId: string, principalId: string) {
+    async challenge(
+      groupId: string,
+      principalId: string,
+      scope: SendAccessChallenge['scope'] = 'SEND_READ_PREVIEW',
+    ) {
       await store.prune(input.now());
       const context = await input.context(groupId);
       const m = context?.members.find((m) => m.principalId === principalId);
@@ -72,7 +79,7 @@ export function createSendMemberAccess(input: {
         membershipEpoch: member.membershipEpoch,
         chainId: context.mandate.network.chainId,
         account: context.mandate.account,
-        scope: 'SEND_READ_PREVIEW',
+        scope,
         issuedAt: now,
         expiresAt: now + 120,
       });

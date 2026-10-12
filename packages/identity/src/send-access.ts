@@ -10,7 +10,8 @@ export const SendAccessChallengeSchema = z.strictObject({
   membershipEpoch: z.number().int().nonnegative(),
   chainId: z.number().int().positive(),
   account: AddressSchema,
-  scope: z.literal('SEND_READ_PREVIEW'),
+  /** SEND_READ_PREVIEW: reads and previews. MEMBER_CONTRIBUTE: also own-wallet funding and mandate proposals. */
+  scope: z.enum(['SEND_READ_PREVIEW', 'MEMBER_CONTRIBUTE']),
   issuedAt: z.number().int().positive(),
   expiresAt: z.number().int().positive(),
 });

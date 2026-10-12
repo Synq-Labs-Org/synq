@@ -187,8 +187,13 @@ export function apiConfigFromEnv(
       'CONFIG_INVALID',
       'SYNQ_API_URL must be https unless it is a loopback address',
     );
-  const token = env.SYNQ_API_TOKEN?.trim() || null;
-  return { baseUrl, token };
+  if (env.SYNQ_API_TOKEN)
+    fail(
+      'CONFIG_INVALID',
+      'SYNQ_API_TOKEN is no longer used: the plugin authenticates as your member wallet',
+      'Unset SYNQ_API_TOKEN and run `mm synq login <group>`.',
+    );
+  return { baseUrl, token: null };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -230,11 +235,68 @@ function assertSession(v: unknown): asserts v is FundingSession {
     fail('SYNQ_API_ERROR', 'Synq API returned a malformed funding session');
 }
 
+export type MemberAccessChallenge = {
+  challengeId: `0x${string}`;
+  groupId: string;
+  memberId: string;
+  principalId: string;
+  signer: string;
+  membershipEpoch: number;
+  chainId: number;
+  account: string;
+  scope: string;
+  issuedAt: number;
+  expiresAt: number;
+};
+export type MemberAccessSession = {
+  token: string;
+  expiresAt: number;
+  memberId: string;
+  principalId: string;
+  groupId: string;
+  scope: string;
+};
+
 export class SynqApi {
   constructor(
     private readonly config: SynqApiConfig,
     private readonly fetchImpl: FetchLike = (u, i) => fetch(u, i),
   ) {}
+
+  /** Same API, authenticated with a member session token. */
+  as(token: string): SynqApi {
+    return new SynqApi({ ...this.config, token }, this.fetchImpl);
+  }
+
+  async memberChallenge(body: {
+    groupId: string;
+    principalId: string;
+    scope: 'MEMBER_CONTRIBUTE';
+  }): Promise<MemberAccessChallenge> {
+    const v = await this.call(
+      'POST',
+      '/v1/send/access/challenges',
+      body,
+      false,
+    );
+    if (!isObject(v) || !hex(v.challengeId, 64) || !hex(v.signer, 40))
+      fail('SYNQ_API_ERROR', 'Synq API returned a malformed member challenge');
+    return v as MemberAccessChallenge;
+  }
+
+  async memberSession(body: {
+    challengeId: string;
+    signature: string;
+  }): Promise<MemberAccessSession> {
+    const v = await this.call('POST', '/v1/send/access', body, false);
+    if (
+      !isObject(v) ||
+      typeof v.token !== 'string' ||
+      typeof v.expiresAt !== 'number'
+    )
+      fail('SYNQ_API_ERROR', 'Synq API returned a malformed member session');
+    return v as MemberAccessSession;
+  }
 
   private async call(
     method: 'GET' | 'POST',
@@ -246,7 +308,7 @@ export class SynqApi {
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (auth) {
       if (!this.config.token)
-        fail('SYNQ_API_UNAUTHORIZED', `${path} requires SYNQ_API_TOKEN`);
+        fail('SESSION_REQUIRED', `${path} requires a member session`);
       headers.authorization = `Bearer ${this.config.token}`;
     }
     let res: Response;

@@ -27,10 +27,14 @@ import {
   encodeFunctionData,
   erc20Abi,
   getAddress,
+  hashTypedData,
   isAddress,
+  parseAbi,
+  recoverAddress,
   zeroAddress,
   type Address,
   type Hex,
+  type PublicClient,
 } from 'viem';
 
 export type DelegationErrorCode =
@@ -43,7 +47,9 @@ export type DelegationErrorCode =
   | 'OUTSIDE_WINDOW'
   | 'WRONG_DESTINATION'
   | 'DUPLICATE_ATTEMPT'
-  | 'GROUP_POLICY_VIOLATION';
+  | 'GROUP_POLICY_VIOLATION'
+  | 'SIGNATURE_INVALID'
+  | 'DELEGATION_REVOKED';
 
 export class DelegationPolicyError extends Error {
   constructor(
@@ -83,6 +89,20 @@ export type GroupContributionLimits = {
   latestValidUntil: number;
 };
 
+const ERC1271_MAGIC = '0x1626ba7e';
+const ERC1271_ABI = parseAbi([
+  'function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)',
+]);
+const DISABLED_ABI = parseAbi([
+  'function disabledDelegations(bytes32 delegationHash) view returns (bool)',
+]);
+
+/** Minimal chain reads the adapter needs (a viem PublicClient satisfies it). */
+export type DelegationChainReader = Pick<
+  PublicClient,
+  'getCode' | 'readContract'
+>;
+
 export type RedemptionCall = {
   to: Address;
   data: Hex;
@@ -115,7 +135,7 @@ export class MetaMaskDelegationAdapter {
 
   validatePolicy(
     p: RecurringContributionPolicy,
-    limits?: GroupContributionLimits,
+    limits: GroupContributionLimits,
   ) {
     if (p.chainId !== this.chainId)
       fail('NETWORK_FORBIDDEN', 'policy is for another chain');
@@ -152,7 +172,7 @@ export class MetaMaskDelegationAdapter {
       fail('POLICY_INVALID', 'invalid validity window');
     if (!/^0x[0-9a-fA-F]{64}$/.test(p.salt))
       fail('POLICY_INVALID', 'salt must be bytes32');
-    if (limits) {
+    {
       if (getAddress(limits.safe) !== getAddress(p.safe))
         fail('GROUP_POLICY_VIOLATION', 'destination is not the group Safe');
       if (p.perPeriodAmount > limits.maxPerPeriod)
@@ -188,7 +208,7 @@ export class MetaMaskDelegationAdapter {
   /** Unsigned delegation; the member signs it in MetaMask (never Synq or an LLM). */
   buildDelegation(
     p: RecurringContributionPolicy,
-    limits?: GroupContributionLimits,
+    limits: GroupContributionLimits,
   ): Delegation {
     this.validatePolicy(p, limits);
     return createDelegation({
@@ -225,11 +245,12 @@ export class MetaMaskDelegationAdapter {
   }
 
   /** A signed delegation is accepted only if it is exactly the canonical one for the policy. */
-  verifyDelegation(
+  async verifyDelegation(
     signed: Delegation,
     p: RecurringContributionPolicy,
-    limits?: GroupContributionLimits,
-  ): Hex {
+    limits: GroupContributionLimits,
+    chain: DelegationChainReader,
+  ): Promise<Hex> {
     const expected = this.buildDelegation(p, limits);
     const norm = (c: Caveat) =>
       `${getAddress(c.enforcer)}:${c.terms.toLowerCase()}`;
@@ -254,7 +275,68 @@ export class MetaMaskDelegationAdapter {
       signed.signature.length < 132
     )
       fail('DELEGATION_MISMATCH', 'delegation is unsigned');
+    await this.assertSignedByDelegator(signed, chain);
     return hashDelegation(signed);
+  }
+
+  /**
+   * EOAs and EIP-7702 stateless DeleGators (code = 0xef0100 || impl) sign with the
+   * EOA key, so ECDSA recovery must yield the delegator. Any other contract
+   * account must accept the delegation hash through ERC-1271.
+   */
+  private async assertSignedByDelegator(
+    signed: Delegation,
+    chain: DelegationChainReader,
+  ) {
+    const typed = this.delegationTypedData(signed);
+    const digest = hashTypedData(typed);
+    const delegator = getAddress(signed.delegator);
+    const code = (
+      (await chain.getCode({ address: delegator })) ?? '0x'
+    ).toLowerCase();
+    if (code === '0x' || code.startsWith('0xef0100')) {
+      let recovered: Address | null = null;
+      try {
+        recovered = await recoverAddress({
+          hash: digest,
+          signature: signed.signature,
+        });
+      } catch {
+        recovered = null;
+      }
+      if (recovered !== delegator)
+        fail(
+          'SIGNATURE_INVALID',
+          'delegation was not signed by the delegator key',
+        );
+      return;
+    }
+    let magic: Hex | null = null;
+    try {
+      magic = await chain.readContract({
+        address: delegator,
+        abi: ERC1271_ABI,
+        functionName: 'isValidSignature',
+        args: [digest, signed.signature],
+      });
+    } catch {
+      magic = null;
+    }
+    if (magic?.toLowerCase() !== ERC1271_MAGIC)
+      fail(
+        'SIGNATURE_INVALID',
+        'delegator account rejected the signature (ERC-1271)',
+      );
+  }
+
+  /** On-chain revocation state; a disabled delegation is never planned. */
+  async isDisabled(signed: Delegation, chain: DelegationChainReader) {
+    return chain.readContract({
+      address: this.delegationManager,
+      abi: DISABLED_ABI,
+      functionName: 'disabledDelegations',
+      args: [hashDelegation(signed)],
+    });
   }
 
   /** Raw redeemDelegations call for one execution; used directly only by enforcement tests. */
@@ -283,7 +365,7 @@ export class MetaMaskDelegationAdapter {
   }
 
   /** Off-chain pre-checks the Synq executor runs before asking the chain to enforce the same terms. */
-  planContribution(
+  async planContribution(
     signed: Delegation,
     p: RecurringContributionPolicy,
     input: {
@@ -292,9 +374,12 @@ export class MetaMaskDelegationAdapter {
       spentThisPeriod: bigint;
       spentTotal: bigint;
     },
-    limits?: GroupContributionLimits,
-  ): RedemptionCall {
-    this.verifyDelegation(signed, p, limits);
+    limits: GroupContributionLimits,
+    chain: DelegationChainReader,
+  ): Promise<RedemptionCall> {
+    await this.verifyDelegation(signed, p, limits, chain);
+    if (await this.isDisabled(signed, chain))
+      fail('DELEGATION_REVOKED', 'delegation was revoked on-chain');
     if (
       input.nowSeconds < p.validAfter ||
       input.nowSeconds >= p.validUntil ||
@@ -371,6 +456,30 @@ export class MemoryAttemptLedger implements AttemptLedger {
     return true;
   }
 }
+/** Durable ledger: one row per attempt key, inserted once. */
+export class PostgresAttemptLedger implements AttemptLedger {
+  constructor(
+    private readonly pool: {
+      query(
+        sql: string,
+        values?: unknown[],
+      ): Promise<{ rowCount: number | null }>;
+    },
+  ) {}
+  async migrate() {
+    await this.pool.query(
+      'CREATE TABLE IF NOT EXISTS synq_delegation_attempts (attempt_key text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())',
+    );
+  }
+  async claim(key: string) {
+    const r = await this.pool.query(
+      'INSERT INTO synq_delegation_attempts(attempt_key) VALUES ($1) ON CONFLICT DO NOTHING',
+      [key],
+    );
+    return r.rowCount === 1;
+  }
+}
+
 export async function claimAttempt(
   ledger: AttemptLedger,
   delegationHash: Hex,

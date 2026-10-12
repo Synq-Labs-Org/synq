@@ -23,4 +23,17 @@ export interface SynqHost {
   /** Selected wallet first when the host exposes it, then every EVM wallet. */
   walletAddresses(): { selected: Address | null; all: Address[] };
   submit(request: TxRequest): Promise<TxSubmission>;
+  /** EIP-712 signature by the selected wallet; only for wallet-submit commands. */
+  signTypedData(request: TypedDataRequest): Promise<Hex>;
 }
+
+export type TypedDataRequest = {
+  chainId: number;
+  typedData: {
+    domain: Record<string, unknown>;
+    types: Record<string, { name: string; type: string }[]>;
+    primaryType: string;
+    message: Record<string, unknown>;
+  };
+  summary: string;
+};

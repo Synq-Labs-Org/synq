@@ -16,6 +16,7 @@ import {
 import { SynqPluginError, fail } from './errors.js';
 import {
   membershipOf,
+  memberApi,
   resolveSpender,
   verifiedGroup,
   type Deps,
@@ -205,9 +206,11 @@ export async function contribute(
   )
     fail('INVALID_INPUT', '--request-id must be 8-128 of [A-Za-z0-9_.:-]');
 
-  const { group, safe, client } = await verifiedGroup(deps, input.groupId);
+  const verified = await verifiedGroup(deps, input.groupId);
+  const { group, safe, client } = verified;
   const spender = resolveSpender(deps.host, input.from);
   const member = membershipOf(group, spender);
+  const api = await memberApi(deps, verified, input.from);
   const nowSeconds = () => Math.floor(deps.now() / 1000);
   if (input.mandateId)
     await verifiedContributionMandate(
@@ -233,7 +236,7 @@ export async function contribute(
     symbol: NETWORK.ausd.symbol,
     decimals: NETWORK.ausd.decimals,
   };
-  let session = await deps.api.quote({
+  let session = await api.quote({
     requestId,
     groupId: group.groupId,
     destination: {
@@ -316,7 +319,7 @@ export async function contribute(
     fail('DUPLICATE_CONTRIBUTION', `request ${requestId} is already in flight`);
 
   if (session.state === 'QUOTED')
-    session = await deps.api.authorize(session.sessionId);
+    session = await api.authorize(session.sessionId);
   if (session.state === 'EXPIRED')
     fail('INTENT_EXPIRED', 'funding quote expired before authorization');
   if (session.state !== 'USER_AUTHORIZED')
@@ -364,13 +367,13 @@ export async function contribute(
     updatedAt: deps.now(),
   });
 
-  session = await deps.api.recordSource(session.sessionId, hash);
+  session = await api.recordSource(session.sessionId, hash);
   const attempts = options.reconcileAttempts ?? 10;
   const sleep =
     options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   for (let i = 0; i < attempts && session.state !== 'CREDITED'; i++) {
     try {
-      session = await deps.api.reconcile(session.sessionId);
+      session = await api.reconcile(session.sessionId);
     } catch (error) {
       if (
         !(error instanceof SynqPluginError) ||

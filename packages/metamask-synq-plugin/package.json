@@ -50,6 +50,19 @@
         ]
       },
       {
+        "id": "synq:login",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts"
+        ],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
         "id": "synq:treasury",
         "capabilities": [
           "wallet-read"

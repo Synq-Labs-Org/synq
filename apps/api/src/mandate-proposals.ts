@@ -58,7 +58,7 @@ export const MandateProposalSchema = z.strictObject({
   state: z.enum(MANDATE_PROPOSAL_STATES),
   proposedBy: z.strictObject({
     memberId: z.string().max(200).nullable(),
-    source: z.enum(['BRAIN', 'OPERATOR']),
+    source: z.enum(['BRAIN', 'OPERATOR', 'MEMBER']),
   }),
   executionTx: Hash.nullable(),
   reason: z.string().max(300).nullable(),

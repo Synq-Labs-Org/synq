@@ -1,8 +1,17 @@
-import { decodeEventLog, erc20Abi, keccak256, toHex } from 'viem';
+import { randomBytes } from 'node:crypto';
+import {
+  decodeEventLog,
+  erc20Abi,
+  keccak256,
+  recoverTypedDataAddress,
+  toHex,
+} from 'viem';
+import { memberAccessTypedData } from '../src/core/session.js';
 import type {
   FetchLike,
   FundingSession,
   GroupView,
+  MemberAccessChallenge,
 } from '../src/core/synq-api.js';
 import { NETWORK } from '../src/core/network.js';
 import {
@@ -15,7 +24,12 @@ import {
   SAFE,
 } from './fakes.js';
 
-export const TOKEN = 'test-admin-token-0123456789abcdef';
+type MemberSession = {
+  groupId: string;
+  memberId: string;
+  signer: string;
+  expiresAt: number;
+};
 
 /** Behaves like apps/api's group, funding, treasury, world and mandate-proposal routes. */
 export class FakeSynqApi {
@@ -50,6 +64,9 @@ export class FakeSynqApi {
     ],
   };
   sessions = new Map<string, FundingSession>();
+  challenges = new Map<string, MemberAccessChallenge>();
+  tokens = new Map<string, MemberSession>();
+  challengesIssued = 0;
   quoteTtl = 600;
   tamperQuote?: (s: FundingSession) => FundingSession;
   authorizeState?: FundingSession['state'];
@@ -71,16 +88,84 @@ export class FakeSynqApi {
     const method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     this.calls.push({ method, path: pathname, body });
-    const admin =
-      (init.headers as Record<string, string>).authorization ===
-      `Bearer ${TOKEN}`;
+    const nowS = Math.floor(this.now() / 1000);
+    const header = (init.headers as Record<string, string>).authorization ?? '';
+    const member = (groupId: string): MemberSession | null => {
+      const s = this.tokens.get(header.replace(/^Bearer /, ''));
+      const active = this.group.memberships.some(
+        (x) => x.status === 'ACTIVE' && x.signer.toLowerCase() === s?.signer,
+      );
+      return s &&
+        s.expiresAt > nowS &&
+        s.groupId === groupId.toLowerCase() &&
+        active
+        ? s
+        : null;
+    };
+    const unauthorized = () => this.json(401, { error: 'UNAUTHORIZED' });
     let m: RegExpMatchArray | null;
     if (method === 'GET' && (m = pathname.match(/^\/v1\/groups\/([^/]+)$/)))
       return decodeURIComponent(m[1]!) === GROUP_ID
         ? this.json(200, this.group)
         : this.json(404, { error: 'NOT_FOUND' });
-    if (!admin) return this.json(401, { error: 'UNAUTHORIZED' });
+    if (method === 'POST' && pathname === '/v1/send/access/challenges') {
+      const ms = this.group.memberships.find(
+        (x) => x.principalId === body.principalId && x.status === 'ACTIVE',
+      );
+      if (body.groupId !== CHAIN_GROUP_ID || !ms)
+        return this.json(403, { error: 'SENDER_NOT_MEMBER' });
+      this.challengesIssued++;
+      const c: MemberAccessChallenge = {
+        challengeId: `0x${randomBytes(32).toString('hex')}`,
+        groupId: CHAIN_GROUP_ID,
+        memberId: ms.memberId,
+        principalId: ms.principalId,
+        signer: ms.signer.toLowerCase(),
+        membershipEpoch: this.group.membershipEpoch,
+        chainId: NETWORK.chainId,
+        account: this.group.account,
+        scope: body.scope ?? 'SEND_READ_PREVIEW',
+        issuedAt: nowS,
+        expiresAt: nowS + 120,
+      };
+      this.challenges.set(c.challengeId, c);
+      return this.json(201, c);
+    }
+    if (method === 'POST' && pathname === '/v1/send/access') {
+      const c = this.challenges.get(body.challengeId);
+      this.challenges.delete(body.challengeId);
+      if (!c || c.expiresAt <= nowS)
+        return this.json(401, { error: 'MEMBER_SIGNATURE_INVALID' });
+      const signer = await recoverTypedDataAddress({
+        ...memberAccessTypedData(c),
+        signature: body.signature,
+      });
+      if (signer.toLowerCase() !== c.signer)
+        return this.json(401, { error: 'MEMBER_SIGNATURE_INVALID' });
+      const token = randomBytes(24).toString('base64url');
+      this.tokens.set(token, {
+        groupId: c.groupId,
+        memberId: c.memberId,
+        signer: c.signer,
+        expiresAt: nowS + 300,
+      });
+      return this.json(201, {
+        token,
+        expiresAt: nowS + 300,
+        memberId: c.memberId,
+        principalId: c.principalId,
+        groupId: c.groupId,
+        scope: c.scope,
+      });
+    }
     if (method === 'POST' && pathname === '/v1/funding/quotes') {
+      const caller = member(body.groupId);
+      if (
+        !caller ||
+        caller.signer !== body.source.sender.toLowerCase() ||
+        caller.signer !== body.source.refundTo.toLowerCase()
+      )
+        return unauthorized();
       const active = this.group.memberships
         .filter((x) => x.status === 'ACTIVE')
         .map((x) => x.signer.toLowerCase());
@@ -122,7 +207,10 @@ export class FakeSynqApi {
     }
     if ((m = pathname.match(/^\/v1\/funding\/(0x[0-9a-f]{64})(?:\/(\w+))?$/))) {
       const s = this.sessions.get(m[1]!);
-      if (!s) return this.json(404, { error: 'FUNDING_NOT_FOUND' });
+      if (!s) return unauthorized();
+      const caller = member(s.groupId);
+      if (!caller || caller.signer !== s.quote.sourceSender)
+        return unauthorized();
       const action = m[2];
       if (!action) return this.json(200, s);
       if (action === 'authorize') {
@@ -176,6 +264,7 @@ export class FakeSynqApi {
       method === 'GET' &&
       pathname === `/v1/groups/${CHAIN_GROUP_ID}/treasury`
     ) {
+      if (!member(CHAIN_GROUP_ID)) return unauthorized();
       const bal = this.chain.balance(SAFE).toString();
       const events = [...this.sessions.values()]
         .filter((s) => s.sourceTransactionHash)
@@ -210,6 +299,7 @@ export class FakeSynqApi {
       });
     }
     if (method === 'GET' && pathname === `/v1/world/${GROUP_ID}`) {
+      if (!member(GROUP_ID)) return unauthorized();
       const meta = {
         provenance: 'KERNEL',
         source: 'test',
@@ -278,6 +368,7 @@ export class FakeSynqApi {
       });
     }
     if (method === 'POST' && pathname === '/v1/mandate-proposals') {
+      if (!member(body.groupId)) return unauthorized();
       return this.json(201, {
         proposalId: keccak256(toHex(JSON.stringify(body.mandate))),
         groupId: body.groupId,

@@ -9,9 +9,9 @@ import { SynqPluginError } from '../src/core/errors.js';
 import type { Deps } from '../src/core/group.js';
 import { MemoryJournal } from '../src/core/journal.js';
 import { NETWORK } from '../src/core/network.js';
-import { SynqApi } from '../src/core/synq-api.js';
-import { hostFromContext } from '../src/plugin-host.js';
-import { FakeSynqApi, TOKEN } from './fake-api.js';
+import { FakeSynqApi } from './fake-api.js';
+import { makeDeps } from './deps.js';
+import { MemorySessionStore } from '../src/core/session.js';
 import {
   AUSD,
   FakeChain,
@@ -22,7 +22,6 @@ import {
   ROGUE_SAFE,
   SAFE,
   fakeHostContext,
-  fakeIo,
 } from './fakes.js';
 
 const NOW = 1_790_000_000_000;
@@ -32,14 +31,14 @@ function setup(host: Parameters<typeof fakeHostContext>[1] = {}) {
   const api = new FakeSynqApi(chain, () => NOW);
   const { ctx, log } = fakeHostContext(chain, host);
   const journal = new MemoryJournal();
-  const deps: Deps = {
-    host: hostFromContext(ctx, fakeIo, 'synq:contribute'),
-    api: new SynqApi(
-      { baseUrl: 'http://127.0.0.1:3200', token: TOKEN },
-      api.fetch,
-    ),
-    now: () => NOW,
-  };
+  const sessions = new MemorySessionStore();
+  const deps: Deps = makeDeps(
+    ctx,
+    api.fetch,
+    'synq:contribute',
+    sessions,
+    () => NOW,
+  );
   const run = (input: Partial<ContributeInput> = {}) =>
     contribute(
       deps,
@@ -51,7 +50,7 @@ function setup(host: Parameters<typeof fakeHostContext>[1] = {}) {
         sleep: async () => {},
       },
     );
-  return { chain, api, log, journal, deps, run };
+  return { chain, api, log, journal, deps, run, sessions, ctx };
 }
 
 const code = async (p: Promise<unknown>) => {
@@ -64,9 +63,19 @@ const code = async (p: Promise<unknown>) => {
   return 'NO_ERROR';
 };
 const submitted = (log: ReturnType<typeof setup>['log']) =>
-  log.flatMap((l) => l.requests).length;
+  log.flatMap((l) => l.requests).filter((r) => r.kind === 'transaction').length;
 
 describe('synq contribute', () => {
+  it('signs in as the member wallet once and reuses the session', async () => {
+    const t = setup();
+    await t.run();
+    await t.run({ requestId: 'another-contribution' });
+    expect(t.api.challengesIssued).toBe(1);
+    const tokens = [...t.api.tokens.values()];
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).toMatchObject({ memberId: 'alice' });
+  });
+
   it('reads the verified group, submits one bounded AUSD transfer and returns a reconciled receipt', async () => {
     const t = setup();
     const r = await t.run();
@@ -79,9 +88,10 @@ describe('synq contribute', () => {
     expect(r.explorerUrl).toBe(`${NETWORK.explorerUrl}/tx/${r.txHash}`);
     expect(t.chain.balance(SAFE)).toBe(1_500_000n);
     expect(t.chain.balance(MEMBER)).toBe(8_500_000n);
-    expect(t.log).toHaveLength(1);
-    expect(t.log[0]!.source).toBe('synq:contribute');
-    const req = t.log[0]!.requests[0]!;
+    const kinds = t.log.flatMap((l) => l.requests).map((r) => r.kind);
+    expect(kinds).toEqual(['typed-data', 'transaction']);
+    expect(t.log.every((l) => l.source === 'synq:contribute')).toBe(true);
+    const req = t.log.flatMap((l) => l.requests)[1]!;
     expect(req.kind).toBe('transaction');
     if (req.kind !== 'transaction') return;
     expect(req.chainId).toBe(NETWORK.chainId);
@@ -287,6 +297,13 @@ describe('synq contribute', () => {
     });
     expect(await code(v.run())).toBe('WRONG_SPENDER');
     expect(submitted(t.log) + submitted(u.log) + submitted(v.log)).toBe(0);
+  });
+
+  it('refuses a session signed by a wallet other than the member', async () => {
+    const t = setup({ typedSigner: OTHER });
+    expect(await code(t.run())).toBe('WRONG_SPENDER');
+    expect(submitted(t.log)).toBe(0);
+    expect(t.api.tokens.size).toBe(0);
   });
 
   it('detects a host that signed from another wallet and never reports it as credited', async () => {

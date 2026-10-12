@@ -1,6 +1,6 @@
 import { parseUnits } from 'viem';
 import { fail } from './errors.js';
-import { verifiedGroup, type Deps } from './group.js';
+import { memberApi, verifiedGroup, type Deps } from './group.js';
 import { NETWORK, sameAddress } from './network.js';
 import type { MandateProposalView } from './synq-api.js';
 
@@ -84,9 +84,12 @@ export async function propose(
   deps: Deps,
   input: { groupId: string; mandate: unknown; change: 'NEW' | 'SUPERSEDE' },
 ): Promise<ProposalResult> {
-  const { group, safe } = await verifiedGroup(deps, input.groupId);
+  const verified = await verifiedGroup(deps, input.groupId);
+  const { group, safe } = verified;
   assertBinding(input.mandate, group, safe);
-  const p = await deps.api.propose({
+  const p = await (
+    await memberApi(deps, verified)
+  ).propose({
     groupId: group.groupId,
     mandate: input.mandate,
     change: input.change,

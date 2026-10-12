@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { callerFor, mayPropose } from './member-scope.js';
+import type { SendRouteDeps } from './send-routes.js';
 import {
   MandateProposalError,
   type MandateProposalService,
@@ -31,7 +33,11 @@ const ProposeBody = z.strictObject({
 /** Review and owner approval of mandate proposals; creation is operator-only. */
 export async function mandateRoutes(
   api: FastifyInstance,
-  deps: { service: MandateProposalService; adminToken: string | null },
+  deps: {
+    service: MandateProposalService;
+    adminToken: string | null;
+    memberAccess?: SendRouteDeps['memberAccess'];
+  },
 ) {
   const admin = (header: string | undefined) => {
     const d = (v: string) => createHash('sha256').update(v).digest();
@@ -102,13 +108,23 @@ export async function mandateRoutes(
   );
 
   api.post('/v1/mandate-proposals', async (request, reply) => {
-    if (!admin(request.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
     try {
       const body = ProposeBody.parse(request.body);
+      const caller = admin(request.headers.authorization)
+        ? ({ kind: 'ADMIN' } as const)
+        : await callerFor(
+            request.headers.authorization,
+            body.groupId.toLowerCase(),
+            { adminToken: null, memberAccess: deps.memberAccess },
+          );
+      if (!mayPropose(caller))
+        return reply.code(401).send({ error: 'UNAUTHORIZED' });
       const p = await deps.service.propose({
         ...body,
-        proposedBy: { memberId: null, source: 'OPERATOR' },
+        proposedBy:
+          caller.kind === 'ADMIN'
+            ? { memberId: null, source: 'OPERATOR' }
+            : { memberId: caller.memberId, source: 'MEMBER' },
       });
       return reply.code(201).send(await publicView(p.proposalId));
     } catch (error) {

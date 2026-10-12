@@ -3,11 +3,13 @@ import { assertChain, verifiedGroupSafe } from './chain.js';
 import { fail } from './errors.js';
 import type { SynqHost } from './host.js';
 import { NETWORK, sameAddress } from './network.js';
+import type { MemberSessions } from './session.js';
 import type { GroupView, MembershipView, SynqApi } from './synq-api.js';
 
 export type Deps = {
   host: SynqHost;
   api: SynqApi;
+  sessions: MemberSessions;
   now: () => number;
 };
 
@@ -93,3 +95,32 @@ export const membershipStatus = (group: GroupView, signer: Address | null) => {
   if (mine.some((m) => m.status === 'ACTIVE')) return 'ACTIVE' as const;
   return mine.length ? ('REVOKED' as const) : ('NONE' as const);
 };
+
+/** API client authenticated as the selected member wallet for this verified group. */
+export async function memberApi(
+  deps: Deps,
+  v: VerifiedGroup,
+  from?: string,
+): Promise<SynqApi> {
+  const signer = resolveSpender(deps.host, from);
+  membershipOf(v.group, signer);
+  return deps.sessions.apiFor(v.group, v.safe, signer);
+}
+
+export async function login(deps: Deps, groupId: string, from?: string) {
+  const v = await verifiedGroup(deps, groupId);
+  const signer = resolveSpender(deps.host, from);
+  const member = membershipOf(v.group, signer);
+  const s = await deps.sessions.session(v.group, v.safe, signer, {
+    refresh: true,
+  });
+  return {
+    groupId: v.group.groupId,
+    chainGroupId: v.group.chainGroupId,
+    safe: v.safe,
+    signer,
+    memberId: member.memberId,
+    scope: 'MEMBER_CONTRIBUTE' as const,
+    expiresAt: s.expiresAt,
+  };
+}

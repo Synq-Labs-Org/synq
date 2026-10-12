@@ -19,13 +19,18 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import { mandateRegistryAbi } from '../src/core/chain.js';
 import type { Capability, SynqCommandId } from '../src/core/capabilities.js';
 import { NETWORK } from '../src/core/network.js';
 import type { HostContext } from '../src/plugin-host.js';
 
-export const MEMBER = getAddress('0x1111111111111111111111111111111111111111');
-export const OTHER = getAddress('0x2222222222222222222222222222222222222222');
+export const ACCOUNTS = [
+  privateKeyToAccount(keccak256(toHex('synq-plugin-test-member'))),
+  privateKeyToAccount(keccak256(toHex('synq-plugin-test-other'))),
+];
+export const MEMBER = ACCOUNTS[0]!.address;
+export const OTHER = ACCOUNTS[1]!.address;
 export const SAFE = getAddress(`0x${'5'.repeat(40)}`);
 export const ROGUE_SAFE = getAddress(
   '0x3333333333333333333333333333333333333333',
@@ -33,7 +38,8 @@ export const ROGUE_SAFE = getAddress(
 export const CHAIN_GROUP_ID =
   '0x8241ac62ee0888e2065225c17e29cf9c6245069c89c687d2da44aae40811c1ec' as Hex;
 export const MANDATE_ID = `0x${'ab'.repeat(32)}` as Hex;
-export const GROUP_ID = 'club-1';
+/** Production convention: the identity group id is the chain group id. */
+export const GROUP_ID = CHAIN_GROUP_ID;
 export const AUSD = NETWORK.ausd.address;
 
 type Mandate = {
@@ -244,6 +250,7 @@ export function fakeHostContext(
     wallets?: Address[];
     selected?: Address | null;
     signer?: Address;
+    typedSigner?: Address;
     rejectWith?: string;
   } = {},
 ): { ctx: HostContext; log: ExecutorLog[] } {
@@ -269,8 +276,24 @@ export function fakeHostContext(
       log.push(entry);
       const execute: EvmWalletExecutor = async (request) => {
         entry.requests.push(request);
+        if (request.kind === 'typed-data') {
+          const who = opts.typedSigner ?? selected ?? wallets[0]!;
+          const account = ACCOUNTS.find((a) => a.address === getAddress(who));
+          if (!account) throw new Error('no key for signer');
+          const t = request.typedData;
+          return {
+            kind: 'signature',
+            status: 'SIGNED',
+            signature: await account.signTypedData({
+              domain: t.domain,
+              types: t.types,
+              primaryType: t.primaryType,
+              message: t.message,
+            } as Parameters<typeof account.signTypedData>[0]),
+          };
+        }
         if (request.kind !== 'transaction')
-          throw new Error('unexpected signature request');
+          throw new Error('unexpected message signature request');
         if (opts.rejectWith)
           return {
             kind: 'transaction',

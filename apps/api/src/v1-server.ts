@@ -68,16 +68,16 @@ import {
   DirectMonadAusdAdapter,
   FundingRouter,
   createFundingActivities,
-  FundingRequestSchema,
   type FundingSqlPool,
   type FundingActivities,
 } from '@synq/funding';
 import { sendRoutes, type SendRouteDeps } from './send-routes.js';
+import { fundingRoutes } from './funding-routes.js';
+import { callerFor } from './member-scope.js';
 import { PostgresSendAccessStore } from './send-access-store.js';
 import { fundingReceipt, productionSendPorts } from './send-runtime.js';
 import { DurableKernel } from './kernel-runtime.js';
 import { indexedContributions } from '@synq/read-model';
-import { createHash, timingSafeEqual } from 'node:crypto';
 
 export async function registerProductionSend(input: {
   app: FastifyInstance;
@@ -106,81 +106,16 @@ async function registerFundingApi(
     readModel: ReadModelRuntime;
   },
 ) {
-  const authorized = (header: string | undefined) => {
-    const digest = (v: string) => createHash('sha256').update(v).digest();
-    return (
-      !!input.ports.adminToken &&
-      timingSafeEqual(
-        digest(header ?? ''),
-        digest(`Bearer ${input.ports.adminToken}`),
-      )
-    );
-  };
-  const id = z.string().regex(/^0x[0-9a-f]{64}$/);
-  app.post('/v1/funding/quotes', async (req, reply) => {
-    if (!authorized(req.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const request = FundingRequestSchema.parse(req.body);
-    const context = await input.ports.groups.context(request.groupId);
-    if (
-      !context ||
-      context.mandate.account !== request.destination.account ||
-      !context.members.some(
-        (m) => m.signer.toLowerCase() === request.source.sender.toLowerCase(),
-      )
-    )
-      return reply.code(403).send({ error: 'FUNDING_BINDING_INVALID' });
-    const now = input.ports.now();
-    const plan = await input.activities.planRoute({ ...request, now });
-    if (plan.status !== 'ROUTED') return reply.code(422).send(plan);
-    return input.activities.openFromPlan({
-      groupId: request.groupId,
-      plan,
-      now,
-    });
-  });
-  app.get('/v1/funding/:sessionId', async (req, reply) => {
-    if (!authorized(req.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
-    const s = await input.store.get(sessionId);
-    return s ?? reply.code(404).send({ error: 'FUNDING_NOT_FOUND' });
-  });
-  app.post('/v1/funding/:sessionId/authorize', async (req, reply) => {
-    if (!authorized(req.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
-    return input.activities.authorize(sessionId, input.ports.now());
-  });
-  app.post('/v1/funding/:sessionId/source', async (req, reply) => {
-    if (!authorized(req.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
-    const { transactionHash } = z
-      .strictObject({ transactionHash: id })
-      .parse(req.body);
-    const s = await input.store.get(sessionId);
-    if (!s) return reply.code(404).send({ error: 'FUNDING_NOT_FOUND' });
-    return input.activities.recordSource(
-      sessionId,
-      await fundingReceipt(
-        input.readModel.client,
-        s,
-        transactionHash as `0x${string}`,
-      ),
-      input.ports.now(),
-    );
-  });
-  app.post('/v1/funding/:sessionId/reconcile', async (req, reply) => {
-    if (!authorized(req.headers.authorization))
-      return reply.code(401).send({ error: 'UNAUTHORIZED' });
-    const { sessionId } = z.object({ sessionId: id }).parse(req.params);
-    const now = input.ports.now();
-    await input.activities.observeDestination(sessionId, now);
-    const s = await input.activities.confirmIndexed(sessionId, now);
-    return s.state === 'INDEXED' || s.state === 'CREDITED'
-      ? input.activities.credit(sessionId, now)
-      : s;
+  await app.register(fundingRoutes, {
+    activities: input.activities,
+    sessions: input.store,
+    context: input.ports.groups.context,
+    now: input.ports.now,
+    adminToken: input.ports.adminToken,
+    ...(input.ports.memberAccess
+      ? { memberAccess: input.ports.memberAccess }
+      : {}),
+    receipt: (s, hash) => fundingReceipt(input.readModel.client, s, hash),
   });
 }
 
@@ -464,14 +399,17 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       const { groupId } = z
         .object({ groupId: z.string().min(1).max(128) })
         .parse(request.params);
-      const supplied = createHash('sha256')
-        .update(request.headers.authorization ?? '')
-        .digest();
-      const expected = createHash('sha256')
-        .update(`Bearer ${config.SYNQ_API_ADMIN_TOKEN}`)
-        .digest();
-      if (!timingSafeEqual(supplied, expected))
-        return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      const caller = await callerFor(
+        request.headers.authorization,
+        groupId.toLowerCase(),
+        {
+          adminToken: config.SYNQ_API_ADMIN_TOKEN,
+          ...(registered.ports.memberAccess
+            ? { memberAccess: registered.ports.memberAccess }
+            : {}),
+        },
+      );
+      if (!caller) return reply.code(401).send({ error: 'UNAUTHORIZED' });
       const session = await store.transaction((tx) => tx.getGroup(groupId));
       if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
       await worldPlugins.refresh();
@@ -569,6 +507,9 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
     await app.register(mandateRoutes, {
       service: mandateProposals,
       adminToken: config.SYNQ_API_ADMIN_TOKEN,
+      ...(registered.ports.memberAccess
+        ? { memberAccess: registered.ports.memberAccess }
+        : {}),
     });
     const reasoners = brainReasonersFromEnv(env);
     const authorizer = intents;

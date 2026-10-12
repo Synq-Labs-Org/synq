@@ -428,11 +428,15 @@ export async function sendRoutes(
           .strictObject({
             groupId: GroupParams.shape.groupId,
             principalId: z.string().min(1).max(200),
+            scope: z
+              .enum(['SEND_READ_PREVIEW', 'MEMBER_CONTRIBUTE'])
+              .optional(),
           })
           .parse(request.body);
         const challenge = await deps.memberAccess?.challenge(
           body.groupId.toLowerCase(),
           body.principalId,
+          body.scope,
         );
         if (!challenge) throw new HttpError(403, 'SENDER_NOT_MEMBER');
         return challenge;

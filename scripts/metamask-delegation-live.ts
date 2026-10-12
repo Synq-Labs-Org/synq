@@ -216,7 +216,12 @@ async function main() {
       adapter.delegationTypedData(unsigned),
     ),
   };
-  const delegationHash = adapter.verifyDelegation(signed, policy, limits);
+  const delegationHash = await adapter.verifyDelegation(
+    signed,
+    policy,
+    limits,
+    pub,
+  );
   log({
     step: 'delegation-created',
     delegationHash,
@@ -262,7 +267,7 @@ async function main() {
 
   // 4. bounded contribution through the delegation
   const safeBefore = await balance(safe);
-  const first = adapter.planContribution(
+  const first = await adapter.planContribution(
     signed,
     policy,
     {
@@ -272,6 +277,7 @@ async function main() {
       spentTotal: 0n,
     },
     limits,
+    pub,
   );
   const r1 = await wait(
     await op.sendTransaction({ to: first.to, data: first.data }),
@@ -299,7 +305,7 @@ async function main() {
   // 5. period allowance is enforced on-chain (0.6 + 0.6 > 1 AUSD per week)
   let offline: string | null = null;
   try {
-    adapter.planContribution(
+    await adapter.planContribution(
       signed,
       policy,
       {
@@ -309,6 +315,7 @@ async function main() {
         spentTotal: (6n * AUSD_UNIT) / 10n,
       },
       limits,
+      pub,
     );
   } catch (e) {
     offline = (e as { code?: string }).code ?? 'ERROR';
