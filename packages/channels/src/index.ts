@@ -8,3 +8,4 @@ export * from './linq.js';
 export * from './whatsapp.js';
 export * from './capabilities.js';
 export * from './cards/index.js';
+export * from './imessage/index.js';

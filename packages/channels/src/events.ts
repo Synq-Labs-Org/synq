@@ -34,6 +34,7 @@ export const VerifiedSenderSchema = z.strictObject({
     'WEBHOOK_SECRET_TOKEN',
     'WEBHOOK_HMAC',
     'BOT_API_POLL',
+    'IMESSAGE_BRIDGE',
     'FIXTURE',
   ]),
   providerUserId: ExternalIdSchema.nullable(),

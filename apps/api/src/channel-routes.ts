@@ -2,8 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   TELEGRAM_SECRET_HEADER,
+  webhookTokenMatches,
   channelCapabilities,
   type ChannelGateway,
+  type IMessageBridge,
+  type IMessageTransport,
   type LinqV3Adapter,
   type TelegramAdapter,
 } from '@synq/channels';
@@ -25,6 +28,12 @@ export type ChannelRouteDeps = {
     verify(raw: unknown, nowSeconds: number): string | null;
   };
   env?: Readonly<Record<string, string | undefined>>;
+  /** Local iMessage bridge (BlueBubbles pushes webhooks to the API on the same Mac). */
+  imessage?: {
+    bridge: IMessageBridge;
+    transport: IMessageTransport;
+    webhookToken: string | null;
+  };
 };
 
 const CodeSchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/);
@@ -92,6 +101,19 @@ export async function channelRoutes(
     const outcomes = [];
     for (const event of events)
       outcomes.push((await deps.gateway.handle(event)).status);
+    return reply.code(200).send({ ok: true, outcomes });
+  });
+
+  api.post('/v1/channels/imessage/webhook/:token', async (request, reply) => {
+    const im = deps.imessage;
+    const token = (request.params as { token?: string }).token ?? '';
+    if (!im?.webhookToken)
+      return reply.code(404).send({ error: 'CHANNEL_NOT_CONFIGURED' });
+    if (!webhookTokenMatches(im.webhookToken, token))
+      return reply.code(401).send({ error: 'WEBHOOK_TOKEN_INVALID' });
+    const outcomes = [];
+    for (const m of im.transport.parseEvent(json(request.body)))
+      outcomes.push((await im.bridge.ingest(m, 'WEBHOOK')).status);
     return reply.code(200).send({ ok: true, outcomes });
   });
 
