@@ -22,9 +22,22 @@ export type ProviderBookingOutcome =
   | { status: 'FAILED'; reason: string }
   | { status: 'UNKNOWN'; reason: string };
 
+/**
+ * Settlement Fabric v1.3 declaration (see @synq/settlement fabric). A port
+ * with economicEffect NONE_SANDBOX never captures treasury value: its success
+ * is recorded as a simulated provider obligation and the reservation released.
+ */
+export type ProviderSettlementProfile = {
+  category: string;
+  mode: string;
+  economicEffect: 'NONE_SANDBOX' | 'TESTNET_TOKENS';
+  providerName: string;
+};
+
 export interface ProviderBookingPort {
   readonly providerId: string;
   readonly host: string;
+  readonly settlement?: ProviderSettlementProfile;
   book(input: {
     offer: EconomicOffer;
     travelers: TravelerPii[];
