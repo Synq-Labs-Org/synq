@@ -4,7 +4,6 @@ import {
   type Money,
   type ProviderCapability,
 } from '@synq/offer-exchange';
-import { getJson, obj, str, type HttpFetch } from './http.js';
 
 export type CheckoutMode =
   | 'NATIVE_API'
@@ -30,10 +29,62 @@ export type CheckoutRecipient = {
   country: string;
 };
 
+/** On-chain payment the route broadcast for an order (testnet only). */
+export type PaymentEvidence = {
+  chain: string;
+  chainId: number;
+  txHash: string;
+};
+
+/**
+ * `HELD`: the route stopped before paying (quote above the grant, price
+ * increase, wrong item, unexpected payment transaction, step-up required).
+ * Nothing was paid; the order, if any, is left to expire. `FAILED`: the
+ * provider definitively created nothing. `UNKNOWN_PROVIDER_OUTCOME`: an
+ * order or payment may exist; reconcile, never resubmit.
+ */
 export type PlacedOrder =
-  | { state: 'ORDER_PLACED'; orderRef: string; charged: Money | null }
+  | {
+      state: 'ORDER_PLACED';
+      orderRef: string;
+      charged: Money | null;
+      payment?: PaymentEvidence;
+      providerStatus?: string;
+    }
+  | {
+      state: 'HELD';
+      orderRef: string | null;
+      reason: string;
+      stepUp?: 'KYC';
+      quoted?: Money | null;
+    }
   | { state: 'FAILED'; reason: string }
-  | { state: 'UNKNOWN_PROVIDER_OUTCOME'; reason: string };
+  | {
+      state: 'UNKNOWN_PROVIDER_OUTCOME';
+      reason: string;
+      orderRef?: string | null;
+      payment?: PaymentEvidence;
+    };
+
+export type ReconcileOutcome =
+  | {
+      status: 'FOUND';
+      orderRef: string;
+      paymentStatus: string;
+      deliveryStatus: string | null;
+    }
+  | { status: 'NOT_FOUND' }
+  | { status: 'UNKNOWN'; reason: string };
+
+export type PlaceInput = {
+  offer: EconomicOffer;
+  recipient: CheckoutRecipient;
+  idempotencyKey: string;
+  /** Kernel grant cap, including tax and shipping. */
+  maxTotal: Money;
+  /** Revalidated item price the grant was issued against; any increase holds. */
+  maxUnit: Money;
+};
 
 export interface CheckoutRoute {
   readonly mode: CheckoutMode;
@@ -43,11 +94,12 @@ export interface CheckoutRoute {
   supports(offer: EconomicOffer): boolean;
   /** True only with real sandbox credentials for this route. */
   sandboxReady(): boolean;
-  place?(input: {
-    offer: EconomicOffer;
-    recipient: CheckoutRecipient;
-    idempotencyKey: string;
-  }): Promise<PlacedOrder>;
+  place?(input: PlaceInput): Promise<PlacedOrder>;
+  /** Looks an ambiguous order up at the provider; never creates or pays. */
+  reconcile?(input: {
+    orderRef: string | null;
+    since: number;
+  }): Promise<ReconcileOutcome>;
 }
 
 export type CheckoutDecision =
@@ -156,94 +208,4 @@ export function simulatedCheckoutReceipt(input: {
     evidence: 'SIMULATED',
     createdAt: input.now,
   };
-}
-
-export const CROSSMINT = 'crossmint';
-export const CROSSMINT_STAGING_HOST = 'staging.crossmint.com';
-
-/**
- * Crossmint headless checkout (staging). Supports Amazon ASIN and Shopify
- * product locators; staging payment is USDC on Base Sepolia, so a Monad
- * treasury needs a bridged edge buffer before a real staging order.
- */
-export class CrossmintCheckoutRoute implements CheckoutRoute {
-  readonly mode = 'STABLECOIN_CHECKOUT' as const;
-  readonly providerId = CROSSMINT;
-  readonly host = CROSSMINT_STAGING_HOST;
-  constructor(
-    readonly capability: ProviderCapability,
-    private readonly apiKey: string | undefined,
-    private readonly fetchImpl: HttpFetch,
-    private readonly payerAddress: string | null,
-  ) {}
-  supports(offer: EconomicOffer) {
-    return /^(amazon:[A-Z0-9]{10}|shopify:https:\/\/)/.test(offer.providerRef);
-  }
-  sandboxReady() {
-    return (
-      !!this.apiKey &&
-      this.apiKey.startsWith('sk_staging') &&
-      this.payerAddress !== null
-    );
-  }
-  async place(input: {
-    offer: EconomicOffer;
-    recipient: CheckoutRecipient;
-    idempotencyKey: string;
-  }): Promise<PlacedOrder> {
-    if (!this.sandboxReady())
-      return { state: 'FAILED', reason: 'staging credentials missing' };
-    const r = input.recipient;
-    try {
-      const body = await getJson(
-        this.fetchImpl,
-        'crossmint',
-        `https://${this.host}/api/2022-06-09/orders`,
-        {
-          method: 'POST',
-          headers: {
-            'X-API-KEY': this.apiKey!,
-            'Content-Type': 'application/json',
-            'Idempotency-Key': input.idempotencyKey,
-          },
-          body: JSON.stringify({
-            recipient: {
-              email: r.email,
-              physicalAddress: {
-                name: r.name,
-                line1: r.line1,
-                line2: r.line2,
-                city: r.city,
-                state: r.state,
-                postalCode: r.postalCode,
-                country: r.country,
-              },
-            },
-            payment: {
-              method: 'base-sepolia',
-              currency: 'usdc',
-              payerAddress: this.payerAddress,
-            },
-            lineItems: [{ productLocator: input.offer.providerRef }],
-          }),
-        },
-      );
-      const order = obj(body.order);
-      const phase = str(order.phase);
-      const id = str(order.orderId);
-      if (!id)
-        return { state: 'UNKNOWN_PROVIDER_OUTCOME', reason: 'no order id' };
-      return phase === 'completed' || phase === 'delivery'
-        ? { state: 'ORDER_PLACED', orderRef: id, charged: null }
-        : {
-            state: 'UNKNOWN_PROVIDER_OUTCOME',
-            reason: `order ${id} awaiting ${phase ?? 'unknown'} (payment not broadcast)`,
-          };
-    } catch (e) {
-      return {
-        state: 'UNKNOWN_PROVIDER_OUTCOME',
-        reason: (e as Error).message,
-      };
-    }
-  }
 }

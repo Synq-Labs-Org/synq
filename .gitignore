@@ -20,3 +20,4 @@ playwright-report/
 artifacts/brain-demo/
 artifacts/synq-send/
 .synq-local/
+.synq-cache/

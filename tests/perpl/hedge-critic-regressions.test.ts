@@ -58,25 +58,41 @@ const withRisk = (
   });
 };
 describe('economic fields are derived from trusted evidence, never from the intent', () => {
-  it('P10-N3 derives simulation from a custom transport without a caller flag', () => {
+  it('explicit recorded transport labels fixtures and wrapped live fetch remains live', () => {
     const server = new FakePerplRest(
       testnetPerpl.chainId,
       testnetPerpl.restUrl,
     );
     expect(
-      new PerplRestClient({ network: testnetPerpl, fetch: server.fetch })
-        .executionMode,
+      new PerplRestClient({
+        transport: 'recorded',
+        network: testnetPerpl,
+        fetch: server.fetch,
+      }).executionMode,
     ).toBe('SIMULATION');
     expect(
       new PerplRestClient({
         network: testnetPerpl,
         fetch: server.fetch,
-        simulation: false,
+        transport: 'recorded',
       }).executionMode,
     ).toBe('SIMULATION');
-    expect(new PerplRestClient({ network: testnetPerpl }).executionMode).toBe(
-      'REAL_TESTNET',
-    );
+    expect(
+      new PerplRestClient({
+        transport: 'live',
+        network: testnetPerpl,
+      }).executionMode,
+    ).toBe('REAL_TESTNET');
+  });
+  it('labels a wrapped live fetch as REAL_TESTNET without relying on function identity', () => {
+    const wrapped = (...args: Parameters<typeof fetch>) => fetch(...args);
+    expect(
+      new PerplRestClient({
+        network: testnetPerpl,
+        transport: 'live',
+        fetch: wrapped,
+      }).executionMode,
+    ).toBe('REAL_TESTNET');
   });
   it('P10-N4 scopes hedge identities to unambiguous group and hedge tuples', () => {
     expect(scopedHedgeIntentId('a', 'same')).not.toBe(
@@ -249,6 +265,7 @@ describe('independent critic findings inverted to local fail-closed regressions'
   });
   it('F4 cannot use restartable in-memory fixture grants for a live executor', () => {
     const rest = new PerplRestClient({
+      transport: 'live',
       network: testnetPerpl,
       signer: testSigner('trade'),
     });
@@ -302,7 +319,7 @@ describe('independent critic findings inverted to local fail-closed regressions'
         network: mainnetPerpl,
         signer: testSigner('trade'),
         fetch: server.fetch,
-        simulation: true,
+        transport: 'recorded',
       });
     expect(
       () =>

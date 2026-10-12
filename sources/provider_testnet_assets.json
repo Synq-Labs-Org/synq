@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-12T00:00:00Z",
+  "note": "Testnet-only payment assets for provider sandboxes. Crossmint staging payment chains from the Create Order payment.method enum (docs.crossmint.com/api-reference/headless/create-order); USDC addresses from Circle (developers.circle.com/stablecoins/usdc-contract-addresses). Testnet USDC has no financial value.",
+  "crossmintStaging": {
+    "ethereum-sepolia": { "chainId": 11155111, "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
+    "base-sepolia": { "chainId": 84532, "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e" },
+    "arbitrum-sepolia": { "chainId": 421614, "usdc": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
+    "optimism-sepolia": { "chainId": 11155420, "usdc": "0x5fd84259d66Cd46123540766Be93DFE6D43130D7" }
+  }
+}

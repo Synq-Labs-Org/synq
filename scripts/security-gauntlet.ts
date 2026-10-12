@@ -98,7 +98,8 @@ const targets = [
 const evidenceDir = resolve('bounty-evidence/integration');
 mkdirSync(evidenceDir, { recursive: true });
 const outputPath = resolve(evidenceDir, 'gauntlet-vitest.json');
-const files = [...new Set(targets.map((t) => t[1]))];
+const dedicatedFile = 'tests/gauntlet/integrated-attacks.test.ts';
+const files = [dedicatedFile, ...new Set(targets.map((t) => t[1]))];
 const args = [
   'pnpm',
   'exec',
@@ -135,11 +136,21 @@ const table = targets.map(([target, file, pattern], index) => {
     .filter((r) => r.name.endsWith(file))
     .flatMap((r) => r.assertionResults)
     .filter((a) => a.fullName.toLowerCase().includes(pattern.toLowerCase()));
-  const passed = cases.length > 0 && cases.every((c) => c.status === 'passed');
+  const dedicated = report.testResults
+    .filter((r) => r.name.endsWith(dedicatedFile))
+    .flatMap((r) => r.assertionResults)
+    .filter((a) => a.fullName.includes(`target ${index + 1}:`));
+  const passed =
+    cases.length > 0 &&
+    cases.every((c) => c.status === 'passed') &&
+    dedicated.length === 1 &&
+    dedicated[0]?.status === 'passed';
   return {
     targetId: index + 1,
     target,
     file,
+    dedicatedFile,
+    dedicatedCases: dedicated.map((c) => c.fullName),
     cases: cases.map((c) => c.fullName),
     status: passed ? 'PASS' : 'FAIL',
     attackerWins: passed ? 0 : null,
@@ -149,7 +160,7 @@ const passed = exitCode === 0 && table.every((t) => t.status === 'PASS');
 const result = {
   executionMode: 'SIMULATION',
   criterion:
-    'Unauthorized economic state mutation. Existing boundary regressions assert zero grants, zero attacker-directed transfers, no double credits/orders, or absence of a withdrawal/signing authority. Allowed control executions are counted separately by those tests.',
+    'Unauthorized economic state mutation. Dedicated Brain/World/Kernel/Temporal/local venue scenarios compare balances, economic nonces, registry state, grants and venue positions before/after; mapped boundary regressions additionally assert zero grants, zero attacker-directed transfers, no double credits/orders, or absence of a withdrawal/signing authority. Allowed control executions are counted separately by those tests.',
   command: ['corepack', ...args].join(' '),
   passedTests: report.numPassedTests,
   failedTests: report.numFailedTests,

@@ -1,0 +1,4 @@
+{
+  "error": true,
+  "message": "Error: https://na.business-api.amazon.com/products/2020-08-26/products/getProductsByAsins [403] {\n  \"errors\": [\n    {\n      \"code\": \"Unauthorized\",\n      \"message\": \"Access to requested resource is denied.\",\n      \"details\": \"\"\n    }\n  ]\n}"
+}

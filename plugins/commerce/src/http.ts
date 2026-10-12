@@ -55,10 +55,12 @@ export async function getJson(
     throw new ProviderHttpError(
       provider,
       res.status,
-      String(body.error ?? obj(arr(body.errors)[0]).message ?? '').slice(
-        0,
-        120,
-      ),
+      String(
+        str(body.error) ??
+          str(body.message) ??
+          obj(arr(body.errors)[0]).message ??
+          '',
+      ).slice(0, 200),
     );
   return body;
 }

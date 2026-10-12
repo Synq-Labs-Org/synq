@@ -598,24 +598,29 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const result = await runCrossPhaseDemo();
-  const path = resolve('bounty-evidence/integration/cross-phase-demo.json');
-  mkdirSync(resolve('bounty-evidence/integration'), { recursive: true });
-  writeFileSync(
-    path,
-    JSON.stringify(
-      result,
-      (_, value: unknown) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      2,
-    ) + '\n',
-  );
-  console.log(
-    JSON.stringify({
-      executionMode: result.executionMode,
-      stages: result.stages.map((s) => s.stage),
-      finalBalance: result.finalBalance,
-      evidence: path,
-    }),
-  );
+  if (process.argv.includes('--testnet')) {
+    const { runCrossPhaseTestnet } = await import('./cross-phase-testnet.js');
+    await runCrossPhaseTestnet();
+  } else {
+    const result = await runCrossPhaseDemo();
+    const path = resolve('bounty-evidence/integration/cross-phase-demo.json');
+    mkdirSync(resolve('bounty-evidence/integration'), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify(
+        result,
+        (_, value: unknown) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        2,
+      ) + '\n',
+    );
+    console.log(
+      JSON.stringify({
+        executionMode: result.executionMode,
+        stages: result.stages.map((s) => s.stage),
+        finalBalance: result.finalBalance,
+        evidence: path,
+      }),
+    );
+  }
 }

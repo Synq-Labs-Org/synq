@@ -1,0 +1,126 @@
+{
+  "search_metadata": {
+    "id": "search_d97LXP4moruQ0BRPwk03EOrl",
+    "status": "Success",
+    "created_at": "2026-10-12T03:28:58Z",
+    "request_time_taken": 3.84,
+    "parsing_time_taken": 0.09,
+    "total_time_taken": 3.92,
+    "request_url": "https://www.google.com/search?q=Amazon+Basics+USB-C+to+USB-C+cable&oq=Amazon+Basics+USB-C+to+USB-C+cable&gl=us&hl=en&udm=28",
+    "html_url": "https://www.searchapi.io/api/v1/searches/search_d97LXP4moruQ0BRPwk03EOrl.html",
+    "json_url": "https://www.searchapi.io/api/v1/searches/search_d97LXP4moruQ0BRPwk03EOrl"
+  },
+  "search_parameters": {
+    "engine": "google_shopping",
+    "q": "Amazon Basics USB-C to USB-C cable",
+    "hl": "en",
+    "gl": "us"
+  },
+  "shopping_results": [
+    {
+      "position": 1,
+      "product_id": "150525782982848888",
+      "title": "Amazon Basics USB Type-C to USB Type-C 2.0 Cable",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:150525782982848888,gpcid:12525448017773726857,headlineOfferDocid:12776310584955762810,imageDocid:17833641994266202892,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "offers": "& more",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:150525782982848888,gpcid:12525448017773726857,headlineOfferDocid:12776310584955762810,imageDocid:17833641994266202892,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$11.39",
+      "extracted_price": 11.39,
+      "rating": 3.2,
+      "reviews": 1,
+      "delivery": "Free delivery",
+      "delivery_return": "30-day returns",
+      "condition": "Pre-owned",
+      "seller": "eBay - link8249"
+    },
+    {
+      "position": 2,
+      "prds": "6536760200004694487",
+      "title": "Amazon Gold Basics Double Braided Nylon Charging Cable 10 Feet | Color: Gold",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:6536760200004694487,imageDocid:16107688107631824835,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:6536760200004694487,imageDocid:16107688107631824835,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$12.60",
+      "extracted_price": 12.6,
+      "tag": "21% OFF",
+      "condition": "Pre-owned",
+      "seller": "Mercari"
+    },
+    {
+      "position": 3,
+      "product_id": "150525782982848888",
+      "title": "Amazon Basics USB Type-C to USB Type-C 2.0 Cable",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:150525782982848888,gpcid:12525448017773726857,headlineOfferDocid:4872634672547675281,imageDocid:17833641994266202892,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "offers": "& more",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:150525782982848888,gpcid:12525448017773726857,headlineOfferDocid:4872634672547675281,imageDocid:17833641994266202892,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$14.99",
+      "extracted_price": 14.99,
+      "rating": 3.2,
+      "reviews": 1,
+      "delivery": "Free delivery on $35+",
+      "delivery_return": "30-day returns",
+      "seller": "Target"
+    },
+    {
+      "position": 4,
+      "prds": "17291968294884236026",
+      "title": "Amazon Silver Basics Double Braided Nylon Charging Cable 10 Feet - New | Color: Silver",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:17291968294884236026,imageDocid:1370192744792291310,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:17291968294884236026,imageDocid:1370192744792291310,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$11.70",
+      "extracted_price": 11.7,
+      "original_price": "$20",
+      "extracted_original_price": 20.0,
+      "tag": "41% OFF",
+      "seller": "Mercari"
+    },
+    {
+      "position": 5,
+      "product_id": "4440795921255152264",
+      "title": "Basics USB Type-C to Micro-B 3.1 Gen2 Charger Cable",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:4440795921255152264,gpcid:11880829957570639466,headlineOfferDocid:4090187472360831221,imageDocid:1403880576802420873,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "offers": "& more",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=catalogid:4440795921255152264,gpcid:11880829957570639466,headlineOfferDocid:4090187472360831221,imageDocid:1403880576802420873,pvo:25,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$6.00",
+      "extracted_price": 6.0,
+      "condition": "Pre-owned",
+      "seller": "eBay"
+    },
+    {
+      "position": 6,
+      "prds": "2481109548613017075",
+      "title": "Amazon Basics USB-2.0 Type C - Lightning (MFi Certified) 10ft Charging Cable NWT - New Electronics | Size: s",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:2481109548613017075,imageDocid:9760279129645059532,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:2481109548613017075,imageDocid:9760279129645059532,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$9.96",
+      "extracted_price": 9.96,
+      "original_price": "$15",
+      "extracted_original_price": 15.0,
+      "tag": "33% OFF",
+      "seller": "Mercari"
+    },
+    {
+      "position": 7,
+      "prds": "3308262635404948862",
+      "title": "AmazonBasics Nylon Braided USB-C Cable - Electronics | Color: Grey | Size: xs",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:3308262635404948862,imageDocid:7915034120072105749,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:3308262635404948862,imageDocid:7915034120072105749,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$18.00",
+      "extracted_price": 18.0,
+      "delivery": "Free delivery",
+      "condition": "Pre-owned",
+      "seller": "Mercari"
+    },
+    {
+      "position": 8,
+      "prds": "16915327648990424941",
+      "title": "Amazon Basics Cameras, Photo & Video | Double Braided Nylon Usb Cable Type C | Color: Gray/Silver | Size: Os | G_Balboa's Closet",
+      "product_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:16915327648990424941,imageDocid:11524524404026339167,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "offers_link": "https://www.google.com/search?ibp=oshop&q=Amazon+Basics+USB-C+to+USB-C+cable&prds=headlineOfferDocid:16915327648990424941,imageDocid:11524524404026339167,pvo:3,pvt:hg&gl=us&hl=en&udm=28",
+      "price": "$20.00",
+      "extracted_price": 20.0,
+      "tag": "33% OFF",
+      "condition": "Pre-owned",
+      "seller": "Poshmark"
+    }
+  ]
+}

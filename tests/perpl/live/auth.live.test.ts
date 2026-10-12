@@ -73,7 +73,11 @@ describe.skipIf(!LIVE || !HAVE_KEYS)(
     it('signs reads, rejects stale timestamps, replayed nonces and bad signatures, and enforces scopes', async () => {
       const r = read();
       const t = trade();
-      const rest = new PerplRestClient({ network, signer: r.signer });
+      const rest = new PerplRestClient({
+        transport: 'live',
+        network,
+        signer: r.signer,
+      });
       const wallet = await rest.wallet();
       const account = wallet.as?.[0];
       expect(account?.fw).toBe(true);
