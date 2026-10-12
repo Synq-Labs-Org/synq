@@ -1,0 +1,20 @@
+{
+  "profile": "sandbox/monad-testnet",
+  "chainId": 10143,
+  "caip2": "eip155:10143",
+  "explorerUrl": "https://testnet.monadexplorer.com",
+  "confirmationDepth": 2,
+  "ausd": {
+    "address": "0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC",
+    "symbol": "AUSD",
+    "decimals": 6
+  },
+  "mandateRegistry": "0xB46436e9912aBd103bc16b6f79A8307A51970a35",
+  "maxContributionBaseUnits": "5000000",
+  "sources": {
+    "ausd": "sources/chain_registry.json#assets.testnetAUSD",
+    "mandateRegistry": "contracts/deployments/10143.json#MandateRegistry",
+    "explorerUrl": "@synq/chain-registry profileConfiguration('sandbox/monad-testnet').explorerUrl",
+    "confirmationDepth": "@synq/chain-registry profileConfiguration('sandbox/monad-testnet').confirmationDepth"
+  }
+}

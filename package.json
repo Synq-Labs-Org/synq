@@ -34,6 +34,7 @@
     "test:report": "node scripts/test-report.mjs",
     "test:schema-compat": "vitest run tests/domain/schema-compat.test.ts",
     "test:plugins": "vitest run tests/plugins",
+    "test:mm-plugin": "npm --prefix packages/metamask-synq-plugin run typecheck && npm --prefix packages/metamask-synq-plugin test",
     "test:live:p10": "SYNQ_P10_LIVE=1 vitest run --config tests/perpl/vitest.live.config.ts",
     "sources:resolve": "node scripts/resolve-sources.mjs",
     "registry:probe": "node --import tsx scripts/testnet-probe.ts",

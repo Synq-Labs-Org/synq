@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - '!packages/metamask-synq-plugin'
   - apps/*
   - workers/*
   - plugins/*
