@@ -13,7 +13,7 @@ export const SERPAPI_AMAZON = 'serpapi-amazon';
 export const SERPAPI_GOOGLE_SHOPPING = 'serpapi-google-shopping';
 export const SEARCH_PRICE_TTL_SECONDS = 300;
 
-function query(subject: ProductSubject): string {
+export function productQuery(subject: ProductSubject): string {
   return (
     subject.gtin ??
     [
@@ -27,7 +27,7 @@ function query(subject: ProductSubject): string {
   );
 }
 
-function baseOffer(
+export function productOffer(
   intent: EconomicIntent,
   providerId: string,
   fulfillmentProviderId: string,
@@ -123,13 +123,13 @@ export class SerpApiDiscovery implements OfferProvider {
       amazon
         ? {
             engine: 'amazon',
-            k: query(s),
+            k: productQuery(s),
             amazon_domain: 'amazon.com',
             api_key: this.apiKey,
           }
         : {
             engine: 'google_shopping',
-            q: query(s),
+            q: productQuery(s),
             gl: 'us',
             hl: 'en',
             api_key: this.apiKey,
@@ -155,64 +155,95 @@ export class SerpApiDiscovery implements OfferProvider {
     now: number,
     amazon: boolean,
   ): EconomicOfferInput[] {
-    const price = r.extracted_price;
-    if (typeof price !== 'number' || !(price > 0)) return [];
-    const title = str(r.title) ?? '';
-    const used =
-      /\b(renewed|refurbished|used|pre-owned)\b/i.test(title) ||
-      /used|refurb/i.test(str(r.second_hand_condition) ?? '');
-    const subject: ProductSubject = {
-      kind: 'PRODUCT',
-      title: title.slice(0, 300) || 'untitled',
-      ...(str(r.brand) ? { brand: String(r.brand) } : {}),
-      variant: {},
-      condition: used
-        ? /refurb|renewed/i.test(title)
-          ? 'REFURBISHED'
-          : 'USED'
-        : 'NEW',
-      ...(str(r.source) ? { seller: String(r.source) } : {}),
-      ...(typeof r.rating === 'number'
-        ? { sellerRatingBps: Math.round((r.rating / 5) * 10_000) }
-        : {}),
-      attributes: {},
-      quantity: want.quantity,
-    };
-    if (amazon) {
-      const asin = str(r.asin);
-      if (!asin) return [];
-      return [
-        baseOffer(
-          intent,
-          SERPAPI_AMAZON,
-          this.options.checkoutProviderId ?? 'crossmint',
-          `amazon:${asin}`,
-          subject,
-          price,
-          'USD',
-          now,
-          'STABLECOIN_CHECKOUT',
-          this.options.evidence,
-        ),
-      ];
-    }
-    const id =
+    const gid =
       str(r.product_id) ??
-      str(r.position !== undefined ? String(r.position) : undefined);
-    if (!id) return [];
-    return [
-      baseOffer(
-        intent,
-        SERPAPI_GOOGLE_SHOPPING,
-        'human-handoff',
-        `gshop:${id}`,
-        subject,
-        price,
-        'USD',
-        now,
-        'DISCOVERY_ONLY',
-        this.options.evidence,
-      ),
-    ];
+      (r.position !== undefined ? String(r.position) : undefined);
+    return productRowOffer(intent, want, now, {
+      price: r.extracted_price,
+      title: str(r.title),
+      brand: str(r.brand),
+      seller: str(r.source),
+      rating: r.rating,
+      conditionText: str(r.second_hand_condition),
+      ...(amazon
+        ? {
+            providerId: SERPAPI_AMAZON,
+            ref: str(r.asin) ? `amazon:${str(r.asin)}` : undefined,
+            fulfillmentProviderId:
+              this.options.checkoutProviderId ?? 'crossmint',
+            mode: 'STABLECOIN_CHECKOUT' as const,
+          }
+        : {
+            providerId: SERPAPI_GOOGLE_SHOPPING,
+            ref: gid ? `gshop:${gid}` : undefined,
+            fulfillmentProviderId: 'human-handoff',
+            mode: 'DISCOVERY_ONLY' as const,
+          }),
+      evidence: this.options.evidence,
+    });
   }
+}
+
+/** Provider-neutral search row, normalised by each discovery adapter. */
+export type ProductRow = {
+  providerId: string;
+  fulfillmentProviderId: string;
+  ref: string | undefined;
+  price: unknown;
+  title: string | undefined;
+  brand: string | undefined;
+  seller: string | undefined;
+  rating: unknown;
+  conditionText: string | undefined;
+  mode: 'STABLECOIN_CHECKOUT' | 'DISCOVERY_ONLY';
+  evidence: EvidenceLabel;
+};
+
+/** Maps one normalised search row to an offer; search prices are never executable. */
+export function productRowOffer(
+  intent: EconomicIntent,
+  want: ProductSubject,
+  now: number,
+  r: ProductRow,
+): EconomicOfferInput[] {
+  const price = r.price;
+  if (typeof price !== 'number' || !(price > 0) || !r.ref) return [];
+  if (r.mode === 'STABLECOIN_CHECKOUT' && !/^amazon:[A-Z0-9]{10}$/.test(r.ref))
+    return [];
+  const title = r.title ?? '';
+  const used =
+    /\b(renewed|refurbished|used|pre-owned)\b/i.test(title) ||
+    /used|refurb|pre-owned/i.test(r.conditionText ?? '');
+  const subject: ProductSubject = {
+    kind: 'PRODUCT',
+    title: title.slice(0, 300) || 'untitled',
+    ...(r.mode === 'STABLECOIN_CHECKOUT' ? { asin: r.ref.slice(7) } : {}),
+    ...(r.brand ? { brand: r.brand.slice(0, 64) } : {}),
+    variant: {},
+    condition: used
+      ? /refurb|renewed/i.test(`${title} ${r.conditionText ?? ''}`)
+        ? 'REFURBISHED'
+        : 'USED'
+      : 'NEW',
+    ...(r.seller ? { seller: r.seller.slice(0, 120) } : {}),
+    ...(typeof r.rating === 'number'
+      ? { sellerRatingBps: Math.round((r.rating / 5) * 10_000) }
+      : {}),
+    attributes: {},
+    quantity: want.quantity,
+  };
+  return [
+    productOffer(
+      intent,
+      r.providerId,
+      r.fulfillmentProviderId,
+      r.ref,
+      subject,
+      price,
+      'USD',
+      now,
+      r.mode,
+      r.evidence,
+    ),
+  ];
 }

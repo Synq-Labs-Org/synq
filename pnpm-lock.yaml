@@ -645,6 +645,9 @@ importers:
       '@synq/offer-exchange':
         specifier: workspace:*
         version: link:../../packages/offer-exchange
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
       zod:
         specifier: 4.6.5
         version: 4.6.5

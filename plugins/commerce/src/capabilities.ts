@@ -7,7 +7,8 @@ import type { CheckoutRoute } from './checkout.js';
 import { EBAY_BROWSE, EBAY_ORDER } from './ebay.js';
 import { IMMERSVE } from './immersve.js';
 import { SERPAPI_AMAZON, SERPAPI_GOOGLE_SHOPPING } from './serpapi.js';
-import { CROSSMINT } from './checkout.js';
+import { SEARCHAPI_AMAZON, SEARCHAPI_GOOGLE_SHOPPING } from './searchapi.js';
+import { CROSSMINT } from './crossmint.js';
 
 const cap = (
   c: Partial<ProviderCapability> &
@@ -31,7 +32,34 @@ export function commerceCapabilities(
 ): ProviderCapability[] {
   const ebayEnv = env.EBAY_ENV === 'production' ? 'PRODUCTION' : 'SANDBOX';
   const crossmintKey = env.CROSSMINT_API_KEY ?? '';
+  const crossmintNotStaging =
+    (!!crossmintKey && !crossmintKey.startsWith('sk_staging_')) ||
+    (env.CROSSMINT_ENV !== undefined && env.CROSSMINT_ENV !== 'staging');
   return [
+    credentialStatus(
+      cap({
+        providerId: SEARCHAPI_AMAZON,
+        displayName: 'Amazon via SearchApi.io',
+        verbs: ['DISCOVER', 'QUOTE'],
+        credentialEnv: ['SEARCHAPI_KEY'],
+        sourceRefs: [
+          'https://www.searchapi.io/docs/amazon-search',
+          'https://www.searchapi.io/docs/amazon-product',
+        ],
+      }),
+      env,
+    ),
+    credentialStatus(
+      cap({
+        providerId: SEARCHAPI_GOOGLE_SHOPPING,
+        displayName: 'Google Shopping via SearchApi.io',
+        verbs: ['DISCOVER'],
+        discoveryOnly: true,
+        credentialEnv: ['SEARCHAPI_KEY'],
+        sourceRefs: ['https://www.searchapi.io/docs/google-shopping'],
+      }),
+      env,
+    ),
     credentialStatus(
       cap({
         providerId: SERPAPI_AMAZON,
@@ -78,14 +106,15 @@ export function commerceCapabilities(
         'https://developer.ebay.com/api-docs/buy/order/overview.html',
       ],
     }),
-    crossmintKey && !crossmintKey.startsWith('sk_staging')
+    crossmintNotStaging
       ? cap({
           providerId: CROSSMINT,
           displayName: 'Crossmint headless checkout',
           verbs: ['QUOTE', 'PURCHASE', 'TRACK'],
           environment: 'SANDBOX',
           status: 'BLOCKED',
-          statusReason: 'only staging keys are accepted',
+          statusReason:
+            'only Crossmint staging (sk_staging_, CROSSMINT_ENV=staging) is accepted',
         })
       : credentialStatus(
           cap({
@@ -96,7 +125,7 @@ export function commerceCapabilities(
             credentialEnv: ['CROSSMINT_API_KEY'],
             settlementRails: ['STABLECOIN_CHECKOUT'],
             sourceRefs: [
-              'https://docs.crossmint.com/payments/headless/guides/providers/amazon',
+              'https://docs.crossmint.com/api-reference/headless/create-order',
             ],
           }),
           env,

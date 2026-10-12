@@ -1,0 +1,270 @@
+{
+  "search_metadata": {
+    "id": "search_mMjwVJvBznTlm1BBWvynp5OY",
+    "status": "Success",
+    "created_at": "2026-10-12T03:28:55Z",
+    "request_time_taken": 1.91,
+    "parsing_time_taken": 0.05,
+    "total_time_taken": 1.96,
+    "request_url": "https://www.amazon.com/dp/B01GGKZ1VA?th=1&psc=1",
+    "html_url": "https://www.searchapi.io/api/v1/searches/search_mMjwVJvBznTlm1BBWvynp5OY.html",
+    "json_url": "https://www.searchapi.io/api/v1/searches/search_mMjwVJvBznTlm1BBWvynp5OY"
+  },
+  "search_parameters": {
+    "engine": "amazon_product",
+    "asin": "B01GGKZ1VA",
+    "amazon_domain": "amazon.com",
+    "delivery_country": "us"
+  },
+  "product": {
+    "asin": "B01GGKZ1VA",
+    "title": "Amazon Basics USB-C to USB-C 2.0 Fast Charging Cable, 480Mbps Data Transfer Speed, USB-IF Certified, for Apple iPhone 16/15, iPad, Samsung Galaxy, Tablets, Laptops, 6 Foot, Black",
+    "brand_store": {
+      "id": "947C6949-CF8E-4BD3-914A-B411DD3E4433",
+      "text": "Visit the Amazon Basics Store",
+      "link": "https://www.amazon.com/stores/AmazonBasics/page/947C6949-CF8E-4BD3-914A-B411DD3E4433?lp_asin=B01GGKZ1VA&ref_=ast_bln&store_ref=bl_ast_dp_brandlogo_sto"
+    },
+    "marketplace_id": "ATVPDKIKX0DER",
+    "link": "https://www.amazon.com/clp/B01GGKZ1VA",
+    "rating": 4.5,
+    "reviews": 57102,
+    "bought_past_month": "1K+ bought in past month",
+    "attributes": [
+      {
+        "name": "Brand",
+        "value": "Amazon Basics"
+      },
+      {
+        "name": "Connector Type",
+        "value": "USB Type C"
+      },
+      {
+        "name": "Cable Type",
+        "value": "USB"
+      },
+      {
+        "name": "Compatible Devices",
+        "value": "iPhone 17/16/15, iPhone 17/16/15 Pro, iPhone 17/16/15 Pro Max, iPhone Air, iPhone 16/15 Plus; iPad Air 6/previous; iPad Mini 7/previous, iPad Pro 7/previous, iPad Pro 7/previous; MacBook Air M3/previous, MacBook Air Retina, MacBook Pro M4; Mac mini, Mac Studio, Mac Pro 2024/2019; iMac M4/previous, iMac Retina 5K/4K, iMac Pro; Samsung Galaxy S4/S23/S22/S20/S10/S9/S8/S7/S5/S4 series; Samsung Z Fold, Flip, A, Note, Tab; Huawei P60/P50/P40/P30/P20, Pura, Mate, Nova; Xiaomi 14/13/12/11, Xiaomi Redmi, Xiaomi Mi; LG G8/G7/G6/G5/G4/G3, LG V60/V50/V40/V30/V20, LG Velvet, U, Stylo; Google Pixel, Nexus; HTC Desire, Wildfire, U; Motorola Edge, Razr, Moto G, Defy; Asus, Nokia, Sony, and other USB A/USB C compatible devices"
+      },
+      {
+        "name": "Special Feature",
+        "value": "Fast Charging"
+      }
+    ],
+    "feature_bullets": [
+      "USB-IF Certified, connects any USB-C enabled devices. For power transfer/charging smartphones, power banks, wall/car chargers, and low-power devices. Suitable for data transfer between smartphones, tablets, laptops, hard drives and more",
+      "In the box: 1 cable, 6 foot 15W USB-C 2.0 cable for charging and powering devices, transfering data, photos, and music",
+      "Fast Charge and Data Transfer: Supports fast charging up to 15W (5V/3A) and data transfer speeds up to 480 Mbps. Do not exceed recommended load (15W, 5V/3A). Limited charging speed for PD enabled devices",
+      "Backed by an Amazon Basics 1-Year Limited Warranty"
+    ],
+    "categories": [
+      {
+        "id": "172282",
+        "title": "Electronics",
+        "link": "https://www.amazon.com/electronics-store/b/ref=dp_bc_1?ie=UTF8&node=172282"
+      },
+      {
+        "id": "541966",
+        "title": "Computers & Accessories",
+        "link": "https://www.amazon.com/computer-pc-hardware-accessories-add-ons/b/ref=dp_bc_2?ie=UTF8&node=541966"
+      },
+      {
+        "id": "172456",
+        "title": "Computer Accessories & Peripherals",
+        "link": "https://www.amazon.com/Computer-Accessories-Supplies/b/ref=dp_bc_3?ie=UTF8&node=172456"
+      },
+      {
+        "id": "23666438011",
+        "title": "Cables & Accessories",
+        "link": "https://www.amazon.com/Cables-Accessories/b/ref=dp_bc_4?ie=UTF8&node=23666438011"
+      },
+      {
+        "id": "172463",
+        "title": "Cables & Interconnects",
+        "link": "https://www.amazon.com/Cables-Interconnects-Computer-Accessories-Supplies/b/ref=dp_bc_5?ie=UTF8&node=172463"
+      },
+      {
+        "id": "464394",
+        "title": "USB Cables",
+        "link": "https://www.amazon.com/USB-Cables/b/ref=dp_bc_6?ie=UTF8&node=464394"
+      }
+    ],
+    "search_alias": {
+      "title": "Electronics",
+      "value": "electronics"
+    },
+    "documents": [
+      {
+        "name": "User Manual (PDF)",
+        "link": "https://m.media-amazon.com/images/I/91N-Zf7891L.pdf"
+      },
+      {
+        "name": "Safety Information (PDF)",
+        "link": "https://m.media-amazon.com/images/I/91bUuCoLt1L.pdf"
+      },
+      {
+        "name": "Warranty (PDF)",
+        "link": "https://m.media-amazon.com/images/I/616c9XCo3DL.pdf"
+      }
+    ],
+    "buybox": {
+      "price": {
+        "raw": "$6.29",
+        "value": 6.29,
+        "symbol": "$",
+        "currency": "USD"
+      },
+      "maximum_order_quantity": 3,
+      "offer_listing_id": "Ei3wkLElFbByQepDLQH2MNqfu5HE1bKt%2FO7hk3IVR%2FQRz6vz9VrwdM9mjO7AdiwfpcjlxUsRGrVrHDB9eUK0CJuGkMgEXsEVGJwvY4tDjDbvRVJUveksBR8yyVQ9Q46RcKkjf2o52rclLtfmvpU1wQ%3D%3D",
+      "fulfillment": {
+        "standard_delivery": {
+          "text": "FREE delivery October 18 - 20 on orders shipped by Amazon over $35",
+          "type": "FREE",
+          "condition": "on orders shipped by Amazon over $35",
+          "date": "October 18 - 20"
+        },
+        "fastest_delivery": {
+          "text": "Or fastest delivery October 18 - 19",
+          "type": "fastest",
+          "date": "October 18 - 19"
+        },
+        "sold_by": "Amazon.com",
+        "is_sold_by_amazon": true
+      },
+      "availability": "Only 3 left in stock - order soon."
+    },
+    "specifications": [
+      {
+        "name": "Connector Type",
+        "value": "USB Type C"
+      },
+      {
+        "name": "Cable Type",
+        "value": "USB"
+      },
+      {
+        "name": "Compatible Devices",
+        "value": "iPhone 17/16/15, iPhone 17/16/15 Pro, iPhone 17/16/15 Pro Max, iPhone Air, iPhone 16/15 Plus; iPad Air 6/previous; iPad Mini 7/previous, iPad Pro 7/previous, iPad Pro 7/previous; MacBook Air M3/previous, MacBook Air Retina, MacBook Pro M4; Mac mini, Mac Studio, Mac Pro 2024/2019; iMac M4/previous, iMac Retina 5K/4K, iMac Pro; Samsung Galaxy S4/S23/S22/S20/S10/S9/S8/S7/S5/S4 series; Samsung Z Fold, Flip, A, Note, Tab; Huawei P60/P50/P40/P30/P20, Pura, Mate, Nova; Xiaomi 14/13/12/11, Xiaomi Redmi, Xiaomi Mi; LG G8/G7/G6/G5/G4/G3, LG V60/V50/V40/V30/V20, LG Velvet, U, Stylo; Google Pixel, Nexus; HTC Desire, Wildfire, U; Motorola Edge, Razr, Moto G, Defy; Asus, Nokia, Sony, and other USB A/USB C compatible devices"
+      },
+      {
+        "name": "Other Special Features of the Product",
+        "value": "Fast Charging"
+      },
+      {
+        "name": "Compatible Phone Models",
+        "value": "iPhone 17/16/15, iPhone 17/16/15 Pro, iPhone 17/16/15 Pro Max, iPhone Air, iPhone 16/15 Plus; Samsung Galaxy S4/S23/S22/S20/S10/S9/S8/S7/S5/S4 series; Samsung Z Fold, Flip, A; Huawei P60/P50/P40/P30/P20, Pura, Mate, Nova; Xiaomi 14/13/12/11, Xiaomi Redmi, Xiaomi Mi; LG G8/G7/G6/G5/G4/G3, LG V60/V50/V40/V30/V20, LG Velvet, U, Stylo; Google Pixel, Nexus; HTC Desire, Wildfire, U; Motorola Edge, Razr, Moto G, Defy; Asus, Nokia, Sony, and other USB A/USB C compatible devices"
+      },
+      {
+        "name": "Ethernet Cable Category",
+        "value": "Cat 5e"
+      },
+      {
+        "name": "Connector Gender",
+        "value": "Male-to-Male"
+      },
+      {
+        "name": "Data Transfer Rate",
+        "value": "480 megabits_per_second"
+      },
+      {
+        "name": "Number of Pins",
+        "value": "24"
+      },
+      {
+        "name": "Maximum Current",
+        "value": "3 A"
+      },
+      {
+        "name": "Wattage",
+        "value": "15 watts"
+      },
+      {
+        "name": "Maximum Voltage",
+        "value": "5 volts"
+      },
+      {
+        "name": "Connectivity Technology",
+        "value": "USB"
+      },
+      {
+        "name": "Unit Count",
+        "value": "1 Count"
+      },
+      {
+        "name": "Item Weight",
+        "value": "1.4 ounces"
+      },
+      {
+        "name": "Number of Items",
+        "value": "1"
+      },
+      {
+        "name": "Brand Name",
+        "value": "Amazon Basics"
+      },
+      {
+        "name": "Model Name",
+        "value": "2.0 Charger Cable"
+      },
+      {
+        "name": "Model",
+        "value": "L6LUC025-CS-R"
+      },
+      {
+        "name": "Manufacturer",
+        "value": "Amazon"
+      },
+      {
+        "name": "UPC",
+        "value": "810011412668 841710146820"
+      },
+      {
+        "name": "Global Trade Identification Number",
+        "value": "00841710146820"
+      },
+      {
+        "name": "Included Components",
+        "value": "USB Type C"
+      },
+      {
+        "name": "Part Number",
+        "value": "L6LUC025-CS-R"
+      },
+      {
+        "name": "ASIN",
+        "value": "B01GGKZ1VA"
+      },
+      {
+        "name": "Recommended Uses For Product",
+        "value": "Charging"
+      },
+      {
+        "name": "Specification Met",
+        "value": "USB-IF"
+      },
+      {
+        "name": "Indoor Outdoor Usage",
+        "value": "Indoor, Outdoor"
+      },
+      {
+        "name": "Color",
+        "value": "Black"
+      },
+      {
+        "name": "Item Shape",
+        "value": "Round"
+      }
+    ],
+    "bestsellers_rank": [
+      {
+        "name": "See Top 100 in Our Brands",
+        "link": "https://www.amazon.com/gp/bestsellers/private-brands/ref=pd_zg_ts_private-brands"
+      },
+      {
+        "name": "USB Cables",
+        "link": "https://www.amazon.com/gp/bestsellers/pc/464394/ref=pd_zg_hrsr_pc"
+      }
+    ],
+    "whats_in_the_box": ["USB Type C"]
+  }
+}
