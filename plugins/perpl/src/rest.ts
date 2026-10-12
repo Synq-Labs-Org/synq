@@ -41,7 +41,8 @@ export type FetchLike = (
 export type RestOptions = {
   network: PerplNetworkConfig;
   fetch?: FetchLike;
-  simulation?: boolean;
+  /** Recorded transports cannot produce live venue evidence, including fetch wrappers. */
+  transport: 'live' | 'recorded';
   signer?: PerplRequestSigner;
   clock?: ServerClock;
   nonces?: NonceSource;
@@ -66,6 +67,11 @@ export class PerplRestClient {
   private readonly backoff: readonly number[];
 
   constructor(options: RestOptions) {
+    if (options.transport !== 'live' && options.transport !== 'recorded')
+      throw new PerplError(
+        'INVALID_REQUEST',
+        'explicit transport kind required',
+      );
     const official = perplNetwork(options.network.profile);
     if (
       options.network.chainId !== official.chainId ||
@@ -75,13 +81,13 @@ export class PerplRestClient {
     )
       throw new PerplError('PROFILE_MISMATCH', 'unregistered REST deployment');
     this.network = official;
-    if (options.simulation && !options.fetch)
+    if (options.transport === 'recorded' && !options.fetch)
       throw new PerplError(
         'INVALID_REQUEST',
-        'simulation needs an isolated transport',
+        'recorded transport needs an isolated fetch',
       );
     this.executionMode =
-      options.fetch && options.fetch !== fetch
+      options.transport === 'recorded'
         ? 'SIMULATION'
         : options.network.profile === 'sandbox/monad-testnet'
           ? 'REAL_TESTNET'
@@ -159,6 +165,20 @@ export class PerplRestClient {
     target: string,
     options: { body?: unknown; signed?: boolean; retry?: boolean } = {},
   ): Promise<z.output<S>> {
+    if (method === 'POST') {
+      if (target !== '/v1/trading/orders')
+        throw new PerplError(
+          'SCOPE_INSUFFICIENT',
+          'economic endpoint not allowed',
+        );
+      if (!options.signed || this.signer?.scope !== 'trade')
+        throw new PerplError(
+          'SCOPE_INSUFFICIENT',
+          'trade-scoped signer required',
+        );
+      if (this.network.profile !== 'sandbox/monad-testnet')
+        throw new PerplError('PROFILE_MISMATCH', 'mainnet orders disabled');
+    }
     const body = options.body === undefined ? '' : JSON.stringify(options.body);
     const signed = options.signed ?? false;
     const retry = options.retry ?? true;

@@ -19,15 +19,7 @@ import {
 } from './world-sources.js';
 import { PerplRestClient } from '@synq/plugin-perpl';
 import { perplNetwork } from '@synq/chain-registry';
-import { PluginRegistry } from '@synq/plugin-sdk';
-import {
-  KuruFlowClient,
-  KuruClobAdapter,
-  kuruFlowPlugin,
-  kuruSkillPlugin,
-  kuruClobPlugin,
-} from '@synq/plugin-kuru';
-import { chainlinkCrePlugin } from '@synq/plugin-chainlink-cre';
+import { productionWorldPlugins } from './world-runtime.js';
 import { z } from 'zod';
 import {
   AddressSchema,
@@ -209,6 +201,7 @@ const EnvSchema = z
     SYNQ_API_ADMIN_TOKEN: z.string().min(MIN_ADMIN_TOKEN_LENGTH),
     SYNQ_DEPLOYMENTS_DIR: z.string().default('contracts/deployments'),
     SYNQ_EXECUTION_MODULE: AddressSchema.optional(),
+    SYNQ_SEND_MANDATE_ID: z.string().min(1).max(128).default('synq_send'),
     SYNQ_RATE_LIMIT_CAPACITY: z.coerce.number().int().min(1).default(30),
     SYNQ_RATE_LIMIT_REFILL_PER_SECOND: z.coerce.number().positive().default(1),
     SYNQ_TRUST_PROXY: z.string().optional(),
@@ -429,20 +422,13 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       },
       now,
     );
-    const worldPlugins = new PluginRegistry();
-    const kuruDeps = {
-      clientFor: () => readModel.client,
-      clob: new KuruClobAdapter(() => readModel.client),
-      flow: new KuruFlowClient({
-        fetch: (url, init) => fetch(url, init),
-        clock: { now: Date.now },
-      }),
-      probeAddress: AddressSchema.parse(executionModules[chainId]),
-    };
-    worldPlugins.register(kuruFlowPlugin(kuruDeps));
-    worldPlugins.register(kuruSkillPlugin(kuruDeps));
-    worldPlugins.register(kuruClobPlugin(kuruDeps));
-    worldPlugins.register(chainlinkCrePlugin(() => readModel.client));
+    const worldPlugins = productionWorldPlugins({
+      client: readModel.client,
+      network,
+      executionModule: AddressSchema.parse(executionModules[chainId]),
+      sendEnabled: true,
+      now,
+    });
     const worldMarket =
       config.SYNQ_PROFILE === 'local/anvil'
         ? { quotes: async () => [] }
@@ -450,6 +436,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
             network,
             readModel.client,
             new PerplRestClient({
+              transport: 'live',
               network: perplNetwork(config.SYNQ_PROFILE),
             }),
           );
@@ -467,7 +454,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       readModel,
       kernel,
       identity: new StoreIdentityDirectoryReader(store, pool),
-      plugins: worldPlugins,
+      plugins: worldPlugins.registry,
       mainnetBroadcastAllowed: false,
       market: worldMarket,
       risk: worldRisk,
@@ -487,6 +474,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
         return reply.code(401).send({ error: 'UNAUTHORIZED' });
       const session = await store.transaction((tx) => tx.getGroup(groupId));
       if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
+      await worldPlugins.refresh();
       return world.build({ groupId });
     });
     const registered = await registerProductionSend({
@@ -505,6 +493,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
           authorizer: intents,
           executionModule: AddressSchema.parse(executionModules[chainId]),
           adminToken: config.SYNQ_API_ADMIN_TOKEN,
+          sendMandateId: config.SYNQ_SEND_MANDATE_ID,
           sends,
           funding,
         }),

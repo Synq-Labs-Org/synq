@@ -29,7 +29,10 @@ describe.skipIf(!LIVE)('Perpl public reads', () => {
   it('MAINNET_READ_ONLY: mainnet AUSD collateral validated from context and chain, not funded', async () => {
     const network = perplNetwork('proof/monad-mainnet');
     expect(network.mutationEnabled).toBe(false);
-    const rest = new PerplRestClient({ network });
+    const rest = new PerplRestClient({
+      transport: 'live',
+      network,
+    });
     const context = await rest.context();
     const adapter = new PerplCollateralAdapter(network);
     const collateral = adapter.resolve(context);
@@ -65,7 +68,10 @@ describe.skipIf(!LIVE)('Perpl public reads', () => {
 
   it('REAL_TESTNET: Agora testnet AUSD collateral and live market-data WebSocket with forced reconnect', async () => {
     const network = perplNetwork('sandbox/monad-testnet');
-    const rest = new PerplRestClient({ network });
+    const rest = new PerplRestClient({
+      transport: 'live',
+      network,
+    });
     const context = await rest.context();
     const adapter = new PerplCollateralAdapter(network);
     const collateral = adapter.resolve(context);

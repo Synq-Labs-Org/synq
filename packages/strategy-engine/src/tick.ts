@@ -61,6 +61,9 @@ export type DcaTickVerdict =
       decisionId: string | null;
     };
 
+/** Scheduled ticks never accept market evidence older than five minutes, even if a policy is looser. */
+export const MAX_DCA_TICK_EVIDENCE_AGE_SECONDS = 300;
+
 const min = (a: bigint, b: bigint) => (a < b ? a : b);
 
 /**
@@ -96,7 +99,10 @@ export function assembleDcaEvaluationInput(
     return verdict('ESCALATE', ['EVIDENCE_FUTURE']);
   if (
     now - facts.evidenceObservedAt >
-    Math.min(300, policy.data.maxMarketDataAgeSeconds)
+    Math.min(
+      MAX_DCA_TICK_EVIDENCE_AGE_SECONDS,
+      policy.data.maxMarketDataAgeSeconds,
+    )
   )
     return verdict('SKIP', ['EVIDENCE_STALE']);
   if (facts.quoteExpiresAt <= now) return verdict('SKIP', ['QUOTE_EXPIRED']);

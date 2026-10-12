@@ -106,6 +106,8 @@ export interface SendRouteDeps {
 }
 
 const STATUS: Partial<Record<string, number>> = {
+  SEND_MANDATE_UNAVAILABLE: 409,
+  SEND_MANDATE_AMBIGUOUS: 409,
   RECIPIENT_UNKNOWN: 422,
   RECIPIENT_MISMATCH: 409,
   PREVIEW_MISMATCH: 409,

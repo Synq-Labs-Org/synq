@@ -110,6 +110,11 @@ export const ProductSubjectSchema = z.strictObject({
     .regex(/^[0-9]{8,14}$/)
     .optional(),
   mpn: z.string().max(64).optional(),
+  /** Amazon Standard Identification Number: marketplace identity for Amazon listings. */
+  asin: z
+    .string()
+    .regex(/^[A-Z0-9]{10}$/)
+    .optional(),
   brand: z.string().max(64).optional(),
   model: z.string().max(64).optional(),
   variant: VariantSchema.default({}),

@@ -58,7 +58,7 @@ function relax(
 }
 
 /**
- * Identity priority (Bible §82): GTIN/UPC/EAN > MPN > brand+model > variant >
+ * Identity priority (Bible §82): GTIN/UPC/EAN > ASIN (same marketplace) > MPN > brand+model > variant >
  * condition > seller > attributes. Fuzzy title similarity never establishes
  * identity on its own.
  */
@@ -76,6 +76,14 @@ export function matchProduct(
         reasons: ['GTIN differs'],
       };
     basis = 'GTIN';
+  } else if (want.asin && got.asin) {
+    if (want.asin !== got.asin)
+      return {
+        level: 'NOT_COMPARABLE',
+        basis: 'ASIN',
+        reasons: ['ASIN differs'],
+      };
+    basis = 'ASIN';
   } else if (want.mpn && got.mpn) {
     if (norm(want.mpn) !== norm(got.mpn))
       return {

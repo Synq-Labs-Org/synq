@@ -6,6 +6,8 @@ import {
 } from '@synq/kernel';
 import {
   FulfillmentReceiptSchema,
+  add,
+  applyBps,
   assertExecutable,
   compare,
   convert,
@@ -15,17 +17,42 @@ import {
   type Money,
 } from '@synq/offer-exchange';
 import {
+  USDC_USD_PAR,
   simulatedCheckoutReceipt,
   type CheckoutDecision,
   type CheckoutRecipient,
+  type CheckoutRoute,
+  type PaymentEvidence,
+  type ReconcileOutcome,
 } from '@synq/plugin-commerce';
 import type { TreasuryReservationStore } from '@synq/settlement';
 
 export type CommerceCheckoutResult =
-  | { kind: 'RECEIPT'; receipt: FulfillmentReceipt }
+  | {
+      kind: 'RECEIPT';
+      receipt: FulfillmentReceipt;
+      payment?: PaymentEvidence;
+    }
   | { kind: 'HANDOFF'; reason: string }
   | { kind: 'REFUSED'; reason: string }
-  | { kind: 'INCIDENT'; reason: string; receipt: FulfillmentReceipt };
+  | {
+      kind: 'INCIDENT';
+      reason: string;
+      receipt: FulfillmentReceipt;
+      payment?: PaymentEvidence;
+    }
+  /**
+   * The reservation is HELD: the route stopped before paying (mismatch, price
+   * increase, step-up) or the outcome is ambiguous. Reconcile; never retry.
+   */
+  | {
+      kind: 'HOLD';
+      reason: string;
+      receipt: FulfillmentReceipt;
+      stepUp?: 'KYC';
+      payment?: PaymentEvidence;
+      quoted?: Money | null;
+    };
 
 export type CommerceReservationBinding = {
   reservationId: string;
@@ -33,6 +60,21 @@ export type CommerceReservationBinding = {
   reservedAssetId: string;
   reservedAmount: string;
 };
+
+/**
+ * Grant cap for a checkout whose tax and shipping are only known once the
+ * provider quotes: the revalidated landed price plus a mandate-set allowance
+ * (rounded up). The provider quote is checked against this cap before paying.
+ */
+export function commerceGrantCap(landed: Money, allowanceBps: number): Money {
+  if (
+    !Number.isInteger(allowanceBps) ||
+    allowanceBps < 0 ||
+    allowanceBps > 5_000
+  )
+    throw new RangeError('allowance must be 0..5000 bps');
+  return add(landed, applyBps(landed, allowanceBps, 'up'));
+}
 
 export function commerceExecution(input: {
   offer: EconomicOffer;
@@ -150,13 +192,26 @@ export async function executeCommerceCheckout(
     offer: input.offer,
     recipient,
     idempotencyKey: input.idempotencyKey,
+    maxTotal: cap,
+    maxUnit: convert(input.offer.price.base, cap, input.offer.price.fx),
   });
+  const orderRef =
+    placed.state === 'ORDER_PLACED'
+      ? placed.orderRef
+      : placed.state === 'FAILED'
+        ? null
+        : (placed.orderRef ?? null);
+  const payment =
+    placed.state === 'ORDER_PLACED' ||
+    placed.state === 'UNKNOWN_PROVIDER_OUTCOME'
+      ? placed.payment
+      : undefined;
   const receipt = FulfillmentReceiptSchema.parse({
     receiptId: `order-${input.idempotencyKey}`.slice(0, 160),
     intentId: input.intentId,
     offerId: input.offer.offerId,
     providerId: route.providerId,
-    providerRef: placed.state === 'ORDER_PLACED' ? placed.orderRef : null,
+    providerRef: orderRef,
     providerReference: null,
     state:
       placed.state === 'ORDER_PLACED'
@@ -172,11 +227,40 @@ export async function executeCommerceCheckout(
     evidence: 'PROVIDER_SANDBOX',
     createdAt: now,
   });
-  if (placed.state === 'ORDER_PLACED' && placed.charged) {
+  const reservationIds = async () => {
+    const ids = [input.reservation.reservationId];
+    const edge = `${input.reservation.reservationId}-edge`;
+    if (await deps.reservations.get(edge)) ids.push(edge);
+    return ids;
+  };
+  if (placed.state === 'HELD' || placed.state === 'UNKNOWN_PROVIDER_OUTCOME') {
+    for (const id of await reservationIds())
+      await deps.reservations.hold(id, placed.reason.slice(0, 200), now);
+    return {
+      kind: 'HOLD',
+      reason: placed.reason,
+      receipt,
+      ...(placed.state === 'HELD' && placed.stepUp
+        ? { stepUp: placed.stepUp }
+        : {}),
+      ...(placed.state === 'HELD' ? { quoted: placed.quoted ?? null } : {}),
+      ...(payment ? { payment } : {}),
+    };
+  }
+  if (placed.state === 'FAILED') {
+    // Definitive provider rejection before any order or payment existed.
+    for (const id of await reservationIds())
+      await deps.reservations.release(id, placed.reason.slice(0, 200), now);
+    return { kind: 'RECEIPT', receipt };
+  }
+  if (placed.charged) {
     let over = true;
     try {
       over =
-        compare(convert(placed.charged, cap, input.offer.price.fx), cap) > 0;
+        compare(
+          convert(placed.charged, cap, [...input.offer.price.fx, USDC_USD_PAR]),
+          cap,
+        ) > 0;
     } catch {
       over = true;
     }
@@ -185,7 +269,62 @@ export async function executeCommerceCheckout(
         kind: 'INCIDENT',
         reason: 'charged amount exceeds the grant',
         receipt,
+        ...(payment ? { payment } : {}),
       };
   }
-  return { kind: 'RECEIPT', receipt };
+  return { kind: 'RECEIPT', receipt, ...(payment ? { payment } : {}) };
+}
+
+export type CommerceReconciliation =
+  | { status: 'RELEASED'; reason: string }
+  | { status: 'STILL_HELD'; outcome: ReconcileOutcome };
+
+/**
+ * Reconciles a HELD checkout by reading the provider. The reservation is only
+ * released when the provider shows no order and no payment was broadcast, or
+ * the order exists but was never paid; anything else stays HELD for recourse.
+ */
+export async function reconcileCommerceCheckout(
+  deps: { reservations: TreasuryReservationStore; now: () => number },
+  input: {
+    route: CheckoutRoute;
+    reservationId: string;
+    orderRef: string | null;
+    paymentBroadcast: boolean;
+    since: number;
+  },
+): Promise<CommerceReconciliation> {
+  const outcome: ReconcileOutcome = input.route.reconcile
+    ? await input.route.reconcile({
+        orderRef: input.orderRef,
+        since: input.since,
+      })
+    : { status: 'UNKNOWN', reason: 'route cannot reconcile' };
+  const unpaid =
+    outcome.status === 'FOUND' &&
+    [
+      'awaiting-payment',
+      'requires-kyc',
+      'failed-kyc',
+      'manual-kyc',
+      'requires-recipient',
+      'requires-crypto-payer-address',
+      'draft',
+    ].includes(outcome.paymentStatus);
+  if (
+    !input.paymentBroadcast &&
+    ((outcome.status === 'NOT_FOUND' && input.orderRef === null) || unpaid)
+  ) {
+    const reason =
+      outcome.status === 'NOT_FOUND'
+        ? 'reconciled: provider has no order and nothing was paid'
+        : 'reconciled: order exists but was never paid';
+    const ids = [input.reservationId];
+    const edge = `${input.reservationId}-edge`;
+    if (await deps.reservations.get(edge)) ids.push(edge);
+    for (const id of ids)
+      await deps.reservations.releaseHeld(id, reason, deps.now());
+    return { status: 'RELEASED', reason };
+  }
+  return { status: 'STILL_HELD', outcome };
 }
