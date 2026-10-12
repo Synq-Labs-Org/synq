@@ -26,7 +26,7 @@ import type { HostContext } from '../src/plugin-host.js';
 
 export const MEMBER = getAddress('0x1111111111111111111111111111111111111111');
 export const OTHER = getAddress('0x2222222222222222222222222222222222222222');
-export const SAFE = getAddress('0xa8f6236c86a2d6b42be69486a8ccf4670f233e0c');
+export const SAFE = getAddress(`0x${'5'.repeat(40)}`);
 export const ROGUE_SAFE = getAddress(
   '0x3333333333333333333333333333333333333333',
 );

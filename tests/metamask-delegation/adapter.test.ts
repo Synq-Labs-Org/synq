@@ -1,4 +1,4 @@
-import { profileConfiguration } from '@synq/chain-registry';
+import { officialAsset, profileConfiguration } from '@synq/chain-registry';
 import {
   MetaMaskDelegationAdapter,
   MemoryAttemptLedger,
@@ -24,8 +24,8 @@ const memberAccount = privateKeyToAccount(
   keccak256(toHex('synq-test-member')) as Hex,
 );
 const member = memberAccount.address;
-const executor = getAddress('0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD');
-const safe = getAddress('0xa8f6236c86a2d6b42be69486a8ccf4670f233e0c');
+const executor = getAddress(`0x${'e'.repeat(40)}`);
+const safe = getAddress(`0x${'5'.repeat(40)}`);
 const rogue = getAddress('0x3333333333333333333333333333333333333333');
 const adapter = new MetaMaskDelegationAdapter(chainId);
 const now = 1_790_000_000;
@@ -69,10 +69,10 @@ const fresh = { nowSeconds: now + 10, spentThisPeriod: 0n, spentTotal: 0n };
 describe('MetaMaskDelegationAdapter', () => {
   it('uses the kit deployment for Monad testnet and the registry AUSD', () => {
     expect(adapter.delegationManager).toBe(
-      '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3',
+      getAddress(adapter.environment.DelegationManager),
     );
-    expect(adapter.token.toLowerCase()).toBe(
-      '0xa9012a055bd4e0edff8ce09f960291c09d5322dc',
+    expect(adapter.token).toBe(
+      getAddress(officialAsset('testnetAUSD').address),
     );
     expect(code(() => new MetaMaskDelegationAdapter(143))).toBe(
       'NETWORK_FORBIDDEN',
