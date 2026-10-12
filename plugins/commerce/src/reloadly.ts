@@ -513,6 +513,37 @@ export function parseGiftCardRef(ref: string): GiftCardRef | null {
     : null;
 }
 
+/** Canonical identity of a gift card denomination, matched exactly by the offer exchange. */
+export const giftCardModel = (r: {
+  countryCode: string;
+  recipientCurrency: string;
+  unitPriceCents: number;
+}) => `giftcard-${r.countryCode}-${r.recipientCurrency}-${r.unitPriceCents}`;
+
+/** Intent subject for "buy a <brand> gift card": brand + model give an exact identity. */
+export function giftCardSubject(input: {
+  brand: string;
+  countryCode: string;
+  recipientCurrency: string;
+  unitPriceCents: number;
+  recipientRef: string;
+}) {
+  return {
+    kind: 'PRODUCT' as const,
+    title: `${input.brand} gift card ${(input.unitPriceCents / 100).toFixed(2)} ${input.recipientCurrency}`,
+    brand: input.brand,
+    model: giftCardModel(input),
+    quantity: 1,
+    attributes: {
+      giftProduct: input.brand,
+      country: input.countryCode,
+      faceCurrency: input.recipientCurrency,
+      denominationCents: String(input.unitPriceCents),
+      recipientRef: input.recipientRef,
+    },
+  };
+}
+
 /** What the group asked for, carried in the intent's product attributes. */
 export type GiftCardRequest = {
   productName: string;
@@ -574,9 +605,11 @@ function offerFor(input: {
           0,
           300,
         ),
-      ...(p.brand ? { brand: p.brand.slice(0, 64) } : {}),
+      brand: (p.brand ?? req.productName).slice(0, 64),
+      model: giftCardModel(req),
       quantity: 1,
       attributes: {
+        giftProduct: req.productName,
         reloadlyProductId: String(p.productId),
         country: req.countryCode,
         denominationCents: String(req.unitPriceCents),

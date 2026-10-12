@@ -1,3 +1,7 @@
+import {
+  credentialStatus,
+  type ProviderCapability,
+} from '@synq/offer-exchange';
 import type {
   CredentialStatus,
   ProviderExecutionCapability,
@@ -203,4 +207,45 @@ export function settlementFabricCapabilities(
       sourceRefs: [],
     },
   ];
+}
+
+/** Offer-exchange capability rows for the sandbox execution providers. */
+export function reloadlyProviderCapability(env: Env): ProviderCapability {
+  return credentialStatus(
+    {
+      providerId: RELOADLY,
+      displayName: 'Reloadly gift cards (sandbox)',
+      domains: ['COMMERCE'],
+      verbs: ['DISCOVER', 'QUOTE', 'PURCHASE', 'TRACK'],
+      environment: 'SANDBOX',
+      status:
+        (env.RELOADLY_ENV ?? 'sandbox') === 'sandbox' ? 'READY' : 'BLOCKED',
+      statusReason: null,
+      kycRequired: false,
+      credentialEnv: ['RELOADLY_CLIENT_ID', 'RELOADLY_CLIENT_SECRET'],
+      settlementRails: ['PROVIDER_BALANCE'],
+      discoveryOnly: false,
+      sourceRefs: RELOADLY_SOURCES,
+    },
+    env,
+  );
+}
+export function lithicProviderCapability(env: Env): ProviderCapability {
+  return credentialStatus(
+    {
+      providerId: LITHIC,
+      displayName: 'Lithic card issuing (sandbox)',
+      domains: ['COMMERCE'],
+      verbs: ['DISCOVER', 'QUOTE', 'PURCHASE', 'PAY', 'CANCEL', 'TRACK'],
+      environment: 'SANDBOX',
+      status: (env.LITHIC_ENV ?? 'sandbox') === 'sandbox' ? 'READY' : 'BLOCKED',
+      statusReason: null,
+      kycRequired: false,
+      credentialEnv: ['LITHIC_API_KEY'],
+      settlementRails: ['SCOPED_CARD'],
+      discoveryOnly: false,
+      sourceRefs: LITHIC_SOURCES,
+    },
+    env,
+  );
 }

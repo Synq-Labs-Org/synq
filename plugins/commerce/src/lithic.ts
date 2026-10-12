@@ -319,7 +319,7 @@ export class LithicSandboxClient {
     if (status === 201 || status === 200) {
       // The sandbox answers 2xx for declines too; the transaction is the truth.
       const token = str(json.token) ?? null;
-      const tx = token ? await this.getTransaction(token) : null;
+      const tx = token ? await this.awaitTransaction(token) : null;
       const approved =
         !!tx && tx.result === 'APPROVED' && tx.status !== 'DECLINED';
       return {
@@ -339,16 +339,17 @@ export class LithicSandboxClient {
     this.fail(status, json);
   }
 
-  async simulateVoid(transactionToken: string, amountCents = 0) {
+  /** Omitting the amount voids/clears the full authorization (an explicit 0 moves nothing, observed in sandbox). */
+  async simulateVoid(transactionToken: string, amountCents?: number) {
     await this.ok('POST', '/simulate/void', {
       token: transactionToken,
-      amount: amountCents,
+      ...(amountCents !== undefined ? { amount: amountCents } : {}),
     });
   }
-  async simulateClearing(transactionToken: string, amountCents = 0) {
+  async simulateClearing(transactionToken: string, amountCents?: number) {
     await this.ok('POST', '/simulate/clearing', {
       token: transactionToken,
-      amount: amountCents,
+      ...(amountCents !== undefined ? { amount: amountCents } : {}),
     });
   }
   async simulateReturn(
@@ -361,6 +362,24 @@ export class LithicSandboxClient {
       pan: secret.reveal(this),
     });
     return str(j.token) ?? null;
+  }
+
+  /**
+   * A just-simulated transaction can take a moment to become readable; poll
+   * briefly. If it never appears the outcome is unknown and the error stands.
+   */
+  private async awaitTransaction(token: string): Promise<LithicTransaction> {
+    const sleep =
+      this.options.sleep ??
+      ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (let i = 0; ; i++) {
+      try {
+        return await this.getTransaction(token);
+      } catch (e) {
+        if (!(e instanceof LithicError) || e.status !== 404 || i >= 6) throw e;
+        await sleep(500 * (i + 1));
+      }
+    }
   }
 
   async getTransaction(token: string): Promise<LithicTransaction> {
@@ -606,7 +625,7 @@ export class LithicSandboxCardPort implements ProviderBookingPort {
     try {
       const tx = await this.client.getTransaction(input.providerRef);
       if (tx.status === 'PENDING')
-        await this.client.simulateVoid(input.providerRef, 0);
+        await this.client.simulateVoid(input.providerRef);
       if (tx.cardToken) await this.client.setCardState(tx.cardToken, 'CLOSED');
       return {
         confirmed: true,
@@ -655,6 +674,8 @@ export class SimulatedCardMerchant {
       subject: {
         kind: 'PRODUCT',
         title: this.merchant.title,
+        brand: this.merchant.descriptor,
+        model: 'merchant-payment',
         quantity: 1,
         seller: this.merchant.descriptor,
       },
