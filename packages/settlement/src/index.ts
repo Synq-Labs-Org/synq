@@ -4,3 +4,6 @@ export * from './router.js';
 export * from './x402.js';
 export * from './recourse.js';
 export * from './grant-ledger.js';
+export * from './fabric.js';
+export * from './fabric-store.js';
+export * from './fabric-service.js';

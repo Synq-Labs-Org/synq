@@ -31,6 +31,8 @@ export const ReservationRequestSchema = z.strictObject({
     'DCA',
     'X402',
     'CONVERSION',
+    'GIFT_CARD',
+    'CARD',
     'OTHER',
   ]),
   settlementPlanHash: z.string().max(80).nullable(),
