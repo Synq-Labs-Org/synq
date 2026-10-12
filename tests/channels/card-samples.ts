@@ -5,6 +5,11 @@ const W = 'https://app.synq.example';
 /** Public Monad testnet transaction from the MetaMask delegation evidence. */
 const SAMPLE_TX_HASH =
   '0x794be83895e30c3e5bc7f27a56ad416c434e8189b2da5421b32975441a6480c0';
+/** Synthetic addresses (not real accounts) so samples stay out of the chain registry. */
+const sampleAddress = (head: string, tail: string) =>
+  `0x${head}${'0'.repeat(32)}${tail}`;
+export const SAMPLE_SAFE = sampleAddress('a8f6', '3e0c');
+export const SAMPLE_RECIPIENT = sampleAddress('6bd6', '08bd');
 const NOW = 1_791_792_000; // 2026-10-12T08:00:00Z
 const id = (n: number) => `card_${n.toString(16).padStart(24, '0')}`;
 const base = (n: number) => ({
@@ -28,7 +33,7 @@ export const SAMPLE_CARDS: Record<string, InteractiveCard> = Object.fromEntries(
           reserved: { amount: '25', symbol: 'AUSD' },
           pending: { amount: '2.5', symbol: 'AUSD' },
           memberCount: 3,
-          account: '0xA8F6000000000000000000000000000000003E0c',
+          account: SAMPLE_SAFE,
           chainId: 10143,
           asOf: 'Envio block 70321484',
           activity: [
@@ -55,7 +60,7 @@ export const SAMPLE_CARDS: Record<string, InteractiveCard> = Object.fromEntries(
           amount: { amount: '10', symbol: 'AUSD' },
           recipient: {
             label: 'bob',
-            address: '0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD',
+            address: SAMPLE_RECIPIENT,
           },
           reason: 'Split for Saturday dinner',
           quorum: { counted: 1, required: 2 },

@@ -15,7 +15,7 @@ import {
   InteractiveCardSchema,
   type InteractiveCard,
 } from '@synq/schemas';
-import { SAMPLE_CARDS } from './card-samples.js';
+import { SAMPLE_CARDS, SAMPLE_SAFE } from './card-samples.js';
 
 const renderer = new CardBannerRenderer();
 const PNG_SIGNATURE = Buffer.from([
@@ -184,7 +184,7 @@ describe('card banners', () => {
     const proposal = SAMPLE_CARDS.proposal!;
     if (proposal.type !== 'APPROVAL_PROPOSAL') throw new Error('fixture');
     expect(tree('proposal')).not.toContain(proposal.recipient!.address!);
-    expect(tree('proposal')).toContain('0x6BD6…08bD');
+    expect(tree('proposal')).toContain('0x6bd6…08bd');
     expect(tree('proposal')).not.toContain(proposal.proposalId);
     const receipt = SAMPLE_CARDS['receipt-testnet']!;
     if (receipt.type !== 'EXECUTION_RECEIPT') throw new Error('fixture');
@@ -193,9 +193,7 @@ describe('card banners', () => {
     expect(tree('receipt-sandbox')).toContain('SANDBOX');
     expect(tree('gift')).toContain('SANDBOX');
     expect(tree('hotel')).toContain('Non-refundable');
-    expect(tree('treasury')).not.toContain(
-      '0xA8F6000000000000000000000000000000003E0c',
-    );
+    expect(tree('treasury')).not.toContain(SAMPLE_SAFE);
   });
 
   it('groups digits without changing the exact amount', () => {
