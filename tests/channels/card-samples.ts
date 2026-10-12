@@ -2,6 +2,9 @@ import { InteractiveCardSchema, type InteractiveCard } from '@synq/schemas';
 
 /** Sample cards for banner tests, design review and the Telegram preview. Sample data only. */
 const W = 'https://app.synq.example';
+/** Public Monad testnet transaction from the MetaMask delegation evidence. */
+const SAMPLE_TX_HASH =
+  '0x794be83895e30c3e5bc7f27a56ad416c434e8189b2da5421b32975441a6480c0';
 const NOW = 1_791_792_000; // 2026-10-12T08:00:00Z
 const id = (n: number) => `card_${n.toString(16).padStart(24, '0')}`;
 const base = (n: number) => ({
@@ -191,18 +194,16 @@ export const SAMPLE_CARDS: Record<string, InteractiveCard> = Object.fromEntries(
           subjectId: 'delegated_contribution',
           label: 'MetaMask delegated contribution 0.6 AUSD → group Safe',
           status: 'CONFIRMED',
-          transactionHash:
-            '0x794be83895e30c3e5bc7f27a56ad416c434e8189b2da5421b32975441a6480c0',
+          transactionHash: SAMPLE_TX_HASH,
           orderId: null,
-          explorerUrl:
-            'https://testnet.monadexplorer.com/tx/0x794be83895e30c3e5bc7f27a56ad416c434e8189b2da5421b32975441a6480c0',
+          explorerUrl: `https://testnet.monadexplorer.com/tx/${SAMPLE_TX_HASH}`,
           settlementStatus: 'SETTLED',
           executionMode: 'REAL_TESTNET',
           actions: [
             {
               kind: 'EXPLORER',
               label: 'View on explorer',
-              url: 'https://testnet.monadexplorer.com/tx/0x794be83895e30c3e5bc7f27a56ad416c434e8189b2da5421b32975441a6480c0',
+              url: `https://testnet.monadexplorer.com/tx/${SAMPLE_TX_HASH}`,
               style: 'PRIMARY',
             },
           ],
