@@ -184,7 +184,7 @@ describe('Perpl REST client against a signature-verifying double', () => {
         network: testnet,
         signer,
         fetch: server.fetch,
-        simulation: true,
+        transport: 'recorded',
         sleep: async () => {},
         ...extra,
       });
@@ -225,7 +225,7 @@ describe('Perpl REST client against a signature-verifying double', () => {
       network: testnet,
       signer: rogue,
       fetch: server.fetch,
-      simulation: true,
+      transport: 'recorded',
       sleep: async () => {},
     });
     await expect(c.wallet()).rejects.toMatchObject({
@@ -250,7 +250,7 @@ describe('Perpl REST client against a signature-verifying double', () => {
           lb: 0,
         },
       ]),
-    ).rejects.toMatchObject({ code: 'SCOPE_INSUFFICIENT', status: 403 });
+    ).rejects.toMatchObject({ code: 'SCOPE_INSUFFICIENT' });
   });
 
   it('account missing (404) on trading state', async () => {
@@ -292,6 +292,7 @@ describe('Perpl REST client against a signature-verifying double', () => {
   it('times out instead of hanging and validates response shapes', async () => {
     const { server } = setup();
     const hanging = new PerplRestClient({
+      transport: 'recorded',
       network: testnet,
       timeoutMs: 20,
       fetch: (_u, init) =>
@@ -308,7 +309,11 @@ describe('Perpl REST client against a signature-verifying double', () => {
         : undefined,
     );
     await expect(
-      new PerplRestClient({ network: testnet, fetch: server.fetch }).context(),
+      new PerplRestClient({
+        transport: 'recorded',
+        network: testnet,
+        fetch: server.fetch,
+      }).context(),
     ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 });

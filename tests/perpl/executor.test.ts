@@ -227,7 +227,7 @@ function exchange(
     network: testnetPerpl,
     signer: trade,
     fetch: server.fetch,
-    simulation: true,
+    transport: 'recorded',
     sleep: async () => {},
   });
   return { server, rest, orders, history };
@@ -383,7 +383,7 @@ describe('Perpl hedge executor', () => {
       network: testnetPerpl,
       signer: testSigner('trade'),
       fetch: server.fetch,
-      simulation: true,
+      transport: 'recorded',
       sleep: async () => {},
     });
     const receipt = await executor(client, grants).execute(grantFor(grants));
@@ -408,7 +408,7 @@ describe('Perpl hedge executor', () => {
       network: testnetPerpl,
       signer: testSigner('trade'),
       fetch: server.fetch,
-      simulation: true,
+      transport: 'recorded',
       sleep: async () => {},
     });
     const receipt = await executor(client, grants).execute(grantFor(grants));
@@ -450,7 +450,7 @@ describe('Perpl hedge executor', () => {
       network: testnetPerpl,
       signer: testSigner('read'),
       fetch: server.fetch,
-      simulation: true,
+      transport: 'recorded',
     });
     expect(() => executor(rest, new HedgeGrantAuthority(GRANT_KEY))).toThrow(
       /SCOPE_INSUFFICIENT/,

@@ -1,6 +1,7 @@
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/common';
 import {
   ParentClosePolicy,
+  patched,
   WorkflowIdReusePolicy,
   proxyActivities,
   setHandler,
@@ -18,7 +19,8 @@ import {
   ActionExecutionWorkflow,
   type ActionTuning,
 } from './action-execution.js';
-import { stateQuery } from './messages.js';
+import { stateQuery, nextScheduledEventQuery } from './messages.js';
+import { WORKFLOW_ID_PREFIX } from '@synq/schemas';
 import { NON_RETRYABLE, seconds } from './common.js';
 
 export type DcaTickInput = {
@@ -66,6 +68,7 @@ export async function DCAWorkflow(input: DcaTickInput): Promise<DcaTickResult> {
     ticksRecorded: 0,
   };
   setHandler(stateQuery, () => result);
+  setHandler(nextScheduledEventQuery, () => ({ kind: 'NONE', at: null }));
   const record = async (evaluation: DcaEvaluation) => {
     result.decision = evaluation.decision;
     result.reasons = evaluation.reasons;
@@ -112,10 +115,27 @@ export async function DCAWorkflow(input: DcaTickInput): Promise<DcaTickResult> {
     evidence: evaluation.evidence ?? evidence,
   });
   result.childWorkflowId = built.workflowId;
+  const withMetadata = patched('dca-child-world-metadata-v1');
+  const prefix = `${WORKFLOW_ID_PREFIX.actionExecution}.`;
+  const canonicalId = built.workflowId.slice(prefix.length);
+  if (
+    withMetadata &&
+    (!built.workflowId.startsWith(prefix) ||
+      !/^intent_[0-9a-f]{64}$/.test(canonicalId))
+  )
+    throw new Error('INVALID_CANONICAL_CHILD_WORKFLOW_ID');
   try {
     await startChild(ActionExecutionWorkflow, {
       workflowId: built.workflowId,
       args: [built.start, input.actionTuning ?? {}],
+      ...(withMetadata
+        ? {
+            memo: {
+              synqGroupId: built.start.intent.groupId,
+              synqIntentId: canonicalId,
+            },
+          }
+        : {}),
       ...(input.executionTaskQueue
         ? { taskQueue: input.executionTaskQueue }
         : {}),
