@@ -10,6 +10,7 @@ import {
   type ChannelEvent,
   type GatewayOutcome,
 } from '@synq/channels';
+import type { InteractiveCard } from '@synq/schemas';
 import { CARD_KEY, fixture } from './harness.js';
 
 export const NOW = 1_800_000_000;
@@ -45,6 +46,13 @@ export class FakeBlueBubbles {
   rejectSends = false;
   messages = new Map<string, ServerMessage>();
   sent: { chatGuid: string; text: string; tempGuid: string }[] = [];
+  attachments: {
+    chatGuid: string;
+    name: string;
+    method: string;
+    bytes: number;
+    type: string;
+  }[] = [];
   urls: string[] = [];
   private n = 0;
   constructor(private readonly clock: { t: number }) {}
@@ -102,6 +110,21 @@ export class FakeBlueBubbles {
       });
       return json({ status: 200, data: { guid: `OUT-${this.sent.length}` } });
     }
+    if (path === '/message/attachment') {
+      const form = init?.body as FormData;
+      const file = form.get('attachment') as File;
+      this.attachments.push({
+        chatGuid: String(form.get('chatGuid')),
+        name: String(form.get('name')),
+        method: String(form.get('method')),
+        bytes: file.size,
+        type: file.type,
+      });
+      return json({
+        status: 200,
+        data: { guid: `ATT-${this.attachments.length}` },
+      });
+    }
     if (path === '/message/query') {
       const body = JSON.parse(String(init?.body)) as {
         chatGuid: string;
@@ -131,7 +154,11 @@ export class FakeBlueBubbles {
 }
 
 export function imessageFixture(
-  options: { chatLinkQuorum?: number; allowed?: string[] } = {},
+  options: {
+    chatLinkQuorum?: number;
+    allowed?: string[];
+    banners?: { render(card: InteractiveCard): Promise<Buffer> };
+  } = {},
 ) {
   const f = fixture(NOW, { cards: true });
   const server = new FakeBlueBubbles(f.clock);
@@ -144,6 +171,7 @@ export function imessageFixture(
   const adapter = new IMessageChannelAdapter({
     transport,
     botHandle: BOT_HANDLE,
+    ...(options.banners ? { banners: options.banners } : {}),
     sleep: noWait,
     nowMs: () => f.clock.t * 1000,
     limiter: new OutboundLimiter({

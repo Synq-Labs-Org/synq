@@ -53,6 +53,11 @@ export interface IMessageTransport {
   readonly capabilities: IMessageTransportCapabilities;
   health(): Promise<{ ok: boolean; detail: string }>;
   send(chatId: string, message: IMessageSend): Promise<{ messageId: string }>;
+  /** Sends a PNG as an attachment, where the transport supports it without private APIs. */
+  sendImage?(
+    chatId: string,
+    image: { png: Buffer; name: string; idempotencyKey: string },
+  ): Promise<{ messageId: string }>;
   /** Parses one pushed event (webhook body or socket frame). Unknown shapes yield []. */
   parseEvent(raw: unknown): IMessageInbound[];
   /** Re-reads a message from the server; used because some webhooks are unsigned. */
@@ -271,6 +276,35 @@ export class BlueBubblesTransport implements IMessageTransport {
       messageId:
         (sent.success ? sent.data.data?.guid : undefined) ??
         `synq-${message.idempotencyKey}`,
+    };
+  }
+
+  /** `POST /message/attachment` with AppleScript; no Private API. */
+  async sendImage(
+    chatId: string,
+    image: { png: Buffer; name: string; idempotencyKey: string },
+  ) {
+    const form = new FormData();
+    form.set('chatGuid', normalizeChatGuid(chatId));
+    form.set('tempGuid', `synq-${image.idempotencyKey}`);
+    form.set('name', image.name);
+    form.set('method', 'apple-script');
+    form.set(
+      'attachment',
+      new Blob([new Uint8Array(image.png)], { type: 'image/png' }),
+      image.name,
+    );
+    const body = await this.call('/message/attachment', {
+      method: 'POST',
+      body: form,
+    });
+    const sent = z
+      .looseObject({ data: z.looseObject({ guid: z.string() }).optional() })
+      .safeParse(body);
+    return {
+      messageId:
+        (sent.success ? sent.data.data?.guid : undefined) ??
+        `synq-${image.idempotencyKey}`,
     };
   }
 

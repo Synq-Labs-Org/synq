@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  CardBannerRenderer,
   CardLinkIssuer,
   ChannelGateway,
   IMessageBridge,
@@ -47,6 +48,7 @@ const ChannelEnvSchema = z.object({
     .min(60)
     .default(86_400),
   SYNQ_CHANNEL_CARDS: z.enum(['0', '1']).default('1'),
+  SYNQ_CARD_BANNERS: z.enum(['0', '1']).default('1'),
   SYNQ_CARD_LINK_KEY: z.string().min(32).optional(),
   SYNQ_CARD_LINK_TTL_SECONDS: z.coerce
     .number()
@@ -109,6 +111,15 @@ export async function registerChannels(input: {
         ? { webhookSecret: env.TELEGRAM_WEBHOOK_SECRET }
         : {}),
       respondToAllMessages: env.SYNQ_TELEGRAM_ALL_MESSAGES === '1',
+      ...(env.SYNQ_CHANNEL_CARDS === '1' && env.SYNQ_CARD_BANNERS === '1'
+        ? {
+            banners: new CardBannerRenderer(),
+            onBannerError: (error: unknown) =>
+              input.log('card banner fallback', {
+                error: String(error).slice(0, 200),
+              }),
+          }
+        : {}),
       transport:
         telegramMode === 'webhook' ? 'WEBHOOK_SECRET_TOKEN' : 'BOT_API_POLL',
     });
@@ -132,6 +143,9 @@ export async function registerChannels(input: {
     ? new IMessageChannelAdapter({
         transport: imessage.transport,
         botHandle: imessage.botHandle,
+        ...(env.SYNQ_CHANNEL_CARDS === '1' && env.SYNQ_CARD_BANNERS === '1'
+          ? { banners: new CardBannerRenderer() }
+          : {}),
       })
     : undefined;
   if (imessageAdapter) adapters.push(imessageAdapter);

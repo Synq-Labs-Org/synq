@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import type { InteractiveCard } from '@synq/schemas';
 import {
   ChannelDeliveryError,
   type ChannelAdapter,
@@ -66,7 +67,7 @@ export class TelegramBotApi {
 
   async call<T = unknown>(
     method: string,
-    params: Record<string, unknown> = {},
+    params: Record<string, unknown> | FormData = {},
     signal?: AbortSignal,
   ): Promise<T> {
     const doFetch = this.options.fetch ?? fetch;
@@ -75,8 +76,12 @@ export class TelegramBotApi {
     try {
       response = await doFetch(`${this.base}/${method}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(params),
+        ...(params instanceof FormData
+          ? { body: params }
+          : {
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(params),
+            }),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
     } catch (error) {
@@ -199,7 +204,25 @@ export type TelegramAdapterOptions = {
   maxAttempts?: number;
   sleep?: Sleep;
   transport?: 'WEBHOOK_SECRET_TOKEN' | 'BOT_API_POLL';
+  /** Renders a card banner; when set, card messages go out as one photo with caption and buttons. */
+  banners?: { render(card: InteractiveCard): Promise<Buffer> } | null;
+  onBannerError?: (error: unknown) => void;
 };
+
+export const TELEGRAM_CAPTION_LIMIT = 1024;
+/** Caption up to the limit (cut at a line break when possible) and the remainder, if any. */
+export function splitCaption(
+  text: string,
+  limit = TELEGRAM_CAPTION_LIMIT,
+): { caption: string; rest: string | null } {
+  if (text.length <= limit) return { caption: text, rest: null };
+  const cut = text.lastIndexOf('\n', limit);
+  const at = cut > limit / 2 ? cut : limit;
+  return {
+    caption: text.slice(0, at).trimEnd(),
+    rest: text.slice(at).trim().slice(0, 4096) || null,
+  };
+}
 
 export class TelegramAdapter implements ChannelAdapter {
   readonly channel = 'telegram' as const;
@@ -462,69 +485,121 @@ export class TelegramAdapter implements ChannelAdapter {
     const text = [message.text, ...inline.map((b) => `${b.label}: ${b.url}`)]
       .join('\n')
       .slice(0, 4096);
+    const replyParameters =
+      message.replyTo && /^[0-9]+$/.test(message.replyTo)
+        ? {
+            message_id: Number(message.replyTo),
+            allow_sending_without_reply: true,
+          }
+        : null;
+    const keyboard =
+      buttons.length || callbacks.length
+        ? {
+            inline_keyboard: [
+              ...buttons.map((b) => [
+                { text: b.label.slice(0, 64), url: b.url },
+              ]),
+              ...callbacks.map((c) => [
+                { text: c.label.slice(0, 64), callback_data: c.data },
+              ]),
+            ],
+          }
+        : null;
     const params: Record<string, unknown> = {
       chat_id: Number(chatId),
       text,
       link_preview_options: { is_disabled: true },
-      ...(message.replyTo && /^[0-9]+$/.test(message.replyTo)
-        ? {
-            reply_parameters: {
-              message_id: Number(message.replyTo),
-              allow_sending_without_reply: true,
-            },
-          }
-        : {}),
-      ...(buttons.length || callbacks.length
-        ? {
-            reply_markup: {
-              inline_keyboard: [
-                ...buttons.map((b) => [
-                  { text: b.label.slice(0, 64), url: b.url },
-                ]),
-                ...callbacks.map((c) => [
-                  { text: c.label.slice(0, 64), callback_data: c.data },
-                ]),
-              ],
-            },
-          }
-        : {}),
+      ...(replyParameters ? { reply_parameters: replyParameters } : {}),
+      ...(keyboard ? { reply_markup: keyboard } : {}),
     };
-    const maxAttempts = this.options.maxAttempts ?? 3;
+    const sendText = async () => {
+      const sent = z
+        .looseObject({ message_id: z.number().int() })
+        .parse(
+          await this.retrying(() =>
+            this.options.api.call('sendMessage', params),
+          ),
+        );
+      return { messageId: String(sent.message_id) };
+    };
     return this.limiter.run(chatId, async () => {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          const sent = z
-            .looseObject({ message_id: z.number().int() })
-            .parse(await this.options.api.call('sendMessage', params));
-          return { messageId: String(sent.message_id) };
-        } catch (error) {
-          if (!(error instanceof TelegramApiError)) throw error;
-          const retryable =
-            error.httpStatus === 429 ||
-            error.httpStatus === 0 ||
-            error.httpStatus >= 500;
-          if (!retryable)
-            throw new ChannelDeliveryError(
-              'PROVIDER_REJECTED',
-              attempt,
-              error.description,
-            );
-          if (attempt >= maxAttempts)
-            throw new ChannelDeliveryError(
-              error.httpStatus === 429
-                ? 'RATE_LIMITED'
-                : 'PROVIDER_UNAVAILABLE',
-              attempt,
-              error.description,
-            );
-          const waitSeconds =
-            error.httpStatus === 429
-              ? Math.min(Math.max(error.retryAfterSeconds ?? 1, 1), 60)
-              : Math.min(2 ** attempt, 30);
-          await this.wait(waitSeconds * 1000);
-        }
+      const card = message.card;
+      const banners = this.options.banners;
+      if (!card || !banners) return sendText();
+      let photo: Buffer;
+      try {
+        photo = await banners.render(card);
+      } catch (error) {
+        this.options.onBannerError?.(error);
+        return sendText();
       }
+      const { caption, rest } = splitCaption(text);
+      const form = new FormData();
+      form.set('chat_id', chatId);
+      form.set('caption', caption);
+      form.set(
+        'photo',
+        new Blob([new Uint8Array(photo)], { type: 'image/png' }),
+        `${card.cardId}.png`,
+      );
+      if (keyboard) form.set('reply_markup', JSON.stringify(keyboard));
+      if (replyParameters)
+        form.set('reply_parameters', JSON.stringify(replyParameters));
+      let messageId: string;
+      try {
+        const sent = z
+          .looseObject({ message_id: z.number().int() })
+          .parse(
+            await this.retrying(() => this.options.api.call('sendPhoto', form)),
+          );
+        messageId = String(sent.message_id);
+      } catch (error) {
+        this.options.onBannerError?.(error);
+        return sendText();
+      }
+      if (rest)
+        await this.retrying(() =>
+          this.options.api.call('sendMessage', {
+            chat_id: Number(chatId),
+            text: rest,
+            link_preview_options: { is_disabled: true },
+          }),
+        ).catch((error: unknown) => this.options.onBannerError?.(error));
+      return { messageId };
     });
+  }
+
+  /** Retries 429/5xx/network failures with backoff; maps failures to ChannelDeliveryError. */
+  private async retrying<T>(task: () => Promise<T>): Promise<T> {
+    const maxAttempts = this.options.maxAttempts ?? 3;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await task();
+      } catch (error) {
+        if (!(error instanceof TelegramApiError)) throw error;
+        const retryable =
+          error.httpStatus === 429 ||
+          error.httpStatus === 0 ||
+          error.httpStatus >= 500;
+        if (!retryable)
+          throw new ChannelDeliveryError(
+            'PROVIDER_REJECTED',
+            attempt,
+            error.description,
+          );
+        if (attempt >= maxAttempts)
+          throw new ChannelDeliveryError(
+            error.httpStatus === 429 ? 'RATE_LIMITED' : 'PROVIDER_UNAVAILABLE',
+            attempt,
+            error.description,
+          );
+        const waitSeconds =
+          error.httpStatus === 429
+            ? Math.min(Math.max(error.retryAfterSeconds ?? 1, 1), 60)
+            : Math.min(2 ** attempt, 30);
+        await this.wait(waitSeconds * 1000);
+      }
+    }
   }
 
   async acknowledgeAction(callbackId: string, text: string) {

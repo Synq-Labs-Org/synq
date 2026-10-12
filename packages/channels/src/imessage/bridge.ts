@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { InteractiveCard } from '@synq/schemas';
 import {
   ChannelDeliveryError,
   type ChannelAdapter,
@@ -39,6 +40,8 @@ export type IMessageAdapterOptions = {
   /** Outbound messages per chat per minute before Synq stops replying (loop guard). */
   maxPerChatPerMinute?: number;
   echoWindowSeconds?: number;
+  /** Card banner renderer; the PNG is sent before the card text where the transport supports images. */
+  banners?: { render(card: InteractiveCard): Promise<Buffer> } | null;
   sleep?: Sleep;
   nowMs?: () => number;
 };
@@ -144,6 +147,7 @@ export class IMessageChannelAdapter implements ChannelAdapter {
       sha(`${chatId}:${message.text}:${this.nowMs()}`).slice(0, 32);
     let last: DeliveryResult = { messageId: '' };
     const bubbles = this.bubbles(message);
+    await this.sendBanner(chatId, message, key);
     for (const [i, text] of bubbles.entries()) {
       if (!this.underRate(chatId))
         throw new ChannelDeliveryError('RATE_LIMITED', 0, 'per-chat reply cap');
@@ -159,6 +163,33 @@ export class IMessageChannelAdapter implements ChannelAdapter {
       this.remember(chatId, text);
     }
     return last;
+  }
+
+  /** Best effort: a banner that fails to render or upload never blocks the text. */
+  private async sendBanner(
+    chatId: string,
+    message: OutboundMessage,
+    key: string,
+  ) {
+    const card = message.card;
+    const banners = this.options.banners;
+    const sendImage = this.options.transport.sendImage?.bind(
+      this.options.transport,
+    );
+    if (!card || !banners || !sendImage || !this.underRate(chatId)) return;
+    try {
+      const png = await banners.render(card);
+      await this.limiter.run(chatId, () =>
+        sendImage(chatId, {
+          png,
+          name: `${card.cardId}.png`,
+          idempotencyKey: `${key}-img`,
+        }),
+      );
+      this.sentAt.get(chatId)!.push(this.nowMs());
+    } catch {
+      // Text delivery below still carries the card.
+    }
   }
 
   private async deliver(

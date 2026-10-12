@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
-import { CardLinkIssuer, imessageConfigFromEnv } from '@synq/channels';
+import {
+  CardBannerRenderer,
+  CardLinkIssuer,
+  imessageConfigFromEnv,
+} from '@synq/channels';
 import { channelRoutes } from '../../apps/api/src/channel-routes.js';
 import { CARD_KEY, GROUP_A, GROUP_B } from './harness.js';
 import {
@@ -302,5 +306,47 @@ describe('iMessage runtime configuration and webhook route', () => {
     const ok = await post('T'.repeat(32), raw);
     expect(ok.json()).toEqual({ ok: true, outcomes: ['FORWARDED'] });
     await app.close();
+  });
+});
+
+describe('iMessage card banners', () => {
+  const pending = {
+    intentHash: `0x${'11'.repeat(32)}`,
+    draftDigest: `0x${'22'.repeat(32)}`,
+    label: 'Send 1 AUSD to carol',
+    counted: 0,
+    required: 2,
+    status: 'PENDING' as const,
+    amount: { amount: '1', symbol: 'AUSD' },
+  };
+
+  it('attaches the banner PNG via BlueBubbles AppleScript before the card text', async () => {
+    const f = imessageFixture({ banners: new CardBannerRenderer() });
+    await f.link(ALICE, 'principal_alice', GROUP_A);
+    f.approvals.set(GROUP_A, [pending]);
+    expect(await f.gateway.notify()).toEqual({ delivered: 1, failed: 0 });
+    expect(f.server.attachments).toEqual([
+      expect.objectContaining({
+        chatGuid: GROUP_CHAT,
+        method: 'apple-script',
+        type: 'image/png',
+      }),
+    ]);
+    expect(f.server.attachments[0]!.bytes).toBeGreaterThan(10_000);
+    expect(f.server.textsTo(GROUP_CHAT).at(-2)).toContain('Amount: 1 AUSD');
+  });
+
+  it('still delivers the text when the banner fails', async () => {
+    const f = imessageFixture({
+      banners: {
+        render: async () => {
+          throw new Error('render failed');
+        },
+      },
+    });
+    await f.link(ALICE, 'principal_alice', GROUP_A);
+    f.approvals.set(GROUP_A, [pending]);
+    expect(await f.gateway.notify()).toEqual({ delivered: 1, failed: 0 });
+    expect(f.server.attachments).toEqual([]);
   });
 });

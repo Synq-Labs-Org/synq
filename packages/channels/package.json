@@ -12,7 +12,10 @@
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "zod": "4.6.5",
-    "@synq/schemas": "workspace:*"
+    "@resvg/resvg-js": "2.6.2",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/schemas": "workspace:*",
+    "satori": "0.47.1",
+    "zod": "4.6.5"
   }
 }
