@@ -1,0 +1,145 @@
+{
+  "name": "mm-plugin-synq",
+  "version": "0.1.0",
+  "description": "Synq group treasury commands for the MetaMask Agent Wallet CLI (mm): read groups, contribute to a group Safe, and propose mandate spends",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "keywords": [
+    "oclif-plugin",
+    "metamask",
+    "agent-wallet",
+    "synq"
+  ],
+  "files": [
+    "dist",
+    "oclif.manifest.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && oclif manifest",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "stage": "npm run build && node scripts/stage.mjs"
+  },
+  "oclif": {
+    "bin": "mm",
+    "commands": "./dist/commands",
+    "topicSeparator": " ",
+    "topics": {
+      "synq": {
+        "description": "Synq group treasuries: groups, contributions, proposals and receipts"
+      }
+    }
+  },
+  "mm": {
+    "schemaVersion": 1,
+    "minCliVersion": "^7.1.0",
+    "capabilities": [],
+    "commands": [
+      {
+        "id": "synq:groups",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "accounts"
+        ],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:treasury",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:contribute",
+        "capabilities": [
+          "wallet-read",
+          "wallet-submit"
+        ],
+        "dataAccess": [
+          "accounts"
+        ],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:propose",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "accounts"
+        ],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:dca",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [
+          "accounts"
+        ],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:risk",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:strategies",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [],
+        "targetChains": [
+          10143
+        ]
+      },
+      {
+        "id": "synq:receipts",
+        "capabilities": [
+          "wallet-read"
+        ],
+        "dataAccess": [],
+        "targetChains": [
+          10143
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "viem": "2.57.4"
+  },
+  "peerDependencies": {
+    "@metamask/agent-wallet": "^7.1.0"
+  },
+  "devDependencies": {
+    "@metamask/agent-sdk": "7.1.0",
+    "@metamask/agent-wallet": "7.1.0",
+    "@types/node": "^22",
+    "oclif": "^4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

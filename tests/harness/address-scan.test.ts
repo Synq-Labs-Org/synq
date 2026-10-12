@@ -18,6 +18,8 @@ const ALLOWED_PATHS = [
   // Sourced testnet-only provider payment assets (Circle testnet USDC).
   /^sources\/provider_testnet_assets\.json$/,
   /^bounty-evidence\//,
+  // Standalone mm plugin pin of the registry; drift-tested by tests/metamask-plugin/network.test.ts.
+  /^packages\/metamask-synq-plugin\/src\/core\/network\.json$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
   // Submission evidence documents cite deployed contracts and explorer-linked transactions.
