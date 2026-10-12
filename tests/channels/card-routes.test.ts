@@ -67,5 +67,26 @@ describe('POST /v1/cards/resolve', () => {
     expect(
       (await post({ ...body, nonce: 'garbage' }, 'alice-session')).statusCode,
     ).toBe(400);
+    const status = (q: Record<string, string>) =>
+      app!.inject({
+        method: 'GET',
+        url: `/v1/cards/status?${new URLSearchParams(q)}`,
+      });
+    const s = await status({
+      p: body.proposalId!,
+      g: body.groupId!,
+      n: body.nonce!,
+    });
+    expect(s.json()).toEqual({
+      status: 'OK',
+      state: 'PENDING',
+      counted: 0,
+      required: 2,
+    });
+    expect(JSON.stringify(s.json())).not.toContain('AUSD');
+    expect(
+      (await status({ p: body.proposalId!, g: GROUP_B, n: body.nonce! }))
+        .statusCode,
+    ).toBe(403);
   });
 });

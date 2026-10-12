@@ -238,6 +238,26 @@ export async function channelRoutes(
       .send(code === 200 ? outcome : { error: outcome.status });
   });
 
+  api.get('/v1/cards/status', async (request, reply) => {
+    const q = request.query as Record<string, string | undefined>;
+    const parsed = CardLinkSchema.safeParse({
+      proposalId: q.p,
+      groupId: q.g,
+      nonce: q.n,
+    });
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const outcome = await deps.gateway.cardLinkStatus({
+      ...parsed.data,
+      groupId: parsed.data.groupId.toLowerCase(),
+    });
+    const code = CARD_STATUS[outcome.status] ?? 403;
+    return reply
+      .code(code)
+      .header('cache-control', 'no-store')
+      .send(code === 200 ? outcome : { error: outcome.status });
+  });
+
   api.get('/v1/channels/capabilities', async () =>
     channelCapabilities(deps.env ?? {}),
   );

@@ -200,6 +200,48 @@ export class ChannelGateway {
   }
 
   /**
+   * Public status for a card link holder (e.g. the Messages extension):
+   * only the quorum count and state, which the chat already shows. The
+   * group-bound nonce must be valid; no member data or amounts are returned.
+   */
+  async cardLinkStatus(input: {
+    proposalId: string;
+    groupId: string;
+    nonce: string;
+  }): Promise<
+    | {
+        status: 'OK';
+        state: ApprovalSummary['status'];
+        counted: number;
+        required: number;
+      }
+    | {
+        status:
+          | 'CARDS_DISABLED'
+          | 'LINK_MALFORMED'
+          | 'LINK_EXPIRED'
+          | 'LINK_INVALID'
+          | 'PROPOSAL_NOT_FOUND';
+      }
+  > {
+    const links = this.options.cards?.links;
+    if (!links) return { status: 'CARDS_DISABLED' };
+    const check = links.verify(input);
+    if (!check.ok) return { status: check.code };
+    const a = (await this.options.ports.approvals(input.groupId)).find(
+      (x) => approvalProposalId(x) === input.proposalId,
+    );
+    return a
+      ? {
+          status: 'OK',
+          state: a.status,
+          counted: a.counted,
+          required: a.required,
+        }
+      : { status: 'PROPOSAL_NOT_FOUND' };
+  }
+
+  /**
    * Resolves a tapped card link for an authenticated member: checks the
    * group-bound nonce, the member, and reads the canonical proposal of that
    * group. It returns what will be authorized; it approves nothing.
