@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@synq/offer-exchange": "workspace:*",
+    "@synq/settlement": "workspace:*",
     "viem": "2.57.4",
     "zod": "4.6.5"
   }

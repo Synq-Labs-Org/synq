@@ -663,6 +663,9 @@ importers:
       '@synq/offer-exchange':
         specifier: workspace:*
         version: link:../../packages/offer-exchange
+      '@synq/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)

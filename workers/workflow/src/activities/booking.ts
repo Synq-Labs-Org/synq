@@ -26,6 +26,9 @@ import { redact } from '@synq/profile-vault';
 import {
   ReservationError,
   planSettlement,
+  type ExecutionCategory,
+  type FinancialExecutionMode,
+  type SettlementFabric,
   type RailDescriptor,
   type ReferencePrice,
   type ReservationRequest,
@@ -81,6 +84,12 @@ export type BookingActivityDeps = {
     }): Promise<boolean>;
   };
   receipts: { write(receipt: FulfillmentReceipt): Promise<void> };
+  /**
+   * Settlement Fabric v1.3. When present, ports that declare a settlement
+   * profile get a ProviderOrder that gates resubmission (reconcile first) and
+   * a ledgered settlement receipt.
+   */
+  fabric?: SettlementFabric;
   incidents?: {
     open(input: {
       bookingId: string;
@@ -343,6 +352,25 @@ export function createBookingActivities(
           reason: clean(`KERNEL_REFUSED: ${(e as Error).message}`),
         };
       }
+      let orderId: string | null = null;
+      if (deps.fabric && port.settlement) {
+        const order = await deps.fabric.openOrder({
+          intentId: input.grant.intentId,
+          groupId: input.grant.groupId,
+          providerId: port.providerId,
+          mode: port.settlement.mode as FinancialExecutionMode,
+          economicEffect: port.settlement.economicEffect,
+          idempotencyKey: input.idempotencyKey,
+          amount: input.grant.execution.maxAmount,
+        });
+        const gate = await deps.fabric.submitGate(order.providerOrderId);
+        if (gate.action !== 'SUBMIT')
+          return {
+            status: 'UNKNOWN',
+            reason: `prior submit ${gate.order.state}: reconcile at the provider before any retry`,
+          };
+        orderId = order.providerOrderId;
+      }
       const travelers = await deps.travelers.resolve({
         groupId: input.grant.groupId,
         refs: input.travelerRefs,
@@ -353,6 +381,16 @@ export function createBookingActivities(
         travelers,
         idempotencyKey: input.idempotencyKey,
       });
+      if (orderId && deps.fabric) {
+        if (out.status === 'FAILED')
+          await deps.fabric.transition(orderId, 'FAILED', {
+            reason: clean(out.reason),
+          });
+        else if (out.status === 'UNKNOWN')
+          await deps.fabric.transition(orderId, 'UNKNOWN_OUTCOME', {
+            reason: clean(out.reason),
+          });
+      }
       return out.status === 'FAILED' || out.status === 'UNKNOWN'
         ? { ...out, reason: clean(out.reason) }
         : out;
@@ -381,6 +419,59 @@ export function createBookingActivities(
 
     async settleBooking(input) {
       const now = deps.now();
+      const sandboxPort = deps.ports[input.offer.fulfillmentProviderId];
+      if (sandboxPort?.settlement?.economicEffect === 'NONE_SANDBOX') {
+        // A provider sandbox spent no treasury value: never capture; release.
+        const profile = sandboxPort.settlement;
+        const order = deps.fabric
+          ? await deps.fabric.store.findOrder(
+              sandboxPort.providerId,
+              input.idempotencyKey,
+            )
+          : null;
+        if (deps.fabric && order)
+          await deps.fabric.settleSandboxOrder({
+            providerOrderId: order.providerOrderId,
+            providerRefs: { providerRef: input.providerRef },
+            category: profile.category as ExecutionCategory,
+            providerName: profile.providerName,
+            reservationIds: legsOf(input.reservationId),
+            charged: input.charged,
+          });
+        else
+          await eachLeg(input.reservationId, async (id, state) => {
+            if (state === 'ACTIVE' || state === 'EXECUTING')
+              await deps.reservations.release(
+                id,
+                'SANDBOX_NO_ECONOMIC_EFFECT',
+                now,
+              );
+            else if (state === 'HELD')
+              await deps.reservations.releaseHeld(
+                id,
+                'SANDBOX_NO_ECONOMIC_EFFECT',
+                now,
+              );
+          });
+        const receipt = FulfillmentReceiptSchema.parse({
+          receiptId: `rcpt-${input.bookingId}`,
+          intentId: input.intent.id,
+          offerId: input.offer.offerId,
+          providerId: input.offer.fulfillmentProviderId,
+          providerRef: input.providerRef,
+          providerReference: input.reference,
+          state: 'CONFIRMED',
+          charged: input.charged,
+          idempotencyKey: input.idempotencyKey,
+          reservationId: input.reservationId,
+          grantId: input.grantId,
+          environment: 'SANDBOX',
+          evidence: 'PROVIDER_SANDBOX',
+          createdAt: now,
+        });
+        await deps.receipts.write(receipt);
+        return { status: 'SETTLED', receipt };
+      }
       const existing = await deps.reservations.get(input.reservationId);
       const capturable =
         existing &&

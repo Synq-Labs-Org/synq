@@ -34,10 +34,30 @@ export const TravelerProfileSchema = z.strictObject({
     .optional(),
   passportExpiry: z.iso.date().optional(),
 });
+/**
+ * A purchased gift card's redemption secret. Stored only sealed; it is never
+ * posted into a group chat and is decrypted only for delivery to its recipient.
+ */
+export const GiftCodeSecretSchema = z.strictObject({
+  provider: text(40),
+  transactionId: text(80),
+  recipientRef: text(160),
+  codes: z
+    .array(
+      z.strictObject({
+        cardNumber: z.string().max(200).optional(),
+        pinCode: z.string().max(200).optional(),
+        redemptionUrl: z.string().max(500).optional(),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
 export const PROFILE_SCHEMAS = {
   SHIPPING: ShippingProfileSchema,
   RECIPIENT: ShippingProfileSchema,
   TRAVELER: TravelerProfileSchema,
+  GIFT_CODE: GiftCodeSecretSchema,
 } as const;
 export type ProfileKind = keyof typeof PROFILE_SCHEMAS;
 export type ProfileData<K extends ProfileKind> = z.output<
@@ -136,6 +156,8 @@ const aad = (r: Pick<SealedProfile, 'ref' | 'groupId' | 'kind' | 'keyId'>) =>
   Buffer.from(JSON.stringify([r.ref, r.groupId, r.kind, r.keyId]));
 
 function summarize(kind: ProfileKind, data: Record<string, unknown>): string {
+  if (kind === 'GIFT_CODE')
+    return `gift code · ${String(data.provider)} · ${(data.codes as unknown[]).length} card(s)`;
   if (kind === 'TRAVELER')
     return `traveler ${String(data.givenName).slice(0, 1)}. ${String(data.familyName).slice(0, 1)}.`;
   return `${kind.toLowerCase()} ${String(data.name).slice(0, 1)}. · ${String(data.city).slice(0, 1)}*** · ${String(data.country)}`;
@@ -298,5 +320,35 @@ export class ProfileDecryptor {
     const out: Record<string, unknown> = {};
     for (const f of input.fields) if (plain[f] !== undefined) out[f] = plain[f];
     return out as Pick<ProfileData<K>, F>;
+  }
+}
+
+/**
+ * Seals gift card redeem codes as a GIFT_CODE vault record in the recipient's
+ * group. Returns only an opaque ref; an unknown recipient ref stores nothing.
+ */
+export class GiftCodeVault {
+  private readonly directory: ProfileDirectory;
+  constructor(
+    private readonly store: ProfileStore,
+    keys: VaultKeyProvider,
+    now: () => number,
+  ) {
+    this.directory = new ProfileDirectory(store, keys, now);
+  }
+  async seal(input: {
+    provider: string;
+    transactionId: string;
+    recipientRef: string;
+    codes: { cardNumber?: string; pinCode?: string; redemptionUrl?: string }[];
+  }): Promise<{ ref: string }> {
+    const recipient = await this.store.get(input.recipientRef);
+    if (!recipient) throw new ProfileAccessError('NOT_FOUND', 'recipient');
+    const { ref } = await this.directory.put({
+      groupId: recipient.groupId,
+      kind: 'GIFT_CODE',
+      data: input,
+    });
+    return { ref };
   }
 }
