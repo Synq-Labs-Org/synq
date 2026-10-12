@@ -13,6 +13,7 @@ import {
   MemoryWebhookDeduper,
   SimulatedCardMerchant,
   assertLithicSandbox,
+  lithicCardMemo,
   lithicIdempotencyKey,
   redactCardData,
   verifyLithicWebhook,
@@ -91,7 +92,8 @@ describe('Lithic sandbox card adapter', () => {
     const create = fake.calls.find(
       (c) => c.path === '/cards' && c.method === 'POST',
     )!;
-    expect(JSON.parse(create.body!).memo).toBe('synq:synq-k1');
+    expect(JSON.parse(create.body!).memo).toBe(lithicCardMemo('synq-k1'));
+    expect(JSON.parse(create.body!).memo).toMatch(/^synq:[0-9a-f]{40}$/);
     if (out.status === 'CONFIRMED') {
       expect(out.charged).toEqual({
         amount: '1840',
@@ -261,6 +263,44 @@ describe('Lithic sandbox card adapter', () => {
     expect(c.refund).toBeNull();
     expect(f2.txs.get(out.providerRef)!.status).toBe('VOIDED');
     expect(f2.cards.get(out.reference!)!.state).toBe('CLOSED');
+  });
+});
+
+describe('Lithic reconcile with long (bytes32 group) keys', () => {
+  it('LIT-011 memos are fixed-length hashes of the full key: distinct per booking and found exactly on reconcile', async () => {
+    const { fake, port, client } = setup();
+    const g = `0x${'ab'.repeat(32)}`;
+    const keyA = `synq:${g}:booking-A:workflow-${'x'.repeat(40)}`;
+    const keyB = `synq:${g}:booking-B:workflow-${'x'.repeat(40)}`;
+    expect(lithicCardMemo(keyA)).not.toBe(lithicCardMemo(keyB));
+    expect(lithicCardMemo(keyA).length).toBeLessThanOrEqual(120);
+    fake.failNext.push({
+      path: /^\/simulate\/authorize$/,
+      status: 0,
+      throws: true,
+    });
+    expect(
+      (await port.book({ offer: offer(900), idempotencyKey: keyA })).status,
+    ).toBe('UNKNOWN');
+    expect(
+      await port.find({ offer: offer(900), idempotencyKey: keyB }),
+    ).toBeNull();
+    const a = await port.find({ offer: offer(900), idempotencyKey: keyA });
+    expect(a!.status).toBe('UNKNOWN');
+    expect(
+      (await port.book({ offer: offer(900), idempotencyKey: keyB })).status,
+    ).toBe('CONFIRMED');
+    const b = await port.find({ offer: offer(900), idempotencyKey: keyB });
+    expect(b!.status).toBe('CONFIRMED');
+    expect(fake.cards.size).toBe(2);
+    await expect(
+      client.createCard({
+        spendLimitCents: 1,
+        duration: 'FOREVER',
+        memo: 'm'.repeat(121),
+        idempotencyKey: 'x',
+      }),
+    ).rejects.toThrow(/memo too long/);
   });
 });
 

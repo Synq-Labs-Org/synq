@@ -57,6 +57,11 @@ export type CrossmintConfig = {
   environment: string | undefined;
   baseUrl?: string;
   chain: CrossmintStagingChain;
+  /**
+   * Operator-pinned Crossmint deposit addresses the USDC transfer may pay.
+   * Empty or absent: every payment holds (fail closed).
+   */
+  paymentRecipients?: readonly string[];
 };
 
 export function assertCrossmintStaging(c: CrossmintConfig): string {
@@ -448,6 +453,22 @@ export class CrossmintCheckoutRoute implements CheckoutRoute {
         'payment transaction is not a USDC transfer on the order chain',
         total,
       );
+    const recipient = `0x${data.slice(34, 74)}`;
+    if (data.slice(10, 34) !== '0'.repeat(24))
+      return fail('payment transfer recipient malformed', total);
+    const pinned = (this.config!.paymentRecipients ?? []).map((a) =>
+      a.toLowerCase(),
+    );
+    if (!pinned.length)
+      return fail(
+        'payment recipient not pinned (CROSSMINT_PAYMENT_RECIPIENTS)',
+        total,
+      );
+    if (!pinned.includes(recipient))
+      return fail(
+        'payment transfer recipient is not a pinned Crossmint address',
+        total,
+      );
     const amount = BigInt(`0x${data.slice(74, 138)}`);
     if (amount !== BigInt(total.amount))
       return fail('payment amount differs from the quote', total);
@@ -495,7 +516,8 @@ export class CrossmintCheckoutRoute implements CheckoutRoute {
           str(p.payerAddress) ??
           ''
         ).toLowerCase();
-        if (who !== '' && who !== payer) return false;
+        // Never adopt an order that does not name our payer.
+        if (who !== payer) return false;
         const created = Date.parse(str(o.createdAt) ?? '');
         // Without a timestamp, a payer match is treated as ours (conservative).
         return Number.isNaN(created) || created / 1000 >= input.since - 60;

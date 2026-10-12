@@ -34,6 +34,10 @@ import {
   reconcileCommerceCheckout,
 } from '../../workers/workflow/src/activities/commerce.js';
 import {
+  MemorySettlementFabricStore,
+  SettlementFabric,
+} from '@synq/settlement';
+import {
   approval,
   approvalPorts,
   memoryLedger,
@@ -60,12 +64,17 @@ const usd = (c: number): Money => ({
 /** Unsigned EIP-1559 USDC transfer shaped like Crossmint's payment preparation. */
 function paymentTx(
   amount: bigint,
-  opts: { chainId?: number; to?: string; memo?: boolean } = {},
+  opts: {
+    chainId?: number;
+    to?: string;
+    memo?: boolean;
+    recipient?: string;
+  } = {},
 ): Hex {
   const data = encodeFunctionData({
     abi: parseAbi(['function transfer(address,uint256) returns (bool)']),
     functionName: 'transfer',
-    args: [DEPOSIT, amount],
+    args: [(opts.recipient ?? DEPOSIT) as Hex, amount],
   });
   return serializeTransaction({
     type: 'eip1559',
@@ -88,7 +97,8 @@ type OrderOpts = {
   paymentStatus?: string;
   txAmount?: bigint;
   txTo?: string;
-  payer?: string;
+  txRecipient?: string;
+  payer?: string | null;
   quoteStatus?: string;
 };
 /** Order object per the documented Crossmint OrderObject schema. */
@@ -127,9 +137,10 @@ function order(o: OrderOpts = {}) {
       currency: 'usdc',
       preparation: {
         chain: CHAIN,
-        payerAddress: o.payer ?? PAYER,
+        ...(o.payer === null ? {} : { payerAddress: o.payer ?? PAYER }),
         serializedTransaction: paymentTx(o.txAmount ?? 6_840_000n, {
           ...(o.txTo ? { to: o.txTo } : {}),
+          ...(o.txRecipient ? { recipient: o.txRecipient } : {}),
         }),
       },
     },
@@ -200,7 +211,12 @@ function payer(outcome: 'success' | 'reverted' | 'throw' = 'success') {
   return { p, paid };
 }
 
-const config = { apiKey: SK, environment: 'staging', chain: CHAIN } as const;
+const config = {
+  apiKey: SK,
+  environment: 'staging',
+  chain: CHAIN,
+  paymentRecipients: [DEPOSIT],
+} as const;
 const caps = () =>
   commerceCapabilities({
     SEARCHAPI_KEY: 'k',
@@ -352,6 +368,7 @@ async function run(
   s: Awaited<ReturnType<typeof setup>>,
   route: CrossmintCheckoutRoute,
   offer: EconomicOffer = s.offer,
+  fabric?: SettlementFabric,
 ) {
   const decision = new CommerceExecutionRouter([route]).decide(offer, [
     'STABLECOIN_CHECKOUT',
@@ -362,6 +379,7 @@ async function run(
       reservations: s.reservations,
       now,
       resolveRecipient: async () => recipient,
+      ...(fabric ? { fabric } : {}),
     },
     {
       intentId: intent.id,
@@ -645,5 +663,97 @@ describe('Crossmint staging checkout through the Kernel grant', () => {
       reason: expect.stringMatching(/broadcast outcome unknown/),
     });
     expect(paid).toHaveLength(1);
+  });
+});
+
+describe('Crossmint payment pinning and fabric orders (security re-check)', () => {
+  it('SEC-L3 a USDC transfer to an unpinned recipient, or with no pinned recipients, holds before paying', async () => {
+    const s = await setup();
+    const { p, paid } = payer();
+    const wrong = await run(
+      s,
+      route(
+        crossmintServer({
+          order: { txRecipient: '0x000000000000000000000000000000000000beef' },
+        }).f,
+        p,
+      ),
+    );
+    expect(wrong).toMatchObject({
+      kind: 'HOLD',
+      reason: expect.stringMatching(/not a pinned Crossmint address/),
+    });
+    const s2 = await setup();
+    const unpinned = new CrossmintCheckoutRoute(
+      crossmintCap(),
+      { ...config, paymentRecipients: [] },
+      crossmintServer().f,
+      p,
+      { pollAttempts: 1, sleep: async () => {} },
+    );
+    expect(await run(s2, unpinned)).toMatchObject({
+      kind: 'HOLD',
+      reason: expect.stringMatching(/not pinned/),
+    });
+    expect(paid).toHaveLength(0);
+  });
+
+  it('SEC-L3 reconcile without an order id never adopts an order that does not name our payer', async () => {
+    const { p } = payer();
+    const anonymous = order({ payer: null });
+    const r = route(crossmintServer({ list: [anonymous] }).f, p);
+    expect(await r.reconcile({ orderRef: null, since: T })).toEqual({
+      status: 'NOT_FOUND',
+    });
+    const ours = route(crossmintServer({ list: [order()] }).f, p);
+    expect((await ours.reconcile({ orderRef: null, since: T })).status).toBe(
+      'FOUND',
+    );
+  });
+
+  it('SEC-L2 a paid Crossmint order is TESTNET_SETTLED with a testnet debit; a reconciled no-order run is FAILED', async () => {
+    const s = await setup();
+    const fabric = new SettlementFabric(
+      new MemorySettlementFabricStore(),
+      s.reservations,
+      now,
+    );
+    const { p } = payer();
+    const out = await run(s, route(crossmintServer().f, p), s.offer, fabric);
+    expect(out.kind).toBe('RECEIPT');
+    const o = await fabric.store.findOrder('crossmint', 'cable-1-checkout');
+    expect(o!.state).toBe('TESTNET_SETTLED');
+    const rc = await fabric.store.getReceipt(`sr-${o!.providerOrderId}`);
+    expect(rc!.treasuryEffect).toBe('TESTNET_DEBIT');
+    expect(rc!.providerRefs.txHash).toBe(`0x${'ab'.repeat(32)}`);
+
+    const s2 = await setup();
+    const fabric2 = new SettlementFabric(
+      new MemorySettlementFabricStore(),
+      s2.reservations,
+      now,
+    );
+    const r2 = route(
+      crossmintServer({ create: { status: 500, body: '{}' } }).f,
+      p,
+    );
+    const held = await run(s2, r2, s2.offer, fabric2);
+    expect(held.kind).toBe('HOLD');
+    const o2 = await fabric2.store.findOrder('crossmint', 'cable-1-checkout');
+    expect(o2!.state).toBe('UNKNOWN_OUTCOME');
+    await reconcileCommerceCheckout(
+      { reservations: s2.reservations, now, fabric: fabric2 },
+      {
+        route: r2,
+        reservationId: 'res-cable',
+        orderRef: null,
+        paymentBroadcast: false,
+        since: T,
+        idempotencyKey: 'cable-1-checkout',
+      },
+    );
+    expect((await fabric2.store.getOrder(o2!.providerOrderId))!.state).toBe(
+      'FAILED',
+    );
   });
 });

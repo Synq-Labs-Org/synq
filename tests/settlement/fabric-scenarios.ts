@@ -198,6 +198,157 @@ export function fabricScenarios(
       ).toBe('ORDER_CONFLICT');
     });
 
+    it('FAB-006 a provider-reported refund id reused for a confirmed refund conflicts before any treasury change', async () => {
+      const { fabric, store, reservations, id } = await world();
+      await reservations.capture(`res-${id}`, 10_000_000n, T0 + 1);
+      const order = await fabric.openOrder({
+        intentId: `int-${id}`,
+        groupId: 'g1',
+        providerId: 'monad-ausd',
+        mode: 'TESTNET',
+        economicEffect: 'TESTNET_TOKENS',
+        idempotencyKey: `synq-key-${id}`,
+        amount: usd(1000),
+      });
+      await fabric.recordProviderRefund({
+        providerOrderId: order.providerOrderId,
+        refundId: `rf-${id}`,
+        amount: usd(400),
+        providerRef: 'p',
+      });
+      const before = await reservations.free('g1', AUSD);
+      expect(
+        await code(
+          fabric.confirmRefund({
+            providerOrderId: order.providerOrderId,
+            refundId: `rf-${id}`,
+            amount: usd(1000),
+            onchain: { chainId: 10143, txHash: `0x${'c'.repeat(64)}` },
+            reservationId: `res-${id}`,
+            coreAmount: 10_000_000n,
+            observedCoreAmount: 10_000_000n,
+          }),
+        ),
+      ).toBe('RECORD_CONFLICT');
+      const after = await reservations.free('g1', AUSD);
+      expect(after).toEqual(before);
+      const totals = await store.ledgerTotals('g1');
+      expect(totals.CONFIRMED_REFUND).toEqual({});
+      expect(totals.PROVIDER_REPORTED_REFUND['USD/2']).toBe('400');
+    });
+
+    it('FAB-007 concurrent provider refunds never exceed the order, and a duplicate id is booked once', async () => {
+      const { fabric, store, id } = await world();
+      const order = await fabric.openOrder({
+        intentId: `int-${id}`,
+        groupId: 'g1',
+        providerId: 'reloadly-sandbox',
+        mode: 'PROVIDER_SANDBOX',
+        economicEffect: 'NONE_SANDBOX',
+        idempotencyKey: `synq-key-${id}`,
+        amount: usd(1000),
+      });
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, i) =>
+          fabric.recordProviderRefund({
+            providerOrderId: order.providerOrderId,
+            refundId: `rf-${id}-${i}`,
+            amount: usd(300),
+            providerRef: null,
+          }),
+        ),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(3);
+      const dup = await Promise.allSettled([
+        fabric.recordProviderRefund({
+          providerOrderId: order.providerOrderId,
+          refundId: `rf-${id}-0`,
+          amount: usd(300),
+          providerRef: null,
+        }),
+      ]);
+      expect(dup[0]!.status).toBe('fulfilled');
+      const refunds = await store.listRefunds(order.providerOrderId);
+      expect(refunds.reduce((s, r) => s + BigInt(r.amount.amount), 0n)).toBe(
+        900n,
+      );
+      expect(
+        (await store.ledgerTotals('g1')).PROVIDER_REPORTED_REFUND['USD/2'],
+      ).toBe('900');
+    });
+
+    it('FAB-008 a testnet-token order settles as TESTNET_SETTLED with a testnet debit; PENDING_SUBMIT and UNKNOWN orders resolve', async () => {
+      const { fabric, reservations, id } = await world();
+      const base = {
+        intentId: `int-${id}`,
+        groupId: 'g1',
+        amount: usd(700),
+      };
+      const cm = await fabric.openOrder({
+        ...base,
+        providerId: 'crossmint',
+        mode: 'TESTNET',
+        economicEffect: 'TESTNET_TOKENS',
+        idempotencyKey: `synq-cm-${id}`,
+      });
+      const r = await fabric.settleTestnetOrder({
+        providerOrderId: cm.providerOrderId,
+        providerRefs: { orderRef: 'ord-1', txHash: `0x${'d'.repeat(64)}` },
+        category: 'MERCHANT_CHECKOUT',
+        providerName: 'crossmint',
+        charged: usd(650),
+      });
+      expect(r.treasuryEffect).toBe('TESTNET_DEBIT');
+      expect(r.label).toBe('REAL_TESTNET');
+      expect((await fabric.store.getOrder(cm.providerOrderId))!.state).toBe(
+        'TESTNET_SETTLED',
+      );
+      expect(
+        await code(
+          fabric.settleSandboxOrder({
+            providerOrderId: cm.providerOrderId,
+            providerRefs: {},
+            category: 'MERCHANT_CHECKOUT',
+            providerName: 'x',
+            reservationIds: [],
+            charged: null,
+          }),
+        ),
+      ).toBe('ORDER_TRANSITION_FORBIDDEN');
+      const pending = await fabric.openOrder({
+        ...base,
+        providerId: 'reloadly-sandbox',
+        mode: 'PROVIDER_SANDBOX',
+        economicEffect: 'NONE_SANDBOX',
+        idempotencyKey: `synq-pend-${id}`,
+      });
+      await fabric.settleSandboxOrder({
+        providerOrderId: pending.providerOrderId,
+        providerRefs: { providerRef: '9' },
+        category: 'DIGITAL_GOODS_SANDBOX',
+        providerName: 'Reloadly',
+        reservationIds: [`res-${id}`],
+        charged: null,
+      });
+      expect(
+        (await fabric.store.getOrder(pending.providerOrderId))!.state,
+      ).toBe('SANDBOX_FULFILLED');
+      expect((await reservations.get(`res-${id}`))!.state).toBe('RELEASED');
+      const unknown = await fabric.openOrder({
+        ...base,
+        providerId: 'lithic-sandbox',
+        mode: 'PROVIDER_SANDBOX',
+        economicEffect: 'NONE_SANDBOX',
+        idempotencyKey: `synq-unk-${id}`,
+      });
+      await fabric.submitGate(unknown.providerOrderId);
+      await fabric.transition(unknown.providerOrderId, 'UNKNOWN_OUTCOME');
+      await fabric.markFailed(unknown.providerOrderId, 'reconciled: declined');
+      expect(
+        (await fabric.store.getOrder(unknown.providerOrderId))!.state,
+      ).toBe('FAILED');
+    });
+
     it('FAB-005 a testnet refund confirms into the treasury only with on-chain evidence', async () => {
       const { fabric, reservations, id } = await world();
       await reservations.capture(`res-${id}`, 10_000_000n, T0 + 1);

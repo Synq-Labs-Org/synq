@@ -172,7 +172,10 @@ describe('Reloadly gift card sandbox adapter', () => {
       decimals: 2,
     });
     expect(w.fake.orders).toHaveLength(1);
-    expect(w.fake.orders[0]!.customIdentifier).toBe('synq-gift-1');
+    expect(w.fake.orders[0]!.customIdentifier).toBe(
+      ReloadlyGiftCardPort.customIdentifier('synq-gift-1'),
+    );
+    expect(w.fake.orders[0]!.customIdentifier).toMatch(/^synq-[0-9a-f]{40}$/);
     expect(w.fake.orders[0]!.recipientEmail).toBeNull();
     expect(w.sealed).toHaveLength(1);
     expect(JSON.stringify(out)).not.toContain(w.fake.code);
@@ -369,5 +372,187 @@ describe('Reloadly gift card sandbox adapter', () => {
     expect(decimalMoney(10.56, 'USD').amount).toBe('1056');
     expect(decimalMoney(60553.3575, 'USD').amount).toBe('6055336');
     expect(decimalMoney(0.1 + 0.2, 'USD').amount).toBe('30');
+  });
+});
+
+describe('Reloadly identifiers and gift-code custody (security re-check)', () => {
+  const G = `0x${'8241ac62'.repeat(8)}`;
+  async function world() {
+    const fake = new FakeReloadly();
+    const client = new ReloadlyClient(
+      {
+        clientId: fake.clientId,
+        clientSecret: fake.clientSecret,
+        environment: 'sandbox',
+      },
+      fake.fetch,
+      now,
+    );
+    const keys = new EnvVaultKeyProvider({
+      SYNQ_PROFILE_VAULT_KEY: randomBytes(32).toString('base64'),
+    });
+    const store = new MemoryProfileStore();
+    const dir = new ProfileDirectory(store, keys, now);
+    const person = (name: string) => ({
+      name,
+      line1: '1 Main St',
+      city: 'Austin',
+      postalCode: '73301',
+      country: 'US',
+      email: `${name.toLowerCase()}@example.com`,
+    });
+    const ra = (
+      await dir.put({ groupId: G, kind: 'RECIPIENT', data: person('Ann') })
+    ).ref;
+    const rb = (
+      await dir.put({ groupId: G, kind: 'RECIPIENT', data: person('Ben') })
+    ).ref;
+    const other = (
+      await dir.put({
+        groupId: 'other-group',
+        kind: 'RECIPIENT',
+        data: person('Eve'),
+      })
+    ).ref;
+    const traveler = (
+      await dir.put({
+        groupId: G,
+        kind: 'TRAVELER',
+        data: {
+          givenName: 'T',
+          familyName: 'R',
+          bornOn: '1990-01-01',
+          email: 't@example.com',
+          phone: '+14155550100',
+        },
+      })
+    ).ref;
+    const vault = new GiftCodeVault(store, keys, now);
+    const port = new ReloadlyGiftCardPort(client, vault);
+    const provider = new ReloadlyGiftCardProvider(client, now);
+    const decryptor = new ProfileDecryptor(store, keys, now, 'delivery-worker');
+    const offerFor = async (id: string, recipientRef: string) => {
+      const intent = EconomicIntentSchema.parse({
+        ...intentFor(recipientRef),
+        id,
+        groupId: G,
+      });
+      return EconomicOfferSchema.parse((await provider.search(intent))[0]);
+    };
+    return {
+      fake,
+      store,
+      vault,
+      port,
+      ra,
+      rb,
+      other,
+      traveler,
+      offerFor,
+      decryptor,
+    };
+  }
+
+  it('SEC-H1 two bookings in a bytes32 group get distinct identifiers; B never adopts A’s order or codes', async () => {
+    const w = await world();
+    const keyA = `synq:${G}:booking-A:booking-booking-A-${'9'.repeat(12)}`;
+    const keyB = `synq:${G}:booking-B:booking-booking-B-${'9'.repeat(12)}`;
+    const idA = ReloadlyGiftCardPort.customIdentifier(keyA);
+    const idB = ReloadlyGiftCardPort.customIdentifier(keyB);
+    expect(idA).not.toBe(idB);
+    expect(idA).toMatch(/^synq-[0-9a-f]{40}$/);
+    const offerA = await w.offerFor('gift-A', w.ra);
+    const offerB = await w.offerFor('gift-B', w.rb);
+    const a = await w.port.book({ offer: offerA, idempotencyKey: keyA });
+    expect(a.status).toBe('CONFIRMED');
+    // Booking B's pre-submit lookup must not see A's transaction.
+    expect(
+      await w.port.find({ offer: offerB, idempotencyKey: keyB }),
+    ).toBeNull();
+    const b = await w.port.book({ offer: offerB, idempotencyKey: keyB });
+    expect(b.status).toBe('CONFIRMED');
+    if (a.status !== 'CONFIRMED' || b.status !== 'CONFIRMED') return;
+    expect(b.providerRef).not.toBe(a.providerRef);
+    expect(w.fake.orders.map((o) => o.customIdentifier)).toEqual([idA, idB]);
+    const sealed = [...w.store.records.values()].filter(
+      (r) => r.kind === 'GIFT_CODE',
+    );
+    expect(sealed).toHaveLength(2);
+    const open = (ref: string) =>
+      w.decryptor.resolve({
+        groupId: G,
+        ref,
+        kind: 'GIFT_CODE',
+        purpose: 'deliver',
+        fields: ['recipientRef', 'transactionId'],
+      });
+    const opened = await Promise.all(sealed.map((r) => open(r.ref)));
+    expect(opened.map((o) => [o.transactionId, o.recipientRef]).sort()).toEqual(
+      [
+        [a.providerRef, w.ra],
+        [b.providerRef, w.rb],
+      ].sort(),
+    );
+    // Reconciling A again re-uses A's sealed record; it never re-seals to B.
+    expect(
+      (await w.port.find({ offer: offerA, idempotencyKey: keyA }))!.status,
+    ).toBe('CONFIRMED');
+    expect(
+      [...w.store.records.values()].filter((r) => r.kind === 'GIFT_CODE'),
+    ).toHaveLength(2);
+    await expect(
+      w.vault.seal({
+        provider: 'reloadly',
+        transactionId: a.providerRef,
+        groupId: G,
+        recipientRef: w.rb,
+        codes: [{ cardNumber: 'x' }],
+      }),
+    ).rejects.toThrow(/TAMPERED/);
+  });
+
+  it('SEC-M1 gift codes seal only to a RECIPIENT/SHIPPING record of the ordering group', async () => {
+    const w = await world();
+    const codes = [{ cardNumber: 'c' }];
+    await expect(
+      w.vault.seal({
+        provider: 'reloadly',
+        transactionId: '1',
+        groupId: G,
+        recipientRef: w.other,
+        codes,
+      }),
+    ).rejects.toThrow(/WRONG_GROUP/);
+    await expect(
+      w.vault.seal({
+        provider: 'reloadly',
+        transactionId: '2',
+        groupId: G,
+        recipientRef: w.traveler,
+        codes,
+      }),
+    ).rejects.toThrow(/FIELD_NOT_ALLOWED/);
+    // A group-G order naming another group's recipient: the order stands, nothing is sealed.
+    const offer = await w.offerFor('gift-X', w.other);
+    const out = await w.port.book({ offer, idempotencyKey: `synq:${G}:x` });
+    expect(out.status).toBe('CONFIRMED');
+    expect(
+      [...w.store.records.values()].filter((r) => r.kind === 'GIFT_CODE'),
+    ).toHaveLength(0);
+    // An offer without its group binding is refused before contacting the provider.
+    const unbound = EconomicOfferSchema.parse({
+      ...offer,
+      subject: {
+        ...offer.subject,
+        attributes: {
+          ...(offer.subject.kind === 'PRODUCT' ? offer.subject.attributes : {}),
+          groupId: '',
+        },
+      },
+    });
+    expect(
+      (await w.port.book({ offer: unbound, idempotencyKey: 'k-unbound' }))
+        .status,
+    ).toBe('FAILED');
   });
 });

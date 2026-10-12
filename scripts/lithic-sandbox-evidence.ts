@@ -29,6 +29,7 @@ import {
   LithicSandboxCardPort,
   LithicSandboxClient,
   SimulatedCardMerchant,
+  lithicCardMemo,
   lithicIdempotencyKey,
   lithicProviderCapability,
   redactCardData,
@@ -253,7 +254,7 @@ async function main() {
   const voidCard = await client.createCard({
     spendLimitCents: 100,
     duration: 'FOREVER',
-    memo: `synq:void-demo:${state.idempotencyKey}`,
+    memo: lithicCardMemo(`void-demo:${state.idempotencyKey}`),
     idempotencyKey: lithicIdempotencyKey(`void-demo:${state.idempotencyKey}`),
   });
   if (voidCard.secret) pans.push(voidCard.secret.reveal(client));

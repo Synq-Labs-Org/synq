@@ -148,7 +148,8 @@ export function settlementFabricCapabilities(
       providerId: CROSSMINT,
       displayName: 'Crossmint headless checkout (staging)',
       category: 'MERCHANT_CHECKOUT',
-      mode: 'PROVIDER_SANDBOX',
+      // Staging merchant, but payment is real testnet USDC: TESTNET mode, TESTNET_DEBIT receipts.
+      mode: 'TESTNET',
       products: ['MERCHANT_GOODS'],
       currencies: ['USD', 'USDC'],
       chains: Object.keys(CROSSMINT_STAGING_CHAINS).map((chain) => ({

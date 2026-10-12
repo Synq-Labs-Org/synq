@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'node:crypto';
 import { z } from 'zod';
 
 const text = (max: number) => z.string().min(1).max(max);
@@ -155,9 +160,13 @@ export class ProfileAccessError extends Error {
 const aad = (r: Pick<SealedProfile, 'ref' | 'groupId' | 'kind' | 'keyId'>) =>
   Buffer.from(JSON.stringify([r.ref, r.groupId, r.kind, r.keyId]));
 
+/** Non-secret tag binding a sealed gift code to exactly one recipient ref. */
+const recipientTag = (recipientRef: string) =>
+  `r:${createHash('sha256').update(recipientRef).digest('hex').slice(0, 16)}`;
+
 function summarize(kind: ProfileKind, data: Record<string, unknown>): string {
   if (kind === 'GIFT_CODE')
-    return `gift code · ${String(data.provider)} · ${(data.codes as unknown[]).length} card(s)`;
+    return `gift code · ${String(data.provider)} · ${(data.codes as unknown[]).length} card(s) · ${recipientTag(String(data.recipientRef))}`;
   if (kind === 'TRAVELER')
     return `traveler ${String(data.givenName).slice(0, 1)}. ${String(data.familyName).slice(0, 1)}.`;
   return `${kind.toLowerCase()} ${String(data.name).slice(0, 1)}. · ${String(data.city).slice(0, 1)}*** · ${String(data.country)}`;
@@ -179,6 +188,8 @@ export class ProfileDirectory {
     kind: K;
     data: ProfileData<K>;
     expiresAt?: number;
+    /** @internal deterministic ref for one-per-transaction GIFT_CODE records. */
+    ref?: string;
   }): Promise<{ ref: string; summary: string }> {
     const parsed = PROFILE_SCHEMAS[input.kind].safeParse(input.data);
     if (!parsed.success)
@@ -186,7 +197,12 @@ export class ProfileDirectory {
         'INVALID_PROFILE',
         parsed.error.issues[0]?.path.join('.') ?? '',
       );
-    const ref = `pv_${randomBytes(16).toString('hex')}`;
+    if (
+      input.ref !== undefined &&
+      !(input.kind === 'GIFT_CODE' && /^gc_[0-9a-f]{40}$/.test(input.ref))
+    )
+      throw new ProfileAccessError('INVALID_PROFILE', 'ref');
+    const ref = input.ref ?? `pv_${randomBytes(16).toString('hex')}`;
     const keyId = this.keys.activeKeyId;
     const iv = randomBytes(12);
     const cipher = createCipheriv(
@@ -336,18 +352,46 @@ export class GiftCodeVault {
   ) {
     this.directory = new ProfileDirectory(store, keys, now);
   }
+  /**
+   * One sealed record per provider transaction, bound to one recipient of the
+   * ordering group. Re-sealing the same transaction for the same recipient
+   * returns the existing ref; for anyone else it is refused.
+   */
   async seal(input: {
     provider: string;
     transactionId: string;
+    groupId: string;
     recipientRef: string;
     codes: { cardNumber?: string; pinCode?: string; redemptionUrl?: string }[];
   }): Promise<{ ref: string }> {
     const recipient = await this.store.get(input.recipientRef);
     if (!recipient) throw new ProfileAccessError('NOT_FOUND', 'recipient');
-    const { ref } = await this.directory.put({
-      groupId: recipient.groupId,
+    if (recipient.groupId !== input.groupId)
+      throw new ProfileAccessError('WRONG_GROUP', 'recipient');
+    if (recipient.kind !== 'RECIPIENT' && recipient.kind !== 'SHIPPING')
+      throw new ProfileAccessError('FIELD_NOT_ALLOWED', 'recipient kind');
+    const ref = `gc_${createHash('sha256')
+      .update(`${input.provider}:${input.transactionId}`)
+      .digest('hex')
+      .slice(0, 40)}`;
+    const existing = await this.store.get(ref);
+    if (existing) {
+      if (
+        existing.groupId === input.groupId &&
+        existing.summary.endsWith(recipientTag(input.recipientRef))
+      )
+        return { ref };
+      throw new ProfileAccessError(
+        'TAMPERED',
+        'transaction sealed for another recipient',
+      );
+    }
+    const { groupId, provider, transactionId, recipientRef, codes } = input;
+    await this.directory.put({
+      groupId,
       kind: 'GIFT_CODE',
-      data: input,
+      data: { provider, transactionId, recipientRef, codes },
+      ref,
     });
     return { ref };
   }

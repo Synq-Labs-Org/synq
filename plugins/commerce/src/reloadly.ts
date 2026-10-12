@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   money,
   type EconomicIntent,
@@ -486,6 +487,8 @@ export interface GiftCodeSealer {
   seal(input: {
     provider: string;
     transactionId: string;
+    /** The ordering group: the recipient record must belong to it. */
+    groupId: string;
     recipientRef: string;
     codes: GiftCode[];
   }): Promise<{ ref: string }>;
@@ -609,6 +612,7 @@ function offerFor(input: {
       model: giftCardModel(req),
       quantity: 1,
       attributes: {
+        groupId: input.intent.groupId,
         giftProduct: req.productName,
         reloadlyProductId: String(p.productId),
         country: req.countryCode,
@@ -731,15 +735,21 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     private readonly accountCurrency = ACCOUNT_CURRENCY,
   ) {}
 
-  /** customIdentifier derived from the idempotency key (stable, bounded). */
+  /**
+   * customIdentifier: a fixed-length hash of the FULL idempotency key. Never a
+   * truncation: long keys (bytes32 group ids) must not collide across bookings.
+   */
   static customIdentifier(idempotencyKey: string) {
-    return idempotencyKey.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 60);
+    return `synq-${createHash('sha256').update(`reloadly:${idempotencyKey}`).digest('hex').slice(0, 40)}`;
   }
 
-  private bound(
-    offer: EconomicOffer,
-  ):
-    | { ok: true; ref: GiftCardRef; recipientRef: string; cap: Money }
+  private bound(offer: EconomicOffer):
+    | {
+        ok: true;
+        ref: GiftCardRef;
+        recipient: { groupId: string; recipientRef: string };
+        cap: Money;
+      }
     | { ok: false; reason: string } {
     const ref = parseGiftCardRef(offer.providerRef);
     if (!ref || offer.subject.kind !== 'PRODUCT')
@@ -751,6 +761,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
       a.denominationCents !== String(ref.unitPriceCents) ||
       a.faceCurrency !== ref.recipientCurrency ||
       !a.recipientRef ||
+      !a.groupId ||
       offer.subject.quantity !== 1
     )
       return {
@@ -766,7 +777,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     return {
       ok: true,
       ref,
-      recipientRef: a.recipientRef,
+      recipient: { groupId: a.groupId, recipientRef: a.recipientRef },
       cap: money(
         BigInt(p.base.amount) +
           BigInt(p.fees.amount) +
@@ -785,7 +796,8 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     cap: Money,
     customIdentifier: string,
   ): string | null {
-    if (t.customIdentifier !== null && t.customIdentifier !== customIdentifier)
+    // Exact match only: a transaction without our identifier is never ours.
+    if (t.customIdentifier !== customIdentifier)
       return 'customIdentifier differs';
     if (t.productId !== null && t.productId !== ref.productId)
       return 'product differs';
@@ -811,7 +823,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     ref: GiftCardRef,
     cap: Money,
     customIdentifier: string,
-    recipientRef: string,
+    recipient: { groupId: string; recipientRef: string },
   ): Promise<ProviderBookingOutcome> {
     const bad = this.check(t, ref, cap, customIdentifier);
     if (bad)
@@ -827,7 +839,8 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
             sealer.seal({
               provider: 'reloadly',
               transactionId: t.transactionId,
-              recipientRef,
+              groupId: recipient.groupId,
+              recipientRef: recipient.recipientRef,
               codes,
             }),
           );
@@ -925,7 +938,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     } catch {
       return { status: 'UNKNOWN', reason: 'order response unreadable' };
     }
-    return this.outcome(t, b.ref, b.cap, customIdentifier, b.recipientRef);
+    return this.outcome(t, b.ref, b.cap, customIdentifier, b.recipient);
   }
 
   async find(input: {
@@ -948,13 +961,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
         status: 'UNKNOWN',
         reason: `DUPLICATE_PROVIDER_ORDERS: ${found.map((t) => t.transactionId).join(',')}`,
       };
-    return this.outcome(
-      found[0]!,
-      b.ref,
-      b.cap,
-      customIdentifier,
-      b.recipientRef,
-    );
+    return this.outcome(found[0]!, b.ref, b.cap, customIdentifier, b.recipient);
   }
 
   async cancel() {

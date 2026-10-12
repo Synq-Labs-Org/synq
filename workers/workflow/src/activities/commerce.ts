@@ -23,9 +23,13 @@ import {
   type CheckoutRecipient,
   type CheckoutRoute,
   type PaymentEvidence,
+  type PlacedOrder,
   type ReconcileOutcome,
 } from '@synq/plugin-commerce';
-import type { TreasuryReservationStore } from '@synq/settlement';
+import type {
+  SettlementFabric,
+  TreasuryReservationStore,
+} from '@synq/settlement';
 
 export type CommerceCheckoutResult =
   | {
@@ -116,6 +120,8 @@ export async function executeCommerceCheckout(
     reservations: TreasuryReservationStore;
     resolveRecipient(ref: string, purpose: string): Promise<CheckoutRecipient>;
     now: () => number;
+    /** Settlement Fabric v1.3: testnet-token checkout orders with a submit gate. */
+    fabric?: SettlementFabric;
   },
   input: {
     intentId: string;
@@ -188,13 +194,51 @@ export async function executeCommerceCheckout(
     input.recipientRef,
     `checkout:${input.intentId}`,
   );
-  const placed = await route.place!({
-    offer: input.offer,
-    recipient,
-    idempotencyKey: input.idempotencyKey,
-    maxTotal: cap,
-    maxUnit: convert(input.offer.price.base, cap, input.offer.price.fx),
-  });
+  let fabricOrderId: string | null = null;
+  let gateBlocked: string | null = null;
+  if (deps.fabric && route.mode === 'STABLECOIN_CHECKOUT') {
+    const order = await deps.fabric.openOrder({
+      intentId: input.grant.intentId,
+      groupId: input.grant.groupId,
+      providerId: route.providerId,
+      mode: 'TESTNET',
+      economicEffect: 'TESTNET_TOKENS',
+      idempotencyKey: input.idempotencyKey,
+      amount: cap,
+    });
+    fabricOrderId = order.providerOrderId;
+    const gate = await deps.fabric.submitGate(order.providerOrderId);
+    if (gate.action !== 'SUBMIT')
+      gateBlocked = `prior submit ${gate.order.state}: reconcile at the provider before any retry`;
+  }
+  const placed: PlacedOrder = gateBlocked
+    ? { state: 'UNKNOWN_PROVIDER_OUTCOME', reason: gateBlocked, orderRef: null }
+    : await route.place!({
+        offer: input.offer,
+        recipient,
+        idempotencyKey: input.idempotencyKey,
+        maxTotal: cap,
+        maxUnit: convert(input.offer.price.base, cap, input.offer.price.fx),
+      });
+  if (deps.fabric && fabricOrderId && !gateBlocked) {
+    if (placed.state === 'ORDER_PLACED')
+      await deps.fabric.settleTestnetOrder({
+        providerOrderId: fabricOrderId,
+        providerRefs: {
+          orderRef: placed.orderRef,
+          ...(placed.payment ? { txHash: placed.payment.txHash } : {}),
+        },
+        category: 'MERCHANT_CHECKOUT',
+        providerName: route.providerId,
+        charged: placed.charged,
+      });
+    else if (placed.state === 'FAILED')
+      await deps.fabric.markFailed(fabricOrderId, placed.reason.slice(0, 200));
+    else
+      await deps.fabric.transition(fabricOrderId, 'UNKNOWN_OUTCOME', {
+        reason: placed.reason.slice(0, 200),
+      });
+  }
   const orderRef =
     placed.state === 'ORDER_PLACED'
       ? placed.orderRef
@@ -285,12 +329,18 @@ export type CommerceReconciliation =
  * the order exists but was never paid; anything else stays HELD for recourse.
  */
 export async function reconcileCommerceCheckout(
-  deps: { reservations: TreasuryReservationStore; now: () => number },
+  deps: {
+    reservations: TreasuryReservationStore;
+    now: () => number;
+    fabric?: SettlementFabric;
+  },
   input: {
     route: CheckoutRoute;
     reservationId: string;
     orderRef: string | null;
     paymentBroadcast: boolean;
+    /** With a fabric: the checkout's idempotency key, to move its order out of UNKNOWN_OUTCOME. */
+    idempotencyKey?: string;
     since: number;
   },
 ): Promise<CommerceReconciliation> {
@@ -324,6 +374,13 @@ export async function reconcileCommerceCheckout(
     if (await deps.reservations.get(edge)) ids.push(edge);
     for (const id of ids)
       await deps.reservations.releaseHeld(id, reason, deps.now());
+    if (deps.fabric && input.idempotencyKey) {
+      const o = await deps.fabric.store.findOrder(
+        input.route.providerId,
+        input.idempotencyKey,
+      );
+      if (o) await deps.fabric.markFailed(o.providerOrderId, reason);
+    }
     return { status: 'RELEASED', reason };
   }
   return { status: 'STILL_HELD', outcome };

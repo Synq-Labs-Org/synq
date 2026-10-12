@@ -267,13 +267,15 @@ export class LithicSandboxClient {
   }): Promise<{ card: LithicCard; secret: CardSecret | null }> {
     if (!Number.isInteger(input.spendLimitCents) || input.spendLimitCents <= 0)
       throw new LithicError(0, 'spend limit must be positive cents');
+    // Never truncate: the memo is the reconcile key and must match exactly.
+    if (input.memo.length > 120) throw new LithicError(0, 'memo too long');
     return toCard(
       await this.ok(
         'POST',
         '/cards',
         {
           type: 'VIRTUAL',
-          memo: input.memo.slice(0, 120),
+          memo: input.memo,
           spend_limit: input.spendLimitCents,
           spend_limit_duration: input.duration,
           state: 'OPEN',
@@ -484,7 +486,10 @@ export function lithicIdempotencyKey(key: string): string {
   const variant = ((parseInt(h[16]!, 16) & 0x3) | 0x8).toString(16);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
-const memoFor = (idempotencyKey: string) => `synq:${idempotencyKey}`;
+/** Fixed-length memo from the FULL idempotency key, matched exactly on reconcile. */
+export const lithicCardMemo = (idempotencyKey: string) =>
+  `synq:${createHash('sha256').update(`lithic-memo:${idempotencyKey}`).digest('hex').slice(0, 40)}`;
+const memoFor = lithicCardMemo;
 export const lithicMerchantRef = (descriptor: string) =>
   `lithic-merchant:${descriptor}`;
 const descriptorOf = (offer: EconomicOffer) => {

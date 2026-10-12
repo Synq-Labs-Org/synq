@@ -102,7 +102,7 @@ async function main() {
     settlementFabricCapabilities(process.env),
   );
   const gate = new RealMoneyGate(process.env);
-  const gateDecision = gate.authorize({
+  const gateDecision = await gate.authorize({
     mode: 'MAINNET_READ_ONLY',
     invoiceId: 'none',
     amountMinor: 1_000n,

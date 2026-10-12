@@ -53,7 +53,7 @@ afterAll(async () => {
   await env?.teardown();
 });
 
-async function giftWorld() {
+async function giftWorld(groupId = 'group-1') {
   const fake = new FakeReloadly();
   const client = new ReloadlyClient(
     {
@@ -73,7 +73,7 @@ async function giftWorld() {
     keys,
     now,
   ).put({
-    groupId: 'group-1',
+    groupId,
     kind: 'RECIPIENT',
     data: {
       name: 'Bea Recipient',
@@ -89,7 +89,7 @@ async function giftWorld() {
   const port = new ReloadlyGiftCardPort(client, sealer);
   const credsEnv = { RELOADLY_CLIENT_ID: 'x', RELOADLY_CLIENT_SECRET: 'y' };
   const world = await fabricBookingWorld({
-    groupId: 'group-1',
+    groupId,
     mandateId: 'gift-mandate',
     providerId: RELOADLY,
     host: RELOADLY_SANDBOX_HOST,
@@ -113,7 +113,7 @@ async function giftWorld() {
   });
   const intent = EconomicIntentSchema.parse({
     id: `gift-${process.pid}-${Math.random().toString(36).slice(2, 8)}`,
-    groupId: 'group-1',
+    groupId,
     domain: 'COMMERCE',
     objective: 'buy a $10 gift card',
     subject: giftCardSubject({
@@ -165,7 +165,7 @@ async function candidates(
 
 async function run(
   activities: Parameters<typeof withWorkers>[2],
-  input: Record<string, unknown>,
+  input: Record<string, unknown> & { groupId?: string },
   approve = ['alice', 'bob'],
 ) {
   const config = testConfig('fabric');
@@ -175,7 +175,7 @@ async function run(
       workflowId: `fabric-${input.bookingId}-${process.pid}`,
       args: [
         {
-          groupId: 'group-1',
+          groupId: input.groupId ?? 'group-1',
           travelerRefs: [],
           approvalTimeoutSeconds: 30,
           reconcileIntervalSeconds: 1,
@@ -419,5 +419,37 @@ describe('v1.3 settlement fabric through the Temporal booking workflow', () => {
       (await world.reservations.free('group-1', USDC.canonicalAssetId)).held,
     ).toBe('0');
     expect(JSON.stringify(s)).not.toContain(card.pan as string);
+  });
+
+  it('WF-FAB-005 two gift bookings in a bytes32 group place two orders and seal each code to its own recipient', async () => {
+    const G = `0x${'8241ac62'.repeat(8)}`;
+    const g = await giftWorld(G);
+    const graph = new ProviderCapabilityGraph([
+      reloadlyProviderCapability(g.credsEnv),
+    ]);
+    const states: BookingWorkflowState[] = [];
+    for (const suffix of ['a', 'b']) {
+      const intent = EconomicIntentSchema.parse({
+        ...g.intent,
+        id: `${g.intent.id}-${suffix}`,
+      });
+      states.push(
+        await run(g.world.activities, {
+          groupId: G,
+          bookingId: `gift-${process.pid}-${suffix}-bytes32`,
+          mandateId: 'gift-mandate',
+          intent,
+          candidates: await candidates(intent, g.provider, graph),
+          approvedMax: usd(2_500),
+        }),
+      );
+    }
+    expect(states.map((s) => s.state)).toEqual(['RECONCILED', 'RECONCILED']);
+    expect(g.fake.orders).toHaveLength(2);
+    expect(states[0]!.providerRef).not.toBe(states[1]!.providerRef);
+    expect(new Set(g.fake.orders.map((o) => o.customIdentifier)).size).toBe(2);
+    expect(
+      [...g.profiles.records.values()].filter((r) => r.kind === 'GIFT_CODE'),
+    ).toHaveLength(2);
   });
 });

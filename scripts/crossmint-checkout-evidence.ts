@@ -634,6 +634,10 @@ async function main() {
       apiKey: env.CROSSMINT_API_KEY,
       environment: env.CROSSMINT_ENV,
       chain: CHAIN,
+      paymentRecipients: (env.CROSSMINT_PAYMENT_RECIPIENTS ?? '')
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean),
     },
     realFetch,
     payer,

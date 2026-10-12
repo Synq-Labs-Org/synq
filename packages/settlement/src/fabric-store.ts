@@ -43,6 +43,19 @@ export interface SettlementFabricStore {
   appendLedger(e: LedgerEntry): Promise<LedgerEntry>;
   ledgerTotals(groupId: string): Promise<LedgerTotals>;
   putRefund(r: SettlementRefundRecord): Promise<SettlementRefundRecord>;
+  /**
+   * Atomically: an existing refund id must carry the same record (any ledger
+   * difference is a conflict); otherwise the same-ledger total for the order
+   * plus this amount must stay within `cap`, then the record is inserted.
+   */
+  putRefundCapped(
+    r: SettlementRefundRecord,
+    cap: bigint,
+  ): Promise<SettlementRefundRecord>;
+  markRefundCredited(
+    refundId: string,
+    credited: boolean,
+  ): Promise<SettlementRefundRecord>;
   listRefunds(providerOrderId: string): Promise<SettlementRefundRecord[]>;
   putReceipt(r: SettlementReceipt): Promise<SettlementReceipt>;
   getReceipt(receiptId: string): Promise<SettlementReceipt | null>;
@@ -50,6 +63,12 @@ export interface SettlementFabricStore {
 
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a) === JSON.stringify(b);
+
+const sameRefund = (a: SettlementRefundRecord, b: SettlementRefundRecord) =>
+  same(
+    { ...a, at: 0, treasuryCredit: false },
+    { ...b, at: 0, treasuryCredit: false },
+  );
 
 function sameEntry(a: LedgerEntry, b: LedgerEntry) {
   const { at: _a, ...x } = a;
@@ -152,6 +171,38 @@ export class MemorySettlementFabricStore implements SettlementFabricStore {
     return [...this.refunds.values()].filter(
       (r) => r.providerOrderId === orderId,
     );
+  }
+  // No await between check and insert: atomic on the JS event loop.
+  async putRefundCapped(raw: SettlementRefundRecord, cap: bigint) {
+    const r = SettlementRefundRecordSchema.parse(raw);
+    if (!this.orders.has(r.providerOrderId))
+      throw new SettlementFabricError('NOT_FOUND', r.providerOrderId);
+    const prior = this.refunds.get(r.refundId);
+    if (prior) {
+      if (!sameRefund(prior, r))
+        throw new SettlementFabricError('RECORD_CONFLICT', r.refundId);
+      return prior;
+    }
+    let sum = 0n;
+    for (const f of this.refunds.values())
+      if (f.providerOrderId === r.providerOrderId && f.ledger === r.ledger)
+        sum += BigInt(f.amount.amount);
+    if (sum + BigInt(r.amount.amount) > cap)
+      throw new SettlementFabricError('REFUND_EXCEEDS_ORDER');
+    this.refunds.set(r.refundId, r);
+    return r;
+  }
+  async markRefundCredited(refundId: string, credited: boolean) {
+    const r = this.refunds.get(refundId);
+    if (!r) throw new SettlementFabricError('NOT_FOUND', refundId);
+    if (credited && r.ledger !== 'CONFIRMED_REFUND')
+      throw new SettlementFabricError(
+        'RECORD_CONFLICT',
+        'credit needs CONFIRMED',
+      );
+    const next = { ...r, treasuryCredit: credited };
+    this.refunds.set(refundId, next);
+    return next;
   }
   async putReceipt(raw: SettlementReceipt) {
     const r = SettlementReceiptSchema.parse(raw);
@@ -378,6 +429,58 @@ export class PostgresSettlementFabricStore implements SettlementFabricStore {
     if (!same({ ...prior, at: 0 }, { ...f, at: 0 }))
       throw new SettlementFabricError('RECORD_CONFLICT', f.refundId);
     return prior;
+  }
+  async putRefundCapped(raw: SettlementRefundRecord, cap: bigint) {
+    const f = SettlementRefundRecordSchema.parse(raw);
+    return this.tx(async (c) => {
+      const o = await c.query(
+        `SELECT 1 FROM ${this.s}.synq_settle_orders WHERE provider_order_id=$1 FOR UPDATE`,
+        [f.providerOrderId],
+      );
+      if (!o.rows.length)
+        throw new SettlementFabricError('NOT_FOUND', f.providerOrderId);
+      const prior = await c.query(
+        `SELECT data FROM ${this.s}.synq_settle_refunds WHERE refund_id=$1`,
+        [f.refundId],
+      );
+      if (prior.rows[0]) {
+        const p = SettlementRefundRecordSchema.parse(prior.rows[0].data);
+        if (!sameRefund(p, f))
+          throw new SettlementFabricError('RECORD_CONFLICT', f.refundId);
+        return p;
+      }
+      const sum = await c.query(
+        `SELECT COALESCE(SUM((data->'amount'->>'amount')::numeric),0)::text AS s
+         FROM ${this.s}.synq_settle_refunds WHERE provider_order_id=$1 AND ledger=$2`,
+        [f.providerOrderId, f.ledger],
+      );
+      if (BigInt(sum.rows[0]!.s as string) + BigInt(f.amount.amount) > cap)
+        throw new SettlementFabricError('REFUND_EXCEEDS_ORDER');
+      await c.query(
+        `INSERT INTO ${this.s}.synq_settle_refunds (refund_id, provider_order_id, ledger, mode, onchain, treasury_credit, data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          f.refundId,
+          f.providerOrderId,
+          f.ledger,
+          f.mode,
+          f.onchain !== null,
+          f.treasuryCredit,
+          JSON.stringify(f),
+        ],
+      );
+      return f;
+    });
+  }
+  async markRefundCredited(refundId: string, credited: boolean) {
+    const r = await this.pool.query(
+      `UPDATE ${this.s}.synq_settle_refunds SET treasury_credit=$2,
+         data = jsonb_set(data, '{treasuryCredit}', to_jsonb($2::boolean))
+       WHERE refund_id=$1 RETURNING data`,
+      [refundId, credited],
+    );
+    if (!r.rows[0]) throw new SettlementFabricError('NOT_FOUND', refundId);
+    return SettlementRefundRecordSchema.parse(r.rows[0].data);
   }
   async listRefunds(orderId: string) {
     const r = await this.pool.query(

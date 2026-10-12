@@ -263,46 +263,69 @@ export function validateBitrefillPurchase(
   };
 }
 
-/** A human approval of one specific real-money payment, capped. */
+/**
+ * A reference to an approval that already exists in Synq's authority layer:
+ * a Kernel economic grant or a Mera passkey approval. The gate never trusts
+ * the caller's description of it; it asks the verifier.
+ */
 export type RealMoneyApproval = {
   approvalId: string;
+  reference: { kind: 'KERNEL_GRANT' | 'MERA_APPROVAL'; id: string };
   invoiceId: string;
-  approvedBy: string;
-  humanVerified: boolean;
   capMinor: bigint;
   currency: string;
   expiresAt: number;
 };
+
+/**
+ * Verifies an approval reference against the authority that issued it and
+ * the exact payment it must cover (e.g. EconomicGrantAuthority.verify, or the
+ * identity ledger for a Mera approval). Single use is the verifier's job too.
+ */
+export interface RealMoneyApprovalVerifier {
+  verifyAndConsume(input: {
+    reference: RealMoneyApproval['reference'];
+    invoiceId: string;
+    amountMinor: bigint;
+    currency: string;
+    now: number;
+  }): Promise<boolean>;
+}
+export const DENY_ALL_APPROVALS: RealMoneyApprovalVerifier = {
+  verifyAndConsume: async () => false,
+};
+
 export type RealMoneyDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 
 /**
  * Default-deny real-money gate: REAL_MONEY_APPROVAL_REQUIRED mode, the
- * mainnet broadcast flag, and a single-use, unexpired, human-verified
- * approval for exactly this invoice with a cap at or above the amount.
+ * mainnet broadcast flag, an unexpired approval for exactly this invoice with
+ * a cap at or above the amount, and a reference the verifier confirms and
+ * consumes. There is no self-asserted "human verified" input.
  */
 export class RealMoneyGate {
   private readonly used = new Set<string>();
   constructor(
     private readonly env: Readonly<Record<string, string | undefined>>,
+    private readonly verifier: RealMoneyApprovalVerifier = DENY_ALL_APPROVALS,
   ) {}
-  authorize(input: {
+  async authorize(input: {
     mode: string;
     invoiceId: string;
     amountMinor: bigint;
     currency: string;
     approval: RealMoneyApproval | null;
     now: number;
-  }): RealMoneyDecision {
+  }): Promise<RealMoneyDecision> {
     const deny = (reason: string) => ({ allowed: false as const, reason });
     if (input.mode !== 'REAL_MONEY_APPROVAL_REQUIRED')
       return deny('mode is not REAL_MONEY_APPROVAL_REQUIRED');
     if (this.env.SYNQ_ALLOW_MAINNET_BROADCAST !== 'true')
       return deny('SYNQ_ALLOW_MAINNET_BROADCAST is not true');
     const a = input.approval;
-    if (!a) return deny('no human approval');
-    if (!a.humanVerified) return deny('approval not human-verified');
+    if (!a) return deny('no approval');
     if (a.invoiceId !== input.invoiceId)
       return deny('approval is for another invoice');
     if (a.currency !== input.currency) return deny('approval currency differs');
@@ -310,6 +333,19 @@ export class RealMoneyGate {
       return deny('amount above the approved cap');
     if (a.expiresAt <= input.now) return deny('approval expired');
     if (this.used.has(a.approvalId)) return deny('approval already used');
+    let ok = false;
+    try {
+      ok = await this.verifier.verifyAndConsume({
+        reference: a.reference,
+        invoiceId: input.invoiceId,
+        amountMinor: input.amountMinor,
+        currency: input.currency,
+        now: input.now,
+      });
+    } catch {
+      ok = false;
+    }
+    if (!ok) return deny('approval reference not verified by the authority');
     this.used.add(a.approvalId);
     return { allowed: true };
   }
@@ -491,7 +527,7 @@ export class BitrefillClient {
     approval: RealMoneyApproval | null;
     now: number;
   }): Promise<never> {
-    const d = input.gate.authorize(input);
+    const d = await input.gate.authorize(input);
     if (!d.allowed)
       throw new BitrefillError(0, `REAL_MONEY_DENIED: ${d.reason}`);
     throw new BitrefillError(

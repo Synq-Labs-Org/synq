@@ -409,6 +409,17 @@ export function createBookingActivities(
       try {
         const found = await port.find({ offer, idempotencyKey });
         if (!found) return { status: 'ABSENT' };
+        if (found.status === 'FAILED' && deps.fabric && port.settlement) {
+          const o = await deps.fabric.store.findOrder(
+            port.providerId,
+            idempotencyKey,
+          );
+          if (o)
+            await deps.fabric.markFailed(
+              o.providerOrderId,
+              clean(found.reason),
+            );
+        }
         if (found.status === 'FAILED' || found.status === 'UNKNOWN')
           return { status: 'UNKNOWN', reason: clean(found.reason) };
         return found;

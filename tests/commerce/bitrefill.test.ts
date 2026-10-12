@@ -220,9 +220,8 @@ describe('Bitrefill read-only adapter', () => {
     const c = new BitrefillClient({ kind: 'PERSONAL', apiKey: 'k' }, f.fetch);
     const approval: RealMoneyApproval = {
       approvalId: 'a1',
+      reference: { kind: 'KERNEL_GRANT', id: '0xgrant' },
       invoiceId: 'inv-1',
-      approvedBy: 'human:alice',
-      humanVerified: true,
       capMinor: 1_200n,
       currency: 'USD',
       expiresAt: 2_000,
@@ -235,48 +234,93 @@ describe('Bitrefill read-only adapter', () => {
       now: 1_000,
     };
     const before = f.calls.length;
-    const denied = new RealMoneyGate({});
+    const flagOff = new RealMoneyGate({});
     await expect(
       c.payInvoice({
-        gate: denied,
+        gate: flagOff,
         mode: 'REAL_MONEY_APPROVAL_REQUIRED',
         ...base,
       }),
     ).rejects.toThrow(/REAL_MONEY_DENIED: SYNQ_ALLOW_MAINNET_BROADCAST/);
-    const g = new RealMoneyGate({ SYNQ_ALLOW_MAINNET_BROADCAST: 'true' });
-    expect(g.authorize({ mode: 'PROVIDER_SANDBOX', ...base }).allowed).toBe(
-      false,
-    );
+    const env = { SYNQ_ALLOW_MAINNET_BROADCAST: 'true' };
+    // Default verifier denies everything: a well-formed approval is not enough.
+    const defaultGate = new RealMoneyGate(env);
     expect(
-      g.authorize({
+      await defaultGate.authorize({
         mode: 'REAL_MONEY_APPROVAL_REQUIRED',
         ...base,
-        approval: null,
-      }).allowed,
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: 'approval reference not verified by the authority',
+    });
+    const seen: unknown[] = [];
+    const verifier = {
+      verifyAndConsume: async (i: unknown) => {
+        seen.push(i);
+        return true;
+      },
+    };
+    const g = new RealMoneyGate(env, verifier);
+    expect(
+      (await g.authorize({ mode: 'PROVIDER_SANDBOX', ...base })).allowed,
     ).toBe(false);
     expect(
-      g.authorize({
-        mode: 'REAL_MONEY_APPROVAL_REQUIRED',
-        ...base,
-        amountMinor: 1_201n,
-      }).allowed,
+      (
+        await g.authorize({
+          mode: 'REAL_MONEY_APPROVAL_REQUIRED',
+          ...base,
+          approval: null,
+        })
+      ).allowed,
     ).toBe(false);
     expect(
-      g.authorize({ mode: 'REAL_MONEY_APPROVAL_REQUIRED', ...base, now: 2_000 })
-        .allowed,
+      (
+        await g.authorize({
+          mode: 'REAL_MONEY_APPROVAL_REQUIRED',
+          ...base,
+          amountMinor: 1_201n,
+        })
+      ).allowed,
     ).toBe(false);
     expect(
-      g.authorize({
-        mode: 'REAL_MONEY_APPROVAL_REQUIRED',
-        ...base,
-        approval: { ...approval, humanVerified: false },
-      }).allowed,
+      (
+        await g.authorize({
+          mode: 'REAL_MONEY_APPROVAL_REQUIRED',
+          ...base,
+          now: 2_000,
+        })
+      ).allowed,
+    ).toBe(false);
+    expect(seen).toHaveLength(0);
+    const throwing = new RealMoneyGate(env, {
+      verifyAndConsume: async () => {
+        throw new Error('ledger down');
+      },
+    });
+    expect(
+      (
+        await throwing.authorize({
+          mode: 'REAL_MONEY_APPROVAL_REQUIRED',
+          ...base,
+        })
+      ).allowed,
     ).toBe(false);
     await expect(
       c.payInvoice({ gate: g, mode: 'REAL_MONEY_APPROVAL_REQUIRED', ...base }),
     ).rejects.toThrow(/NO_BROADCAST_PATH/);
+    expect(seen).toEqual([
+      {
+        reference: { kind: 'KERNEL_GRANT', id: '0xgrant' },
+        invoiceId: 'inv-1',
+        amountMinor: 1_000n,
+        currency: 'USD',
+        now: 1_000,
+      },
+    ]);
     expect(
-      g.authorize({ mode: 'REAL_MONEY_APPROVAL_REQUIRED', ...base }).allowed,
+      (await g.authorize({ mode: 'REAL_MONEY_APPROVAL_REQUIRED', ...base }))
+        .allowed,
     ).toBe(false);
     expect(f.calls.length).toBe(before);
   });
@@ -289,6 +333,8 @@ describe('Bitrefill read-only adapter', () => {
     });
     const cm = caps.find((c) => c.providerId === 'crossmint')!;
     expect(cm.category).toBe('MERCHANT_CHECKOUT');
+    expect(cm.mode).toBe('TESTNET');
+    expect(cm.economicEffect).toBe('TESTNET_TOKENS');
     expect(cm.health).toBe('DOWN');
     expect(cm.statusReason).toMatch(/BLOCKED_EXTERNAL/);
     const prod = settlementFabricCapabilities({
