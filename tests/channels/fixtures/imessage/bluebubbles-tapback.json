@@ -1,0 +1,15 @@
+{
+  "type": "new-message",
+  "data": {
+    "guid": "8F0C2A4E-1D3B-4C55-9A61-0B7E2D9C1A05",
+    "text": "Loved “/balance”",
+    "handle": { "address": "+15550100002" },
+    "chats": [{ "guid": "iMessage;+;chat123456789012345678" }],
+    "attachments": [],
+    "dateCreated": 1800000000000,
+    "isFromMe": false,
+    "associatedMessageGuid": "p:0/8F0C2A4E-1D3B-4C55-9A61-0B7E2D9C1A01",
+    "associatedMessageType": 2000,
+    "threadOriginatorGuid": null
+  }
+}

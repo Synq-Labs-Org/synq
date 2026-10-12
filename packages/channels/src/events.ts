@@ -1,6 +1,12 @@
 import { z } from 'zod';
+import type { InteractiveCard } from '@synq/schemas';
 
-export const CHANNEL_IDS = ['telegram', 'linq', 'whatsapp'] as const;
+export const CHANNEL_IDS = [
+  'telegram',
+  'linq',
+  'whatsapp',
+  'imessage',
+] as const;
 export const ChannelIdSchema = z.enum(CHANNEL_IDS);
 export type ChannelId = z.output<typeof ChannelIdSchema>;
 
@@ -28,6 +34,7 @@ export const VerifiedSenderSchema = z.strictObject({
     'WEBHOOK_SECRET_TOKEN',
     'WEBHOOK_HMAC',
     'BOT_API_POLL',
+    'IMESSAGE_BRIDGE',
     'FIXTURE',
   ]),
   providerUserId: ExternalIdSchema.nullable(),
@@ -110,9 +117,14 @@ export type ChannelEvent = z.output<typeof ChannelEventSchema>;
 export type ChannelEventType = ChannelEvent['type'];
 
 export type OutboundButton = { label: string; url: string };
+/** A provider callback button; it may refresh read-only state, never approve. */
+export type OutboundCallback = { label: string; data: string };
 export type OutboundMessage = {
   text: string;
   buttons?: readonly OutboundButton[];
+  callbacks?: readonly OutboundCallback[];
+  /** The canonical card this message renders, for adapters with richer surfaces. */
+  card?: InteractiveCard;
   replyTo?: string | null;
   idempotencyKey?: string;
 };

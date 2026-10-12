@@ -1,0 +1,21 @@
+{
+  "type": "message.upserted",
+  "seq": 41,
+  "ts": 1800000000000,
+  "chatID": "!imsgchat123:beeper.local",
+  "ids": ["msg_0001"],
+  "entries": [
+    {
+      "id": "msg_0001",
+      "chatID": "!imsgchat123:beeper.local",
+      "accountID": "imessage",
+      "senderID": "+15550100002",
+      "senderName": "Bob",
+      "timestamp": "2027-01-15T08:00:00.000Z",
+      "sortKey": "41",
+      "text": "@synq what is our balance?",
+      "isSender": false,
+      "attachments": []
+    }
+  ]
+}

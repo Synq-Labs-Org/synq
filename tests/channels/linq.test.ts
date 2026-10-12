@@ -245,6 +245,7 @@ describe('channel capabilities', () => {
     expect(caps.map((c) => [c.channel, c.status])).toEqual([
       ['telegram', 'AVAILABLE'],
       ['linq', 'CREDENTIALS_MISSING'],
+      ['imessage', 'CREDENTIALS_MISSING'],
       ['whatsapp', 'UNAVAILABLE'],
     ]);
     expect(await new WhatsAppAdapter().send().catch((e) => e.code)).toBe(

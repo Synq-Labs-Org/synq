@@ -2,8 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   TELEGRAM_SECRET_HEADER,
+  webhookTokenMatches,
   channelCapabilities,
   type ChannelGateway,
+  type IMessageBridge,
+  type IMessageTransport,
   type LinqV3Adapter,
   type TelegramAdapter,
 } from '@synq/channels';
@@ -25,6 +28,12 @@ export type ChannelRouteDeps = {
     verify(raw: unknown, nowSeconds: number): string | null;
   };
   env?: Readonly<Record<string, string | undefined>>;
+  /** Local iMessage bridge (BlueBubbles pushes webhooks to the API on the same Mac). */
+  imessage?: {
+    bridge: IMessageBridge;
+    transport: IMessageTransport;
+    webhookToken: string | null;
+  };
 };
 
 const CodeSchema = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/);
@@ -95,6 +104,19 @@ export async function channelRoutes(
     return reply.code(200).send({ ok: true, outcomes });
   });
 
+  api.post('/v1/channels/imessage/webhook/:token', async (request, reply) => {
+    const im = deps.imessage;
+    const token = (request.params as { token?: string }).token ?? '';
+    if (!im?.webhookToken)
+      return reply.code(404).send({ error: 'CHANNEL_NOT_CONFIGURED' });
+    if (!webhookTokenMatches(im.webhookToken, token))
+      return reply.code(401).send({ error: 'WEBHOOK_TOKEN_INVALID' });
+    const outcomes = [];
+    for (const m of im.transport.parseEvent(json(request.body)))
+      outcomes.push((await im.bridge.ingest(m, 'WEBHOOK')).status);
+    return reply.code(200).send({ ok: true, outcomes });
+  });
+
   api.get('/v1/channels/links/:code', async (request, reply) => {
     const parsed = z
       .strictObject({ code: CodeSchema })
@@ -155,7 +177,7 @@ export async function channelRoutes(
     const body = z
       .strictObject({
         groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-        channel: z.enum(['telegram', 'linq']),
+        channel: z.enum(['telegram', 'linq', 'imessage']),
         externalGroupId: z.string().min(1).max(200),
       })
       .safeParse(json(request.body));
@@ -176,6 +198,64 @@ export async function channelRoutes(
     return reply
       .code(outcome === 'UNLINKED' ? 200 : outcome === 'NOT_LINKED' ? 404 : 403)
       .send(outcome === 'UNLINKED' ? { status: outcome } : { error: outcome });
+  });
+
+  const CardLinkSchema = z.strictObject({
+    proposalId: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/),
+    groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+    nonce: z.string().min(1).max(200),
+  });
+  const CARD_STATUS: Record<string, number> = {
+    OK: 200,
+    NOT_PENDING: 200,
+    CARDS_DISABLED: 404,
+    LINK_MALFORMED: 400,
+    LINK_INVALID: 403,
+    LINK_EXPIRED: 410,
+    NOT_A_MEMBER: 403,
+    PROPOSAL_NOT_FOUND: 404,
+  };
+  /** A tapped card link: member-authenticated, group-bound, canonical read; never an approval. */
+  api.post('/v1/cards/resolve', async (request, reply) => {
+    const body = CardLinkSchema.safeParse(json(request.body));
+    if (!body.success)
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const header = request.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const groupId = body.data.groupId.toLowerCase();
+    const session = token ? await deps.memberSession(token, groupId) : null;
+    if (!session)
+      return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
+    const outcome = await deps.gateway.resolveCardLink({
+      proposalId: body.data.proposalId,
+      groupId,
+      nonce: body.data.nonce,
+      principalId: session.principalId,
+    });
+    const code = CARD_STATUS[outcome.status] ?? 403;
+    return reply
+      .code(code)
+      .send(code === 200 ? outcome : { error: outcome.status });
+  });
+
+  api.get('/v1/cards/status', async (request, reply) => {
+    const q = request.query as Record<string, string | undefined>;
+    const parsed = CardLinkSchema.safeParse({
+      proposalId: q.p,
+      groupId: q.g,
+      nonce: q.n,
+    });
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const outcome = await deps.gateway.cardLinkStatus({
+      ...parsed.data,
+      groupId: parsed.data.groupId.toLowerCase(),
+    });
+    const code = CARD_STATUS[outcome.status] ?? 403;
+    return reply
+      .code(code)
+      .header('cache-control', 'no-store')
+      .send(code === 200 ? outcome : { error: outcome.status });
   });
 
   api.get('/v1/channels/capabilities', async () =>

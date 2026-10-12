@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  CardLinkIssuer,
   ChannelGateway,
+  IMessageBridge,
+  IMessageChannelAdapter,
   LinqV3Adapter,
+  imessageConfigFromEnv,
+  pollAllowlistedChats,
   TelegramAdapter,
   TelegramBotApi,
   type ChannelAdapter,
@@ -41,6 +46,14 @@ const ChannelEnvSchema = z.object({
     .int()
     .min(60)
     .default(86_400),
+  SYNQ_CHANNEL_CARDS: z.enum(['0', '1']).default('1'),
+  SYNQ_CARD_LINK_KEY: z.string().min(32).optional(),
+  SYNQ_CARD_LINK_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(7 * 86_400)
+    .default(43_200),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
 });
 
@@ -75,7 +88,8 @@ export async function registerChannels(input: {
         : 'poll'
       : 'off');
   const linqEnabled = Boolean(env.LINQ_WEBHOOK_SECRET);
-  if (telegramMode === 'off' && !linqEnabled) return null;
+  const imessage = imessageConfigFromEnv(input.env, input.fetch);
+  if (telegramMode === 'off' && !linqEnabled && !imessage) return null;
   const store = new PostgresChannelStore(input.pool);
   await store.migrate();
   const adapters: ChannelAdapter[] = [];
@@ -114,7 +128,23 @@ export async function registerChannels(input: {
       })
     : undefined;
   if (linq) adapters.push(linq);
+  const imessageAdapter = imessage
+    ? new IMessageChannelAdapter({
+        transport: imessage.transport,
+        botHandle: imessage.botHandle,
+      })
+    : undefined;
+  if (imessageAdapter) adapters.push(imessageAdapter);
   const now = () => Math.floor(Date.now() / 1000);
+  const webBaseUrl = env.SYNQ_WEB_BASE_URL ?? input.origin;
+  const cardLinks = env.SYNQ_CARD_LINK_KEY
+    ? new CardLinkIssuer({
+        key: env.SYNQ_CARD_LINK_KEY,
+        webBaseUrl,
+        now,
+        ttlSeconds: env.SYNQ_CARD_LINK_TTL_SECONDS,
+      })
+    : null;
   const gateway = new ChannelGateway({
     store,
     adapters,
@@ -129,9 +159,10 @@ export async function registerChannels(input: {
         ? { mandateProposals: input.mandateProposals }
         : {}),
     }),
-    webBaseUrl: env.SYNQ_WEB_BASE_URL ?? input.origin,
+    webBaseUrl,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,
     now,
+    ...(env.SYNQ_CHANNEL_CARDS === '1' ? { cards: { links: cardLinks } } : {}),
     ...(telegram?.botUsername
       ? { botUsernames: { telegram: telegram.botUsername } }
       : {}),
@@ -150,6 +181,22 @@ export async function registerChannels(input: {
         code: outcome.code,
       }),
   });
+  const bridge =
+    imessage && imessageAdapter
+      ? new IMessageBridge({
+          transport: imessage.transport,
+          adapter: imessageAdapter,
+          gateway,
+          allowedChats: imessage.allowedChats,
+          mentionWords: imessage.mentionWords,
+          log: (message, fields) => input.log(message, fields),
+        })
+      : undefined;
+  if (imessage)
+    input.log('imessage bridge configured', {
+      transport: imessage.transport.name,
+      allowedChats: imessage.allowedChats.length,
+    });
   const memberAccess = input.send.memberAccess;
   await input.app.register(channelRoutes, {
     gateway,
@@ -169,6 +216,15 @@ export async function registerChannels(input: {
         }
       : {}),
     env: input.env,
+    ...(bridge && imessage
+      ? {
+          imessage: {
+            bridge,
+            transport: imessage.transport,
+            webhookToken: imessage.webhookToken,
+          },
+        }
+      : {}),
   });
   const controller = new AbortController();
   const loops: Promise<unknown>[] = [];
@@ -184,6 +240,21 @@ export async function registerChannels(input: {
           }),
       ),
     );
+    if (bridge && imessage) {
+      loops.push(bridge.supervise(controller.signal));
+      if (imessage.transport.name === 'beeper')
+        loops.push(
+          pollAllowlistedChats(
+            bridge,
+            controller.signal,
+            imessage.pollMs,
+            (error) =>
+              input.log('imessage poll error', {
+                error: String(error).slice(0, 200),
+              }),
+          ),
+        );
+    }
     if (telegramMode === 'poll' && telegram)
       loops.push(
         telegram.poll({
@@ -200,5 +271,14 @@ export async function registerChannels(input: {
     controller.abort();
     await Promise.allSettled(loops);
   };
-  return { gateway, store, telegram, linq, telegramMode, start, stop };
+  return {
+    gateway,
+    store,
+    telegram,
+    linq,
+    imessage: bridge,
+    telegramMode,
+    start,
+    stop,
+  };
 }

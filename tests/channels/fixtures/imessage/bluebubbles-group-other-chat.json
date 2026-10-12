@@ -1,0 +1,16 @@
+{
+  "type": "new-message",
+  "data": {
+    "guid": "8F0C2A4E-1D3B-4C55-9A61-0B7E2D9C1A02",
+    "text": "private family conversation that must never be read",
+    "handle": { "address": "+15550100009" },
+    "chats": [
+      { "guid": "iMessage;+;chat999999999999999999", "displayName": "Family" }
+    ],
+    "attachments": [],
+    "dateCreated": 1800000000000,
+    "isFromMe": false,
+    "associatedMessageGuid": null,
+    "threadOriginatorGuid": null
+  }
+}

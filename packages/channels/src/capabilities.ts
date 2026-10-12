@@ -55,6 +55,36 @@ export function channelCapabilities(
         ? null
         : 'LINQ_API_KEY / LINQ_WEBHOOK_SECRET not configured',
     },
+    (() => {
+      const t = env.SYNQ_IMESSAGE_TRANSPORT ?? 'off';
+      const ready =
+        has('SYNQ_IMESSAGE_ALLOWED_CHATS') &&
+        ((t === 'bluebubbles' &&
+          has('BLUEBUBBLES_PASSWORD') &&
+          has('SYNQ_IMESSAGE_WEBHOOK_TOKEN')) ||
+          (t === 'beeper' && has('BEEPER_ACCESS_TOKEN')));
+      return {
+        channel: 'imessage' as const,
+        status: ready
+          ? ('AVAILABLE' as const)
+          : ('CREDENTIALS_MISSING' as const),
+        evidence: 'FIXTURE_ONLY' as const,
+        groupModel:
+          'Existing iMessage group chats on a Mac bridge (BlueBubbles or Beeper Desktop, SIP enabled); only chats listed in SYNQ_IMESSAGE_ALLOWED_CHATS are read',
+        ingress:
+          t === 'beeper' ? ['LOCAL_API_POLL'] : ['WEBHOOK_TOKEN_PLUS_READBACK'],
+        features: [
+          'commands',
+          'mentions',
+          'link-cards',
+          'receipts',
+          'approval-count',
+        ],
+        reason: ready
+          ? null
+          : 'SYNQ_IMESSAGE_TRANSPORT with its credentials and SYNQ_IMESSAGE_ALLOWED_CHATS not configured',
+      };
+    })(),
     {
       channel: 'whatsapp',
       status: 'UNAVAILABLE',

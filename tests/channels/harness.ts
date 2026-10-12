@@ -1,4 +1,5 @@
 import {
+  CardLinkIssuer,
   ChannelDeliveryError,
   ChannelGateway,
   MemoryChannelStore,
@@ -15,6 +16,7 @@ export const GROUP_A = `0x${'a1'.repeat(32)}`;
 export const GROUP_B = `0x${'b2'.repeat(32)}`;
 export const CHAT_A = '-1001';
 export const CHAT_B = '-1002';
+export const CARD_KEY = 'card-link-test-key-0123456789abcdef';
 
 export class FakeAdapter implements ChannelAdapter {
   readonly channel = 'telegram' as const;
@@ -51,6 +53,7 @@ export function fixture(
     chatLinkQuorum?: number;
     requireChatAdmin?: boolean;
     pendingLinkTtlSeconds?: number;
+    cards?: boolean;
   } = {},
 ) {
   const clock = { t: now };
@@ -113,6 +116,18 @@ export function fixture(
     requireChatAdmin: { telegram: options.requireChatAdmin ?? false },
     ...(options.pendingLinkTtlSeconds
       ? { pendingLinkTtlSeconds: options.pendingLinkTtlSeconds }
+      : {}),
+    ...(options.cards
+      ? {
+          cards: {
+            links: new CardLinkIssuer({
+              key: CARD_KEY,
+              webBaseUrl: 'https://synq.example',
+              now: () => clock.t,
+              ttlSeconds: 3600,
+            }),
+          },
+        }
       : {}),
     onEvent: (event, o) =>
       events.push({ event, status: o.status, code: o.code }),

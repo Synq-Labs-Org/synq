@@ -171,11 +171,11 @@ export async function rehearseTelegram() {
     await demo.commands.approve('bob', send.intentHash!);
     await waitFor('quorum', (m) => /Quorum reached/.test(m.text));
     const receipt = await waitFor('receipt', (m) =>
-      /^Confirmed on Monad testnet/.test(m.text),
+      /^Confirmed (on Monad testnet|\[REAL_TESTNET\])/.test(m.text),
     );
     log(receipt.text);
     await waitFor('reconciled', (m) =>
-      /^Reconciled on Monad testnet/.test(m.text),
+      /^Reconciled (on Monad testnet|\[REAL_TESTNET\])/.test(m.text),
     );
     const proposal = await demo.commands.proposeMandate('1.5');
     log(`mandate proposal ${proposal.proposalId}`);

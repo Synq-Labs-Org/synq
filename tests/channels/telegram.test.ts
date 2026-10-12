@@ -381,3 +381,35 @@ describe('telegram adapter', () => {
     expect(calls).toHaveLength(4);
   });
 });
+
+describe('telegram card keyboard', () => {
+  it('renders URL buttons and read-only callback buttons, dropping oversized callback data', async () => {
+    const { a, calls } = adapter(() => ({
+      body: { ok: true, result: { message_id: 9 } },
+    }));
+    await a.send('-100', {
+      text: 'Approval needed',
+      buttons: [
+        {
+          label: 'Review and approve',
+          url: 'https://synq.example/approve?p=1',
+        },
+      ],
+      callbacks: [
+        { label: 'Refresh status', data: `r:${'a'.repeat(48)}` },
+        { label: 'too big', data: 'x'.repeat(65) },
+      ],
+    });
+    expect(calls[0]!.body.reply_markup).toEqual({
+      inline_keyboard: [
+        [
+          {
+            text: 'Review and approve',
+            url: 'https://synq.example/approve?p=1',
+          },
+        ],
+        [{ text: 'Refresh status', callback_data: `r:${'a'.repeat(48)}` }],
+      ],
+    });
+  });
+});
