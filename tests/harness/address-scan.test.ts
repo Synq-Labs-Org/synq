@@ -15,6 +15,8 @@ import { trackedFiles } from '../../scripts/secrets.mjs';
 const ALLOWED_PATHS = [
   /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
   /^sources\/chain_registry\.json$/,
+  // Sourced testnet-only provider payment assets (Circle testnet USDC).
+  /^sources\/provider_testnet_assets\.json$/,
   /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
   /^bounty-evidence\//,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
