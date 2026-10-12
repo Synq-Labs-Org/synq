@@ -74,6 +74,7 @@
     "@synq/funding": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/metamask-delegation": "workspace:*",
     "@synq/perpl-executor": "workspace:*",
     "@synq/plugin-perpl": "workspace:*",
     "@synq/plugin-chainlink-cre": "workspace:*",
