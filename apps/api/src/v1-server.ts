@@ -396,19 +396,16 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       workflows: temporalStatus,
     });
     app.get('/v1/world/:groupId', async (request, reply) => {
-      const { groupId } = z
+      const groupId = z
         .object({ groupId: z.string().min(1).max(128) })
-        .parse(request.params);
-      const caller = await callerFor(
-        request.headers.authorization,
-        groupId.toLowerCase(),
-        {
-          adminToken: config.SYNQ_API_ADMIN_TOKEN,
-          ...(registered.ports.memberAccess
-            ? { memberAccess: registered.ports.memberAccess }
-            : {}),
-        },
-      );
+        .parse(request.params)
+        .groupId.toLowerCase();
+      const caller = await callerFor(request.headers.authorization, groupId, {
+        adminToken: config.SYNQ_API_ADMIN_TOKEN,
+        ...(registered.ports.memberAccess
+          ? { memberAccess: registered.ports.memberAccess }
+          : {}),
+      });
       if (!caller) return reply.code(401).send({ error: 'UNAUTHORIZED' });
       const session = await store.transaction((tx) => tx.getGroup(groupId));
       if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
