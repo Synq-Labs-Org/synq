@@ -17,12 +17,11 @@ const ALLOWED_PATHS = [
   /^sources\/chain_registry\.json$/,
   // Sourced testnet-only provider payment assets (Circle testnet USDC).
   /^sources\/provider_testnet_assets\.json$/,
-  /^sources\/research\/2026-10-10-(mastra-temporal-models|kuru-chainlink-cre|perpl-intents-ausd)\.md$/,
   /^bounty-evidence\//,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
-  /^sources\/research\/2026-10-10-(?:perpl-intents-ausd|kuru-chainlink-cre|mastra-temporal-models)\.md$/,
-  /^bounty-evidence\//,
+  // Submission evidence documents cite deployed contracts and explorer-linked transactions.
+  /^submission\/(DEPLOYMENTS|DEMO_EVIDENCE)\.md$/,
   /^adrs\//,
   /^docs\//,
   /(^|\/)README\.md$/,
