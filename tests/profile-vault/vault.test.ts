@@ -1,6 +1,8 @@
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   EnvVaultKeyProvider,
+  GiftCodeVault,
   HmacHumanProofVerifier,
   MemoryProfileStore,
   MerchantAuthBroker,
@@ -298,5 +300,128 @@ describe('MerchantAuthBroker', () => {
         proof: verifier.issue(c, 'human:alice'),
       }),
     ).toBe(false);
+  });
+});
+
+describe('gift code recipient binding (N4)', () => {
+  const codes = [{ cardNumber: 'GC-0001', pinCode: '1234' }];
+  const tagOf = (ref: string) =>
+    `r:${createHash('sha256').update(ref).digest('hex').slice(0, 16)}`;
+  async function sealed() {
+    const store = new MemoryProfileStore();
+    const dir = new ProfileDirectory(store, keys, now);
+    const ann = (
+      await dir.put({ groupId: 'g1', kind: 'RECIPIENT', data: address })
+    ).ref;
+    const ben = (
+      await dir.put({
+        groupId: 'g1',
+        kind: 'RECIPIENT',
+        data: { ...address, name: 'Ben Doe' },
+      })
+    ).ref;
+    const vault = new GiftCodeVault(store, keys, now);
+    const seal = (recipientRef: string) =>
+      vault.seal({
+        provider: 'reloadly',
+        transactionId: 'tx-1',
+        groupId: 'g1',
+        recipientRef,
+        codes,
+      });
+    const { ref } = await seal(ann);
+    const worker = new ProfileDecryptor(store, keys, now, 'delivery-worker');
+    const open = () =>
+      worker.resolve({
+        groupId: 'g1',
+        ref,
+        kind: 'GIFT_CODE',
+        purpose: 'deliver',
+        fields: ['recipientRef'],
+      });
+    return { store, ann, ben, ref, seal, open };
+  }
+
+  it('authenticates the recipient tag: editing or stripping it makes the record tampered', async () => {
+    const w = await sealed();
+    const record = w.store.records.get(w.ref)!;
+    expect(record.binding).toBe(tagOf(w.ann));
+    expect(record.summary.endsWith(record.binding!)).toBe(true);
+    expect(await w.open()).toEqual({ recipientRef: w.ann });
+    const original = structuredClone(record);
+    w.store.records.set(w.ref, { ...original, binding: tagOf(w.ben) });
+    await expect(w.open()).rejects.toThrow(/TAMPERED/);
+    await expect(w.seal(w.ben)).rejects.toThrow(/TAMPERED/);
+    const { binding: _drop, ...stripped } = original;
+    w.store.records.set(w.ref, stripped);
+    await expect(w.open()).rejects.toThrow(/TAMPERED/);
+    w.store.records.set(w.ref, original);
+    expect(await w.open()).toEqual({ recipientRef: w.ann });
+  });
+
+  it('a rewritten summary cannot re-bind a sealed transaction to another recipient', async () => {
+    const w = await sealed();
+    const record = w.store.records.get(w.ref)!;
+    w.store.records.set(w.ref, {
+      ...record,
+      summary: record.summary.replace(record.binding!, tagOf(w.ben)),
+    });
+    await expect(w.seal(w.ben)).rejects.toThrow(/TAMPERED/);
+    expect(await w.seal(w.ann)).toEqual({ ref: w.ref });
+  });
+
+  it('records sealed before the binding existed stay readable', async () => {
+    const w = await sealed();
+    const ref = `gc_${'a'.repeat(40)}`;
+    const keyId = keys.activeKeyId;
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', await keys.dataKey(keyId), iv);
+    cipher.setAAD(Buffer.from(JSON.stringify([ref, 'g1', 'GIFT_CODE', keyId])));
+    const plain = {
+      provider: 'reloadly',
+      transactionId: 'tx-legacy',
+      recipientRef: w.ann,
+      codes,
+    };
+    const ciphertext = Buffer.concat([
+      cipher.update(JSON.stringify(plain), 'utf8'),
+      cipher.final(),
+    ]);
+    await w.store.put({
+      ref,
+      groupId: 'g1',
+      kind: 'GIFT_CODE',
+      keyId,
+      iv: iv.toString('base64'),
+      ciphertext: ciphertext.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      summary: `gift code · reloadly · 1 card(s) · ${tagOf(w.ann)}`,
+      expiresAt: null,
+      createdAt: now(),
+    });
+    const worker = new ProfileDecryptor(w.store, keys, now, 'delivery-worker');
+    expect(
+      await worker.resolve({
+        groupId: 'g1',
+        ref,
+        kind: 'GIFT_CODE',
+        purpose: 'deliver',
+        fields: ['recipientRef', 'transactionId'],
+      }),
+    ).toEqual({ recipientRef: w.ann, transactionId: 'tx-legacy' });
+    // A legacy record that gains a forged binding no longer authenticates.
+    w.store.records.set(ref, {
+      ...w.store.records.get(ref)!,
+      binding: tagOf(w.ann),
+    });
+    await expect(
+      worker.resolve({
+        groupId: 'g1',
+        ref,
+        kind: 'GIFT_CODE',
+        purpose: 'deliver',
+        fields: ['recipientRef'],
+      }),
+    ).rejects.toThrow(/TAMPERED/);
   });
 });

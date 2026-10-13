@@ -106,6 +106,11 @@ export type SealedProfile = {
   summary: string;
   expiresAt: number | null;
   createdAt: number;
+  /**
+   * GIFT_CODE only: the recipient tag, authenticated as AEAD associated data.
+   * Records sealed before it existed omit it and keep the original AAD.
+   */
+  binding?: string;
 };
 
 export interface ProfileStore {
@@ -157,12 +162,47 @@ export class ProfileAccessError extends Error {
   }
 }
 
-const aad = (r: Pick<SealedProfile, 'ref' | 'groupId' | 'kind' | 'keyId'>) =>
-  Buffer.from(JSON.stringify([r.ref, r.groupId, r.kind, r.keyId]));
+const aad = (
+  r: Pick<SealedProfile, 'ref' | 'groupId' | 'kind' | 'keyId' | 'binding'>,
+) =>
+  Buffer.from(
+    JSON.stringify(
+      r.binding === undefined
+        ? [r.ref, r.groupId, r.kind, r.keyId]
+        : [r.ref, r.groupId, r.kind, r.keyId, r.binding],
+    ),
+  );
 
 /** Non-secret tag binding a sealed gift code to exactly one recipient ref. */
 const recipientTag = (recipientRef: string) =>
   `r:${createHash('sha256').update(recipientRef).digest('hex').slice(0, 16)}`;
+
+/** Authenticated decryption; throws on any tampering of ciphertext or AAD. */
+async function open(
+  r: SealedProfile,
+  keys: VaultKeyProvider,
+): Promise<Record<string, unknown>> {
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    await keys.dataKey(r.keyId),
+    Buffer.from(r.iv, 'base64'),
+  );
+  decipher.setAAD(aad(r));
+  decipher.setAuthTag(Buffer.from(r.tag, 'base64'));
+  const plain = JSON.parse(
+    Buffer.concat([
+      decipher.update(Buffer.from(r.ciphertext, 'base64')),
+      decipher.final(),
+    ]).toString('utf8'),
+  ) as Record<string, unknown>;
+  if (
+    r.binding !== undefined &&
+    (r.kind !== 'GIFT_CODE' ||
+      recipientTag(String(plain.recipientRef)) !== r.binding)
+  )
+    throw new Error('PROFILE_BINDING_MISMATCH');
+  return plain;
+}
 
 function summarize(kind: ProfileKind, data: Record<string, unknown>): string {
   if (kind === 'GIFT_CODE')
@@ -204,6 +244,12 @@ export class ProfileDirectory {
       throw new ProfileAccessError('INVALID_PROFILE', 'ref');
     const ref = input.ref ?? `pv_${randomBytes(16).toString('hex')}`;
     const keyId = this.keys.activeKeyId;
+    const binding =
+      input.kind === 'GIFT_CODE'
+        ? recipientTag(
+            String((parsed.data as { recipientRef: string }).recipientRef),
+          )
+        : undefined;
     const iv = randomBytes(12);
     const cipher = createCipheriv(
       'aes-256-gcm',
@@ -211,7 +257,7 @@ export class ProfileDirectory {
       iv,
     );
     cipher.setAAD(
-      aad({ ref, groupId: input.groupId, kind: input.kind, keyId }),
+      aad({ ref, groupId: input.groupId, kind: input.kind, keyId, binding }),
     );
     const ciphertext = Buffer.concat([
       cipher.update(JSON.stringify(parsed.data), 'utf8'),
@@ -232,6 +278,7 @@ export class ProfileDirectory {
       summary,
       expiresAt: input.expiresAt ?? null,
       createdAt: this.now(),
+      ...(binding === undefined ? {} : { binding }),
     });
     return { ref, summary };
   }
@@ -308,19 +355,7 @@ export class ProfileDecryptor {
       throw await deny('FIELD_NOT_ALLOWED', r.kind);
     let plain: Record<string, unknown>;
     try {
-      const decipher = createDecipheriv(
-        'aes-256-gcm',
-        await this.keys.dataKey(r.keyId),
-        Buffer.from(r.iv, 'base64'),
-      );
-      decipher.setAAD(aad(r));
-      decipher.setAuthTag(Buffer.from(r.tag, 'base64'));
-      plain = JSON.parse(
-        Buffer.concat([
-          decipher.update(Buffer.from(r.ciphertext, 'base64')),
-          decipher.final(),
-        ]).toString('utf8'),
-      ) as Record<string, unknown>;
+      plain = await open(r, this.keys);
     } catch {
       throw await deny('TAMPERED', r.kind);
     }
@@ -347,7 +382,7 @@ export class GiftCodeVault {
   private readonly directory: ProfileDirectory;
   constructor(
     private readonly store: ProfileStore,
-    keys: VaultKeyProvider,
+    private readonly keys: VaultKeyProvider,
     now: () => number,
   ) {
     this.directory = new ProfileDirectory(store, keys, now);
@@ -376,9 +411,17 @@ export class GiftCodeVault {
       .slice(0, 40)}`;
     const existing = await this.store.get(ref);
     if (existing) {
+      // The authenticated plaintext decides, never the unauthenticated summary.
+      let sealedFor: unknown;
+      try {
+        sealedFor = (await open(existing, this.keys)).recipientRef;
+      } catch {
+        throw new ProfileAccessError('TAMPERED', 'sealed gift code');
+      }
       if (
+        existing.kind === 'GIFT_CODE' &&
         existing.groupId === input.groupId &&
-        existing.summary.endsWith(recipientTag(input.recipientRef))
+        sealedFor === input.recipientRef
       )
         return { ref };
       throw new ProfileAccessError(
