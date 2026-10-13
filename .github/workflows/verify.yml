@@ -140,6 +140,12 @@ jobs:
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm preflight
       - run: forge build --root contracts
+      - name: Temporal CLI 1.8.3 (dev server for workflow integration tests)
+        run: |
+          curl -fsSLo temporal.tgz https://github.com/temporalio/cli/releases/download/v1.8.3/temporal_cli_1.8.3_linux_amd64.tar.gz
+          echo "6f0afac1e9ddea71f480c43a49f5db5167a244c21db923707f069a79bcabdfea  temporal.tgz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin" && tar -xzf temporal.tgz -C "$HOME/.local/bin" temporal && rm temporal.tgz
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: corepack pnpm infra:up
       - name: Anvil, Postgres and Redis integration
         run: corepack pnpm test:integration
