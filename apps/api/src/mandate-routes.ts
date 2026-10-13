@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { callerFor, mayPropose } from './member-scope.js';
 import type { SendRouteDeps } from './send-routes.js';
+import { TokenBucketLimiter, type RateLimitConfig } from './v1/rate-limit.js';
 import {
   MandateProposalError,
   type MandateProposalService,
@@ -30,15 +31,26 @@ const ProposeBody = z.strictObject({
   change: z.enum(['NEW', 'SUPERSEDE']),
 });
 
-/** Review and owner approval of mandate proposals; creation is operator-only. */
+/** Member proposals: a few per member and a bounded number per group per hour. */
+export const MANDATE_PROPOSAL_RATE_LIMIT = {
+  member: { capacity: 5, refillPerSecond: 5 / 3600 },
+  group: { capacity: 20, refillPerSecond: 20 / 3600 },
+} as const satisfies Record<'member' | 'group', RateLimitConfig>;
+
+/** Review and owner approval of mandate proposals; members propose within rate limits. */
 export async function mandateRoutes(
   api: FastifyInstance,
   deps: {
     service: MandateProposalService;
     adminToken: string | null;
     memberAccess?: SendRouteDeps['memberAccess'];
+    proposalRateLimit?: Record<'member' | 'group', RateLimitConfig>;
+    clockMs?: () => number;
   },
 ) {
+  const limits = deps.proposalRateLimit ?? MANDATE_PROPOSAL_RATE_LIMIT;
+  const perMember = new TokenBucketLimiter(limits.member, deps.clockMs);
+  const perGroup = new TokenBucketLimiter(limits.group, deps.clockMs);
   const admin = (header: string | undefined) => {
     const d = (v: string) => createHash('sha256').update(v).digest();
     return (
@@ -119,6 +131,13 @@ export async function mandateRoutes(
           );
       if (!mayPropose(caller))
         return reply.code(401).send({ error: 'UNAUTHORIZED' });
+      if (
+        caller.kind === 'MEMBER' &&
+        !(perMember.take(caller.principalId) && perGroup.take(caller.groupId))
+      )
+        return reply
+          .code(429)
+          .send({ error: 'RATE_LIMITED', message: 'Too many proposals' });
       const p = await deps.service.propose({
         ...body,
         proposedBy:

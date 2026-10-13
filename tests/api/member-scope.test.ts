@@ -31,7 +31,13 @@ import { sandboxMandate } from '../api/kernel-fixture.js';
 
 const ADMIN = 'operator-admin-token-for-tests-0123456789abcdef';
 
-async function world() {
+async function world(
+  opts: {
+    proposalRateLimit?: Parameters<
+      typeof mandateRoutes
+    >[1]['proposalRateLimit'];
+  } = {},
+) {
   let clock = 5_000;
   const identity = new MemoryIdentityStore();
   const config = {
@@ -177,6 +183,10 @@ async function world() {
     service,
     adminToken: ADMIN,
     memberAccess: access,
+    clockMs: () => clock * 1000,
+    ...(opts.proposalRateLimit
+      ? { proposalRateLimit: opts.proposalRateLimit }
+      : {}),
   });
   await api.ready();
   const v1 = createV1Api({
@@ -391,6 +401,62 @@ describe('member-scoped Synq credentials (H2)', () => {
       const t = await w.token(w.groups[0]!, 'MEMBER_CONTRIBUTE');
       w.tick(301);
       expect((await w.quote(w.groups[0]!, w.alice, t)).statusCode).toBe(401);
+    } finally {
+      await w.close();
+    }
+  });
+
+  it('member proposals are rate limited per member and per group; the operator is not (N6)', async () => {
+    const w = await world();
+    try {
+      const t = await w.token(w.groups[0]!, 'MEMBER_CONTRIBUTE');
+      const post = (bearer: string, groupId = w.groups[0]!) =>
+        w.api.inject({
+          method: 'POST',
+          url: '/v1/mandate-proposals',
+          headers: { authorization: `Bearer ${bearer}` },
+          payload: { groupId, mandate: {}, change: 'NEW' },
+        });
+      for (let i = 0; i < 5; i++)
+        expect((await post(t)).statusCode).not.toBe(429);
+      const limited = await post(t);
+      expect(limited.statusCode).toBe(429);
+      expect(limited.json()).toMatchObject({ error: 'RATE_LIMITED' });
+      expect(w.proposals).toHaveLength(5);
+      // The same principal in another group shares its per-member budget.
+      const other = await w.token(w.groups[1]!, 'MEMBER_CONTRIBUTE');
+      expect((await post(other, w.groups[1]!)).statusCode).toBe(429);
+      expect((await post(ADMIN)).statusCode).not.toBe(429);
+      expect(w.proposals).toHaveLength(6);
+      // Budgets refill with time.
+      w.tick(3600);
+      const fresh = await w.token(w.groups[0]!, 'MEMBER_CONTRIBUTE');
+      expect((await post(fresh)).statusCode).not.toBe(429);
+    } finally {
+      await w.close();
+    }
+  });
+
+  it('a group-wide proposal budget caps every member of the group together', async () => {
+    const w = await world({
+      proposalRateLimit: {
+        member: { capacity: 100, refillPerSecond: 1 },
+        group: { capacity: 2, refillPerSecond: 2 / 3600 },
+      },
+    });
+    try {
+      const t = await w.token(w.groups[0]!, 'MEMBER_CONTRIBUTE');
+      const post = (groupId: string) =>
+        w.api.inject({
+          method: 'POST',
+          url: '/v1/mandate-proposals',
+          headers: { authorization: `Bearer ${t}` },
+          payload: { groupId, mandate: {}, change: 'NEW' },
+        });
+      expect((await post(w.groups[0]!)).statusCode).not.toBe(429);
+      expect((await post(w.groups[0]!)).statusCode).not.toBe(429);
+      expect((await post(w.groups[0]!)).statusCode).toBe(429);
+      expect(w.proposals).toHaveLength(2);
     } finally {
       await w.close();
     }
