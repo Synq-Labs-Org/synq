@@ -1,6 +1,7 @@
 name: verify
 on:
   push:
+    branches-ignore: [deploy]
   pull_request:
 permissions:
   contents: read
@@ -120,3 +121,22 @@ jobs:
       - run: corepack pnpm infra:up
       - name: Anvil, Postgres and Redis integration
         run: corepack pnpm test:integration
+  # Continuous delivery: a green main is fast-forwarded to `deploy`, which the
+  # AWS host polls and builds (scripts/deploy/host-deploy.sh).
+  promote:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [typescript, sast, contracts, integration]
+    permissions:
+      contents: write
+    concurrency:
+      group: promote-deploy
+      cancel-in-progress: false
+    steps:
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Fast-forward deploy to this commit
+        run: git push origin "${GITHUB_SHA}:refs/heads/deploy"

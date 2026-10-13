@@ -1,0 +1,107 @@
+# Synq on one EC2 host (infra/aws/synq.cfn.yaml): Caddy terminates TLS for
+# synqlabs.world, the web app serves pages and proxies /api/v1, and the
+# Telegram service runs the live group bot on Monad testnet.
+#
+# The host builds the images from its checkout of main
+# (scripts/deploy/host-deploy.sh); values come from /opt/synq/.env, written
+# from SSM Parameter Store on every deploy.
+name: synq
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+  caddy:
+    <<: *hardening
+    image: caddy:2.10.2-alpine
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      SYNQ_DOMAIN: ${SYNQ_DOMAIN:?set SYNQ_DOMAIN}
+      SYNQ_ACME_EMAIL: ${SYNQ_ACME_EMAIL:?set SYNQ_ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    mem_limit: 96m
+
+  postgres:
+    <<: *hardening
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=60
+      - -c
+      - work_mem=4MB
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 320m
+
+  bot:
+    <<: *hardening
+    build:
+      context: ..
+      dockerfile: infra/docker/bot.Dockerfile
+    image: synq-bot:current
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SYNQ_TELEGRAM_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/synq_telegram_e2e
+      SYNQ_WEB_BASE_URL: https://${SYNQ_DOMAIN}
+      SYNQ_ALLOW_MAINNET_BROADCAST: 'false'
+      SYNQ_MAINNET_CANARY_MAX_USD: '0'
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      SYNQ_MONAD_TESTNET_RPC_URL: ${SYNQ_MONAD_TESTNET_RPC_URL:-}
+    volumes:
+      - bot-state:/app/.synq-local
+      - bot-evidence:/app/bounty-evidence
+      - /opt/synq/secrets:/run/secrets/synq:ro
+    mem_limit: 900m
+
+  web:
+    <<: *hardening
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        SYNQ_API_ORIGIN: http://bot:3292
+    image: synq-web:current
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/dist/cache:uid=1000,gid=1000
+    depends_on:
+      - bot
+    mem_limit: 256m
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres:
+  bot-state:
+  bot-evidence:

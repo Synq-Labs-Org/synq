@@ -1,0 +1,29 @@
+# TLS certificates are issued automatically (Let's Encrypt) once DNS points here.
+{
+	email {$SYNQ_ACME_EMAIL}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+{$SYNQ_DOMAIN} {
+	import common
+	reverse_proxy web:3100
+}
+
+www.{$SYNQ_DOMAIN} {
+	redir https://{$SYNQ_DOMAIN}{uri} permanent
+}
+
+# The API directly (health, provider webhooks); browser traffic uses /api/v1 on the main site.
+api.{$SYNQ_DOMAIN} {
+	import common
+	reverse_proxy bot:3292
+}

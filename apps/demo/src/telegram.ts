@@ -656,7 +656,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     };
     await app.listen({
       port: Number(process.env.SYNQ_API_PORT ?? 3200),
-      host: '127.0.0.1',
+      // Loopback by default; the container sets 0.0.0.0 behind the reverse proxy.
+      host: process.env.SYNQ_API_HOST ?? '127.0.0.1',
     });
     closers.push(() => app.close());
     const addr = app.server.address();

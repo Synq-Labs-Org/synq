@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Synq on a single Graviton EC2 host: Docker Compose (Caddy TLS, web, Telegram
+  service, Postgres). The host builds main from GitHub with a read-only deploy
+  key; operators reach it over SSM only (no SSH).
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t4g.large]
+  RootVolumeGiB:
+    Type: Number
+    Default: 20
+    MinValue: 20
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+
+Resources:
+  # ---- Network --------------------------------------------------------------
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Synq host - HTTP/HTTPS only (no SSH; use SSM)
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: udp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIpv6: '::/0' }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIpv6: '::/0' }
+      Tags: [{ Key: Name, Value: synq-host }]
+
+  # ---- Host role --------------------------------------------------------------
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: synq-runtime-config
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/synq/prod/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref HostRole]
+
+  # ---- Host -------------------------------------------------------------------
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref HostProfile
+      SecurityGroupIds: [!GetAtt HostSecurityGroup.GroupId]
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      CreditSpecification: { CPUCredits: unlimited }
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref RootVolumeGiB
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags: [{ Key: Name, Value: synq-host }]
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y docker
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+            https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-aarch64
+          chmod 755 /usr/local/lib/docker/cli-plugins/docker-compose
+          systemctl enable --now docker
+          # 2 GiB swap: headroom for image pulls and the indexer on a small host.
+          if [ ! -f /swapfile ]; then
+            dd if=/dev/zero of=/swapfile bs=1M count=2048
+            chmod 600 /swapfile && mkswap /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+          swapon -a || true
+          sysctl -w vm.swappiness=10 && echo 'vm.swappiness=10' > /etc/sysctl.d/90-synq.conf
+          dnf install -y git
+          install -d -m 700 /opt/synq /opt/synq/secrets
+          touch /opt/synq/.bootstrapped
+
+  HostAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Host
+      Tags: [{ Key: Name, Value: synq-host }]
+
+Outputs:
+  InstanceId:
+    Value: !Ref Host
+  PublicIp:
+    Value: !Ref HostAddress
