@@ -21,3 +21,12 @@ artifacts/brain-demo/
 artifacts/synq-send/
 .synq-local/
 .synq-cache/
+
+# Docs, plans, reports and evidence stay local; only code is committed.
+/docs/
+/adrs/
+/reports/
+/bounty-evidence/
+/submission/
+/contracts/evidence/
+/AGENTS.md

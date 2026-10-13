@@ -294,10 +294,7 @@ function rebind(start: StartActionExecution) {
 }
 function flowRecording(): FlowQuote {
   const q = JSON.parse(
-    readFileSync(
-      'bounty-evidence/integration/fresh-read-only-evidence.json',
-      'utf8',
-    ),
+    readFileSync('tests/fixtures/kuru-flow-read-only-evidence.json', 'utf8'),
   ).kuru.quote;
   return {
     ...q,

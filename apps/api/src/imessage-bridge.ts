@@ -21,7 +21,7 @@ if (process.argv.includes('--find-chat') && !env.SYNQ_IMESSAGE_ALLOWED_CHATS)
 const config = imessageConfigFromEnv(env);
 if (!config) {
   console.error(
-    'SYNQ_IMESSAGE_TRANSPORT is off; live iMessage evidence remains PENDING. See docs/runbooks/imessage-bridge.md.',
+    'SYNQ_IMESSAGE_TRANSPORT is off; live iMessage evidence remains PENDING.',
   );
   process.exit(2);
 }

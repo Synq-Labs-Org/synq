@@ -18,6 +18,8 @@ const ALLOWED_PATHS = [
   // Sourced testnet-only provider payment assets (Circle testnet USDC).
   /^sources\/provider_testnet_assets\.json$/,
   /^bounty-evidence\//,
+  // Recorded provider responses replayed by the Kuru tests.
+  /^tests\/(kuru\/fixtures\/[\w.-]+|fixtures\/kuru-flow-read-only-evidence)\.json$/,
   // Standalone mm plugin pin of the registry; drift-tested by tests/metamask-plugin/network.test.ts.
   /^packages\/metamask-synq-plugin\/src\/core\/network\.json$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,

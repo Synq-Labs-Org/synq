@@ -1,6 +1,6 @@
 #!/bin/sh
 # Syntax-checks every Swift file and runs the Foundation-only model checks on macOS.
-# Building the extension itself needs full Xcode and the iOS SDK (see docs/runbooks/ios-messages-device.md).
+# Building the extension itself needs full Xcode and the iOS SDK.
 set -eu
 cd "$(dirname "$0")"
 swiftc -parse SynqMessagesExtension/*.swift Checks/main.swift

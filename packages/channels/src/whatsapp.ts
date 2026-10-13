@@ -5,7 +5,7 @@ import {
 } from './events.js';
 
 export const WHATSAPP_UNAVAILABLE_REASON =
-  'WhatsApp Cloud API groups are limited to Official Business Accounts, small business-created groups joined by invite link, and cannot add the business to existing user groups; unofficial libraries are not allowed. See reports/findings/P11-20261011T170500Z-whatsapp-groups.md.';
+  'WhatsApp Cloud API groups are limited to Official Business Accounts, small business-created groups joined by invite link, and cannot add the business to existing user groups; unofficial libraries are not allowed.';
 
 /** Interface placeholder: reports UNAVAILABLE and refuses every operation. */
 export class WhatsAppAdapter implements ChannelAdapter {

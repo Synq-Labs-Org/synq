@@ -20,7 +20,6 @@
     "demo:testnet": "node --import tsx apps/demo/src/testnet.ts",
     "test:testnet": "vitest run --config tests/e2e/vitest.testnet.config.ts",
     "architecture": "node scripts/architecture.mjs",
-    "docs:check": "node --import tsx scripts/check-bible-consistency.ts",
     "preflight": "node --import tsx scripts/preflight.ts",
     "dev": "node --import tsx apps/api/src/server.ts",
     "verify": "pnpm preflight && pnpm typecheck && pnpm lint && pnpm secrets && pnpm format:check && pnpm build && pnpm test && pnpm test:contracts && pnpm test:integration",

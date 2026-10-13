@@ -174,7 +174,7 @@ export function settlementFabricCapabilities(
       economicEffect: 'TESTNET_TOKENS',
       cancel: { supported: false },
       refund: { supported: false },
-      // Staging Amazon orders fail upstream (reports/blockers/P12-…-crossmint-staging-amazon.md).
+      // Staging Amazon orders fail upstream (Crossmint staging cannot reach the Amazon Business API).
       health: observed[CROSSMINT]?.health ?? 'DOWN',
       partnerGated: false,
       statusReason:

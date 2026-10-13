@@ -193,9 +193,25 @@ describe('chain registry', () => {
     );
   });
   it('deployment manifests accept recorded legacy profile labels but normalize them', () => {
-    const recorded = JSON.parse(
-      readFileSync('reports/evidence/local-deployment.json', 'utf8'),
-    );
+    // Manifest shape recorded by an early local deployment (legacy "local" label).
+    const recorded = {
+      manifest: {
+        schemaVersion: 1,
+        network: {
+          profile: 'local',
+          chainId: 31337,
+          providerEnvironment: 'local',
+        },
+        account: `0x${'0'.repeat(38)}a1`,
+        mandateRegistry: `0x${'0'.repeat(38)}a2`,
+        executionModule: `0x${'0'.repeat(38)}a3`,
+        deploymentTransactions: [1, 2, 3, 4].map(
+          (n) => `0x${n.toString(16).padStart(64, '0')}`,
+        ),
+        deploymentBlock: '1',
+        sandboxOnly: true,
+      },
+    };
     expect(DeploymentManifestSchema.parse(recorded.manifest).network).toEqual({
       profile: 'local/anvil',
       chainId: 31337,

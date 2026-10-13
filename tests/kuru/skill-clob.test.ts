@@ -75,7 +75,7 @@ type Recorded = {
   health: { bestBid: string; bestAsk: string };
 };
 const clobReads = JSON.parse(
-  readFileSync('bounty-evidence/kuru/clob-reads.json', 'utf8'),
+  readFileSync('tests/kuru/fixtures/clob-reads.json', 'utf8'),
 ) as {
   markets: Record<string, Recorded>;
 };

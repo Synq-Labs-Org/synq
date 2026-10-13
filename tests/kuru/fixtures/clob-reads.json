@@ -1,0 +1,188 @@
+{
+  "executionMode": "MAINNET_READ_ONLY",
+  "capturedAt": "2026-10-10T15:47:46.821Z",
+  "description": "Kuru exchangeInfo, on-chain getMarketParams/bestBidAsk/getL2Book for MON-AUSD and MON-USDC (mainnet) and MON-USDC (testnet)",
+  "exchangeInfo": [
+    {
+      "symbol": "AUSD_USDC",
+      "status": "TRADING",
+      "marketAddress": "0x699abc15308156e9a3ab89ec7387e9cfe1c86a3b"
+    },
+    {
+      "symbol": "MON_AUSD",
+      "status": "TRADING",
+      "marketAddress": "0x131a2e70a5b31a517a74b8c567149bc294470da9"
+    },
+    {
+      "symbol": "MON_USDC",
+      "status": "TRADING",
+      "marketAddress": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394"
+    },
+    {
+      "symbol": "WBTC_AUSD",
+      "status": "TRADING",
+      "marketAddress": "0xbdc776284bf593981b1f0237f053a7ad11eb596f"
+    },
+    {
+      "symbol": "XAUT_USDC",
+      "status": "TRADING",
+      "marketAddress": "0x851145eaefdc37956b08da829fa31722199f3f07"
+    },
+    {
+      "symbol": "WETH_USDC",
+      "status": "TRADING",
+      "marketAddress": "0xa6afd386135b7d41a6c40c525abc4a1019b0d132"
+    },
+    {
+      "symbol": "cbBTC_USDC",
+      "status": "TRADING",
+      "marketAddress": "0x40c49f171202f91ff5d2fae34c22dd2bfdd22af0"
+    }
+  ],
+  "registryDrift": {
+    "mainnet": []
+  },
+  "markets": {
+    "proof/monad-mainnet:MON-AUSD": {
+      "market": "0x131a2e70a5b31a517a74b8c567149bc294470da9",
+      "params": {
+        "pricePrecision": "100000000",
+        "sizePrecision": "10000000000",
+        "baseAsset": "0x0000000000000000000000000000000000000000",
+        "baseDecimals": 18,
+        "quoteAsset": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
+        "quoteDecimals": 6,
+        "tickSize": "100",
+        "minSize": "2000000000000",
+        "maxSize": "20000000000000000000",
+        "takerFeeBps": "0",
+        "makerFeeBps": "0"
+      },
+      "health": {
+        "status": "UNHEALTHY",
+        "reason": "EMPTY_BOOK",
+        "bestBid": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "bestAsk": "0"
+      },
+      "l2Book": {
+        "blockNumber": "112222026",
+        "bids": [],
+        "asks": [],
+        "bidLevels": 0,
+        "askLevels": 0
+      }
+    },
+    "proof/monad-mainnet:MON-USDC": {
+      "market": "0x065c9d28e428a0db40191a54d33d5b7c71a9c394",
+      "params": {
+        "pricePrecision": "100000000",
+        "sizePrecision": "10000000000",
+        "baseAsset": "0x0000000000000000000000000000000000000000",
+        "baseDecimals": 18,
+        "quoteAsset": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
+        "quoteDecimals": 6,
+        "tickSize": "100",
+        "minSize": "2000000000000",
+        "maxSize": "2000000000000000000",
+        "takerFeeBps": "0",
+        "makerFeeBps": "0"
+      },
+      "health": {
+        "status": "HEALTHY",
+        "bestBid": "24695000000000000",
+        "bestAsk": "24739000000000000"
+      },
+      "l2Book": {
+        "blockNumber": "112222027",
+        "bids": [
+          {
+            "price": "2469500",
+            "size": "159813453168341"
+          },
+          {
+            "price": "2466000",
+            "size": "1602794340660451"
+          },
+          {
+            "price": "2447200",
+            "size": "3205588681320903"
+          },
+          {
+            "price": "2433500",
+            "size": "2020000000000"
+          },
+          {
+            "price": "2392300",
+            "size": "2020000000000"
+          }
+        ],
+        "asks": [
+          {
+            "price": "2473900",
+            "size": "64111773626418"
+          },
+          {
+            "price": "2474400",
+            "size": "160279434066045"
+          },
+          {
+            "price": "2476100",
+            "size": "1602794340660451"
+          },
+          {
+            "price": "2485500",
+            "size": "3205588681320903"
+          },
+          {
+            "price": "2518100",
+            "size": "2262962430000"
+          }
+        ],
+        "bidLevels": 17,
+        "askLevels": 38
+      }
+    },
+    "sandbox/monad-testnet:MON-USDC": {
+      "market": "0xa241896a7dbe8a550d2e5ff7a914bb1989ced2d9",
+      "params": {
+        "pricePrecision": "100000000",
+        "sizePrecision": "10000000000",
+        "baseAsset": "0x0000000000000000000000000000000000000000",
+        "baseDecimals": 18,
+        "quoteAsset": "0x3ba3d39afcf8bb994f7964b3e0171ea2ba361570",
+        "quoteDecimals": 6,
+        "tickSize": "100",
+        "minSize": "2000000000000",
+        "maxSize": "2000000000000000000",
+        "takerFeeBps": "0",
+        "makerFeeBps": "0"
+      },
+      "health": {
+        "status": "UNHEALTHY",
+        "reason": "NO_BIDS",
+        "bestBid": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        "bestAsk": "1001000000000000000"
+      },
+      "l2Book": {
+        "blockNumber": "69864855",
+        "bids": [],
+        "asks": [
+          {
+            "price": "100100000",
+            "size": "2459750000000"
+          },
+          {
+            "price": "110000000",
+            "size": "2200000000000"
+          }
+        ],
+        "bidLevels": 0,
+        "askLevels": 2
+      }
+    }
+  },
+  "monAusdMarketBuy": {
+    "code": "MARKET_UNHEALTHY",
+    "detail": "MON-AUSD"
+  }
+}

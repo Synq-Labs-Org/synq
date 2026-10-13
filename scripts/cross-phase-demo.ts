@@ -410,10 +410,7 @@ export async function runCrossPhaseDemo() {
       }),
     );
     const rawQuote = JSON.parse(
-      readFileSync(
-        'bounty-evidence/integration/fresh-read-only-evidence.json',
-        'utf8',
-      ),
+      readFileSync('tests/fixtures/kuru-flow-read-only-evidence.json', 'utf8'),
     ).kuru.quote as Omit<
       FlowQuote,
       'amountIn' | 'quotedOutput' | 'providerMinOut' | 'transaction'
@@ -449,8 +446,7 @@ export async function runCrossPhaseDemo() {
     });
     record('Kuru quote → bounded prepare', {
       fixtureLabel: 'PUBLIC_PROVIDER_RECORDING_REPLAY',
-      sourceArtifact:
-        'bounty-evidence/integration/fresh-read-only-evidence.json',
+      sourceArtifact: 'tests/fixtures/kuru-flow-read-only-evidence.json',
       replayAt: quote.receivedAt,
       selectedInput: selectedOfficialInput.toString(),
       prepared,

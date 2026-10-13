@@ -13,9 +13,9 @@ type RawQuote = {
   status: number;
   response: unknown;
 };
-/** Raw /api/quote bodies recorded live on Monad mainnet (bounty-evidence/kuru/flow-raw-quote-responses.json). */
+/** Raw /api/quote bodies recorded live on Monad mainnet (tests/kuru/fixtures/flow-raw-quote-responses.json). */
 export const recorded = JSON.parse(
-  readFileSync('bounty-evidence/kuru/flow-raw-quote-responses.json', 'utf8'),
+  readFileSync('tests/kuru/fixtures/flow-raw-quote-responses.json', 'utf8'),
 ) as { quotes: RawQuote[] };
 export const mainnet = kuruDeployment('proof/monad-mainnet');
 export const AUSD = mainnet.tokens.AUSD!;

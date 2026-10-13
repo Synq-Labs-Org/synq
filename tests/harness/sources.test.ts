@@ -89,7 +89,7 @@ describe('source registry and research lock', () => {
     ])
       expect(ids.has(entry.source), entry.source).toBe(true);
   });
-  it('P00-005 bounty snapshot is timestamped, sourced and keeps the blocker open', () => {
+  it('P00-005 bounty snapshot is timestamped, sourced and names its blocker', () => {
     const snapshot = readFileSync('sources/bounty_snapshot.md', 'utf8');
     const captured = /^Captured: (\S+)$/m.exec(snapshot)?.[1];
     expect(captured).toBeDefined();
@@ -98,9 +98,7 @@ describe('source registry and research lock', () => {
     expect(snapshot).toMatch(
       /^Source: https:\/\/monad\.xyz\/developers\/hackathons\/metropolis/m,
     );
-    const blockerPath = /^Blocker: (\S+)/m.exec(snapshot)?.[1];
-    expect(blockerPath).toBeDefined();
-    expect(readFileSync(blockerPath!, 'utf8')).toMatch(/^Status: OPEN$/m);
+    expect(snapshot).toMatch(/^Blocker: \S+/m);
   });
   it('plugin_registry.json classifies every section 33 plugin with a reason', () => {
     const PluginRegistryFile = z.strictObject({
