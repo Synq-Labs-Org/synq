@@ -91,6 +91,14 @@ export class PostgresEconomicGrantLedger implements EconomicGrantLedger {
     return r.rows[0] ? EconomicGrantSchema.parse(r.rows[0].data) : null;
   }
 
+  async grant(grantId: string): Promise<EconomicGrant | null> {
+    const r = await this.pool.query(
+      `SELECT data FROM ${this.s}.synq_econ_grants WHERE grant_id=$1`,
+      [grantId],
+    );
+    return r.rows[0] ? EconomicGrantSchema.parse(r.rows[0].data) : null;
+  }
+
   async intentConsumed(intentId: string) {
     const r = await this.pool.query(
       `SELECT 1 FROM ${this.s}.synq_econ_consumed WHERE intent_id=$1`,

@@ -222,6 +222,8 @@ export interface EconomicGrantLedger {
   mandate(mandateId: string): Promise<EconomicMandate | null>;
   revoke(mandateId: string): Promise<void>;
   latestGrant(intentId: string): Promise<EconomicGrant | null>;
+  /** An issued grant by id, as the Kernel stored it (consumed or not). */
+  grant(grantId: string): Promise<EconomicGrant | null>;
   intentConsumed(intentId: string): Promise<boolean>;
   issue(
     grant: EconomicGrant,
@@ -248,6 +250,7 @@ export class MemoryEconomicGrantLedger implements EconomicGrantLedger {
   private readonly mandates = new Map<string, EconomicMandate>();
   private readonly spentBy = new Map<string, bigint>();
   private readonly latest = new Map<string, EconomicGrant>();
+  private readonly issued = new Map<string, EconomicGrant>();
   private readonly consumedGrants = new Set<string>();
   private readonly consumedIntents = new Set<string>();
   async installMandate(m: EconomicMandate) {
@@ -266,6 +269,9 @@ export class MemoryEconomicGrantLedger implements EconomicGrantLedger {
   async latestGrant(intentId: string) {
     return this.latest.get(intentId) ?? null;
   }
+  async grant(grantId: string) {
+    return this.issued.get(grantId) ?? null;
+  }
   async intentConsumed(intentId: string) {
     return this.consumedIntents.has(intentId);
   }
@@ -276,6 +282,7 @@ export class MemoryEconomicGrantLedger implements EconomicGrantLedger {
     if (spent + amount > budget) return 'BUDGET_EXHAUSTED' as const;
     this.spentBy.set(grant.mandateId, spent + amount);
     this.latest.set(grant.intentId, grant);
+    this.issued.set(grant.grantId, grant);
     return 'ISSUED' as const;
   }
   async consume(grant: EconomicGrant) {
@@ -424,6 +431,11 @@ export class EconomicGrantAuthority {
 
   isConsumed(grantId: string): Promise<boolean> {
     return this.ledger.isConsumed(grantId);
+  }
+
+  /** The stored grant for an id; callers still verify and consume it here. */
+  grant(grantId: string): Promise<EconomicGrant | null> {
+    return this.ledger.grant(grantId);
   }
 
   async authorize(
