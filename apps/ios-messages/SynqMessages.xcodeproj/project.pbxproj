@@ -262,10 +262,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
 				INFOPLIST_FILE = SynqMessages/Info.plist;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "world.synqlabs.messages";
+				PRODUCT_BUNDLE_IDENTIFIER = world.synqlabs.messages;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -277,10 +277,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
 				INFOPLIST_FILE = SynqMessages/Info.plist;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "world.synqlabs.messages";
+				PRODUCT_BUNDLE_IDENTIFIER = world.synqlabs.messages;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -291,7 +291,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
 				INFOPLIST_FILE = SynqMessagesExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -299,10 +299,10 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "world.synqlabs.messages.extension";
+				PRODUCT_BUNDLE_IDENTIFIER = world.synqlabs.messages.extension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SYNQ_WEB_HOST = "synqlabs.world";
+				SYNQ_WEB_HOST = synqlabs.world;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -312,7 +312,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
 				INFOPLIST_FILE = SynqMessagesExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -320,10 +320,10 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "world.synqlabs.messages.extension";
+				PRODUCT_BUNDLE_IDENTIFIER = world.synqlabs.messages.extension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
-				SYNQ_WEB_HOST = "synqlabs.world";
+				SYNQ_WEB_HOST = synqlabs.world;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
