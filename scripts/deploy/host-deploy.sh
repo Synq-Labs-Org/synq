@@ -31,7 +31,7 @@ if [ ! -d "$REPO/.git" ]; then
 fi
 cd "$REPO"
 before=$(cat "$BASE/deployed" 2>/dev/null || echo none)
-git fetch --quiet origin "$BRANCH"
+git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 after=$(git rev-parse "origin/$BRANCH")
 if [ "$before" = "$after" ] && [ "$FORCE" != "--force" ]; then
   exit 0
