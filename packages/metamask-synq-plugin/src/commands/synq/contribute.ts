@@ -65,10 +65,11 @@ const opt = (v: string) => (v === '' ? undefined : v);
 
 export default class SynqContribute extends PluginCommand<Result> {
   static override description =
-    'Contribute testnet AUSD from your Agent Wallet to your Synq group Safe (bounded, policy-gated, reconciled).';
+    'Contribute testnet AUSD from your Agent Wallet to your Synq group Safe (bounded, policy-gated, reconciled). If the Agent Wallet gateway rejects Monad testnet, set SYNQ_MM_RPC_URL to an https Monad testnet RPC: it serves reads and receipt polling after its eth_chainId is verified; signing stays in the Agent Wallet.';
   static override examples = [
     '<%= config.bin %> synq contribute my-club 1 --dry-run --json',
     '<%= config.bin %> synq contribute my-club 1 --json',
+    'SYNQ_MM_RPC_URL=https://testnet-rpc.monad.xyz <%= config.bin %> synq contribute my-club 1 --json',
   ];
   static override flags = schemaToFlags(inputs);
   static override args = schemaToArgs(inputs);

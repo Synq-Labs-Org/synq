@@ -6,7 +6,7 @@ import {
 } from '@metamask/agent-wallet/plugin';
 import { getAddress, isAddress, type Address, type Hex } from 'viem';
 import { allows, type SynqCommandId } from './core/capabilities.js';
-import { SynqPluginError, fail } from './core/errors.js';
+import { fail, synqError } from './core/errors.js';
 import { FileJournal } from './core/journal.js';
 import type { Deps } from './core/group.js';
 import type {
@@ -15,6 +15,7 @@ import type {
   TxSubmission,
   TypedDataRequest,
 } from './core/host.js';
+import { ChainReads, RpcFallback } from './core/rpc.js';
 import { FileSessionStore, MemberSessions } from './core/session.js';
 import { SynqApi, apiConfigFromEnv } from './core/synq-api.js';
 
@@ -55,9 +56,11 @@ export function hostFromContext(
   ctx: HostContext,
   io: CommandIO,
   command: SynqCommandId,
+  rpcFallback: RpcFallback | null = null,
 ): SynqHost {
+  const reads = new ChainReads((id) => ctx.publicClient(id), rpcFallback);
   return {
-    publicClient: (chainId) => ctx.publicClient(chainId),
+    publicClient: (chainId) => reads.publicClient(chainId),
     walletAddresses() {
       const state = ctx.walletStateManager.read();
       const records: WalletEntry[] = [
@@ -96,7 +99,9 @@ export function hostFromContext(
             details: request.details,
           },
         },
-        { waitForReceipt: true },
+        // When the gateway rejected this (testnet) chain, the wallet cannot
+        // poll the receipt; the caller waits on the verified fallback RPC.
+        { waitForReceipt: !reads.usingFallback(request.chainId) },
       );
       if (result.kind !== 'transaction')
         fail(
@@ -143,7 +148,7 @@ export function depsFor(
   command: SynqCommandId,
   env: Record<string, string | undefined> = process.env,
 ): Deps {
-  const host = hostFromContext(ctx, io, command);
+  const host = hostFromContext(ctx, io, command, RpcFallback.fromEnv(env));
   const api = new SynqApi(apiConfigFromEnv(env));
   const now = () => Date.now();
   return {
@@ -178,11 +183,12 @@ export async function asCommand<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof SynqPluginError)
+    const synq = synqError(error);
+    if (synq)
       throw new CommandError(
-        `SYNQ_${error.code}`,
-        error.message,
-        error.hint || 'See mm synq --help.',
+        `SYNQ_${synq.code}`,
+        synq.message,
+        synq.hint || 'See mm synq --help.',
       );
     throw error;
   }

@@ -78,3 +78,12 @@ export function fail(
 ): never {
   throw new SynqPluginError(code, message, hint);
 }
+
+/** The Synq failure behind an error, including one wrapped by a viem transport. */
+export function synqError(error: unknown): SynqPluginError | null {
+  for (let e = error, depth = 0; e && depth < 8; depth++) {
+    if (e instanceof SynqPluginError) return e;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return null;
+}
