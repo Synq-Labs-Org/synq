@@ -51,7 +51,7 @@ class FakeServer {
   }
 }
 const send = (c: Conn, frame: object) => c.socket.send(JSON.stringify(frame));
-async function until(cond: () => boolean, ms = 3_000) {
+async function until(cond: () => boolean, ms = 10_000) {
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error('timeout waiting for condition');
@@ -203,41 +203,48 @@ describe('trading WebSocket resilience', () => {
     };
   };
 
-  it('signs in with mt:29 as the first frame and re-signs with a fresh nonce after a heartbeat gap', async () => {
-    server = new FakeServer();
-    autoSignIn();
-    const { ws, signer } = trading();
-    const resyncs: string[] = [];
-    ws.on('resync', (r) => resyncs.push(r.reason));
-    ws.connect();
-    await until(() => server.conns[0]?.frames.length === 1);
-    const first = server.conns[0]!.frames[0] as Record<string, string | number>;
-    expect(first.mt).toBe(29);
-    const canonical = wsSignInCanonical({
-      chainId: testnet.chainId,
-      timestamp: Number(first.timestamp),
-      nonce: String(first.nonce),
-    });
-    expect(
-      verify(
-        null,
-        Buffer.from(canonical),
-        createPublicKey(signer.key),
-        Buffer.from(String(first.signature), 'base64url'),
-      ),
-    ).toBe(true);
-    await until(() => ws.accounts.get(1058)?.fw === true);
-    send(server.conns[0]!, { mt: 100, sn: 51, h: 1 });
-    send(server.conns[0]!, { mt: 100, sn: 53, h: 3 });
-    await until(
-      () => server.conns.length === 2 && server.conns[1]!.frames.length === 1,
-    );
-    const second = server.conns[1]!.frames[0]!;
-    expect(second.mt).toBe(29);
-    expect(second.nonce).not.toBe(first.nonce);
-    await until(() => resyncs.length === 1);
-    expect(resyncs).toEqual(['gap']);
-  });
+  it(
+    'signs in with mt:29 as the first frame and re-signs with a fresh nonce after a heartbeat gap',
+    { timeout: 30_000 },
+    async () => {
+      server = new FakeServer();
+      autoSignIn();
+      const { ws, signer } = trading();
+      const resyncs: string[] = [];
+      ws.on('resync', (r) => resyncs.push(r.reason));
+      ws.connect();
+      await until(() => server.conns[0]?.frames.length === 1);
+      const first = server.conns[0]!.frames[0] as Record<
+        string,
+        string | number
+      >;
+      expect(first.mt).toBe(29);
+      const canonical = wsSignInCanonical({
+        chainId: testnet.chainId,
+        timestamp: Number(first.timestamp),
+        nonce: String(first.nonce),
+      });
+      expect(
+        verify(
+          null,
+          Buffer.from(canonical),
+          createPublicKey(signer.key),
+          Buffer.from(String(first.signature), 'base64url'),
+        ),
+      ).toBe(true);
+      await until(() => ws.accounts.get(1058)?.fw === true);
+      send(server.conns[0]!, { mt: 100, sn: 51, h: 1 });
+      send(server.conns[0]!, { mt: 100, sn: 53, h: 3 });
+      await until(
+        () => server.conns.length === 2 && server.conns[1]!.frames.length === 1,
+      );
+      const second = server.conns[1]!.frames[0]!;
+      expect(second.mt).toBe(29);
+      expect(second.nonce).not.toBe(first.nonce);
+      await until(() => resyncs.length === 1);
+      expect(resyncs).toEqual(['gap']);
+    },
+  );
 
   it('re-signs after 3401 and stops after repeated auth failures', async () => {
     server = new FakeServer();

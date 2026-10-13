@@ -72,11 +72,33 @@ jobs:
           languages: javascript-typescript
           queries: security-extended
           build-mode: none
+      # Code scanning upload needs GitHub Advanced Security on a private repo, so
+      # results stay local to the job and any error-level finding fails it.
       - name: CodeQL analyze
         # github/codeql-action v4.38.3
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d
         with:
           category: /language:javascript-typescript
+          upload: never
+          output: codeql-results
+      - name: Fail on error-level findings
+        run: |
+          node -e '
+            const fs = require("fs");
+            const files = fs.readdirSync("codeql-results").filter((f) => f.endsWith(".sarif"));
+            const results = files.flatMap((f) => JSON.parse(fs.readFileSync("codeql-results/" + f, "utf8")).runs.flatMap((r) => r.results ?? []));
+            const errors = results.filter((r) => (r.level ?? "warning") === "error");
+            for (const r of results) console.log(`${r.level ?? "warning"} ${r.ruleId} ${r.locations?.[0]?.physicalLocation?.artifactLocation?.uri}:${r.locations?.[0]?.physicalLocation?.region?.startLine}`);
+            console.log(`${results.length} findings, ${errors.length} error-level`);
+            process.exit(errors.length ? 1 : 0);
+          '
+      - if: always()
+        # actions/upload-artifact v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: codeql-sarif
+          path: codeql-results
+          if-no-files-found: warn
   contracts:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

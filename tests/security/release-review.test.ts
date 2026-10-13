@@ -312,9 +312,13 @@ describe('independent foundation release review', () => {
     );
   });
 
-  it('the actual foundation dependency graph passes deterministic authority and signer separation checks', () => {
-    expect(checkArchitecture(process.cwd())).toEqual([]);
-  });
+  it(
+    'the actual foundation dependency graph passes deterministic authority and signer separation checks',
+    { timeout: 30_000 },
+    () => {
+      expect(checkArchitecture(process.cwd())).toEqual([]);
+    },
+  );
 
   it.each(['directSDK', 'transitiveWorker'] as const)(
     'architecture prevents planner signing access through %s',

@@ -98,7 +98,7 @@ const targets = [
 const evidenceDir = resolve('bounty-evidence/integration');
 mkdirSync(evidenceDir, { recursive: true });
 const outputPath = resolve(evidenceDir, 'gauntlet-vitest.json');
-const dedicatedFile = 'tests/gauntlet/integrated-attacks.test.ts';
+const dedicatedFile = 'tests/gauntlet/integrated-attacks.integration.test.ts';
 const files = [dedicatedFile, ...new Set(targets.map((t) => t[1]))];
 const args = [
   'pnpm',

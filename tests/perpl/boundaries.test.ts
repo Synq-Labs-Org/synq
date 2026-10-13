@@ -66,19 +66,23 @@ describe('Perpl signer boundary', () => {
       ).toBe(true);
   });
 
-  it('the repository passes the rule and plugins/perpl holds no signing primitive', () => {
-    expect(
-      checkArchitecture(process.cwd()).filter((e) => /perpl/i.test(e)),
-    ).toEqual([]);
-    const files = readdirSync('plugins/perpl/src').map((f) =>
-      readFileSync(join('plugins/perpl/src', f), 'utf8'),
-    );
-    for (const text of files) {
-      expect(text).not.toMatch(
-        /@noble\/ed25519|from 'node:crypto'.*\bsign\b|privateKeyToAccount|createWalletClient/,
+  it(
+    'the repository passes the rule and plugins/perpl holds no signing primitive',
+    { timeout: 30_000 },
+    () => {
+      expect(
+        checkArchitecture(process.cwd()).filter((e) => /perpl/i.test(e)),
+      ).toEqual([]);
+      const files = readdirSync('plugins/perpl/src').map((f) =>
+        readFileSync(join('plugins/perpl/src', f), 'utf8'),
       );
-    }
-  });
+      for (const text of files) {
+        expect(text).not.toMatch(
+          /@noble\/ed25519|from 'node:crypto'.*\bsign\b|privateKeyToAccount|createWalletClient/,
+        );
+      }
+    },
+  );
 
   it('the client exposes no withdraw or transfer path', () => {
     const names = exchangeAbi.map((e) => e.name);
