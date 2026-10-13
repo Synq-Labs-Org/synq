@@ -218,13 +218,22 @@ export const EXECUTION_MODE_LABEL: Record<
   CANARY_READY: 'Canary-ready (not executed)',
 };
 
+/**
+ * Same-origin path only: one leading slash, never `//host` (protocol-relative)
+ * and never a scheme, so the review link cannot leave the Synq web origin.
+ */
+export const ReviewPathSchema = z
+  .string()
+  .max(512)
+  .regex(/^\/(?![/\\])[A-Za-z0-9/_.:-]*$/);
+
 /** Response of the authenticated card-link resolution endpoint. */
 export const CardResolutionSchema = z.discriminatedUnion('status', [
   z.strictObject({
     status: z.literal('OK'),
     memberId: z.string(),
     card: ApprovalProposalCardSchema,
-    reviewPath: z.string().regex(/^\/[A-Za-z0-9/_.:-]*$/),
+    reviewPath: ReviewPathSchema,
   }),
   z.strictObject({
     status: z.literal('NOT_PENDING'),

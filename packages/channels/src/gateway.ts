@@ -10,7 +10,11 @@ import {
 } from './events.js';
 import { HELP_TEXT, parseCommand, parseSendArgs } from './commands.js';
 import type { ChannelStore, GroupLink, RedeemOutcome } from './store.js';
-import type { CardResolution, InteractiveCard } from '@synq/schemas';
+import {
+  ReviewPathSchema,
+  type CardResolution,
+  type InteractiveCard,
+} from '@synq/schemas';
 import { CardLinkIssuer } from './cards/links.js';
 import { InteractiveCardService, approvalProposalId } from './cards/service.js';
 import {
@@ -1271,7 +1275,8 @@ export class ChannelGateway {
 }
 
 function reviewPath(a: ApprovalSummary) {
-  return a.reviewPath ?? `/intents/${a.intentHash}`;
+  const own = ReviewPathSchema.safeParse(a.reviewPath);
+  return own.success ? own.data : `/intents/${a.intentHash}`;
 }
 
 function stripMention(text: string) {

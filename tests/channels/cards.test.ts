@@ -9,7 +9,11 @@ import {
   renderTelegramCard,
   type ApprovalSummary,
 } from '@synq/channels';
-import { InteractiveCardSchema } from '@synq/schemas';
+import {
+  CardResolutionSchema,
+  InteractiveCardSchema,
+  ReviewPathSchema,
+} from '@synq/schemas';
 import {
   CARD_KEY,
   CHAT_A,
@@ -434,5 +438,56 @@ describe('gateway with cards', () => {
       await f.gateway.handle(tap(CHAT_A, 'cb4', `approve:${HASH('22')}`)),
     ).toMatchObject({ status: 'REFUSED', code: 'CALLBACK_NOT_AN_APPROVAL' });
     expect(f.approvals.get(GROUP_A)![0]!.counted).toBe(1);
+  });
+});
+
+describe('review paths stay on the Synq origin (L9)', () => {
+  it('accepts same-origin paths and rejects protocol-relative or absolute URLs', () => {
+    for (const ok of [`/intents/${HASH('11')}`, '/mandates/0xab', '/'])
+      expect(ReviewPathSchema.safeParse(ok).success).toBe(true);
+    for (const bad of [
+      '//evil.example/x',
+      '///evil.example',
+      '/\\evil.example',
+      'https://evil.example/x',
+      'javascript:alert(1)',
+      'evil.example/x',
+      '',
+    ])
+      expect(ReviewPathSchema.safeParse(bad).success).toBe(false);
+    const card = service().approval({
+      groupId: GROUP_A,
+      groupLabel: 'Trip fund',
+      approval: pending,
+    });
+    expect(
+      CardResolutionSchema.safeParse({
+        status: 'OK',
+        memberId: 'member_0',
+        card,
+        reviewPath: '//evil.example/x',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('a tampered approval review path falls back to the canonical intent path', async () => {
+    const f = fixture(NOW, { cards: true });
+    await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');
+    f.adapter.sent = [];
+    f.approvals.set(GROUP_A, [{ ...pending, reviewPath: '//evil.example/x' }]);
+    await f.gateway.notify();
+    const url = f.adapter.sent.find((s) => s.chat === CHAT_A)!.message
+      .buttons![0]!.url;
+    const { p, g, n } = params(url);
+    const resolved = await f.gateway.resolveCardLink({
+      proposalId: p!,
+      groupId: g!,
+      nonce: n!,
+      principalId: 'principal_alice',
+    });
+    expect(resolved).toMatchObject({
+      status: 'OK',
+      reviewPath: `/intents/${HASH('11')}`,
+    });
   });
 });
