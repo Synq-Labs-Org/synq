@@ -67,7 +67,8 @@ async function world() {
     autoApproveMax: usd(5_000),
     quorum: 1,
     members: ['alice', 'bob'],
-    approverKinds: ['LOCAL_FIXTURE'],
+    // TESTNET mandates take human passkey approvers only; these grants auto-approve.
+    approverKinds: ['MERA_HUMAN'],
     maxQuoteAgeSeconds: 900,
     grantTtlSeconds: 900,
     environment: 'TESTNET',
