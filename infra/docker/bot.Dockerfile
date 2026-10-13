@@ -23,6 +23,10 @@ ENV NODE_ENV=production \
   SYNQ_API_HOST=0.0.0.0 \
   SYNQ_API_PORT=3292 \
   SYNQ_TESTNET_KEY_FILE=/run/secrets/synq/testnet.key
+# Envio's native sync engine verifies the RPC's TLS against the system trust store.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app /app
 # State (keys, group, journal) and evidence are volumes; the indexer keeps its
