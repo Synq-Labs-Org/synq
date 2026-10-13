@@ -14,7 +14,9 @@ ENV CI=true \
   SYNQ_API_ORIGIN=${SYNQ_API_ORIGIN}
 WORKDIR /app
 COPY . .
-RUN NODE_ENV=development corepack pnpm install --frozen-lockfile \
+# Readable by the non-root runtime user whatever modes the checkout has.
+RUN chmod -R a+rX . \
+  && NODE_ENV=development corepack pnpm install --frozen-lockfile \
   && corepack pnpm --filter @synq/web build \
   && rm -rf /root/.cache /root/.local/share/pnpm apps/web/dist/cache
 

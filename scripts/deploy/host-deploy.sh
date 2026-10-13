@@ -15,8 +15,10 @@ FORCE=${1:-}
 param() { aws ssm get-parameter --region "$REGION" --with-decryption --name "/synq/prod/$1" --query Parameter.Value --output text; }
 
 install -d -m 700 /root/.ssh "$BASE/secrets"
-umask 077
-param github-deploy-key > /root/.ssh/synq_deploy
+# Secrets are owner-only; the checkout keeps normal modes so the images' non-root
+# users can read their code.
+secret() { (umask 077 && param "$1" > "$2"); }
+secret github-deploy-key /root/.ssh/synq_deploy
 export GIT_SSH_COMMAND="ssh -i /root/.ssh/synq_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 REMOTE=$(cat $BASE/remote)
 
@@ -35,8 +37,8 @@ git reset --quiet --hard "$after"
 echo "deploying $after ($(git log -1 --format=%s))"
 
 # Runtime config: dotenv in one SecureString, the testnet operator key in another.
-param env > "$BASE/.env"
-param testnet-key > "$BASE/secrets/testnet.key"
+secret env "$BASE/.env"
+secret testnet-key "$BASE/secrets/testnet.key"
 chown 1000:1000 "$BASE/secrets/testnet.key"
 chmod 400 "$BASE/secrets/testnet.key"
 

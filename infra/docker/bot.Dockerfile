@@ -11,7 +11,9 @@ FROM ${NODE_IMAGE} AS deps
 ENV CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
 COPY . .
-RUN corepack pnpm install --frozen-lockfile \
+# Readable by the non-root runtime user whatever modes the checkout has.
+RUN chmod -R a+rX . \
+  && corepack pnpm install --frozen-lockfile \
   && rm -rf /root/.cache /root/.local/share/pnpm
 
 FROM ${NODE_IMAGE} AS runtime
