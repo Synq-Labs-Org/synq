@@ -23,6 +23,7 @@ import {
   reloadlyProviderCapability,
   type CrossmintStagingChain,
   type GiftCodeSealer,
+  type GiftRecipientDirectory,
   type HttpFetch,
 } from '@synq/plugin-commerce';
 import type { RailDescriptor } from '@synq/settlement';
@@ -110,6 +111,8 @@ export function commerceProvidersFromEnv(
     now: () => number;
     /** Sealed gift-code storage; without it Reloadly orders are not installed. */
     giftCodes: GiftCodeSealer | null;
+    /** Group profile lookup; a gift card is only ordered for a RECIPIENT/SHIPPING profile. */
+    recipients: GiftRecipientDirectory | null;
   },
 ): CommerceProviders {
   const providers: Record<string, OfferProvider> = {};
@@ -126,12 +129,13 @@ export function commerceProvidersFromEnv(
       status: 'BLOCKED_EXTERNAL',
       reason: 'RELOADLY_CLIENT_ID / RELOADLY_CLIENT_SECRET not set',
     });
-  else if (!deps.giftCodes)
+  else if (!deps.giftCodes || !deps.recipients)
     status.push({
       providerId: RELOADLY,
       label: 'PROVIDER_SANDBOX',
       status: 'UNAVAILABLE',
-      reason: 'SYNQ_PROFILE_VAULT_KEY not set: gift codes could not be sealed',
+      reason:
+        'SYNQ_PROFILE_VAULT_KEY not set: gift codes could not be sealed or recipients checked',
     });
   else
     try {
@@ -144,8 +148,16 @@ export function commerceProvidersFromEnv(
         deps.fetch,
         deps.now,
       );
-      providers[RELOADLY] = new ReloadlyGiftCardProvider(client, deps.now);
-      ports[RELOADLY] = new ReloadlyGiftCardPort(client, deps.giftCodes);
+      providers[RELOADLY] = new ReloadlyGiftCardProvider(
+        client,
+        deps.now,
+        deps.recipients,
+      );
+      ports[RELOADLY] = new ReloadlyGiftCardPort(
+        client,
+        deps.giftCodes,
+        deps.recipients,
+      );
       capabilities.push(reloadlyProviderCapability(env));
       reloadlyReady = true;
       status.push({

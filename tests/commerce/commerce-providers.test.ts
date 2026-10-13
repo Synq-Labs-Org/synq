@@ -5,6 +5,7 @@ import {
   LITHIC,
   RELOADLY,
   type GiftCodeSealer,
+  type GiftRecipientDirectory,
   type HttpFetch,
 } from '@synq/plugin-commerce';
 import { commerceProvidersFromEnv } from '../../workers/workflow/src/commerce/providers.js';
@@ -16,11 +17,19 @@ const fetch: HttpFetch = async (url) => {
   return { status: 500, text: async () => '{}' };
 };
 const sealer: GiftCodeSealer = { seal: async () => ({ ref: 'gc_x' }) };
+const recipients: GiftRecipientDirectory = {
+  summary: async () => ({ kind: 'RECIPIENT', expired: false }),
+};
 const build = (
   env: Record<string, string>,
   giftCodes: GiftCodeSealer | null = sealer,
 ) =>
-  commerceProvidersFromEnv(env, { fetch, now: () => 1_790_000_000, giftCodes });
+  commerceProvidersFromEnv(env, {
+    fetch,
+    now: () => 1_790_000_000,
+    giftCodes,
+    recipients: giftCodes ? recipients : null,
+  });
 const statusOf = (p: ReturnType<typeof build>) =>
   Object.fromEntries(p.status.map((s) => [s.providerId, s]));
 

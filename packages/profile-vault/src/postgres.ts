@@ -29,12 +29,16 @@ export class PostgresProfileStore implements ProfileStore {
       ref text PRIMARY KEY, group_id text NOT NULL, kind text NOT NULL, key_id text NOT NULL,
       iv text NOT NULL, ciphertext text NOT NULL, tag text NOT NULL, summary text NOT NULL,
       expires_at bigint, created_at bigint NOT NULL)`);
+    // Gift-code recipient binding; it is part of the record's AEAD associated data.
+    await this.pool.query(
+      `ALTER TABLE ${this.s}.synq_profile_vault ADD COLUMN IF NOT EXISTS binding text`,
+    );
   }
 
   async put(r: SealedProfile) {
     const out = await this.pool.query(
-      `INSERT INTO ${this.s}.synq_profile_vault (ref, group_id, kind, key_id, iv, ciphertext, tag, summary, expires_at, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+      `INSERT INTO ${this.s}.synq_profile_vault (ref, group_id, kind, key_id, iv, ciphertext, tag, summary, expires_at, created_at, binding)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
       [
         r.ref,
         r.groupId,
@@ -46,6 +50,7 @@ export class PostgresProfileStore implements ProfileStore {
         r.summary,
         r.expiresAt,
         r.createdAt,
+        r.binding ?? null,
       ],
     );
     if (out.rowCount !== 1) throw new Error('PROFILE_REF_EXISTS');
@@ -69,6 +74,7 @@ export class PostgresProfileStore implements ProfileStore {
           summary: String(row.summary),
           expiresAt: row.expires_at === null ? null : Number(row.expires_at),
           createdAt: Number(row.created_at),
+          ...(row.binding == null ? {} : { binding: String(row.binding) }),
         }
       : null;
   }

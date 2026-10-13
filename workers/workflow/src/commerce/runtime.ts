@@ -10,6 +10,7 @@ import {
 import {
   EnvVaultKeyProvider,
   GiftCodeVault,
+  ProfileDirectory,
   PostgresProfileStore,
   ProfileDecryptor,
   type ProfileSqlPool,
@@ -188,6 +189,7 @@ export async function openCommerceRuntime(options: {
     fetch: options.fetch ?? ((url, init) => fetch(url, init)),
     now,
     giftCodes: keys ? new GiftCodeVault(profiles, keys, now) : null,
+    recipients: keys ? new ProfileDirectory(profiles, keys, now) : null,
   });
 
   const key = grantKey(env);
