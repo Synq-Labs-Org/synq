@@ -1,9 +1,17 @@
 import type { ChannelId } from './events.js';
-import { WHATSAPP_UNAVAILABLE_REASON } from './whatsapp.js';
+import {
+  WHATSAPP_ENV,
+  WHATSAPP_GROUPS_NOTE,
+  WHATSAPP_UNAVAILABLE_REASON,
+} from './whatsapp.js';
 
 export type ChannelCapability = {
   channel: ChannelId;
-  status: 'AVAILABLE' | 'CREDENTIALS_MISSING' | 'UNAVAILABLE';
+  status:
+    | 'AVAILABLE'
+    | 'CREDENTIALS_MISSING'
+    | 'UNAVAILABLE'
+    | 'BLOCKED_EXTERNAL';
   evidence: 'REAL_PROVIDER' | 'FIXTURE_ONLY' | 'NONE';
   groupModel: string;
   ingress: string[];
@@ -85,14 +93,24 @@ export function channelCapabilities(
           : 'SYNQ_IMESSAGE_TRANSPORT with its credentials and SYNQ_IMESSAGE_ALLOWED_CHATS not configured',
       };
     })(),
-    {
-      channel: 'whatsapp',
-      status: 'UNAVAILABLE',
-      evidence: 'NONE',
-      groupModel: 'not supported',
-      ingress: [],
-      features: [],
-      reason: WHATSAPP_UNAVAILABLE_REASON,
-    },
+    (() => {
+      const ready = WHATSAPP_ENV.every(has);
+      return {
+        channel: 'whatsapp' as const,
+        status: ready ? ('AVAILABLE' as const) : ('BLOCKED_EXTERNAL' as const),
+        // Shapes are checked against Meta's docs and a fake Graph API only.
+        evidence: ready ? ('FIXTURE_ONLY' as const) : ('NONE' as const),
+        groupModel: `1:1 chats with allowlisted wa_ids through the official Cloud API. ${WHATSAPP_GROUPS_NOTE}`,
+        ingress: ['WEBHOOK_HMAC'],
+        features: [
+          'commands',
+          'image-banners',
+          'reply-buttons',
+          'cta-url-buttons',
+          'receipts',
+        ],
+        reason: ready ? null : WHATSAPP_UNAVAILABLE_REASON,
+      };
+    })(),
   ];
 }

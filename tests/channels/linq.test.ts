@@ -240,16 +240,18 @@ describe('linq v3 adapter', () => {
 });
 
 describe('channel capabilities', () => {
-  it('reports WhatsApp unavailable and credential state honestly', async () => {
+  it('reports WhatsApp blocked and credential state honestly', async () => {
     const caps = channelCapabilities({ TELEGRAM_BOT_TOKEN: 'x' });
     expect(caps.map((c) => [c.channel, c.status])).toEqual([
       ['telegram', 'AVAILABLE'],
       ['linq', 'CREDENTIALS_MISSING'],
       ['imessage', 'CREDENTIALS_MISSING'],
-      ['whatsapp', 'UNAVAILABLE'],
+      ['whatsapp', 'BLOCKED_EXTERNAL'],
     ]);
-    expect(await new WhatsAppAdapter().send().catch((e) => e.code)).toBe(
-      'CHANNEL_UNAVAILABLE',
-    );
+    expect(
+      await new WhatsAppAdapter()
+        .send('15551234567', { text: 'x' })
+        .catch((e) => e.code),
+    ).toBe('CHANNEL_UNAVAILABLE');
   });
 });
