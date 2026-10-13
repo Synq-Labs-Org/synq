@@ -78,7 +78,7 @@ export function loadTestnetSigner(
 
 export function testnetRpcUrl(): string {
   return (
-    process.env[monadTestnetProfile.rpcEnvironment] ??
+    process.env[monadTestnetProfile.rpcEnvironment] ||
     monadTestnetProfile.defaultRpcUrl
   );
 }

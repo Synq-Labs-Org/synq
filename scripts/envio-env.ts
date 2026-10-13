@@ -52,8 +52,8 @@ export function indexerSettings(input: IndexerSettingsInput): IndexerSettings {
   const reorg = input.maxReorgDepth ?? DEFAULT_MAX_REORG_DEPTH;
   const rpcUrl =
     input.rpcUrl ??
-    process.env[profile.rpcEnvironment] ??
-    profile.defaultRpcUrl;
+    // An empty value (an unset compose variable) means the profile default.
+    (process.env[profile.rpcEnvironment] || profile.defaultRpcUrl);
   const projection = projectionConfigFromDeployment({
     facts,
     profile: profile.network.profile,
