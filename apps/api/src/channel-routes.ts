@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   TELEGRAM_SECRET_HEADER,
+  WHATSAPP_SIGNATURE_HEADER,
   webhookTokenMatches,
   channelCapabilities,
   type ChannelGateway,
@@ -9,12 +10,15 @@ import {
   type IMessageTransport,
   type LinqV3Adapter,
   type TelegramAdapter,
+  type WhatsAppAdapter,
 } from '@synq/channels';
 
 export type ChannelRouteDeps = {
   gateway: ChannelGateway;
   telegram?: TelegramAdapter;
   linq?: LinqV3Adapter;
+  /** Official WhatsApp Cloud API (1:1 only). */
+  whatsapp?: WhatsAppAdapter;
   /** Resolves a member session issued by the existing passkey Send access flow. */
   memberSession(
     token: string,
@@ -100,6 +104,39 @@ export async function channelRoutes(
     const events = linq.normalize(json(raw), verified.webhookId, deps.now());
     const outcomes = [];
     for (const event of events)
+      outcomes.push((await deps.gateway.handle(event)).status);
+    return reply.code(200).send({ ok: true, outcomes });
+  });
+
+  /** Meta's subscription handshake: echo hub.challenge only for our verify token. */
+  api.get('/v1/channels/whatsapp/webhook', async (request, reply) => {
+    const whatsapp = deps.whatsapp;
+    if (!whatsapp)
+      return reply.code(404).send({ error: 'CHANNEL_NOT_CONFIGURED' });
+    const challenge = whatsapp.verifyChallenge(
+      request.query as Record<string, unknown>,
+    );
+    if (challenge === null)
+      return reply.code(403).send({ error: 'VERIFY_TOKEN_INVALID' });
+    return reply
+      .code(200)
+      .header('content-type', 'text/plain; charset=utf-8')
+      .header('cache-control', 'no-store')
+      .send(challenge);
+  });
+
+  /** Signed with X-Hub-Signature-256 over the raw body; a button reply is never an approval. */
+  api.post('/v1/channels/whatsapp/webhook', async (request, reply) => {
+    const whatsapp = deps.whatsapp;
+    if (!whatsapp)
+      return reply.code(404).send({ error: 'CHANNEL_NOT_CONFIGURED' });
+    const raw = String(request.body ?? '');
+    if (
+      !whatsapp.verifySignature(raw, request.headers[WHATSAPP_SIGNATURE_HEADER])
+    )
+      return reply.code(401).send({ error: 'SIGNATURE_INVALID' });
+    const outcomes = [];
+    for (const event of whatsapp.normalize(json(raw)))
       outcomes.push((await deps.gateway.handle(event)).status);
     return reply.code(200).send({ ok: true, outcomes });
   });
