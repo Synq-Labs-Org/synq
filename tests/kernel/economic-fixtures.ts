@@ -62,6 +62,7 @@ export function approvalPorts(
     epoch?: number;
     consumed?: (a: VerifiedApproval) => boolean;
     inactive?: readonly string[];
+    principalKind?: DirectoryMember['principalKind'];
   } = {},
 ): { ledger: ApprovalLedger; directory: MembershipDirectory } {
   const groupId = opts.groupId ?? 'group-1';
@@ -80,7 +81,7 @@ export function approvalPorts(
               groupId,
               memberId,
               principalId: `principal-${memberId}`,
-              principalKind: 'LOCAL_FIXTURE',
+              principalKind: opts.principalKind ?? 'LOCAL_FIXTURE',
               role: 'APPROVER',
               signer: memberAccount(
                 memberId,

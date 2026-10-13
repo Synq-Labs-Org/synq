@@ -33,8 +33,9 @@ export type LithicWebhookDeps = {
 /**
  * POST /v1/webhooks/lithic. The raw body is verified (Standard Webhooks
  * HMAC-SHA256 with a timestamp tolerance) before it is parsed; a verified id
- * is claimed once in the durable deduper. A processing failure releases the
- * claim and answers 500 so Lithic redelivers.
+ * is claimed once in the durable deduper and marked processed after handling.
+ * A processing failure releases the claim and answers 500 so Lithic redelivers;
+ * a claim left unprocessed by a crash is retaken after the lease.
  */
 export async function lithicWebhookRoutes(
   api: FastifyInstance,
@@ -85,6 +86,7 @@ export async function lithicWebhookRoutes(
       await deps.deduper.forget?.(verified.id);
       return reply.code(500).send({ error: 'WEBHOOK_PROCESSING_FAILED' });
     }
+    await deps.deduper.processed?.(verified.id);
     return reply.code(200).send({ ok: true, duplicate: false });
   });
 }

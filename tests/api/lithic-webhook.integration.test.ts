@@ -91,6 +91,28 @@ describe(
       }
     });
 
+    it('LWH-PG-003 a claim left unprocessed by a crash is retaken after the lease; a processed one never is', async () => {
+      const d = new PostgresWebhookDeduper(pool, 'lithic', schema, 60);
+      await d.migrate();
+      const crashed = `msg_crash_${schema}`;
+      expect(await d.firstSeen(crashed)).toBe(true);
+      // Within the lease a redelivery is a duplicate (the first handler may still run).
+      expect(await d.firstSeen(crashed)).toBe(false);
+      const age = (id: string) =>
+        pool.query(
+          `UPDATE "${schema}".synq_webhook_deliveries SET received_at = now() - interval '2 minutes' WHERE webhook_id=$1`,
+          [id],
+        );
+      await age(crashed);
+      expect(await d.firstSeen(crashed)).toBe(true);
+      expect(await d.firstSeen(crashed)).toBe(false);
+      const done = `msg_done_${schema}`;
+      expect(await d.firstSeen(done)).toBe(true);
+      await d.processed(done);
+      await age(done);
+      expect(await d.firstSeen(done)).toBe(false);
+    });
+
     it('LWH-PG-002 production registration migrates the inbox and stays closed without a signing secret', async () => {
       const app = Fastify();
       const closed = await registerLithicWebhook({ app, pool, env: {} });

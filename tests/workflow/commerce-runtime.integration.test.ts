@@ -92,7 +92,7 @@ const treasury = {
       : null,
 };
 
-function mandatesFile() {
+function mandatesFile(version = 1) {
   const dir = mkdtempSync(join(tmpdir(), 'synq-mandates-'));
   const path = join(dir, 'mandates.json');
   writeFileSync(
@@ -101,7 +101,7 @@ function mandatesFile() {
       {
         mandateId: 'gift-mandate',
         groupId: GROUP,
-        version: 1,
+        version,
         status: 'ACTIVE',
         domains: ['COMMERCE'],
         providers: [RELOADLY],
@@ -338,6 +338,33 @@ describe(
       expect((await runtime.reservations.get(s.reservationId!))!.state).toBe(
         'RELEASED',
       );
+    });
+
+    it('RT-004 a revoked mandate stays revoked when the file bumps its version', async () => {
+      const schema = freshSchema();
+      const env = (version: number) => ({
+        SYNQ_ECONOMIC_GRANT_KEY: 'ab'.repeat(32),
+        SYNQ_ECONOMIC_MANDATES_FILE: mandatesFile(version),
+      });
+      const open = (version: number) =>
+        openCommerceRuntime({
+          pool,
+          schema,
+          env: env(version),
+          now,
+          fetch: (async () => {
+            throw new Error('no network');
+          }) as HttpFetch,
+          identity: identity().ports,
+          treasury,
+          workerId: 'rt-revoke',
+        });
+      const first = await open(1);
+      await first.authority!.revoke('gift-mandate');
+      const bumped = await open(2);
+      const m = await bumped.authority!.mandate('gift-mandate');
+      expect(m?.status).toBe('REVOKED');
+      expect(m?.version).toBe(1);
     });
 
     it('RT-003 without credentials or a grant key the worker still starts, reports BLOCKED, and books nothing', async () => {

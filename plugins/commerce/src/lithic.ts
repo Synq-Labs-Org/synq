@@ -462,6 +462,8 @@ export interface WebhookDeduper {
   firstSeen(id: string, meta?: WebhookMeta): Promise<boolean>;
   /** Releases a claim whose processing failed, so the provider's retry is handled. */
   forget?(id: string): Promise<void>;
+  /** Marks a claimed delivery processed; until then a stale claim can be retaken. */
+  processed?(id: string): Promise<void>;
 }
 export type WebhookMeta = { eventType: string | null; bodyHash: string };
 export class MemoryWebhookDeduper implements WebhookDeduper {
@@ -492,9 +494,12 @@ export class PostgresWebhookDeduper implements WebhookDeduper {
     },
     private readonly source = 'lithic',
     schema = 'public',
+    private readonly leaseSeconds = 60,
   ) {
     if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
       throw new Error('invalid schema name');
+    if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1)
+      throw new Error('invalid lease');
     if (!/^[a-z][a-z0-9_-]{0,31}$/.test(source))
       throw new Error('invalid webhook source');
     this.s = `"${schema}"`;
@@ -505,14 +510,40 @@ export class PostgresWebhookDeduper implements WebhookDeduper {
       .query(`CREATE TABLE IF NOT EXISTS ${this.s}.synq_webhook_deliveries (
       source text NOT NULL, webhook_id text NOT NULL, event_type text, body_hash text NOT NULL,
       received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source, webhook_id))`);
+    // Rows that predate the column count as processed; the default is dropped
+    // so new claims start unprocessed.
+    await this.pool.query(
+      `ALTER TABLE ${this.s}.synq_webhook_deliveries ADD COLUMN IF NOT EXISTS processed_at timestamptz DEFAULT now()`,
+    );
+    await this.pool.query(
+      `ALTER TABLE ${this.s}.synq_webhook_deliveries ALTER COLUMN processed_at DROP DEFAULT`,
+    );
   }
+  /**
+   * Claims a delivery. A claim that was never marked processed (the process
+   * died mid-handling) can be retaken once it is older than the lease.
+   */
   async firstSeen(id: string, meta?: WebhookMeta) {
     const r = await this.pool.query(
-      `INSERT INTO ${this.s}.synq_webhook_deliveries (source, webhook_id, event_type, body_hash)
-       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-      [this.source, id, meta?.eventType ?? null, meta?.bodyHash ?? ''],
+      `INSERT INTO ${this.s}.synq_webhook_deliveries AS d (source, webhook_id, event_type, body_hash)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (source, webhook_id) DO UPDATE SET received_at = now()
+       WHERE d.processed_at IS NULL AND d.received_at < now() - make_interval(secs => $5)`,
+      [
+        this.source,
+        id,
+        meta?.eventType ?? null,
+        meta?.bodyHash ?? '',
+        this.leaseSeconds,
+      ],
     );
     return r.rowCount === 1;
+  }
+  async processed(id: string) {
+    await this.pool.query(
+      `UPDATE ${this.s}.synq_webhook_deliveries SET processed_at = now() WHERE source=$1 AND webhook_id=$2`,
+      [this.source, id],
+    );
   }
   async forget(id: string) {
     await this.pool.query(

@@ -16,6 +16,7 @@ import {
   bitrefillRealMoneyGate,
 } from '../../workers/workflow/src/commerce/real-money.js';
 import {
+  approval,
   approvalPorts,
   reservationsWith,
 } from '../kernel/economic-fixtures.js';
@@ -52,7 +53,7 @@ async function world() {
     key: new Uint8Array(32).fill(7),
     reservations,
     ledger: new MemoryEconomicGrantLedger(),
-    approvals: approvalPorts(['alice', 'bob']),
+    approvals: approvalPorts(['alice', 'bob'], { principalKind: 'MERA_HUMAN' }),
   });
   await authority.install({
     mandateId: 'gift-real',
@@ -64,7 +65,7 @@ async function world() {
     hosts: ['api.bitrefill.com', 'sandbox.lithic.com'],
     perActionCap: usd(5_000),
     cumulativeBudget: usd(20_000),
-    autoApproveMax: usd(5_000),
+    autoApproveMax: usd(500),
     quorum: 1,
     members: ['alice', 'bob'],
     // TESTNET mandates take human passkey approvers only; these grants auto-approve.
@@ -83,32 +84,41 @@ async function world() {
     reservationId: string;
     planHash: string;
   }): Promise<EconomicGrant> => {
-    const d = await authority.authorize(
-      {
-        intentId: input.intentId,
-        groupId: 'group-1',
-        mandateId: 'gift-real',
-        execution: {
-          domain: 'COMMERCE',
-          providerId: input.providerId,
-          host: input.host,
-          offerId: input.offerId,
-          subjectHash: HASH,
-          quantity: 1,
-          maxAmount: usd(input.cents),
-          reservationId: input.reservationId,
-          reservedAssetId: 'ausd',
-          reservedAmount: '10000000',
-          settlementPlanHash: input.planHash,
-          recipientRef: null,
-          payAsset: null,
-        },
-        quoteExpiresAt: NOW + 600,
-        revalidatedAt: NOW,
+    const request = {
+      intentId: input.intentId,
+      groupId: 'group-1',
+      mandateId: 'gift-real',
+      execution: {
+        domain: 'COMMERCE' as const,
+        providerId: input.providerId,
+        host: input.host,
+        offerId: input.offerId,
+        subjectHash: HASH,
+        quantity: 1,
+        maxAmount: usd(input.cents),
+        reservationId: input.reservationId,
+        reservedAssetId: 'ausd',
+        reservedAmount: '10000000',
+        settlementPlanHash: input.planHash,
+        recipientRef: null,
+        payAsset: null,
       },
-      [],
-      NOW,
-    );
+      quoteExpiresAt: NOW + 600,
+      revalidatedAt: NOW,
+    };
+    // Above autoApproveMax the Kernel needs alice's passkey approval.
+    let d = await authority.authorize(request, [], NOW);
+    if (d.status === 'PENDING_APPROVAL')
+      d = await authority.authorize(
+        request,
+        [
+          await approval('alice', d.requestHash, {
+            mandateId: 'gift-real',
+            principalKind: 'MERA_HUMAN',
+          }),
+        ],
+        NOW,
+      );
     if (d.status !== 'AUTHORIZED') throw new Error(JSON.stringify(d));
     return d.grant;
   };
@@ -190,6 +200,31 @@ describe('Kernel-grant real-money verifier (L4)', () => {
       await v.verifyAndConsume({ ...input, reference: ref(brf.grantId) }),
     ).toBe(false);
     expect(await w.authority.isConsumed(brf.grantId)).toBe(false);
+  });
+
+  it('RMV-004 an auto-approved grant (no human passkey) never approves real money', async () => {
+    const w = await world();
+    const grant = await w.grantFor({
+      intentId: 'intent-brf-auto',
+      providerId: BITREFILL,
+      host: 'api.bitrefill.com',
+      offerId: bitrefillInvoiceOfferId('inv-4'),
+      cents: 400,
+      reservationId: 'r-1',
+      planHash: 'plan-1',
+    });
+    expect(grant.approvals).toEqual([]);
+    const v = new KernelGrantRealMoneyVerifier(w.authority);
+    expect(
+      await v.verifyAndConsume({
+        reference: ref(grant.grantId),
+        invoiceId: 'inv-4',
+        amountMinor: 400n,
+        currency: 'USD',
+        now: NOW + 5,
+      }),
+    ).toBe(false);
+    expect(await w.authority.isConsumed(grant.grantId)).toBe(false);
   });
 
   it('RMV-003 default wiring is deny-all; even a valid grant with every flag set reaches NO_BROADCAST_PATH', async () => {

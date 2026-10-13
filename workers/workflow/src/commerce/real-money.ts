@@ -18,7 +18,8 @@ const MINOR_UNITS: Readonly<Record<string, number>> = { USD: 2, EUR: 2 };
  * reference is accepted only if it names a Kernel grant that the Kernel itself
  * issued (id, HMAC, mandate version, expiry) for Bitrefill, for exactly this
  * invoice, currency and amount; it is then consumed once, atomically, in the
- * Kernel's grant ledger. Mera approvals and anything else are refused.
+ * Kernel's grant ledger. The grant must carry a MERA_HUMAN quorum (never an
+ * auto-approval); Mera approvals and anything else are refused.
  */
 export class KernelGrantRealMoneyVerifier implements RealMoneyApprovalVerifier {
   constructor(private readonly authority: EconomicGrantAuthority) {}
@@ -35,6 +36,19 @@ export class KernelGrantRealMoneyVerifier implements RealMoneyApprovalVerifier {
     if (decimals === undefined || input.amountMinor <= 0n) return false;
     const grant = await this.authority.grant(input.reference.id);
     if (!grant) return false;
+    // Real money is never auto-approved: the grant must carry a human passkey
+    // quorum under a mandate that admits MERA_HUMAN approvers only.
+    const mandate = await this.authority.mandate(grant.mandateId);
+    if (
+      !mandate ||
+      mandate.status !== 'ACTIVE' ||
+      mandate.version !== grant.mandateVersion ||
+      grant.environment !== 'TESTNET' ||
+      mandate.approverKinds.length !== 1 ||
+      mandate.approverKinds[0] !== 'MERA_HUMAN' ||
+      grant.approvals.length < Math.max(1, mandate.quorum)
+    )
+      return false;
     const g = grant.execution;
     if (
       g.providerId !== BITREFILL ||

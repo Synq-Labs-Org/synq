@@ -105,7 +105,8 @@ function grantKey(env: Env): Uint8Array | null {
 
 /**
  * Installs operator-provided economic mandates. A stored version at or above
- * the file's is kept as-is, so a restart never re-activates a revoked mandate.
+ * the file's is kept as-is, and a revoked mandate id stays revoked whatever
+ * version the file carries.
  */
 async function installMandates(
   authority: EconomicGrantAuthority,
@@ -119,6 +120,9 @@ async function installMandates(
   for (const m of list) {
     const stored = await ledger.mandate(m.mandateId);
     if (stored && stored.version >= m.version) continue;
+    // A revoked mandate id is never re-activated by bumping its version in
+    // the file; the group installs a new mandate id instead.
+    if (stored?.status === 'REVOKED') continue;
     await authority.install(m);
   }
   return list;

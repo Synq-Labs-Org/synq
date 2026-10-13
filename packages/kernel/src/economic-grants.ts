@@ -450,6 +450,10 @@ export class EconomicGrantAuthority {
   }
 
   /** The stored grant for an id; callers still verify and consume it here. */
+  /** Installed mandate (any status), for verifiers that check its approver policy. */
+  mandate(mandateId: string): Promise<EconomicMandate | null> {
+    return this.ledger.mandate(mandateId);
+  }
   grant(grantId: string): Promise<EconomicGrant | null> {
     return this.ledger.grant(grantId);
   }
