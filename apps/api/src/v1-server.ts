@@ -73,7 +73,7 @@ import {
 } from '@synq/funding';
 import { sendRoutes, type SendRouteDeps } from './send-routes.js';
 import { fundingRoutes } from './funding-routes.js';
-import { callerFor } from './member-scope.js';
+import { registerWorldRoute } from './world-route.js';
 import { PostgresSendAccessStore } from './send-access-store.js';
 import { fundingReceipt, productionSendPorts } from './send-runtime.js';
 import { DurableKernel } from './kernel-runtime.js';
@@ -395,22 +395,15 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       risk: worldRisk,
       workflows: temporalStatus,
     });
-    app.get('/v1/world/:groupId', async (request, reply) => {
-      const groupId = z
-        .object({ groupId: z.string().min(1).max(128) })
-        .parse(request.params)
-        .groupId.toLowerCase();
-      const caller = await callerFor(request.headers.authorization, groupId, {
-        adminToken: config.SYNQ_API_ADMIN_TOKEN,
-        ...(registered.ports.memberAccess
-          ? { memberAccess: registered.ports.memberAccess }
-          : {}),
-      });
-      if (!caller) return reply.code(401).send({ error: 'UNAUTHORIZED' });
-      const session = await store.transaction((tx) => tx.getGroup(groupId));
-      if (!session) return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
-      await worldPlugins.refresh();
-      return world.build({ groupId });
+    registerWorldRoute(app, {
+      adminToken: config.SYNQ_API_ADMIN_TOKEN,
+      memberAccess: () => registered.ports.memberAccess,
+      groupExists: async (groupId) =>
+        !!(await store.transaction((tx) => tx.getGroup(groupId))),
+      build: async (groupId) => {
+        await worldPlugins.refresh();
+        return world.build({ groupId });
+      },
     });
     const registered = await registerProductionSend({
       app,

@@ -19,6 +19,8 @@ import {
 } from '../../apps/api/src/send-routes.js';
 import { fundingRoutes } from '../../apps/api/src/funding-routes.js';
 import { mandateRoutes } from '../../apps/api/src/mandate-routes.js';
+import { registerWorldRoute } from '../../apps/api/src/world-route.js';
+import type { MemberAccess } from '../../apps/api/src/member-scope.js';
 import type { MandateProposalService } from '../../apps/api/src/mandate-proposals.js';
 import { createV1Api } from '../../apps/api/src/v1/app.js';
 import {
@@ -263,6 +265,7 @@ async function world(
   return {
     api,
     v1,
+    access,
     groups,
     alice,
     bob,
@@ -458,6 +461,59 @@ describe('member-scoped Synq credentials (H2)', () => {
       expect((await post(w.groups[0]!)).statusCode).toBe(429);
       expect(w.proposals).toHaveLength(2);
     } finally {
+      await w.close();
+    }
+  });
+
+  it('the world projection admits the operator and explicit read scopes of the same group only (N2)', async () => {
+    const w = await world();
+    const built: string[] = [];
+    const app = Fastify();
+    let access: MemberAccess = w.access;
+    registerWorldRoute(app, {
+      adminToken: ADMIN,
+      memberAccess: () => access,
+      groupExists: async (g) => w.groups.includes(g as `0x${string}`),
+      build: async (g) => (built.push(g), { groupId: g }),
+    });
+    await app.ready();
+    const get = (groupId: string, bearer?: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/world/${groupId}`,
+        ...(bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {}),
+      });
+    try {
+      const preview = await w.token(w.groups[0]!);
+      const contribute = await w.token(w.groups[0]!, 'MEMBER_CONTRIBUTE');
+      expect((await get(w.groups[0]!, preview)).statusCode).toBe(200);
+      expect((await get(w.groups[0]!, contribute)).statusCode).toBe(200);
+      expect(
+        (await get(w.groups[0]!.toUpperCase().replace('0X', '0x'), preview))
+          .statusCode,
+      ).toBe(200);
+      expect((await get(w.groups[1]!, preview)).statusCode).toBe(401);
+      expect((await get(w.groups[0]!)).statusCode).toBe(401);
+      expect((await get(w.groups[0]!, 'not-a-session')).statusCode).toBe(401);
+      expect((await get(w.groups[0]!, ADMIN)).statusCode).toBe(200);
+      expect((await get(`0x${'ee'.repeat(32)}`, ADMIN)).statusCode).toBe(404);
+      expect(built).toEqual([
+        w.groups[0],
+        w.groups[0],
+        w.groups[0],
+        w.groups[0],
+      ]);
+      // A session scope outside the explicit allow-list never reads the world.
+      access = {
+        session: async (token, groupId) => {
+          const s = await w.access.session(token, groupId);
+          return s ? { ...s, scope: 'SEND_ONLY' as never } : null;
+        },
+      };
+      expect((await get(w.groups[0]!, contribute)).statusCode).toBe(401);
+      expect(built).toHaveLength(4);
+    } finally {
+      await app.close();
       await w.close();
     }
   });

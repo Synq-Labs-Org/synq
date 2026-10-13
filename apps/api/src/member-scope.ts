@@ -1,7 +1,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { createSendMemberAccess } from './send-access.js';
 
-type MemberAccess = Pick<ReturnType<typeof createSendMemberAccess>, 'session'>;
+export type MemberAccess = Pick<
+  ReturnType<typeof createSendMemberAccess>,
+  'session'
+>;
 export type MemberCaller = {
   kind: 'MEMBER';
   groupId: string;
@@ -47,3 +50,17 @@ export const mayFund = (
 
 export const mayPropose = (caller: Caller | null): caller is Caller =>
   !!caller && (caller.kind === 'ADMIN' || caller.scope === 'MEMBER_CONTRIBUTE');
+
+/**
+ * Member scopes admitted to the group world projection. The projection holds
+ * group-level state only (member ids, signer addresses, mandates, approvals,
+ * kernel and workflow status), no profile PII or credentials; any future scope
+ * must be added here explicitly to read it.
+ */
+export const WORLD_READ_SCOPES: ReadonlySet<MemberCaller['scope']> = new Set([
+  'SEND_READ_PREVIEW',
+  'MEMBER_CONTRIBUTE',
+]);
+
+export const mayReadWorld = (caller: Caller | null): caller is Caller =>
+  !!caller && (caller.kind === 'ADMIN' || WORLD_READ_SCOPES.has(caller.scope));
