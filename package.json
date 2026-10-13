@@ -28,6 +28,8 @@
     "indexer:codegen": "node --import tsx scripts/envio-codegen.ts",
     "indexer:typecheck": "pnpm --filter @synq/envio typecheck",
     "infra:up": "docker compose -f infra/compose.yaml up -d --wait",
+    "stack:prod:up": "docker compose -f infra/compose.prod.yaml up -d --build --wait",
+    "tunnel": "sh scripts/tunnel.sh",
     "indexer:start": "node --import tsx scripts/indexer-local.ts",
     "indexer:testnet-evidence": "node --import tsx scripts/envio-testnet-evidence.ts",
     "testnet:probe": "node --import tsx scripts/testnet-probe.ts",

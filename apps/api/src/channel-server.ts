@@ -11,6 +11,8 @@ import {
   pollAllowlistedChats,
   TelegramAdapter,
   TelegramBotApi,
+  WhatsAppAdapter,
+  whatsappConfigFromEnv,
   type ChannelAdapter,
   type ChannelPorts,
 } from '@synq/channels';
@@ -91,7 +93,9 @@ export async function registerChannels(input: {
       : 'off');
   const linqEnabled = Boolean(env.LINQ_WEBHOOK_SECRET);
   const imessage = imessageConfigFromEnv(input.env, input.fetch);
-  if (telegramMode === 'off' && !linqEnabled && !imessage) return null;
+  const whatsappConfig = whatsappConfigFromEnv(input.env);
+  if (telegramMode === 'off' && !linqEnabled && !imessage && !whatsappConfig)
+    return null;
   const store = new PostgresChannelStore(input.pool);
   await store.migrate();
   const adapters: ChannelAdapter[] = [];
@@ -139,6 +143,28 @@ export async function registerChannels(input: {
       })
     : undefined;
   if (linq) adapters.push(linq);
+  const whatsapp = whatsappConfig
+    ? WhatsAppAdapter.fromConfig(whatsappConfig, {
+        ...(input.fetch ? { fetch: input.fetch } : {}),
+        ...(env.SYNQ_CHANNEL_CARDS === '1' && env.SYNQ_CARD_BANNERS === '1'
+          ? {
+              banners: new CardBannerRenderer(),
+              onBannerError: (error: unknown) =>
+                input.log('card banner fallback', {
+                  channel: 'whatsapp',
+                  error: String(error).slice(0, 200),
+                }),
+            }
+          : {}),
+        onDrop: (reason) => input.log('whatsapp message dropped', { reason }),
+      })
+    : undefined;
+  if (whatsapp) {
+    adapters.push(whatsapp);
+    input.log('whatsapp cloud api configured', {
+      allowedWaIds: whatsappConfig!.allowedWaIds.length,
+    });
+  }
   const imessageAdapter = imessage
     ? new IMessageChannelAdapter({
         transport: imessage.transport,
@@ -216,6 +242,7 @@ export async function registerChannels(input: {
     gateway,
     ...(telegramMode === 'webhook' && telegram ? { telegram } : {}),
     ...(linq ? { linq } : {}),
+    ...(whatsapp ? { whatsapp } : {}),
     memberSession: async (token, groupId) =>
       memberAccess ? memberAccess.session(token, groupId) : null,
     now,
@@ -290,6 +317,7 @@ export async function registerChannels(input: {
     store,
     telegram,
     linq,
+    whatsapp,
     imessage: bridge,
     telegramMode,
     start,

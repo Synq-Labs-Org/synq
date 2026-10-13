@@ -217,7 +217,7 @@ describe('channel routes', () => {
     expect(JSON.stringify(caps)).not.toContain('present');
     expect(
       caps.find((c: { channel: string }) => c.channel === 'whatsapp').status,
-    ).toBe('UNAVAILABLE');
+    ).toBe('BLOCKED_EXTERNAL');
   });
 
   it('binds redemption to a verified Telegram Login when required', async () => {

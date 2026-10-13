@@ -12,7 +12,8 @@ import type {
 /*
  * Renderers only lay out a canonical card. They never compute amounts,
  * decide eligibility or approve: every action is a link to an authenticated
- * page, and the only callback (Telegram refresh) re-reads canonical state.
+ * page, and the only callback (the refresh button on Telegram and WhatsApp)
+ * re-reads canonical state.
  */
 
 const money = (m: CardMoney) => `${m.amount} ${m.symbol}`;
@@ -115,7 +116,7 @@ export function primaryAction(card: InteractiveCard) {
   );
 }
 
-/** Telegram callback data for the read-only refresh button (≤ 64 bytes). */
+/** Callback data for the read-only refresh button (≤ 64 bytes, Telegram and WhatsApp). */
 export function refreshCallbackData(card: InteractiveCard): string | null {
   if (card.type !== 'APPROVAL_PROPOSAL' || card.status !== 'PENDING')
     return null;
@@ -136,6 +137,14 @@ export function renderTelegramCard(card: InteractiveCard): OutboundMessage {
     ...(callbacks.length ? { callbacks } : {}),
     card,
   };
+}
+
+/**
+ * WhatsApp (1:1 only): the review link becomes a CTA URL button and the
+ * read-only refresh a reply button; neither can approve.
+ */
+export function renderWhatsAppCard(card: InteractiveCard): OutboundMessage {
+  return renderTelegramCard(card);
 }
 
 /** iMessage without the Synq extension: one text bubble ending in a single link. */
@@ -189,6 +198,8 @@ export function renderCardForChannel(
   switch (channel) {
     case 'telegram':
       return renderTelegramCard(card);
+    case 'whatsapp':
+      return renderWhatsAppCard(card);
     case 'linq':
     case 'imessage':
       return renderIMessageFallback(card);
