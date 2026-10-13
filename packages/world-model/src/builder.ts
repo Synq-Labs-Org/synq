@@ -64,7 +64,16 @@ export type WorldSources = {
   capabilityFacts?: CapabilityFactsFile;
   providers?: ProviderHealthReader;
 };
-export type WorldTarget = { groupId: string; chainGroupId?: string };
+export type WorldTarget = {
+  groupId: string;
+  chainGroupId?: string;
+  /**
+   * GROUP: kernel intents only when a group-bound record (a Kernel grant or a
+   * workflow of this group) ties them to the group; anything else is omitted.
+   * ALL (default): every kernel intent, for operator and in-process callers.
+   */
+  intentScope?: 'ALL' | 'GROUP';
+};
 
 type ReadModelRead = {
   snapshot: GroupSnapshot | null;
@@ -395,7 +404,7 @@ export class WorldSnapshotBuilder {
       draftMeta,
     );
 
-    const kernelIntents = observed(kernel?.intents ?? [], kernelMeta());
+    let kernelIntents = observed(kernel?.intents ?? [], kernelMeta());
     const pendingExecutions = observed(
       (kernel?.grants ?? [])
         .filter(
@@ -482,6 +491,19 @@ export class WorldSnapshotBuilder {
 
     const providerHealth = this.providerHealth(now, note);
     const workflows = await this.workflows(target.groupId, now, note);
+    if (target.intentScope === 'GROUP') {
+      // Kernel lifecycles carry no group id: fail closed on unbound intents.
+      const own = new Set<string>([
+        ...(kernel?.grants ?? [])
+          .filter((g) => g.groupId === target.groupId)
+          .map((g) => g.intentId),
+        ...workflows.value.flatMap((w) => (w.intentId ? [w.intentId] : [])),
+      ]);
+      kernelIntents = observed(
+        kernelIntents.value.filter((i) => own.has(i.intentId)),
+        kernelIntents.meta,
+      );
+    }
     const marketSnapshots = await this.market(now, note);
     const riskState = await this.risk(target.groupId, now, note);
 

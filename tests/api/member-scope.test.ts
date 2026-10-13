@@ -474,7 +474,10 @@ describe('member-scoped Synq credentials (H2)', () => {
       adminToken: ADMIN,
       memberAccess: () => access,
       groupExists: async (g) => w.groups.includes(g as `0x${string}`),
-      build: async (g) => (built.push(g), { groupId: g }),
+      build: async (g, intentScope) => (
+        built.push(`${g}:${intentScope}`),
+        { groupId: g }
+      ),
     });
     await app.ready();
     const get = (groupId: string, bearer?: string) =>
@@ -497,11 +500,12 @@ describe('member-scoped Synq credentials (H2)', () => {
       expect((await get(w.groups[0]!, 'not-a-session')).statusCode).toBe(401);
       expect((await get(w.groups[0]!, ADMIN)).statusCode).toBe(200);
       expect((await get(`0x${'ee'.repeat(32)}`, ADMIN)).statusCode).toBe(404);
+      // Member sessions get the group-scoped intent view; the operator sees all.
       expect(built).toEqual([
-        w.groups[0],
-        w.groups[0],
-        w.groups[0],
-        w.groups[0],
+        `${w.groups[0]}:GROUP`,
+        `${w.groups[0]}:GROUP`,
+        `${w.groups[0]}:GROUP`,
+        `${w.groups[0]}:ALL`,
       ]);
       // A session scope outside the explicit allow-list never reads the world.
       access = {

@@ -242,3 +242,76 @@ describe('WorldSnapshot builder', () => {
     });
   });
 });
+
+describe('kernel intent scoping', () => {
+  const OTHER = 'group-b';
+  const grant = (n: number, groupId: string, intentId: string) => ({
+    grantId: `0x${String(n).repeat(64)}`,
+    intentId,
+    groupId,
+    mandateId: 'mandate-1',
+    state: 'CONSUMED',
+    maxInputAmount: '1',
+    nativeValue: '0',
+    validUntil: now + 600,
+  });
+  const intents = [
+    'intent_own_granted',
+    'intent_own_workflow',
+    'intent_other_granted',
+    'intent_unbound',
+  ].map((intentId) => ({
+    intentId,
+    state: 'PROPOSED' as const,
+    updatedAt: '',
+  }));
+  const builder = () =>
+    new WorldSnapshotBuilder({
+      network,
+      now: () => now,
+      mainnetBroadcastAllowed: false,
+      kernel: {
+        stateView: () => ({
+          network,
+          mandates: [],
+          grants: [
+            grant(1, GROUP, 'intent_own_granted'),
+            grant(2, OTHER, 'intent_other_granted'),
+          ],
+          intents,
+          observedAt: now,
+        }),
+      },
+      workflows: new InMemoryWorkflowStatusReader(
+        [
+          {
+            workflowId: 'wf_own',
+            type: 'Send',
+            status: 'RUNNING',
+            intentId: 'intent_own_workflow',
+            startedAt: 0,
+            nextEventAt: null,
+          },
+        ],
+        now,
+      ),
+    });
+
+  it('a group-scoped world shows only intents bound to that group and omits unbound ones', async () => {
+    const s = await builder().build({ groupId: GROUP, intentScope: 'GROUP' });
+    expect(s.kernelIntents.value.map((i) => i.intentId)).toEqual([
+      'intent_own_granted',
+      'intent_own_workflow',
+    ]);
+  });
+
+  it('the operator view is unchanged', async () => {
+    for (const s of [
+      await builder().build({ groupId: GROUP }),
+      await builder().build({ groupId: GROUP, intentScope: 'ALL' }),
+    ])
+      expect(s.kernelIntents.value.map((i) => i.intentId)).toEqual(
+        intents.map((i) => i.intentId),
+      );
+  });
+});

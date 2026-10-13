@@ -400,9 +400,9 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
       memberAccess: () => registered.ports.memberAccess,
       groupExists: async (groupId) =>
         !!(await store.transaction((tx) => tx.getGroup(groupId))),
-      build: async (groupId) => {
+      build: async (groupId, intentScope) => {
         await worldPlugins.refresh();
-        return world.build({ groupId });
+        return world.build({ groupId, intentScope });
       },
     });
     const registered = await registerProductionSend({

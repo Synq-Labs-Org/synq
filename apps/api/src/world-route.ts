@@ -13,7 +13,8 @@ export function registerWorldRoute(
     /** Resolved per request: member sessions are wired after this route. */
     memberAccess: () => MemberAccess | undefined;
     groupExists: (groupId: string) => Promise<boolean>;
-    build: (groupId: string) => Promise<unknown>;
+    /** GROUP for member sessions: only intents provably bound to the group. */
+    build: (groupId: string, intentScope: 'ALL' | 'GROUP') => Promise<unknown>;
   },
 ) {
   app.get('/v1/world/:groupId', async (request, reply) => {
@@ -32,6 +33,6 @@ export function registerWorldRoute(
       return reply.code(401).send({ error: 'UNAUTHORIZED' });
     if (!(await deps.groupExists(groupId)))
       return reply.code(404).send({ error: 'GROUP_NOT_FOUND' });
-    return deps.build(groupId);
+    return deps.build(groupId, caller.kind === 'ADMIN' ? 'ALL' : 'GROUP');
   });
 }
