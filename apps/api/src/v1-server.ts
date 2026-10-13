@@ -141,6 +141,11 @@ const EnvSchema = z
     SYNQ_RATE_LIMIT_REFILL_PER_SECOND: z.coerce.number().positive().default(1),
     SYNQ_TRUST_PROXY: z.string().optional(),
     SYNQ_API_PORT: z.coerce.number().int().min(1).max(65535).default(3200),
+    /** Loopback by default; containers set 0.0.0.0 behind their published port. */
+    SYNQ_API_HOST: z
+      .string()
+      .regex(/^(?:[0-9]{1,3}(?:\.[0-9]{1,3}){3}|::|::1|localhost)$/)
+      .default('127.0.0.1'),
     SYNQ_RM_DATABASE_URL: z.string().min(1).optional(),
     SYNQ_RM_REDIS_URL: z.string().min(1).optional(),
     [KERNEL_AUDIT_KEY_ENV]: z.string().min(1).optional(),
@@ -575,7 +580,7 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
     await readModel?.close();
     await pool.end();
   });
-  await app.listen({ port: config.SYNQ_API_PORT, host: '127.0.0.1' });
+  await app.listen({ port: config.SYNQ_API_PORT, host: config.SYNQ_API_HOST });
   return app;
 }
 

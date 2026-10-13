@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { resolve } from 'node:path';
 import { DefaultLogger, NativeConnection, Runtime } from '@temporalio/worker';
 import { loadWorkflowConfig, type WorkflowFamily } from '../config.js';
@@ -17,13 +18,17 @@ import { readLocalManifest } from './manifest.js';
 import { openLocalRuntime } from './runtime.js';
 
 /**
- * Worker process for the local-anvil runtime: `node --import tsx worker-main.ts <manifest.json>`.
+ * Worker process for the local-anvil runtime: `node --import tsx worker-main.ts <manifest.json>`
+ * (or the path in SYNQ_WORKFLOW_MANIFEST, as the container image runs it).
  * SYNQ_WORKFLOW_CRASH_AT arms one instrumented point (crash harness only). SYNQ_DCA_POLICY_FILE (JSON map of
  * strategyId to DCA policy) binds the deterministic strategy engine as the DCA evaluator.
  */
 async function main(): Promise<void> {
-  const manifestPath = process.argv[2];
-  if (!manifestPath) throw new Error('usage: worker-main.ts <manifest.json>');
+  const manifestPath = process.argv[2] ?? process.env.SYNQ_WORKFLOW_MANIFEST;
+  if (!manifestPath)
+    throw new Error(
+      'usage: worker-main.ts <manifest.json> (or SYNQ_WORKFLOW_MANIFEST)',
+    );
   Runtime.install({
     logger: new DefaultLogger(
       (process.env.SYNQ_WORKFLOW_LOG_LEVEL as 'WARN') ?? 'WARN',
@@ -72,6 +77,9 @@ async function main(): Promise<void> {
   };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
+  const health = healthServer(() =>
+    workers.every((w) => w.getState() === 'RUNNING'),
+  );
   const running = runSynqWorkers(workers);
   process.stdout.write(
     `${JSON.stringify({ ready: true, pid: process.pid, armed })}\n`,
@@ -79,9 +87,31 @@ async function main(): Promise<void> {
   try {
     await running;
   } finally {
+    health?.close();
     await runtime.close();
     await connection.close();
   }
+}
+
+/**
+ * SYNQ_WORKFLOW_HEALTH_PORT opens GET /health (200 while every worker is
+ * RUNNING, else 503) for container health checks. It reports state only.
+ */
+function healthServer(ready: () => boolean): Server | null {
+  const port = Number(process.env.SYNQ_WORKFLOW_HEALTH_PORT ?? '');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const server = createServer((request, response) => {
+    const ok = request.method === 'GET' && request.url === '/health';
+    const up = ok && ready();
+    response
+      .writeHead(!ok ? 404 : up ? 200 : 503, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+      })
+      .end(JSON.stringify({ status: !ok ? 'not_found' : up ? 'ok' : 'down' }));
+  });
+  server.listen(port, process.env.SYNQ_WORKFLOW_HEALTH_HOST ?? '127.0.0.1');
+  return server;
 }
 
 main().catch((error: unknown) => {
