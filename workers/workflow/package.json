@@ -9,7 +9,8 @@
     "./client": "./src/client.ts",
     "./config": "./src/config.ts",
     "./activities": "./src/activities/index.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./commerce": "./src/commerce/index.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -39,7 +40,8 @@
     "@synq/offer-exchange": "workspace:*",
     "@synq/settlement": "workspace:*",
     "@synq/plugin-commerce": "workspace:*",
-    "@synq/profile-vault": "workspace:*"
+    "@synq/profile-vault": "workspace:*",
+    "@synq/metamask-delegation": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "1.24.0"

@@ -295,15 +295,26 @@ export const DENY_ALL_APPROVALS: RealMoneyApprovalVerifier = {
   verifyAndConsume: async () => false,
 };
 
+/** The offer id a Kernel grant must carry to cover exactly one Bitrefill invoice. */
+export const bitrefillInvoiceOfferId = (invoiceId: string) =>
+  `bitrefill-invoice:${invoiceId}`;
+
+/** "12.34" -> 1234 cents; anything else (absent, negative, 3+ decimals) is 0. */
+export function canaryCapCents(value: string | undefined): bigint {
+  const m = /^([0-9]{1,12})(?:\.([0-9]{1,2}))?$/.exec(value ?? '');
+  return m ? BigInt(m[1]!) * 100n + BigInt((m[2] ?? '').padEnd(2, '0')) : 0n;
+}
+
 export type RealMoneyDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 
 /**
  * Default-deny real-money gate: REAL_MONEY_APPROVAL_REQUIRED mode, the
- * mainnet broadcast flag, an unexpired approval for exactly this invoice with
- * a cap at or above the amount, and a reference the verifier confirms and
- * consumes. There is no self-asserted "human verified" input.
+ * mainnet broadcast flag, a positive SYNQ_MAINNET_CANARY_MAX_USD covering the
+ * (USD) amount, an unexpired approval for exactly this invoice with a cap at
+ * or above the amount, and a reference the verifier confirms and consumes.
+ * There is no self-asserted "human verified" input.
  */
 export class RealMoneyGate {
   private readonly used = new Set<string>();
@@ -324,6 +335,11 @@ export class RealMoneyGate {
       return deny('mode is not REAL_MONEY_APPROVAL_REQUIRED');
     if (this.env.SYNQ_ALLOW_MAINNET_BROADCAST !== 'true')
       return deny('SYNQ_ALLOW_MAINNET_BROADCAST is not true');
+    const canary = canaryCapCents(this.env.SYNQ_MAINNET_CANARY_MAX_USD);
+    if (canary <= 0n)
+      return deny('SYNQ_MAINNET_CANARY_MAX_USD is not a positive cap');
+    if (input.currency !== 'USD' || input.amountMinor > canary)
+      return deny('amount exceeds SYNQ_MAINNET_CANARY_MAX_USD');
     const a = input.approval;
     if (!a) return deny('no approval');
     if (a.invoiceId !== input.invoiceId)

@@ -83,4 +83,5 @@ export const WORKFLOW_FAMILIES: Readonly<Record<string, WorkflowFamily>> = {
   FundingWorkflow: 'strategy',
   ReconciliationWorkflow: 'operations',
   EmergencyPauseWorkflow: 'operations',
+  BookingWorkflow: 'economic',
 };

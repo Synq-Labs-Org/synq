@@ -458,6 +458,7 @@ export class MemoryAttemptLedger implements AttemptLedger {
 }
 /** Durable ledger: one row per attempt key, inserted once. */
 export class PostgresAttemptLedger implements AttemptLedger {
+  private readonly table: string;
   constructor(
     private readonly pool: {
       query(
@@ -465,15 +466,21 @@ export class PostgresAttemptLedger implements AttemptLedger {
         values?: unknown[],
       ): Promise<{ rowCount: number | null }>;
     },
-  ) {}
+    private readonly schema = 'public',
+  ) {
+    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+      throw new Error('invalid schema name');
+    this.table = `"${schema}".synq_delegation_attempts`;
+  }
   async migrate() {
+    await this.pool.query(`CREATE SCHEMA IF NOT EXISTS "${this.schema}"`);
     await this.pool.query(
-      'CREATE TABLE IF NOT EXISTS synq_delegation_attempts (attempt_key text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())',
+      `CREATE TABLE IF NOT EXISTS ${this.table} (attempt_key text PRIMARY KEY, claimed_at timestamptz NOT NULL DEFAULT now())`,
     );
   }
   async claim(key: string) {
     const r = await this.pool.query(
-      'INSERT INTO synq_delegation_attempts(attempt_key) VALUES ($1) ON CONFLICT DO NOTHING',
+      `INSERT INTO ${this.table}(attempt_key) VALUES ($1) ON CONFLICT DO NOTHING`,
       [key],
     );
     return r.rowCount === 1;
@@ -489,4 +496,55 @@ export async function claimAttempt(
   if (!(await ledger.claim(key)))
     fail('DUPLICATE_ATTEMPT', `period ${period} already attempted`);
   return key;
+}
+
+export type PlannedContribution = RedemptionCall & {
+  period: number;
+  attemptKey: string;
+};
+
+/**
+ * Executor-side planning for one delegated contribution. Every off-chain
+ * check (canonical policy, delegator signature, on-chain revocation, window,
+ * period and cumulative caps) runs first, so a refused plan never burns the
+ * period; the attempt is then claimed in the durable ledger before anything
+ * is broadcast, so a retry after a crash finds DUPLICATE_ATTEMPT and must
+ * reconcile on-chain instead of redeeming twice.
+ */
+export class DelegatedContributionPlanner {
+  constructor(
+    readonly adapter: MetaMaskDelegationAdapter,
+    private readonly ledger: AttemptLedger,
+    private readonly chain: DelegationChainReader,
+  ) {}
+
+  async plan(input: {
+    signed: Delegation;
+    policy: RecurringContributionPolicy;
+    limits: GroupContributionLimits;
+    amount: bigint;
+    nowSeconds: number;
+    spentThisPeriod: bigint;
+    spentTotal: bigint;
+  }): Promise<PlannedContribution> {
+    const call = await this.adapter.planContribution(
+      input.signed,
+      input.policy,
+      {
+        amount: input.amount,
+        nowSeconds: input.nowSeconds,
+        spentThisPeriod: input.spentThisPeriod,
+        spentTotal: input.spentTotal,
+      },
+      input.limits,
+      this.chain,
+    );
+    const period = this.adapter.periodIndex(input.policy, input.nowSeconds);
+    const attemptKey = await claimAttempt(
+      this.ledger,
+      call.delegationHash,
+      period,
+    );
+    return { ...call, period, attemptKey };
+  }
 }

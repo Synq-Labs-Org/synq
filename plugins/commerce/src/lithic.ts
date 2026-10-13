@@ -459,14 +459,66 @@ export function verifyLithicWebhook(input: {
 /** Deduplicates webhook deliveries by `webhook-id` (stable across resends). */
 export interface WebhookDeduper {
   /** True the first time an id is seen; false for every redelivery. */
-  firstSeen(id: string): Promise<boolean>;
+  firstSeen(id: string, meta?: WebhookMeta): Promise<boolean>;
+  /** Releases a claim whose processing failed, so the provider's retry is handled. */
+  forget?(id: string): Promise<void>;
 }
+export type WebhookMeta = { eventType: string | null; bodyHash: string };
 export class MemoryWebhookDeduper implements WebhookDeduper {
   private readonly seen = new Set<string>();
   async firstSeen(id: string) {
     if (this.seen.has(id)) return false;
     this.seen.add(id);
     return true;
+  }
+  async forget(id: string) {
+    this.seen.delete(id);
+  }
+}
+
+/**
+ * Durable dedupe: one row per verified `webhook-id`, inserted once, so a
+ * redelivery after a restart (or to another API instance) is still a
+ * duplicate. Only the event type and a body hash are kept, never card data.
+ */
+export class PostgresWebhookDeduper implements WebhookDeduper {
+  private readonly s: string;
+  constructor(
+    private readonly pool: {
+      query(
+        sql: string,
+        values?: unknown[],
+      ): Promise<{ rowCount: number | null }>;
+    },
+    private readonly source = 'lithic',
+    schema = 'public',
+  ) {
+    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+      throw new Error('invalid schema name');
+    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(source))
+      throw new Error('invalid webhook source');
+    this.s = `"${schema}"`;
+  }
+  async migrate() {
+    await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${this.s}`);
+    await this.pool
+      .query(`CREATE TABLE IF NOT EXISTS ${this.s}.synq_webhook_deliveries (
+      source text NOT NULL, webhook_id text NOT NULL, event_type text, body_hash text NOT NULL,
+      received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (source, webhook_id))`);
+  }
+  async firstSeen(id: string, meta?: WebhookMeta) {
+    const r = await this.pool.query(
+      `INSERT INTO ${this.s}.synq_webhook_deliveries (source, webhook_id, event_type, body_hash)
+       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [this.source, id, meta?.eventType ?? null, meta?.bodyHash ?? ''],
+    );
+    return r.rowCount === 1;
+  }
+  async forget(id: string) {
+    await this.pool.query(
+      `DELETE FROM ${this.s}.synq_webhook_deliveries WHERE source=$1 AND webhook_id=$2`,
+      [this.source, id],
+    );
   }
 }
 

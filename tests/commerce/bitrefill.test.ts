@@ -242,7 +242,43 @@ describe('Bitrefill read-only adapter', () => {
         ...base,
       }),
     ).rejects.toThrow(/REAL_MONEY_DENIED: SYNQ_ALLOW_MAINNET_BROADCAST/);
-    const env = { SYNQ_ALLOW_MAINNET_BROADCAST: 'true' };
+    // The canary cap is a second, independent guard: flag on but cap 0 (the
+    // shipped default) or below the amount still denies before any verifier.
+    for (const [cap, reason] of [
+      [undefined, 'SYNQ_MAINNET_CANARY_MAX_USD is not a positive cap'],
+      ['0', 'SYNQ_MAINNET_CANARY_MAX_USD is not a positive cap'],
+      ['9.99', 'amount exceeds SYNQ_MAINNET_CANARY_MAX_USD'],
+    ] as const)
+      expect(
+        await new RealMoneyGate(
+          {
+            SYNQ_ALLOW_MAINNET_BROADCAST: 'true',
+            ...(cap === undefined ? {} : { SYNQ_MAINNET_CANARY_MAX_USD: cap }),
+          },
+          { verifyAndConsume: async () => true },
+        ).authorize({ mode: 'REAL_MONEY_APPROVAL_REQUIRED', ...base }),
+      ).toEqual({ allowed: false, reason });
+    expect(
+      await new RealMoneyGate(
+        {
+          SYNQ_ALLOW_MAINNET_BROADCAST: 'true',
+          SYNQ_MAINNET_CANARY_MAX_USD: '100',
+        },
+        { verifyAndConsume: async () => true },
+      ).authorize({
+        mode: 'REAL_MONEY_APPROVAL_REQUIRED',
+        ...base,
+        currency: 'EUR',
+        approval: { ...approval, currency: 'EUR' },
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: 'amount exceeds SYNQ_MAINNET_CANARY_MAX_USD',
+    });
+    const env = {
+      SYNQ_ALLOW_MAINNET_BROADCAST: 'true',
+      SYNQ_MAINNET_CANARY_MAX_USD: '20',
+    };
     // Default verifier denies everything: a well-formed approval is not enough.
     const defaultGate = new RealMoneyGate(env);
     expect(
