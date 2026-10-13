@@ -546,15 +546,30 @@ export class TelegramAdapter implements ChannelAdapter {
       if (replyParameters)
         form.set('reply_parameters', JSON.stringify(replyParameters));
       let messageId: string;
+      // A network failure (status 0, e.g. timeout) may have delivered the
+      // photo: never retry it and never post the text fallback after it, or
+      // the chat could show the same card twice.
+      const attempt = { uncertain: null as ChannelDeliveryError | null };
       try {
-        const sent = z
-          .looseObject({ message_id: z.number().int() })
-          .parse(
-            await this.retrying(() => this.options.api.call('sendPhoto', form)),
-          );
+        const sent = z.looseObject({ message_id: z.number().int() }).parse(
+          await this.retrying(async () => {
+            try {
+              return await this.options.api.call('sendPhoto', form);
+            } catch (error) {
+              if (error instanceof TelegramApiError && error.httpStatus === 0)
+                throw (attempt.uncertain = new ChannelDeliveryError(
+                  'PROVIDER_UNAVAILABLE',
+                  1,
+                  `DELIVERY_UNCERTAIN: ${error.description}`,
+                ));
+              throw error;
+            }
+          }),
+        );
         messageId = String(sent.message_id);
       } catch (error) {
         this.options.onBannerError?.(error);
+        if (attempt.uncertain) throw attempt.uncertain;
         return sendText();
       }
       if (rest)

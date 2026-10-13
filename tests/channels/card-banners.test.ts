@@ -3,6 +3,7 @@ import {
   BANNER_HEIGHT,
   BANNER_WIDTH,
   CardBannerRenderer,
+  ChannelDeliveryError,
   OutboundLimiter,
   TelegramAdapter,
   TelegramBotApi,
@@ -217,6 +218,8 @@ type Sent = {
 };
 function telegram(options: {
   respond?: (method: string) => { status?: number; body: unknown };
+  /** Methods whose request fails at the network layer (e.g. a timeout). */
+  networkFailure?: string[];
   banners?: { render(card: InteractiveCard): Promise<Buffer> } | null;
 }) {
   const sent: Sent[] = [];
@@ -231,6 +234,8 @@ function telegram(options: {
         ? null
         : (JSON.parse(String(init?.body)) as Record<string, unknown>),
     });
+    if (options.networkFailure?.includes(method))
+      throw new DOMException('The operation timed out.', 'TimeoutError');
     const r = options.respond?.(method) ?? {
       body: { ok: true, result: { message_id: sent.length } },
     };
@@ -334,6 +339,19 @@ describe('telegram card photos', () => {
       messageId: '7',
     });
     expect(t.sent.map((s) => s.method)).toEqual(['sendPhoto', 'sendMessage']);
+  });
+
+  it('treats a photo upload network timeout as uncertain: no retry, no duplicate text card', async () => {
+    const t = telegram({ networkFailure: ['sendPhoto'] });
+    const error = await t.adapter.send('8850110387', message).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ChannelDeliveryError);
+    expect((error as ChannelDeliveryError).code).toBe('PROVIDER_UNAVAILABLE');
+    expect((error as Error).message).toMatch(/^DELIVERY_UNCERTAIN/);
+    expect(t.sent.map((s) => s.method)).toEqual(['sendPhoto']);
+    expect(t.errors).toHaveLength(1);
   });
 
   it('keeps plain messages and disabled banners on sendMessage', async () => {
