@@ -36,6 +36,12 @@ export const ECONOMIC_DOMAINS = [
   'CONVERSION',
 ] as const;
 
+/**
+ * Mandates that move real testnet value are approved by human passkeys only:
+ * no fixture, delegate or operator principal can count toward their quorum.
+ */
+export const PRODUCTION_APPROVER_KINDS = ['MERA_HUMAN'] as const;
+
 export const EconomicMandateSchema = z
   .strictObject({
     mandateId: IdSchema,
@@ -70,6 +76,16 @@ export const EconomicMandateSchema = z
       ctx.addIssue({ code: 'custom', message: 'per-action cap above budget' });
     if (v.quorum > new Set(v.members).size)
       ctx.addIssue({ code: 'custom', message: 'quorum exceeds members' });
+    if (
+      v.environment === 'TESTNET' &&
+      (v.approverKinds.length !== PRODUCTION_APPROVER_KINDS.length ||
+        !PRODUCTION_APPROVER_KINDS.every((k) => v.approverKinds.includes(k)))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['approverKinds'],
+        message: 'TESTNET mandates are approved by MERA_HUMAN principals only',
+      });
   });
 export type EconomicMandate = z.output<typeof EconomicMandateSchema>;
 export type EconomicMandateInput = z.input<typeof EconomicMandateSchema>;

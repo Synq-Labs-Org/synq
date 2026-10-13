@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   EconomicGrantAuthority,
+  EconomicMandateSchema,
+  PRODUCTION_APPROVER_KINDS,
   economicRequestHash,
   type EconomicAuthorizationRequest,
   type EconomicExecution,
@@ -376,5 +378,32 @@ describe('EconomicGrantAuthority', () => {
           approvals: approvalPorts(['alice', 'bob', 'carol']),
         }),
     ).toThrow();
+  });
+});
+
+describe('production approver kinds (I1)', () => {
+  const testnet = { ...mandate, environment: 'TESTNET' as const };
+  it('pins TESTNET mandates to human passkey approvers', async () => {
+    expect(PRODUCTION_APPROVER_KINDS).toEqual(['MERA_HUMAN']);
+    const { approverKinds: _omit, ...unset } = testnet;
+    expect(EconomicMandateSchema.parse(unset).approverKinds).toEqual([
+      'MERA_HUMAN',
+    ]);
+    for (const approverKinds of [
+      ['LOCAL_FIXTURE'],
+      ['PRIVY_DELEGATE'],
+      ['MERA_HUMAN', 'LOCAL_FIXTURE'],
+      ['MERA_HUMAN', 'PRIVY_DELEGATE'],
+    ])
+      expect(
+        EconomicMandateSchema.safeParse({ ...testnet, approverKinds }).success,
+      ).toBe(false);
+    const { a } = await authority(unset);
+    await expect(
+      a.install({ ...testnet, version: 2, approverKinds: ['LOCAL_FIXTURE'] }),
+    ).rejects.toThrow(/MERA_HUMAN/);
+  });
+  it('leaves sandbox fixture mandates usable', () => {
+    expect(EconomicMandateSchema.safeParse(mandate).success).toBe(true);
   });
 });
