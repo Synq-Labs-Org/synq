@@ -217,6 +217,9 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:../../plugins/chainlink-cre
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:../../plugins/commerce
       '@synq/plugin-kimi':
         specifier: workspace:*
         version: link:../../plugins/kimi
@@ -864,6 +867,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/metamask-delegation':
+        specifier: workspace:*
+        version: link:../../packages/metamask-delegation
       '@synq/offer-exchange':
         specifier: workspace:*
         version: link:../../packages/offer-exchange

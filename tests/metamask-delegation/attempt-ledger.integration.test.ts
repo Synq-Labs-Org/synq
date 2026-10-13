@@ -64,80 +64,84 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe('PostgresAttemptLedger against local Postgres', () => {
-  it('MM-PG-001 migrate is idempotent and a claim is exactly-once under concurrency and across pools', async () => {
-    const ledger = new PostgresAttemptLedger(pool, schema);
-    await ledger.migrate();
-    await ledger.migrate();
-    const h = keccak256(toHex(`d-${schema}`));
-    const results = await Promise.allSettled(
-      Array.from({ length: 8 }, () => claimAttempt(ledger, h, 0)),
-    );
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    expect(
-      results
-        .filter((r) => r.status === 'rejected')
-        .map((r) => (r.reason as { code?: string }).code),
-    ).toEqual(Array(7).fill('DUPLICATE_ATTEMPT'));
-    // A restarted executor (fresh pool) still sees the claim.
-    const other = new pg.Pool({ connectionString: URL, max: 1 });
-    try {
-      const again = new PostgresAttemptLedger(other, schema);
-      await again.migrate();
-      await expect(claimAttempt(again, h, 0)).rejects.toMatchObject({
-        code: 'DUPLICATE_ATTEMPT',
-      });
-      await expect(claimAttempt(again, h, 1)).resolves.toBe(
-        `${h.toLowerCase()}:1`,
+describe(
+  'PostgresAttemptLedger against local Postgres',
+  { timeout: 30_000 },
+  () => {
+    it('MM-PG-001 migrate is idempotent and a claim is exactly-once under concurrency and across pools', async () => {
+      const ledger = new PostgresAttemptLedger(pool, schema);
+      await ledger.migrate();
+      await ledger.migrate();
+      const h = keccak256(toHex(`d-${schema}`));
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => claimAttempt(ledger, h, 0)),
       );
-    } finally {
-      await other.end();
-    }
-    expect(() => new PostgresAttemptLedger(pool, 'bad;schema')).toThrow();
-  });
-
-  it('MM-PG-002 the planner claims only after every off-chain check passes, then refuses the period again', async () => {
-    const ledger = new PostgresAttemptLedger(pool, schema);
-    await ledger.migrate();
-    const planner = new DelegatedContributionPlanner(adapter, ledger, chain);
-    const d = adapter.buildDelegation(policy, limits);
-    const signed = {
-      ...d,
-      signature: await memberAccount.signTypedData(
-        adapter.delegationTypedData(d),
-      ),
-    };
-    const base = {
-      signed,
-      policy,
-      limits,
-      nowSeconds: now + 10,
-      spentThisPeriod: 0n,
-      spentTotal: 0n,
-    };
-    // Refused plans (over the period cap) never burn the period.
-    await expect(
-      planner.plan({ ...base, amount: 20_000_001n }),
-    ).rejects.toMatchObject({ code: 'OVER_PERIOD_CAP' });
-    const planned = await planner.plan({ ...base, amount: 5_000_000n });
-    expect(planned.to).toBe(adapter.delegationManager);
-    expect(planned.period).toBe(0);
-    expect(planned.attemptKey).toBe(
-      `${planned.delegationHash.toLowerCase()}:0`,
-    );
-    const rows = await pool.query(
-      `SELECT attempt_key FROM "${schema}".synq_delegation_attempts WHERE attempt_key=$1`,
-      [planned.attemptKey],
-    );
-    expect(rows.rows).toHaveLength(1);
-    await expect(
-      planner.plan({ ...base, amount: 5_000_000n }),
-    ).rejects.toMatchObject({ code: 'DUPLICATE_ATTEMPT' });
-    const next = await planner.plan({
-      ...base,
-      amount: 5_000_000n,
-      nowSeconds: now + 7 * 86_400 + 10,
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(
+        results
+          .filter((r) => r.status === 'rejected')
+          .map((r) => (r.reason as { code?: string }).code),
+      ).toEqual(Array(7).fill('DUPLICATE_ATTEMPT'));
+      // A restarted executor (fresh pool) still sees the claim.
+      const other = new pg.Pool({ connectionString: URL, max: 1 });
+      try {
+        const again = new PostgresAttemptLedger(other, schema);
+        await again.migrate();
+        await expect(claimAttempt(again, h, 0)).rejects.toMatchObject({
+          code: 'DUPLICATE_ATTEMPT',
+        });
+        await expect(claimAttempt(again, h, 1)).resolves.toBe(
+          `${h.toLowerCase()}:1`,
+        );
+      } finally {
+        await other.end();
+      }
+      expect(() => new PostgresAttemptLedger(pool, 'bad;schema')).toThrow();
     });
-    expect(next.period).toBe(1);
-  });
-});
+
+    it('MM-PG-002 the planner claims only after every off-chain check passes, then refuses the period again', async () => {
+      const ledger = new PostgresAttemptLedger(pool, schema);
+      await ledger.migrate();
+      const planner = new DelegatedContributionPlanner(adapter, ledger, chain);
+      const d = adapter.buildDelegation(policy, limits);
+      const signed = {
+        ...d,
+        signature: await memberAccount.signTypedData(
+          adapter.delegationTypedData(d),
+        ),
+      };
+      const base = {
+        signed,
+        policy,
+        limits,
+        nowSeconds: now + 10,
+        spentThisPeriod: 0n,
+        spentTotal: 0n,
+      };
+      // Refused plans (over the period cap) never burn the period.
+      await expect(
+        planner.plan({ ...base, amount: 20_000_001n }),
+      ).rejects.toMatchObject({ code: 'OVER_PERIOD_CAP' });
+      const planned = await planner.plan({ ...base, amount: 5_000_000n });
+      expect(planned.to).toBe(adapter.delegationManager);
+      expect(planned.period).toBe(0);
+      expect(planned.attemptKey).toBe(
+        `${planned.delegationHash.toLowerCase()}:0`,
+      );
+      const rows = await pool.query(
+        `SELECT attempt_key FROM "${schema}".synq_delegation_attempts WHERE attempt_key=$1`,
+        [planned.attemptKey],
+      );
+      expect(rows.rows).toHaveLength(1);
+      await expect(
+        planner.plan({ ...base, amount: 5_000_000n }),
+      ).rejects.toMatchObject({ code: 'DUPLICATE_ATTEMPT' });
+      const next = await planner.plan({
+        ...base,
+        amount: 5_000_000n,
+        nowSeconds: now + 7 * 86_400 + 10,
+      });
+      expect(next.period).toBe(1);
+    });
+  },
+);
