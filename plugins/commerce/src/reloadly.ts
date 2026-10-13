@@ -494,6 +494,45 @@ export interface GiftCodeSealer {
   }): Promise<{ ref: string }>;
 }
 
+/**
+ * Agent-safe recipient lookup (ProfileDirectory satisfies it): only the kind
+ * and expiry of a vault ref in a group, never its contents.
+ */
+export interface GiftRecipientDirectory {
+  summary(
+    groupId: string,
+    ref: string,
+  ): Promise<{ kind: string; expired: boolean } | null>;
+}
+
+const GIFT_RECIPIENT_KINDS: ReadonlySet<string> = new Set([
+  'RECIPIENT',
+  'SHIPPING',
+]);
+
+/**
+ * A gift card is only ever ordered for a live RECIPIENT/SHIPPING record of the
+ * ordering group, the same rule the code sealer enforces after the order.
+ */
+export async function checkGiftRecipient(
+  directory: GiftRecipientDirectory,
+  groupId: string,
+  recipientRef: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!groupId || !recipientRef)
+    return { ok: false, reason: 'RECIPIENT_INVALID: missing group or ref' };
+  const r = await directory.summary(groupId, recipientRef);
+  if (!r)
+    return {
+      ok: false,
+      reason: 'RECIPIENT_INVALID: not a profile of the ordering group',
+    };
+  if (!GIFT_RECIPIENT_KINDS.has(r.kind))
+    return { ok: false, reason: `RECIPIENT_INVALID: ${r.kind} profile` };
+  if (r.expired) return { ok: false, reason: 'RECIPIENT_INVALID: expired' };
+  return { ok: true };
+}
+
 // ---- Offers and the booking port -------------------------------------------
 
 export type GiftCardRef = {
@@ -522,6 +561,21 @@ export const giftCardModel = (r: {
   recipientCurrency: string;
   unitPriceCents: number;
 }) => `giftcard-${r.countryCode}-${r.recipientCurrency}-${r.unitPriceCents}`;
+
+/** giftCardSubject after the recipient is confirmed as the group's RECIPIENT/SHIPPING record. */
+export async function checkedGiftCardSubject(
+  directory: GiftRecipientDirectory,
+  groupId: string,
+  input: Parameters<typeof giftCardSubject>[0],
+) {
+  const check = await checkGiftRecipient(
+    directory,
+    groupId,
+    input.recipientRef,
+  );
+  if (!check.ok) throw new Error(check.reason);
+  return giftCardSubject(input);
+}
 
 /** Intent subject for "buy a <brand> gift card": brand + model give an exact identity. */
 export function giftCardSubject(input: {
@@ -665,12 +719,20 @@ export class ReloadlyGiftCardProvider {
   constructor(
     private readonly client: ReloadlyClient,
     private readonly now: () => number,
+    private readonly recipients: GiftRecipientDirectory,
     private readonly accountCurrency = ACCOUNT_CURRENCY,
   ) {}
 
   async search(intent: EconomicIntent): Promise<EconomicOfferInput[]> {
     const req = giftCardRequest(intent);
     if (!req) return [];
+    // No offer, and no catalog call, for a recipient outside the group's vault.
+    const recipient = await checkGiftRecipient(
+      this.recipients,
+      intent.groupId,
+      req.recipientRef,
+    );
+    if (!recipient.ok) return [];
     const products = await this.client.products({
       countryCode: req.countryCode,
       productName: req.productName,
@@ -732,6 +794,7 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
   constructor(
     private readonly client: ReloadlyClient,
     private readonly sealer: GiftCodeSealer | null,
+    private readonly recipients: GiftRecipientDirectory,
     private readonly accountCurrency = ACCOUNT_CURRENCY,
   ) {}
 
@@ -877,6 +940,12 @@ export class ReloadlyGiftCardPort implements ProviderBookingPort {
     );
     // Validation before ordering: definitive failures create nothing.
     try {
+      const recipient = await checkGiftRecipient(
+        this.recipients,
+        b.recipient.groupId,
+        b.recipient.recipientRef,
+      );
+      if (!recipient.ok) return { status: 'FAILED', reason: recipient.reason };
       const product = await this.client.product(b.ref.productId);
       const cost = checkDenomination(product, {
         countryCode: b.ref.countryCode,

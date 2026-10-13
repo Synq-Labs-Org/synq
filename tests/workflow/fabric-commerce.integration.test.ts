@@ -68,11 +68,8 @@ async function giftWorld(groupId = 'group-1') {
     SYNQ_PROFILE_VAULT_KEY: randomBytes(32).toString('base64'),
   });
   const profiles = new MemoryProfileStore();
-  const { ref: recipientRef } = await new ProfileDirectory(
-    profiles,
-    keys,
-    now,
-  ).put({
+  const directory = new ProfileDirectory(profiles, keys, now);
+  const { ref: recipientRef } = await directory.put({
     groupId,
     kind: 'RECIPIENT',
     data: {
@@ -85,8 +82,8 @@ async function giftWorld(groupId = 'group-1') {
     },
   });
   const sealer = new GiftCodeVault(profiles, keys, now);
-  const provider = new ReloadlyGiftCardProvider(client, now);
-  const port = new ReloadlyGiftCardPort(client, sealer);
+  const provider = new ReloadlyGiftCardProvider(client, now, directory);
+  const port = new ReloadlyGiftCardPort(client, sealer, directory);
   const credsEnv = { RELOADLY_CLIENT_ID: 'x', RELOADLY_CLIENT_SECRET: 'y' };
   const world = await fabricBookingWorld({
     groupId,

@@ -13,6 +13,7 @@ import {
   ReloadlyGiftCardProvider,
   assertReloadlySandbox,
   checkDenomination,
+  checkedGiftCardSubject,
   decimalMoney,
   type GiftCodeSealer,
 } from '@synq/plugin-commerce';
@@ -43,11 +44,8 @@ async function setup(opts: { sealer?: boolean } = {}) {
     SYNQ_PROFILE_VAULT_KEY: randomBytes(32).toString('base64'),
   });
   const store = new MemoryProfileStore();
-  const { ref: recipientRef } = await new ProfileDirectory(
-    store,
-    keys,
-    now,
-  ).put({
+  const directory = new ProfileDirectory(store, keys, now);
+  const { ref: recipientRef } = await directory.put({
     groupId: 'g1',
     kind: 'RECIPIENT',
     data: {
@@ -71,10 +69,20 @@ async function setup(opts: { sealer?: boolean } = {}) {
   const port = new ReloadlyGiftCardPort(
     client,
     opts.sealer === false ? null : sealer,
+    directory,
   );
-  const provider = new ReloadlyGiftCardProvider(client, now);
+  const provider = new ReloadlyGiftCardProvider(client, now, directory);
   const decryptor = new ProfileDecryptor(store, keys, now, 'delivery-worker');
-  return { fake, client, port, provider, recipientRef, sealed, decryptor };
+  return {
+    fake,
+    client,
+    port,
+    provider,
+    recipientRef,
+    sealed,
+    decryptor,
+    directory,
+  };
 }
 
 const intentFor = (recipientRef: string, over: Record<string, string> = {}) =>
@@ -322,7 +330,7 @@ describe('Reloadly gift card sandbox adapter', () => {
         throw new Error('vault down');
       },
     };
-    const port = new ReloadlyGiftCardPort(v.client, broken);
+    const port = new ReloadlyGiftCardPort(v.client, broken, v.directory);
     const out = await port.book({
       offer: vOffer,
       idempotencyKey: 'synq-gift-10',
@@ -428,8 +436,8 @@ describe('Reloadly identifiers and gift-code custody (security re-check)', () =>
       })
     ).ref;
     const vault = new GiftCodeVault(store, keys, now);
-    const port = new ReloadlyGiftCardPort(client, vault);
-    const provider = new ReloadlyGiftCardProvider(client, now);
+    const port = new ReloadlyGiftCardPort(client, vault, dir);
+    const provider = new ReloadlyGiftCardProvider(client, now, dir);
     const decryptor = new ProfileDecryptor(store, keys, now, 'delivery-worker');
     const offerFor = async (id: string, recipientRef: string) => {
       const intent = EconomicIntentSchema.parse({
@@ -439,6 +447,14 @@ describe('Reloadly identifiers and gift-code custody (security re-check)', () =>
       });
       return EconomicOfferSchema.parse((await provider.search(intent))[0]);
     };
+    const search = (id: string, recipientRef: string) =>
+      provider.search(
+        EconomicIntentSchema.parse({
+          ...intentFor(recipientRef),
+          id,
+          groupId: G,
+        }),
+      );
     return {
       fake,
       store,
@@ -448,7 +464,9 @@ describe('Reloadly identifiers and gift-code custody (security re-check)', () =>
       rb,
       other,
       traveler,
+      dir,
       offerFor,
+      search,
       decryptor,
     };
   }
@@ -532,13 +550,7 @@ describe('Reloadly identifiers and gift-code custody (security re-check)', () =>
         codes,
       }),
     ).rejects.toThrow(/FIELD_NOT_ALLOWED/);
-    // A group-G order naming another group's recipient: the order stands, nothing is sealed.
-    const offer = await w.offerFor('gift-X', w.other);
-    const out = await w.port.book({ offer, idempotencyKey: `synq:${G}:x` });
-    expect(out.status).toBe('CONFIRMED');
-    expect(
-      [...w.store.records.values()].filter((r) => r.kind === 'GIFT_CODE'),
-    ).toHaveLength(0);
+    const offer = await w.offerFor('gift-X', w.ra);
     // An offer without its group binding is refused before contacting the provider.
     const unbound = EconomicOfferSchema.parse({
       ...offer,
@@ -554,5 +566,58 @@ describe('Reloadly identifiers and gift-code custody (security re-check)', () =>
       (await w.port.book({ offer: unbound, idempotencyKey: 'k-unbound' }))
         .status,
     ).toBe('FAILED');
+  });
+
+  it('SEC-N3 a recipient outside the ordering group never reaches the provider', async () => {
+    const w = await world();
+    // Offer creation: no offer, and no catalog call, for a foreign or non-recipient ref.
+    const before = w.fake.calls.length;
+    expect(await w.search('gift-other', w.other)).toEqual([]);
+    expect(await w.search('gift-traveler', w.traveler)).toEqual([]);
+    expect(await w.search('gift-missing', 'pv_' + '0'.repeat(32))).toEqual([]);
+    expect(w.fake.calls.length).toBe(before);
+    // Booking: an offer rewritten to another recipient fails before any provider call.
+    const offer = await w.offerFor('gift-N3', w.ra);
+    const attrs =
+      offer.subject.kind === 'PRODUCT' ? offer.subject.attributes : {};
+    const calls = w.fake.calls.length;
+    for (const recipientRef of [w.other, w.traveler]) {
+      const forged = EconomicOfferSchema.parse({
+        ...offer,
+        subject: { ...offer.subject, attributes: { ...attrs, recipientRef } },
+      });
+      const out = await w.port.book({
+        offer: forged,
+        idempotencyKey: `synq:${G}:n3:${recipientRef}`,
+      });
+      expect(out).toMatchObject({
+        status: 'FAILED',
+        reason: expect.stringMatching(/^RECIPIENT_INVALID/),
+      });
+    }
+    expect(w.fake.calls.length).toBe(calls);
+    expect(w.fake.orders).toHaveLength(0);
+    expect(
+      [...w.store.records.values()].filter((r) => r.kind === 'GIFT_CODE'),
+    ).toHaveLength(0);
+  });
+
+  it('SEC-N3 intent subjects are built only for the group recipient records', async () => {
+    const w = await world();
+    const input = {
+      brand: 'Amazon',
+      countryCode: 'US',
+      recipientCurrency: 'USD',
+      unitPriceCents: 1000,
+    };
+    await expect(
+      checkedGiftCardSubject(w.dir, G, { ...input, recipientRef: w.ra }),
+    ).resolves.toMatchObject({ attributes: { recipientRef: w.ra } });
+    await expect(
+      checkedGiftCardSubject(w.dir, G, { ...input, recipientRef: w.other }),
+    ).rejects.toThrow(/RECIPIENT_INVALID/);
+    await expect(
+      checkedGiftCardSubject(w.dir, G, { ...input, recipientRef: w.traveler }),
+    ).rejects.toThrow(/RECIPIENT_INVALID/);
   });
 });

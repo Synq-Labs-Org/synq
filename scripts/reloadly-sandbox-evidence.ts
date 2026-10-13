@@ -131,11 +131,8 @@ async function main() {
     SYNQ_PROFILE_VAULT_KEY: randomBytes(32).toString('base64'),
   });
   const profiles = new MemoryProfileStore();
-  const { ref: recipientRef } = await new ProfileDirectory(
-    profiles,
-    keys,
-    now,
-  ).put({
+  const directory = new ProfileDirectory(profiles, keys, now);
+  const { ref: recipientRef } = await directory.put({
     groupId: 'evidence-group',
     kind: 'RECIPIENT',
     data: {
@@ -148,7 +145,7 @@ async function main() {
     },
   });
   const vault = new GiftCodeVault(profiles, keys, now);
-  const provider = new ReloadlyGiftCardProvider(client, now);
+  const provider = new ReloadlyGiftCardProvider(client, now, directory);
   const world = await fabricBookingWorld({
     groupId: 'evidence-group',
     mandateId: 'gift-evidence',
@@ -156,7 +153,7 @@ async function main() {
     host: RELOADLY_SANDBOX_HOST,
     capability: reloadlyProviderCapability(env),
     provider,
-    port: new ReloadlyGiftCardPort(client, vault),
+    port: new ReloadlyGiftCardPort(client, vault, directory),
     rail: {
       railId: 'reloadly-sandbox-balance',
       rail: 'PROVIDER_BALANCE',
