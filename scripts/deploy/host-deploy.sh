@@ -14,7 +14,10 @@ BRANCH=${SYNQ_DEPLOY_BRANCH:-deploy}
 FORCE=${1:-}
 param() { aws ssm get-parameter --region "$REGION" --with-decryption --name "/synq/prod/$1" --query Parameter.Value --output text; }
 
-install -d -m 700 /root/.ssh "$BASE/secrets"
+install -d -m 700 /root/.ssh
+# Mounted read-only into the bot, which runs as uid 1000.
+install -d -m 700 -o 1000 -g 1000 "$BASE/secrets"
+chown 1000:1000 "$BASE/secrets" && chmod 700 "$BASE/secrets"
 # Secrets are owner-only; the checkout keeps normal modes so the images' non-root
 # users can read their code.
 secret() { (umask 077 && param "$1" > "$2"); }
