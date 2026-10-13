@@ -10,11 +10,22 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { anvil } from 'viem/chains';
 import { Context } from '@temporalio/activity';
-import { localProfile } from '@synq/chain-registry';
+import { localProfile, officialAssets } from '@synq/chain-registry';
 import { RegistryRiskSource } from '@synq/plugin-chainlink-cre';
 import { RpcRiskAttestationReader } from '@synq/plugin-chainlink-cre';
 import { artifactHash, intentHash, onchainMandateId } from '@synq/kernel';
 import { PostgresIdentityStore } from '@synq/identity';
+import {
+  StoreApprovalLedger,
+  StoreMembershipDirectory,
+} from '@synq/identity/server';
+import {
+  DelegatedContributionPlanner,
+  MetaMaskDelegationAdapter,
+  PostgresAttemptLedger,
+} from '@synq/metamask-delegation';
+import type { Asset } from '@synq/schemas';
+import type { HttpFetch } from '@synq/plugin-commerce';
 import { PluginRegistry } from '@synq/plugin-sdk';
 import {
   ChainHeadObserver,
@@ -65,6 +76,10 @@ import type { SynqActivities } from '../activities/types.js';
 import { unconfiguredPorts } from '../activities/unconfigured.js';
 import { actionWorkflowIdFor } from '../client.js';
 import { localGateway } from './identity.js';
+import {
+  openCommerceRuntime,
+  type CommerceRuntime,
+} from '../commerce/runtime.js';
 import type { LocalWorkflowManifest } from './manifest.js';
 import { localNow, localTransferStart } from './proposal.js';
 
@@ -98,6 +113,14 @@ export type LocalRuntime = {
   kernel: DurableKernel;
   journal: ExecutionJournal;
   client: PublicClient;
+  /** Booking + Settlement Fabric wiring and provider status. */
+  commerce: CommerceRuntime;
+  /** MetaMask delegated contributions: durable attempt ledger and planner. */
+  delegation: {
+    ledger: PostgresAttemptLedger;
+    planner: DelegatedContributionPlanner | null;
+    reason: string | null;
+  };
   close(): Promise<void>;
 };
 
@@ -108,6 +131,10 @@ export async function openLocalRuntime(
     faults?: FaultHooks;
     allowMainnetBroadcast?: boolean;
     dcaPolicies?: Readonly<Record<string, unknown>>;
+    /** Provider credentials and commerce settings; defaults to process.env. */
+    env?: Readonly<Record<string, string | undefined>>;
+    /** Provider HTTP transport; defaults to the global fetch. */
+    fetch?: HttpFetch;
   } = {},
 ): Promise<LocalRuntime> {
   const faults = options.faults ?? NO_FAULTS;
@@ -560,8 +587,51 @@ export async function openLocalRuntime(
         }
       : {}),
   });
+  const commerce = await openCommerceRuntime({
+    pool,
+    env: options.env ?? process.env,
+    now: clock.now,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    workerId: options.workerId ?? 'local-workflow-worker',
+    identity: {
+      ledger: new StoreApprovalLedger(identityStore),
+      directory: new StoreMembershipDirectory(identityStore),
+      approvalsFor: (requestHash) =>
+        identityStore.transaction((tx) => tx.listApprovals(requestHash)),
+    },
+    treasury: {
+      core: manifest.asset,
+      edge: officialAssets.testnetUSDC as Asset,
+      account: async (groupId) =>
+        groupId === manifest.groupId ? manifest.account : null,
+      confirmed: async (groupId, asset) =>
+        groupId === manifest.groupId &&
+        asset.canonicalAssetId === manifest.asset.canonicalAssetId
+          ? client.readContract({
+              address: manifest.token,
+              abi: tokenAbi,
+              functionName: 'balanceOf',
+              args: [manifest.account],
+            })
+          : null,
+    },
+  });
+  const attempts = new PostgresAttemptLedger(pool);
+  await attempts.migrate();
+  let planner: DelegatedContributionPlanner | null = null;
+  let delegationReason: string | null = null;
+  try {
+    planner = new DelegatedContributionPlanner(
+      new MetaMaskDelegationAdapter(chainId),
+      attempts,
+      client,
+    );
+  } catch (e) {
+    delegationReason = (e as Error).message.slice(0, 200);
+  }
   const activities = withHeartbeats({
     ...unconfiguredPorts(),
+    ...commerce.activities,
     ...economic,
     ...operations,
     ...controls,
@@ -573,6 +643,8 @@ export async function openLocalRuntime(
     kernel,
     journal,
     client,
+    commerce,
+    delegation: { ledger: attempts, planner, reason: delegationReason },
     close: async () => {
       await pool.end().catch(() => undefined);
     },

@@ -74,7 +74,15 @@ async function main(): Promise<void> {
   process.once('SIGINT', stop);
   const running = runSynqWorkers(workers);
   process.stdout.write(
-    `${JSON.stringify({ ready: true, pid: process.pid, armed })}\n`,
+    `${JSON.stringify({
+      ready: true,
+      pid: process.pid,
+      armed,
+      commerce: runtime.commerce.status,
+      delegation: runtime.delegation.planner
+        ? 'READY'
+        : `UNAVAILABLE: ${runtime.delegation.reason}`,
+    })}\n`,
   );
   try {
     await running;
