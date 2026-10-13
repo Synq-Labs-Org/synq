@@ -1,0 +1,193 @@
+# Deploy-ready Synq stack: API, web (passkey /approve page), workflow worker,
+# Postgres, Redis and a single-node Temporal. Nothing here is deployed or pushed.
+#
+#   docker compose -f infra/compose.prod.yaml up -d --build --wait
+#   docker compose -f infra/compose.prod.yaml --profile tunnel up -d   # adds a Cloudflare quick tunnel
+#
+# Every value comes from the shell environment (or an untracked .env next to
+# this file); variables listed without a value are passed through by name.
+# Only the web app is published, on 127.0.0.1; the API is reached through the
+# web app's /api/v1 rewrite or on 127.0.0.1:${SYNQ_API_PUBLISH_PORT}.
+name: synq-prod
+
+x-node-service: &node-service
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: synq
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U synq -d synq']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4.5-bookworm@sha256:90e7a336d044f1abc9e9dbc05d65566850896d11453bbd1dd0fb7e5059f0e8fb
+    restart: unless-stopped
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Single-node Temporal (SQLite on a volume). For a managed deployment point
+  # TEMPORAL_ADDRESS at Temporal Cloud or a self-hosted cluster instead.
+  temporal:
+    image: temporalio/temporal:1.8.3@sha256:cea463d98a8d6def4420f903ea5c3fcd0d85c8d10fbcc2770a50c12fff2eb26d
+    restart: unless-stopped
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --headless
+      - --db-filename
+      - /data/temporal.db
+      - --namespace
+      - ${TEMPORAL_NAMESPACE:-default}
+    volumes:
+      - temporal:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'temporal',
+          'operator',
+          'cluster',
+          'health',
+          '--address',
+          '127.0.0.1:7233',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    <<: *node-service
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    image: synq-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:${SYNQ_API_PUBLISH_PORT:-3200}:3200'
+    volumes:
+      # Kernel audit key and plugin manifest files, mounted read-only.
+      - ${SYNQ_SECRETS_DIR:-./secrets}:/run/secrets/synq:ro
+    environment:
+      SYNQ_API_HOST: 0.0.0.0
+      SYNQ_API_PORT: '3200'
+      SYNQ_DATABASE_URL: postgresql://synq:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/synq
+      SYNQ_RM_DATABASE_URL: postgresql://synq:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/synq
+      SYNQ_RM_REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      # Only the web proxy and the tunnel on the compose network are trusted for X-Forwarded-For.
+      SYNQ_TRUST_PROXY: ${SYNQ_TRUST_PROXY:-loopback,uniquelocal}
+      SYNQ_PROFILE:
+      SYNQ_RP_ID:
+      SYNQ_ORIGIN:
+      SYNQ_WEB_BASE_URL:
+      SYNQ_API_ADMIN_TOKEN:
+      SYNQ_KERNEL_AUDIT_KEY_FILE:
+      SYNQ_KERNEL_PLUGINS_FILE:
+      SYNQ_EXECUTION_MODULE:
+      SYNQ_SEND_MANDATE_ID:
+      SYNQ_ALLOW_MAINNET_BROADCAST:
+      SYNQ_MONAD_TESTNET_RPC_URL:
+      SYNQ_CARD_LINK_KEY:
+      SYNQ_CHANNEL_CARDS:
+      SYNQ_CARD_BANNERS:
+      TELEGRAM_BOT_TOKEN:
+      TELEGRAM_WEBHOOK_SECRET:
+      SYNQ_TELEGRAM_MODE:
+      SYNQ_WHATSAPP_TOKEN:
+      SYNQ_WHATSAPP_PHONE_NUMBER_ID:
+      SYNQ_WHATSAPP_APP_SECRET:
+      SYNQ_WHATSAPP_VERIFY_TOKEN:
+      SYNQ_WHATSAPP_ALLOWED_WA_IDS:
+      SYNQ_WHATSAPP_GRAPH_VERSION:
+      LINQ_API_KEY:
+      LINQ_WEBHOOK_SECRET:
+      QWEN_API_KEY:
+      QWEN_BASE_URL:
+      KIMI_API_KEY:
+      KIMI_BASE_URL:
+      OPENAI_API_KEY:
+      OPENAI_BASE_URL:
+
+  web:
+    <<: *node-service
+    build:
+      context: ..
+      dockerfile: infra/docker/web.Dockerfile
+      args:
+        SYNQ_API_ORIGIN: http://api:3200
+    image: synq-web:local
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:${SYNQ_WEB_PUBLISH_PORT:-3100}:3100'
+    tmpfs:
+      - /tmp
+      - /app/apps/web/dist/cache:uid=1000,gid=1000
+
+  worker:
+    <<: *node-service
+    build:
+      context: ..
+      dockerfile: infra/docker/worker.Dockerfile
+    image: synq-worker:local
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${SYNQ_SECRETS_DIR:-./secrets}:/run/secrets/synq:ro
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      SYNQ_WORKFLOW_MANIFEST: ${SYNQ_WORKFLOW_MANIFEST:-/run/secrets/synq/workflow-manifest.json}
+      SYNQ_ALLOW_MAINNET_BROADCAST:
+      SYNQ_WORKFLOW_FAMILIES:
+      SYNQ_WORKFLOW_WORKER_ID:
+      SYNQ_DCA_POLICY_FILE:
+
+  # Demo only: a Cloudflare quick tunnel (random *.trycloudflare.com URL, no
+  # account) to the web app. See scripts/tunnel.sh for the host-side variant.
+  tunnel:
+    profiles: ['tunnel']
+    image: cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    command: ['tunnel', '--no-autoupdate', '--url', 'http://web:3100']
+
+volumes:
+  postgres:
+  temporal:
