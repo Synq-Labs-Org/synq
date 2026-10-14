@@ -1,4 +1,5 @@
 import Messages
+import SafariServices
 import SwiftUI
 import UIKit
 
@@ -9,7 +10,7 @@ import UIKit
 ///
 /// It also still renders the group-bound review cards (`/approve?p&g&n`) that
 /// other Synq channels issue.
-final class MessagesViewController: MSMessagesAppViewController {
+final class MessagesViewController: MSMessagesAppViewController, SFSafariViewControllerDelegate {
     private enum Mode {
         case start
         case fund
@@ -185,18 +186,23 @@ final class MessagesViewController: MSMessagesAppViewController {
 
     // MARK: Safari hand-off
 
-    /// Opens the Synq site, where the passkey lives. The ceremony happens there,
-    /// never inside the extension.
+    /// Shows the Synq site in Safari's in-app browser, where the passkey lives; the
+    /// ceremony (Face ID) happens there, never in the extension. Messages extensions
+    /// cannot hand a web link to Safari itself, so the page opens inside the panel.
     private func openSecurely(_ url: URL) {
-        extensionContext?.open(url) { [weak self] opened in
-            if !opened {
-                Task { @MainActor in
-                    self?.model.error = "Could not open the Synq page."
-                    self?.errorText = "Could not open the Synq page."
-                    self?.render()
-                }
-            }
-        }
+        guard url.scheme == "https" else { return }
+        if presentationStyle != .expanded { requestPresentationStyle(.expanded) }
+        let browser = SFSafariViewController(url: url)
+        browser.dismissButtonStyle = .done
+        browser.delegate = self
+        browser.modalPresentationStyle = .pageSheet
+        (presentedViewController ?? self).present(browser, animated: true)
+    }
+
+    /// Back from the Synq page: show what changed (joined, activated, sent, approved).
+    func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+        model.refresh()
+        if mode == .legacy { refreshLegacy() }
     }
 
     private func pasteLink() {
