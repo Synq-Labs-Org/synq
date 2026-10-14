@@ -182,7 +182,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         guard let conversation = activeConversation else { return }
         let url = FundLink.trip(fundId: ref.fundId, key: ref.key, tripId: trip.tripId).url(host: config.webHost)
         let template = MSMessageTemplateLayout()
-        template.caption = "Trip: \(trip.title)"
+        template.caption = trip.isGift ? trip.title : "Trip: \(trip.title)"
         template.subcaption = "\(model.view?.name ?? ref.name) · vote on Synq"
         template.trailingCaption = trip.stateText
         let session = conversation.selectedMessage?.url == url
@@ -190,7 +190,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         let message = MSMessage(session: session)
         message.layout = MSMessageLiveLayout(alternateLayout: template)
         message.url = url
-        message.summaryText = "Synq trip: \(trip.title)"
+        message.summaryText = "Synq: \(trip.title)"
         insert(message, into: conversation)
     }
 

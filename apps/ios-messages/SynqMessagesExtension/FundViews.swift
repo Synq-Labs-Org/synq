@@ -164,6 +164,26 @@ final class FundModel: ObservableObject {
         }
     }
 
+    func startGift(query: String, maxPrice: String) {
+        guard let ref else { return }
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                let gift = try await client.startGift(fundId: ref.fundId, key: ref.key, query: query, maxPrice: maxPrice)
+                trips.removeAll { $0.tripId == gift.tripId }
+                trips.insert(gift, at: 0)
+                selectedTrip = gift.tripId
+                askReply = nil
+            } catch let e as FundAPIError {
+                error = e.message
+            } catch {
+                self.error = "Could not reach Synq. Check your connection."
+            }
+        }
+    }
+
     private func replaceTrip(_ trip: TripView) {
         if let i = trips.firstIndex(where: { $0.tripId == trip.tripId }) { trips[i] = trip } else { trips.insert(trip, at: 0) }
     }
@@ -276,6 +296,7 @@ struct FundHomeView: View {
     let actions: FundActions
     @State private var sending = false
     @State private var planning = false
+    @State private var gifting = false
 
     var body: some View {
         ScrollView {
@@ -308,6 +329,12 @@ struct FundHomeView: View {
                     }
                 }, onCancel: { sending = false })
             }
+        }
+        .sheet(isPresented: $gifting) {
+            GiftSheet(onSearch: { query, budget in
+                gifting = false
+                model.startGift(query: query, maxPrice: budget)
+            }, onCancel: { gifting = false })
         }
         .sheet(isPresented: $planning) {
             PlanTripSheet(onSearch: { origin, destination, date, travelers in
@@ -412,17 +439,22 @@ struct FundHomeView: View {
             }.font(.footnote)
         }
         HStack {
-            Text("Trips").font(.headline)
+            Text("Trips & gifts").font(.headline)
             Spacer()
             Button {
                 actions.expand()
                 planning = true
-            } label: { Label("Plan a trip", systemImage: "airplane") }
+            } label: { Label("Trip", systemImage: "airplane") }
+                .font(.subheadline)
+            Button {
+                actions.expand()
+                gifting = true
+            } label: { Label("Gift", systemImage: "gift") }
                 .font(.subheadline)
         }
         .padding(.top, 4)
         if model.trips.isEmpty {
-            Text("Search flights together, vote, and pay from the fund. Duffel test mode.")
+            Text("Search flights or gifts together, vote, and pay from the fund. Test mode and sandbox only.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         ForEach(model.trips.prefix(4)) { t in
@@ -702,6 +734,12 @@ struct AskBar: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(model.busy)
+        case .giftSearch(let query, let maxPrice):
+            Button("Find gifts: \(query) (under $\(maxPrice))") {
+                model.startGift(query: query, maxPrice: maxPrice)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.busy)
         case .testMoney:
             Button("Add test money") { model.requestTestFunds() }.buttonStyle(.bordered)
         }
@@ -766,9 +804,11 @@ struct TripDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Button("‹ \(model.view?.name ?? "Fund")") { model.selectedTrip = nil }.font(.subheadline)
-                Text("Group trip").font(.caption.bold()).foregroundStyle(.secondary)
+                Text(trip.isGift ? "Group gift" : "Group trip").font(.caption.bold()).foregroundStyle(.secondary)
                 Text(trip.title).font(.title2.bold())
-                Text("\(trip.travelers) traveller\(trip.travelers == 1 ? "" : "s") · \(trip.stateText)")
+                Text(trip.isGift
+                     ? "Budget $\(trip.maxPrice ?? "") · \(trip.stateText)"
+                     : "\(trip.travelers ?? 1) traveller\((trip.travelers ?? 1) == 1 ? "" : "s") · \(trip.stateText)")
                     .font(.subheadline).foregroundStyle(.secondary)
                 ForEach(trip.options) { o in option(o) }
                 switch trip.state {
@@ -777,11 +817,11 @@ struct TripDetailView: View {
                         Button {
                             model.choose(trip, option: leading.optionId) { actions.open($0) }
                         } label: {
-                            Text("Pay \(leading.total) from the fund and book").frame(maxWidth: .infinity)
+                            Text("Pay \(leading.total) from the fund and \(trip.isGift ? "buy" : "book")").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.busy)
-                        Text("You confirm the payment with Face ID; it needs \(model.view?.threshold ?? 2) approvals. Once paid, Synq books it.")
+                        Text("You confirm the payment with Face ID; it needs \(model.view?.threshold ?? 2) approvals. Once paid, Synq \(trip.isGift ? "buys" : "books") it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 case "AWAITING_PAYMENT":
@@ -795,13 +835,13 @@ struct TripDetailView: View {
                     Text("Back in this chat, share the payment from Payments so others can approve it.")
                         .font(.caption).foregroundStyle(.secondary)
                 case "BOOKING":
-                    HStack { ProgressView(); Text("Paid. Booking with Duffel…") }
+                    HStack { ProgressView(); Text(trip.isGift ? "Paid. Buying with a sandbox card…" : "Paid. Booking with Duffel…") }
                 case "BOOKED":
-                    Text("Booked ✓\(trip.booking?.reference.map { " · ref \($0)" } ?? "")").font(.headline).foregroundStyle(.green)
+                    Text("\(trip.stateText)\(trip.booking?.reference.map { " · \($0)" } ?? "")").font(.headline).foregroundStyle(.green)
                 default:
                     Text(trip.error ?? "Could not book this trip.").font(.subheadline).foregroundStyle(.red)
                 }
-                Button("Share this trip in the chat") {
+                Button(trip.isGift ? "Share this gift in the chat" : "Share this trip in the chat") {
                     if let ref = model.ref { actions.insertTrip(ref, trip) }
                 }
                 .font(.footnote)
@@ -845,15 +885,49 @@ struct FundTripBubble: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(fundName.map { "Synq trip · \($0)" } ?? "Synq trip").font(.caption.bold()).foregroundStyle(.secondary)
+                Text(fundName.map { "Synq \(trip?.isGift == true ? "gift" : "trip") · \($0)" } ?? "Synq").font(.caption.bold()).foregroundStyle(.secondary)
                 Spacer()
                 if let t = trip { Text(t.stateText).font(.caption.bold()) }
             }
-            Text(trip?.title ?? "Group trip").font(.headline).lineLimit(2)
+            Text(trip?.title ?? "Group pick").font(.headline).lineLimit(2)
             Text(trip?.state == "VOTING" ? "Tap to vote" : "Tap for details")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+
+struct GiftSheet: View {
+    let onSearch: (String, String) -> Void
+    let onCancel: () -> Void
+    @State private var query = ""
+    @State private var budget = "50"
+
+    private var valid: Bool {
+        !query.trimmingCharacters(in: .whitespaces).isEmpty
+            && budget.range(of: "^[0-9]{1,3}$", options: .regularExpression) != nil
+            && (Int(budget) ?? 0) >= 1 && (Int(budget) ?? 0) <= 500
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("What are you looking for? e.g. gifts for car lovers", text: $query)
+                    TextField("Budget in $", text: $budget).keyboardType(.numberPad)
+                } footer: {
+                    Text("Live prices from online stores. The group votes, approves the payment with Face ID, and Synq buys it with a sandbox card (no real order).")
+                }
+                Section {
+                    Button("Search gifts") { onSearch(query.trimmingCharacters(in: .whitespaces), budget) }
+                        .disabled(!valid)
+                }
+            }
+            .navigationTitle("Find a gift")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) } }
+        }
     }
 }

@@ -106,10 +106,11 @@ struct FundView: Codable, Equatable {
 enum AskAction: Decodable, Equatable {
     case send(recipientId: String, recipient: String, amount: String)
     case flightSearch(origin: String, destination: String, departureDate: String, travelers: Int)
+    case giftSearch(query: String, maxPrice: String)
     case testMoney
 
     private enum Keys: String, CodingKey {
-        case kind, recipientId, recipient, amount, origin, destination, departureDate, travelers
+        case kind, recipientId, recipient, amount, origin, destination, departureDate, travelers, query, maxPrice
     }
 
     init(from decoder: Decoder) throws {
@@ -124,6 +125,9 @@ enum AskAction: Decodable, Equatable {
                                  destination: try c.decode(String.self, forKey: .destination),
                                  departureDate: try c.decode(String.self, forKey: .departureDate),
                                  travelers: try c.decode(Int.self, forKey: .travelers))
+        case "GIFT_SEARCH":
+            self = .giftSearch(query: try c.decode(String.self, forKey: .query),
+                               maxPrice: try c.decode(String.self, forKey: .maxPrice))
         default:
             self = .testMoney
         }
@@ -162,10 +166,15 @@ struct TripPayTo: Decodable, Equatable {
 
 struct TripView: Decodable, Equatable, Identifiable {
     let tripId: String
-    let origin: String
-    let destination: String
-    let departureDate: String
-    let travelers: Int
+    /// FLIGHT or GIFT.
+    let kind: String
+    let title: String
+    let origin: String?
+    let destination: String?
+    let departureDate: String?
+    let travelers: Int?
+    let query: String?
+    let maxPrice: String?
     /// VOTING, AWAITING_PAYMENT, BOOKING, BOOKED or FAILED.
     let state: String
     let options: [TripOptionView]
@@ -180,13 +189,13 @@ struct TripView: Decodable, Equatable, Identifiable {
     let payTo: TripPayTo?
     var id: String { tripId }
 
-    var title: String { "\(origin) → \(destination) · \(departureDate)" }
+    var isGift: Bool { kind == "GIFT" }
     var stateText: String {
         switch state {
         case "VOTING": return voteCount == 1 ? "1 vote" : "\(voteCount) votes"
         case "AWAITING_PAYMENT": return "Waiting for the group to pay"
-        case "BOOKING": return "Booking…"
-        case "BOOKED": return "Booked ✓"
+        case "BOOKING": return isGift ? "Buying…" : "Booking…"
+        case "BOOKED": return isGift ? "Bought ✓" : "Booked ✓"
         default: return "Could not book"
         }
     }
@@ -337,6 +346,11 @@ struct FundClient {
             "key": key, "origin": origin, "destination": destination,
             "departureDate": departureDate, "travelers": travelers,
         ]), as: TripView.self)
+    }
+
+    func startGift(fundId: String, key: String, query: String, maxPrice: String) async throws -> TripView {
+        try await send(request("/funds/\(fundId)/gifts", method: "POST",
+                               body: ["key": key, "query": query, "maxPrice": maxPrice]), as: TripView.self)
     }
 
     private func readRequest(_ path: String, key: String, voter: String) -> URLRequest {
