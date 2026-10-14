@@ -622,6 +622,10 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         SYNQ_WEB_BASE_URL:
           process.env.SYNQ_WEB_BASE_URL ?? 'http://localhost:3000',
         SYNQ_CHANNEL_NOTIFY_MS: '3000',
+        // Group-bound review links (/approve?p&g&n) for cards shared into iMessage.
+        ...(process.env.SYNQ_CARD_LINK_KEY
+          ? { SYNQ_CARD_LINK_KEY: process.env.SYNQ_CARD_LINK_KEY }
+          : {}),
       },
       origin: RP.origin,
       pool,

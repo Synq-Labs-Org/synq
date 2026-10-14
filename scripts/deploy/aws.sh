@@ -60,9 +60,13 @@ config)
   env_file=${SYNQ_P11_ENV:-$HOME/.synq/p11.env}
   pg=$( (has env && aws ssm get-parameter --name /synq/prod/env --with-decryption --query Parameter.Value --output text | sed -n 's/^POSTGRES_PASSWORD=//p') || true)
   [ -n "$pg" ] || pg=$(openssl rand -hex 24)
+  # Signs the review links in shared cards; kept across runs so issued links stay valid.
+  card=$( (has env && aws ssm get-parameter --name /synq/prod/env --with-decryption --query Parameter.Value --output text | sed -n 's/^SYNQ_CARD_LINK_KEY=//p') || true)
+  [ -n "$card" ] || card=$(openssl rand -hex 32)
   body=$(
-    printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg"
+    printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\nSYNQ_CARD_LINK_KEY=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg" "$card"
     grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL)=' "$env_file" | sed -E 's/^export +//'
+    grep -q -E '^(export +)?SYNQ_MONAD_TESTNET_RPC_URL=' "$env_file" || echo 'SYNQ_MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz'
   )
   grep -q '^TELEGRAM_BOT_TOKEN=' <<<"$body" || { echo "TELEGRAM_BOT_TOKEN missing in $env_file" >&2; exit 1; }
   put env "$body"
