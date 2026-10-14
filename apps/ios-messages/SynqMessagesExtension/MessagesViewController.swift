@@ -54,7 +54,9 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
 
     /// Height of the live layout bubble in the transcript.
     override func contentSizeThatFits(_ size: CGSize) -> CGSize {
-        CGSize(width: size.width, height: min(mode == .legacy ? 160 : 130, size.height))
+        // Fund cards keep credit-card proportions (1.586:1).
+        CGSize(width: size.width,
+               height: min(mode == .legacy ? 160 : size.width / 1.586 + 4, size.height))
     }
 
     /// Stable per-device identifier for a conversation; the extension cannot read

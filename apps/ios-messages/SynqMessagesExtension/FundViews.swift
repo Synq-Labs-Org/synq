@@ -258,7 +258,11 @@ struct StartFundView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Synq").font(.caption.bold()).foregroundStyle(.secondary)
+                TiltingCard {
+                    FundCardFace(name: name.isEmpty ? "Your fund" : name, balance: nil, symbol: "AUSD",
+                                 status: "New", footnote: "This chat", finish: .silver)
+                }
+                .padding(.bottom, 4)
                 Text("Start a group fund").font(.title2.bold())
                 Text("Everyone in this chat joins with Face ID. The money sits in a shared wallet, and every payment needs two people to approve it.")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -273,7 +277,7 @@ struct StartFundView: View {
                     Text(model.busy ? "Starting…" : "Start fund and invite this chat")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.chrome)
                 .disabled(model.busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if let error = model.error {
                     Text(error).font(.footnote).foregroundStyle(.red)
@@ -346,27 +350,29 @@ struct FundHomeView: View {
 
     @ViewBuilder
     private func header(_ ref: FundRef) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Synq fund").font(.caption.bold()).foregroundStyle(.secondary)
-                Text(model.view?.name ?? ref.name).font(.title2.bold())
-            }
-            Spacer()
-            if let v = model.view {
-                Text(v.stateText).font(.caption.bold())
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(v.state == "ACTIVE" ? Color.green.opacity(0.2) : Color.secondary.opacity(0.15)))
-            }
+        let v = model.view
+        let finish: ChromeFinish = v?.cardFinish ?? .silver
+        TiltingCard {
+            FundCardFace(name: v?.name ?? ref.name,
+                         balance: v?.treasury.map { cardAmount($0.balance) },
+                         symbol: v?.treasury?.symbol ?? "AUSD",
+                         status: v?.cardStatus ?? "…",
+                         footnote: v?.cardFootnote ?? "",
+                         finish: finish)
         }
+        .id(finish)
+        .transition(.asymmetric(insertion: .scale(scale: 0.94).combined(with: .opacity),
+                                removal: .opacity))
+        .animation(.spring(response: 0.6, dampingFraction: 0.75), value: v?.state)
+        .animation(.snappy, value: v?.treasury?.balance)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder
     private func content(_ ref: FundRef, _ v: FundView) -> some View {
-        if let t = v.treasury {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(t.balance) \(t.symbol)").font(.system(size: 34, weight: .bold, design: .rounded))
-                Text("in the group wallet · Monad testnet").font(.caption).foregroundStyle(.secondary)
-            }
+        if v.treasury != nil {
+            Text("Group wallet on Monad testnet · drag the card to tilt it")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         switch v.state {
         case "FORMING":
@@ -401,7 +407,7 @@ struct FundHomeView: View {
                 Text(model.busy ? "Launching…" : "Launch fund (\(v.members.count) joined)")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.chromeQuiet)
             .disabled(model.busy || v.members.count < v.minMembers)
         }
         Button("Share the invite again") { actions.insertInvite(ref, v) }.font(.footnote)
@@ -423,14 +429,14 @@ struct FundHomeView: View {
             } label: {
                 Label("Send", systemImage: "arrow.up.circle.fill").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.chrome)
             .disabled(v.recipients.isEmpty)
             Button {
                 model.requestTestFunds()
             } label: {
                 Label("Add test money", systemImage: "plus.circle").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.chromeQuiet)
             .disabled(model.busy || !v.canRequestTestFunds)
         }
         if v.members.contains(where: { !$0.activated }) {
@@ -507,7 +513,7 @@ struct FundHomeView: View {
 
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Text(title).frame(maxWidth: .infinity) }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.chrome)
     }
 }
 
@@ -527,7 +533,7 @@ struct ProposalRow: View {
             }
             Spacer()
             if proposal.state == "PENDING" || proposal.state == "PAID" {
-                Button("Share", action: onShare).font(.caption.bold()).buttonStyle(.bordered)
+                Button("Share", action: onShare).buttonStyle(.chromeChip)
             }
         }
         .padding(10)
@@ -602,8 +608,15 @@ struct ProposalDetailView: View {
                 if let onBack {
                     Button("‹ \(fundName)", action: onBack).font(.subheadline)
                 }
-                Text("Payment from \(fundName)").font(.caption.bold()).foregroundStyle(.secondary)
-                Text(proposal.title).font(.title2.bold())
+                TiltingCard {
+                    PaymentCardFace(fundName: fundName, amount: cardAmount(proposal.amount), symbol: proposal.symbol,
+                                    recipient: proposal.recipient, counted: proposal.approvals.counted,
+                                    required: proposal.approvals.required, status: proposal.cardStatus,
+                                    finish: proposal.cardFinish)
+                }
+                .id(proposal.cardFinish)
+                .animation(.spring(response: 0.6, dampingFraction: 0.75), value: proposal.state)
+                Text(proposal.title).font(.title3.bold())
                 if let sender = proposal.sender {
                     Text("Proposed by \(sender)").font(.subheadline).foregroundStyle(.secondary)
                 }
@@ -617,7 +630,7 @@ struct ProposalDetailView: View {
                     Button(action: onApprove) {
                         Text("Approve with Face ID").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.chrome)
                     Text("Tapping the card never approves anything; you approve on the Synq page with your passkey.")
                         .font(.footnote).foregroundStyle(.secondary)
                 case "PAID":
@@ -642,21 +655,14 @@ struct FundInviteBubble: View {
     let view: FundView?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Synq fund").font(.caption.bold()).foregroundStyle(.secondary)
-                Spacer()
-                if let v = view { Text(v.memberSummary).font(.caption) }
-            }
-            Text(view?.name ?? fallbackName).font(.headline).lineLimit(2)
-            if let t = view?.treasury {
-                Text("\(t.balance) \(t.symbol)").font(.title3.bold())
-            }
-            Text(view.map { $0.state == "FORMING" ? "Tap to join with Face ID" : $0.stateText } ?? "Tap to open")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        FundCardFace(name: view?.name ?? fallbackName,
+                     balance: view?.treasury.map { cardAmount($0.balance) },
+                     symbol: view?.treasury?.symbol ?? "AUSD",
+                     status: view?.cardStatus ?? "Join",
+                     footnote: view?.cardFootnote ?? "Tap to open",
+                     finish: view?.cardFinish ?? .silver)
+            .padding(2)
+            .animation(.spring(response: 0.6, dampingFraction: 0.75), value: view?.state)
     }
 }
 
@@ -665,24 +671,81 @@ struct FundProposalBubble: View {
     let fundName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(fundName.map { "Synq · \($0)" } ?? "Synq payment").font(.caption.bold()).foregroundStyle(.secondary)
-                Spacer()
-                if let p = proposal {
-                    Text(p.state == "PAID" ? "Paid ✓" : p.statusText).font(.caption.bold())
-                        .foregroundStyle(p.state == "PAID" ? .green : .primary)
-                }
-            }
-            Text(proposal?.title ?? "Group payment").font(.headline).lineLimit(2)
-            Text(proposal?.state == "PENDING" ? "Tap to review and approve" : "Tap for details")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        PaymentCardFace(fundName: fundName ?? "Synq",
+                        amount: proposal.map { cardAmount($0.amount) } ?? "—",
+                        symbol: proposal?.symbol ?? "AUSD",
+                        recipient: proposal?.recipient ?? "…",
+                        counted: proposal?.approvals.counted ?? 0,
+                        required: proposal?.approvals.required ?? 2,
+                        status: proposal?.cardStatus ?? "Review",
+                        finish: proposal?.cardFinish ?? .silver)
+            .padding(2)
+            .animation(.spring(response: 0.6, dampingFraction: 0.75), value: proposal?.state)
     }
 }
 
+// MARK: - Card mapping
+
+/// Money on a card always shows two decimals, like a statement.
+func cardAmount(_ s: String) -> String {
+    guard let d = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")) else { return s }
+    let f = NumberFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.minimumFractionDigits = 2
+    f.maximumFractionDigits = 6
+    f.minimumIntegerDigits = 1
+    return f.string(from: d as NSDecimalNumber) ?? s
+}
+
+extension FundView {
+    var cardFinish: ChromeFinish { state == "ACTIVE" ? .titanium : .silver }
+    var cardStatus: String {
+        switch state {
+        case "FORMING": return "Join"
+        case "LAUNCHING": return "Minting"
+        case "SETUP": return setup.map { "\($0.signed) of \($0.required)" } ?? "Activating"
+        case "ACTIVE": return "Live"
+        default: return "Failed"
+        }
+    }
+    var cardFootnote: String {
+        state == "ACTIVE" ? "\(threshold) of \(members.count) approve" : memberSummary
+    }
+}
+
+extension FundProposal {
+    var cardFinish: ChromeFinish { state == "PAID" ? .titanium : .silver }
+    var cardStatus: String {
+        switch state {
+        case "PAID": return "Paid"
+        case "EXECUTING": return "Sending"
+        case "REJECTED": return "Void"
+        default: return "\(approvals.counted) of \(approvals.required)"
+        }
+    }
+}
+
+extension TripView {
+    var cardFinish: ChromeFinish { state == "BOOKED" ? .titanium : .silver }
+    var cardStatus: String {
+        switch state {
+        case "VOTING": return "Voting"
+        case "AWAITING_PAYMENT": return "Pay"
+        case "BOOKING": return isGift ? "Buying" : "Booking"
+        case "BOOKED": return isGift ? "Bought" : "Booked"
+        default: return "Failed"
+        }
+    }
+    var cardTitle: String {
+        if isGift { return chosenOption?.title ?? options.first(where: { $0.optionId == leading })?.title ?? (query ?? title) }
+        return [origin, destination].compactMap { $0 }.joined(separator: " → ")
+    }
+    var cardSubtitle: String {
+        if state == "VOTING" { return "\(options.count) options · \(voteCount) votes" }
+        if let p = payment { return "\(cardAmount(p.amount)) AUSD" }
+        return isGift ? (maxPrice.map { "under $\($0)" } ?? "") : (departureDate ?? "")
+    }
+}
 
 // MARK: - Ask Synq
 
@@ -727,21 +790,21 @@ struct AskBar: View {
     private func actionButton(_ action: AskAction) -> some View {
         switch action {
         case .send(let id, let name, let amount):
-            Button("Send \(amount) to \(name)") { onSend(id, amount) }.buttonStyle(.borderedProminent)
+            Button("Send \(amount) to \(name)") { onSend(id, amount) }.buttonStyle(.chrome)
         case .flightSearch(let o, let d, let date, let n):
             Button("Find flights \(o) → \(d) on \(date) for \(n)") {
                 model.startTrip(origin: o, destination: d, departureDate: date, travelers: n)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.chrome)
             .disabled(model.busy)
         case .giftSearch(let query, let maxPrice):
             Button("Find gifts: \(query) (under $\(maxPrice))") {
                 model.startGift(query: query, maxPrice: maxPrice)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.chrome)
             .disabled(model.busy)
         case .testMoney:
-            Button("Add test money") { model.requestTestFunds() }.buttonStyle(.bordered)
+            Button("Add test money") { model.requestTestFunds() }.buttonStyle(.chromeChip)
         }
     }
 }
@@ -804,8 +867,14 @@ struct TripDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Button("‹ \(model.view?.name ?? "Fund")") { model.selectedTrip = nil }.font(.subheadline)
-                Text(trip.isGift ? "Group gift" : "Group trip").font(.caption.bold()).foregroundStyle(.secondary)
-                Text(trip.title).font(.title2.bold())
+                TiltingCard {
+                    PickCardFace(fundName: model.view?.name ?? "Synq", kind: trip.isGift ? "Gift" : "Trip",
+                                 title: trip.cardTitle, subtitle: trip.cardSubtitle, status: trip.cardStatus,
+                                 finish: trip.cardFinish)
+                }
+                .id(trip.cardFinish)
+                .animation(.spring(response: 0.6, dampingFraction: 0.75), value: trip.state)
+                Text(trip.title).font(.title3.bold())
                 Text(trip.isGift
                      ? "Budget $\(trip.maxPrice ?? "") · \(trip.stateText)"
                      : "\(trip.travelers ?? 1) traveller\((trip.travelers ?? 1) == 1 ? "" : "s") · \(trip.stateText)")
@@ -819,7 +888,7 @@ struct TripDetailView: View {
                         } label: {
                             Text("Pay \(leading.total) from the fund and \(trip.isGift ? "buy" : "book")").frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.chrome)
                         .disabled(model.busy)
                         Text("You confirm the payment with Face ID; it needs \(model.view?.threshold ?? 2) approvals. Once paid, Synq \(trip.isGift ? "buys" : "books") it.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -868,7 +937,7 @@ struct TripDetailView: View {
                 } label: {
                     Label("\(o.votes)", systemImage: mine ? "hand.thumbsup.fill" : "hand.thumbsup")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.chromeChip)
             } else if trip.chosen == o.optionId {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             }
@@ -883,21 +952,16 @@ struct FundTripBubble: View {
     let fundName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(fundName.map { "Synq \(trip?.isGift == true ? "gift" : "trip") · \($0)" } ?? "Synq").font(.caption.bold()).foregroundStyle(.secondary)
-                Spacer()
-                if let t = trip { Text(t.stateText).font(.caption.bold()) }
-            }
-            Text(trip?.title ?? "Group pick").font(.headline).lineLimit(2)
-            Text(trip?.state == "VOTING" ? "Tap to vote" : "Tap for details")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        PickCardFace(fundName: fundName ?? "Synq",
+                     kind: trip?.isGift == true ? "Gift" : "Trip",
+                     title: trip?.cardTitle ?? "Group pick",
+                     subtitle: trip?.cardSubtitle ?? "Tap to vote",
+                     status: trip?.cardStatus ?? "Vote",
+                     finish: trip?.cardFinish ?? .silver)
+            .padding(2)
+            .animation(.spring(response: 0.6, dampingFraction: 0.75), value: trip?.state)
     }
 }
-
 
 struct GiftSheet: View {
     let onSearch: (String, String) -> Void
