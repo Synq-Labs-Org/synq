@@ -313,7 +313,9 @@ describe('trading WebSocket resilience', () => {
   it('correlates mt:3 by cid, dedups duplicate fills and order events, and reconciles a fill delivered after reconnect', async () => {
     server = new FakeServer();
     autoSignIn();
-    const { ws } = trading();
+    // The ack arrives normally here; a generous timeout keeps slow runners from
+    // turning it into UNKNOWN_OUTCOME (timeouts have their own tests).
+    const { ws } = trading({ statusTimeoutMs: 5_000 });
     const fills: unknown[] = [];
     ws.on('fills', (f) => fills.push(...f));
     ws.connect();
