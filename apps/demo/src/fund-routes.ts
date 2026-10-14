@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { FundError, type FundService } from './fund-service.js';
+import type { FundAssistant } from './fund-assistant.js';
+import type { TripService } from './fund-trips.js';
 
 const FundId = z.string().regex(/^fnd_[0-9a-f]{20}$/);
 const Key = z.string().regex(/^[A-Za-z0-9_-]{32}$/);
@@ -26,6 +28,24 @@ const ActivateBody = z.strictObject({
     .max(4),
 });
 const KeyBody = z.strictObject({ key: Key });
+const AskBody = z.strictObject({ key: Key, text: z.string().min(1).max(500) });
+const VoterId = z.string().regex(/^[A-Za-z0-9-]{8,64}$/);
+const TripId = z.string().regex(/^trp_[0-9a-f]{16}$/);
+const OptionId = z.string().regex(/^[0-9a-f]{12}$/);
+const TripBody = z.strictObject({
+  key: Key,
+  origin: z.string().min(3).max(3),
+  destination: z.string().min(3).max(3),
+  departureDate: z.string().max(10),
+  travelers: z.number().int(),
+});
+const VoteBody = z.strictObject({
+  key: Key,
+  voterId: VoterId,
+  optionId: OptionId,
+});
+const ChooseBody = z.strictObject({ key: Key, optionId: OptionId });
+const ReadQuery = z.object({ k: Key, v: VoterId.optional() });
 
 const MESSAGES: Record<FundError['code'], string> = {
   INVALID_REQUEST: 'That request is not valid.',
@@ -72,7 +92,70 @@ async function handle(reply: FastifyReply, run: () => Promise<unknown>) {
  * the creator's admin key; joining and activating also need the member's
  * passkey signatures, verified by the service.
  */
-export function registerFundRoutes(app: FastifyInstance, funds: FundService) {
+export function registerFundRoutes(
+  app: FastifyInstance,
+  funds: FundService,
+  extras: { assistant?: FundAssistant; trips?: TripService } = {},
+) {
+  const fundIdOf = (request: { params: unknown }) =>
+    FundId.parse((request.params as { fundId: string }).fundId);
+  const { assistant, trips } = extras;
+  if (assistant)
+    app.post('/v1/funds/:fundId/ask', (request, reply) =>
+      handle(reply, async () => {
+        const fundId = fundIdOf(request);
+        const body = AskBody.parse(request.body);
+        return assistant.ask(
+          await funds.view(fundId, body.key),
+          body.text,
+          funds.ports.now(),
+        );
+      }),
+    );
+  if (trips) {
+    app.post('/v1/funds/:fundId/trips', (request, reply) =>
+      handle(reply, () =>
+        trips.start(fundIdOf(request), TripBody.parse(request.body)),
+      ),
+    );
+    app.get('/v1/funds/:fundId/trips', (request, reply) =>
+      handle(reply, async () => {
+        const q = ReadQuery.parse(request.query);
+        return { trips: await trips.list(fundIdOf(request), q.k, q.v ?? null) };
+      }),
+    );
+    app.get('/v1/funds/:fundId/trips/:tripId', (request, reply) =>
+      handle(reply, () => {
+        const q = ReadQuery.parse(request.query);
+        const tripId = TripId.parse(
+          (request.params as { tripId: string }).tripId,
+        );
+        return trips.get(fundIdOf(request), q.k, tripId, q.v ?? null);
+      }),
+    );
+    app.post('/v1/funds/:fundId/trips/:tripId/votes', (request, reply) =>
+      handle(reply, () => {
+        const tripId = TripId.parse(
+          (request.params as { tripId: string }).tripId,
+        );
+        return trips.vote(fundIdOf(request), {
+          ...VoteBody.parse(request.body),
+          tripId,
+        });
+      }),
+    );
+    app.post('/v1/funds/:fundId/trips/:tripId/choose', (request, reply) =>
+      handle(reply, () => {
+        const tripId = TripId.parse(
+          (request.params as { tripId: string }).tripId,
+        );
+        return trips.choose(fundIdOf(request), {
+          ...ChooseBody.parse(request.body),
+          tripId,
+        });
+      }),
+    );
+  }
   app.post('/v1/funds', (request, reply) =>
     handle(reply.code(201), () => funds.create(CreateBody.parse(request.body))),
   );

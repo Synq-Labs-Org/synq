@@ -32,14 +32,15 @@ export const FUND_LIMITS = {
   minMembers: 2,
   maxMembers: 8,
   threshold: 2,
-  perActionCap: 5_000_000n,
-  cumulativeBudget: 50_000_000n,
+  // Room for a test-mode hotel stay (about 230 USD, settled 1:1 in AUSD).
+  perActionCap: 500_000_000n,
+  cumulativeBudget: 2_000_000_000n,
   reviewMax: 0n,
   validSeconds: 30 * 86_400,
   maxExecutions: 100,
   starterUnits: 5_000_000n,
-  faucetUnits: 5_000_000n,
-  faucetMaxUnits: 20_000_000n,
+  faucetUnits: 50_000_000n,
+  faucetMaxUnits: 400_000_000n,
   /** Fund launches stop when the operator's testnet gas is below this. */
   minOperatorWei: 400_000_000_000_000_000n,
   createsPerDay: 40,
@@ -148,6 +149,8 @@ export type FundView = {
   recipients: FundRecipientView[];
   proposals: FundProposalView[];
   canRequestTestFunds: boolean;
+  /** Largest single payment the fund's mandate allows, as a decimal. */
+  maxPayment: string;
 };
 
 export type FundPorts = {
@@ -429,6 +432,10 @@ export class FundService {
               }))
           : [],
       proposals,
+      maxPayment: formatUnits(
+        FUND_LIMITS.perActionCap,
+        this.ports.asset.decimals,
+      ),
       canRequestTestFunds:
         fund.state === 'ACTIVE' &&
         BigInt(fund.funding.requested) + FUND_LIMITS.faucetUnits <=

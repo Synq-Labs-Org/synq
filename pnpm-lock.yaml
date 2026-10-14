@@ -295,6 +295,12 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../../packages/offer-exchange
+      '@synq/plugin-duffel':
+        specifier: workspace:*
+        version: link:../../plugins/duffel
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

@@ -106,6 +106,11 @@ export function productionSendPorts(input: {
   sendMandateId?: string;
   sends: PostgresSendStore;
   funding: PostgresFundingSessionStore;
+  /**
+   * Operator-named payees (e.g. a travel settlement account). One is offered only
+   * when the group's own mandate already lists it as a COUNTERPARTY recipient.
+   */
+  contacts?: readonly { label: string; address: Address }[];
 }): Omit<SendRouteDeps, 'store'> {
   const { readModel, kernel } = input;
   const client = readModel.client;
@@ -159,7 +164,13 @@ export function productionSendPorts(input: {
         principalId: m.principalId,
         signer: m.signer,
       })),
-      contacts: [],
+      contacts: (input.contacts ?? []).filter((c) =>
+        mandate.recipients.some(
+          (r) =>
+            r.purpose === 'COUNTERPARTY' &&
+            r.address.toLowerCase() === c.address.toLowerCase(),
+        ),
+      ),
     };
   };
   const treasury = async (groupId: string) => {

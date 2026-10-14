@@ -101,6 +101,9 @@ import {
 } from './testnet-chain.js';
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
+import { FundAssistant } from './fund-assistant.js';
+import { PostgresTripStore, TripService } from './fund-trips.js';
+import { duffelTripPorts } from './duffel-trips.js';
 import { erc20TransferPlugin } from './transfer-plugin.js';
 import { transferVertical } from './vertical.js';
 import {
@@ -507,6 +510,14 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           kernel,
           authorizer: kernel,
           readModel,
+          // Funds pay test-mode hotel totals here; offered only where a
+          // fund's mandate lists it as a counterparty.
+          contacts: [
+            {
+              label: 'Synq Travel (test settlement)',
+              address: deployer.address.toLowerCase() as Address,
+            },
+          ],
         }),
     });
     const mandateStore = new PostgresMandateProposalStore(pool);
@@ -637,10 +648,17 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           chainGroupId: input.chainGroupId,
           account: input.account,
           executor: deployer.address,
-          recipients: input.members.map((m) => ({
-            address: m.signer.toLowerCase() as Address,
-            purpose: 'MEMBER_WITHDRAWAL' as const,
-          })),
+          recipients: [
+            ...input.members.map((m) => ({
+              address: m.signer.toLowerCase() as Address,
+              purpose: 'MEMBER_WITHDRAWAL' as const,
+            })),
+            // Synq Travel settlement: group-approved hotel totals (test mode).
+            {
+              address: deployer.address.toLowerCase() as Address,
+              purpose: 'COUNTERPARTY' as const,
+            },
+          ],
           asset: ausd,
           members: input.members.map((m) => ({
             memberId: m.memberId,
@@ -676,7 +694,51 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       explorer: (h) => `${EXPLORER}${h}`,
       log,
     });
-    registerFundRoutes(app, funds);
+    const fundReasoner = brainReasonersFromEnv(process.env);
+    const assistant = fundReasoner
+      ? new FundAssistant({
+          complete: async ({ system, user, schema }) =>
+            (
+              await fundReasoner.structured.complete({
+                role: 'INTENT',
+                agentId: 'fund-assistant',
+                fixtureKey: 'fund-assistant',
+                messages: [
+                  { role: 'system', content: system },
+                  { role: 'user', content: user },
+                ],
+                responseSchema: schema,
+                maxOutputTokens: 800,
+              })
+            ).text,
+          today: () => new Date().toISOString().slice(0, 10),
+          maxPaymentAmount: Number(FUND_LIMITS.perActionCap) / 1e6,
+        })
+      : undefined;
+    const tripStore = new PostgresTripStore(pool);
+    await tripStore.migrate();
+    const duffelToken = process.env.DUFFEL_TEST_TOKEN ?? '';
+    const trips = /^duffel_test_/.test(duffelToken)
+      ? new TripService(tripStore, {
+          now: clock.now,
+          fund: (fundId, key) => funds.view(fundId, key),
+          ...duffelTripPorts(duffelToken, clock.now),
+          settlement: {
+            address: deployer.address,
+            recipientId: `contact:${deployer.address.toLowerCase()}`,
+            label: 'Synq Travel (test settlement)',
+          },
+          sends: (groupId) => registered.sends.forGroup(groupId, 30),
+          log,
+        })
+      : undefined;
+    log(
+      `funds: assistant ${assistant ? 'on' : 'off'}, hotels ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}`,
+    );
+    registerFundRoutes(app, funds, {
+      ...(assistant ? { assistant } : {}),
+      ...(trips ? { trips } : {}),
+    });
     /** Operator-local view of what the bot sent (not evidence; may hold link codes). */
     const outbox: {
       chatId: string;
@@ -917,6 +979,12 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         await funds
           .tick()
           .catch((e) => log(`funds: ${String(e).slice(0, 200)}`));
+        await trips
+          ?.tick(
+            async (fundId) =>
+              (await fundStore.get(fundId))?.group?.chainGroupId ?? null,
+          )
+          .catch((e) => log(`trips: ${String(e).slice(0, 200)}`));
         await sleep(4000);
       }
     })();

@@ -67,7 +67,7 @@ config)
   [ -n "$card" ] || card=$(openssl rand -hex 32)
   body=$(
     printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\nSYNQ_CARD_LINK_KEY=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg" "$card"
-    grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL)=' "$env_file" | sed -E 's/^export +//'
+    grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL|DUFFEL_TEST_TOKEN)=' "$env_file" | sed -E 's/^export +//'
     grep -q -E '^(export +)?SYNQ_MONAD_TESTNET_RPC_URL=' "$env_file" || echo 'SYNQ_MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz'
   )
   grep -q '^TELEGRAM_BOT_TOKEN=' <<<"$body" || { echo "TELEGRAM_BOT_TOKEN missing in $env_file" >&2; exit 1; }

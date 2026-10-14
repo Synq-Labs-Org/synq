@@ -81,6 +81,8 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       SYNQ_MONAD_TESTNET_RPC_URL: ${SYNQ_MONAD_TESTNET_RPC_URL:-}
       SYNQ_CARD_LINK_KEY: ${SYNQ_CARD_LINK_KEY:-}
+      # Duffel test-mode token (duffel_test_…); hotels are off without it.
+      DUFFEL_TEST_TOKEN: ${DUFFEL_TEST_TOKEN:-}
     volumes:
       - bot-state:/app/.synq-local
       - bot-evidence:/app/bounty-evidence
