@@ -119,7 +119,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
     }
 
     private func render() {
-        let view: AnyView
+        var view: AnyView
         switch mode {
         case .legacy:
             view = legacyView()
@@ -132,6 +132,12 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
             } else {
                 view = AnyView(FundScreen(model: model, actions: actions))
             }
+        }
+        if presentationStyle == .transcript {
+            // A live bubble receives its own taps; open this card expanded.
+            view = AnyView(view
+                .contentShape(Rectangle())
+                .onTapGesture { [weak self] in self?.requestPresentationStyle(.expanded) })
         }
         let controller = UIHostingController(rootView: view)
         hosted?.willMove(toParent: nil)
