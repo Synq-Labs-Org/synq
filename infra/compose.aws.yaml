@@ -71,6 +71,9 @@ services:
     environment:
       SYNQ_TELEGRAM_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/synq_telegram_e2e
       SYNQ_WEB_BASE_URL: https://${SYNQ_DOMAIN}
+      # Real passkeys enroll on the site's own domain.
+      SYNQ_RP_ID: ${SYNQ_DOMAIN}
+      SYNQ_ORIGIN: https://${SYNQ_DOMAIN}
       SYNQ_ALLOW_MAINNET_BROADCAST: 'false'
       SYNQ_MAINNET_CANARY_MAX_USD: '0'
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}

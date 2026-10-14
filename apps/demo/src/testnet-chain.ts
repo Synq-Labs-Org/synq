@@ -83,7 +83,41 @@ export function testnetRpcUrl(): string {
   );
 }
 
+/** ExecutionModule.setExecutor as a Safe call; the one encoding owners sign and the relayer executes. */
+export function setExecutorCall(
+  module: Address,
+  who: Address,
+  allowed: boolean,
+): { to: Address; data: Hex } {
+  return {
+    to: module,
+    data: encodeFunctionData({
+      abi: moduleAbi,
+      functionName: 'setExecutor',
+      args: [who, allowed],
+    }),
+  };
+}
+
+/** MandateRegistry.configureMandate as a Safe call. */
+export function configureMandateCall(
+  registry: Address,
+  mandateId: Hex,
+  config: MandateConfig,
+): { to: Address; data: Hex } {
+  return {
+    to: registry,
+    data: encodeFunctionData({
+      abi: registryAbi,
+      functionName: 'configureMandate',
+      args: [mandateId, config],
+    }),
+  };
+}
+
 export type TestnetGovernance = {
+  /** Any owner-approved call from the Safe; the first two owners sign. */
+  exec(step: string, to: Address, data: Hex): Promise<TransactionReceipt>;
   setExecutor(who: Address, allowed: boolean): Promise<TransactionReceipt>;
   configureMandate(
     mandateId: Hex,
@@ -115,6 +149,7 @@ export type TestnetChain = {
   ): TestnetGovernance;
   fund(account: Address, amount: bigint): Promise<TransactionReceipt>;
   balanceOf(who: Address, blockNumber?: bigint): Promise<bigint>;
+  safeNonce(account: Address): Promise<bigint>;
 };
 
 /** Deployer/gas payer and module executor on Monad testnet; addresses come from the manifest and registry only. */
@@ -283,28 +318,30 @@ export async function connectTestnet(
     }
     const quorum = owners.slice(0, 2);
     return {
-      setExecutor: (who: Address, allowed: boolean) =>
-        safeExec(
+      exec: (step: string, to: Address, data: Hex) =>
+        safeExec(`Safe.execTransaction(${step})`, to, data, quorum),
+      setExecutor: (who: Address, allowed: boolean) => {
+        const call = setExecutorCall(deployment.module, who, allowed);
+        return safeExec(
           'Safe.execTransaction(ExecutionModule.setExecutor)',
-          deployment.module,
-          encodeFunctionData({
-            abi: moduleAbi,
-            functionName: 'setExecutor',
-            args: [who, allowed],
-          }),
+          call.to,
+          call.data,
           quorum,
-        ),
-      configureMandate: (mandateId: Hex, config: MandateConfig) =>
-        safeExec(
-          'Safe.execTransaction(MandateRegistry.configureMandate)',
+        );
+      },
+      configureMandate: (mandateId: Hex, config: MandateConfig) => {
+        const call = configureMandateCall(
           deployment.registry,
-          encodeFunctionData({
-            abi: registryAbi,
-            functionName: 'configureMandate',
-            args: [mandateId, config],
-          }),
+          mandateId,
+          config,
+        );
+        return safeExec(
+          'Safe.execTransaction(MandateRegistry.configureMandate)',
+          call.to,
+          call.data,
           quorum,
-        ),
+        );
+      },
       supersedeMandate: (
         mandateId: Hex,
         version: bigint,
@@ -349,6 +386,13 @@ export async function connectTestnet(
     };
   }
 
+  const safeNonce = (account: Address) =>
+    client.readContract({
+      address: account,
+      abi: safeAbi,
+      functionName: 'nonce',
+    });
+
   const balanceOf = (who: Address, blockNumber?: bigint) =>
     client.readContract({
       address: ausd.address,
@@ -382,5 +426,6 @@ export async function connectTestnet(
     governance,
     fund,
     balanceOf,
+    safeNonce,
   };
 }

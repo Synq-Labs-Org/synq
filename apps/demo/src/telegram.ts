@@ -43,7 +43,7 @@ import {
 import { PostgresProjectionStore } from '@synq/read-model/storage';
 import { loadJournalKey, loadKernelAuditKey } from '@synq/execution-worker';
 import { formatDecimal } from '@synq/domain';
-import { PostgresIdentityStore } from '@synq/identity';
+import { PostgresIdentityStore, safeTransactionHash } from '@synq/identity';
 import { grantPreview } from '@synq/identity/grant';
 import { StoreMembershipDirectory } from '@synq/identity/server';
 import {
@@ -92,11 +92,15 @@ import {
 } from './software-authenticator.js';
 import { SynqApiClient } from './testnet-api.js';
 import {
+  configureMandateCall,
   connectTestnet,
   loadTestnetSigner,
+  setExecutorCall,
   testnetRpcUrl,
   type OwnerSigner,
 } from './testnet-chain.js';
+import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
+import { registerFundRoutes } from './fund-routes.js';
 import { erc20TransferPlugin } from './transfer-plugin.js';
 import { transferVertical } from './vertical.js';
 import {
@@ -226,10 +230,12 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     const webAuthn = (label: string) => ({
       webAuthnClient: authenticators.client(label),
     });
+    // Real passkeys enroll on the deployed site's domain; the software members
+    // were enrolled under the local RP and keep signing with it.
     const identityConfig = {
       profile: PROFILE.network.profile,
-      rpId: RP.rpId,
-      origin: RP.origin,
+      rpId: process.env.SYNQ_RP_ID || RP.rpId,
+      origin: process.env.SYNQ_ORIGIN || RP.origin,
     };
     const late: { kernel: ReturnType<typeof createIntentKernel> | null } = {
       kernel: null,
@@ -532,6 +538,145 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       localAssets: [],
     });
     const directoryReader = new StoreIdentityDirectoryReader(store, pool);
+
+    // Group funds started from the Messages app (any number of groups).
+    const adminInject = async (method: 'POST', url: string, body: unknown) => {
+      const r = await app.inject({
+        method,
+        url,
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': randomBytes(8).toString('hex'),
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: JSON.stringify(body),
+      });
+      return { status: r.statusCode, body: r.body };
+    };
+    const fundStore = new PostgresFundStore(pool);
+    await fundStore.migrate();
+    const funds = new FundService(fundStore, {
+      now: clock.now,
+      chainId: CHAIN_ID,
+      operator: deployer.address,
+      asset: ausd,
+      principal: async (id) => {
+        const p = await store.transaction((tx) => tx.getPrincipal(id));
+        return p ? { signer: p.signer, kind: p.kind, status: p.status } : null;
+      },
+      operatorGas: () => client.getBalance({ address: deployer.address }),
+      createGroup: (owners, salt) => chain.createGroup(owners, salt),
+      bindGroup: async (g) => {
+        const r = await adminInject('POST', '/v1/groups', {
+          groupId: g.chainGroupId,
+          chainGroupId: g.chainGroupId,
+          chainId: CHAIN_ID,
+          account: g.account,
+          owners: g.owners,
+          threshold: g.threshold,
+          executors: [deployer.address],
+        });
+        // A retried launch finds the binding from the first attempt.
+        if (r.status >= 400 && r.status !== 409)
+          throw new Error(`bind group -> ${r.status} ${r.body.slice(0, 200)}`);
+      },
+      joinChallenge: async (groupId, memberId, principalId) => {
+        const r = await adminInject(
+          'POST',
+          `/v1/groups/${groupId}/membership-challenges`,
+          { memberId, principalId },
+        );
+        if (r.status >= 400)
+          throw new Error(
+            `join challenge -> ${r.status} ${r.body.slice(0, 200)}`,
+          );
+        return IdentityChallengeSchema.parse(JSON.parse(r.body));
+      },
+      join: async (groupId, challengeId, signature) => {
+        const r = await adminInject(
+          'POST',
+          `/v1/groups/${groupId}/memberships`,
+          { challengeId, signature },
+        );
+        if (r.status >= 400)
+          throw new Error(`join -> ${r.status} ${r.body.slice(0, 200)}`);
+      },
+      safeNonce: (account) => chain.safeNonce(account),
+      execSafe: async (account, tx, signatures) => {
+        const expected = safeTransactionHash(tx);
+        const owners: OwnerSigner[] = signatures.map((s) => ({
+          address: s.signer,
+          label: s.signer,
+          signSafeTransaction: async (t) => {
+            if (safeTransactionHash(t) !== expected)
+              throw new Error('setup transaction changed since owners signed');
+            return s.signature;
+          },
+        }));
+        const receipt = await chain
+          .governance(account, owners)
+          .exec('fund setup', tx.to, tx.data);
+        return receipt.transactionHash;
+      },
+      setupCalls: (m) => [
+        {
+          ...setExecutorCall(deployment.module, deployer.address, true),
+          step: 'ExecutionModule.setExecutor',
+        },
+        {
+          ...configureMandateCall(
+            deployment.registry,
+            onchainMandateId(m),
+            toMandateConfig(m),
+          ),
+          step: 'MandateRegistry.configureMandate',
+        },
+      ],
+      mandate: (input) =>
+        sendMandate({
+          chainGroupId: input.chainGroupId,
+          account: input.account,
+          executor: deployer.address,
+          recipients: input.members.map((m) => ({
+            address: m.signer.toLowerCase() as Address,
+            purpose: 'MEMBER_WITHDRAWAL' as const,
+          })),
+          asset: ausd,
+          members: input.members.map((m) => ({
+            memberId: m.memberId,
+            signer: m.signer.toLowerCase() as Address,
+          })),
+          now: input.now,
+          limits: {
+            perActionCap: FUND_LIMITS.perActionCap,
+            cumulativeBudget: FUND_LIMITS.cumulativeBudget,
+            reviewMax: FUND_LIMITS.reviewMax,
+            validSeconds: FUND_LIMITS.validSeconds,
+            maxExecutions: FUND_LIMITS.maxExecutions,
+          },
+        }),
+      activateMandate: async (m) => {
+        await registerMandateArtifacts(projectionStore, [
+          { mandateHash: artifactHash(m), artifact: m },
+        ]);
+        await catchUp();
+        kernel.configureMandate(m);
+      },
+      transfer: async (account, units) =>
+        (await chain.fund(account, units)).transactionHash,
+      treasury: (account) => chain.balanceOf(account),
+      sends: (groupId, limit) => registered.sends.forGroup(groupId, limit),
+      quorum: async (digest) => {
+        const q = await approvalGateway.quorum(digest);
+        return {
+          memberIds: q.counted.map((a) => a.memberId),
+          required: q.required,
+        };
+      },
+      explorer: (h) => `${EXPLORER}${h}`,
+      log,
+    });
+    registerFundRoutes(app, funds);
     /** Operator-local view of what the bot sent (not evidence; may hold link codes). */
     const outbox: {
       chatId: string;
@@ -769,6 +914,9 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               });
           },
         }).catch((e) => log(`mandate relayer: ${String(e).slice(0, 200)}`));
+        await funds
+          .tick()
+          .catch((e) => log(`funds: ${String(e).slice(0, 200)}`));
         await sleep(4000);
       }
     })();

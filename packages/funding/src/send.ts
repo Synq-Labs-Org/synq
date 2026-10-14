@@ -366,6 +366,8 @@ export interface SendStore {
   byIntentHash(intentHash: string): Promise<SendRecord | null>;
   /** Records currently in `state`, oldest first; used by the restart recovery sweep. */
   inState(state: SendState): Promise<SendRecord[]>;
+  /** A group's most recent Sends (by last state change), newest first. */
+  forGroup(groupId: string, limit: number): Promise<SendRecord[]>;
   save(record: SendRecord): Promise<void>;
 }
 
@@ -433,6 +435,14 @@ export class MemorySendStore implements SendStore {
   async inState(state: SendState) {
     return [...this.records.values()]
       .filter((r) => r.state === state)
+      .map((r) => structuredClone(r));
+  }
+  async forGroup(groupId: string, limit: number) {
+    const lastAt = (r: SendRecord) => r.history.at(-1)?.at ?? 0;
+    return [...this.records.values()]
+      .filter((r) => r.preview.groupId === groupId)
+      .sort((a, b) => lastAt(b) - lastAt(a))
+      .slice(0, limit)
       .map((r) => structuredClone(r));
   }
   async byIntentHash(h: string) {

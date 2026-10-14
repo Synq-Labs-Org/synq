@@ -375,6 +375,14 @@ export class PostgresSendStore implements SendStore {
     );
     return r.rows.map((x) => parseStoredSend(x.data));
   }
+  async forGroup(groupId: string, limit: number) {
+    const r = await this.pool.query(
+      `SELECT data FROM synq_sends WHERE group_id=$1
+       ORDER BY (data->'history'->-1->>'at')::bigint DESC LIMIT $2`,
+      [groupId, limit],
+    );
+    return r.rows.map((x) => parseStoredSend(x.data));
+  }
   async list(groupId: string) {
     const r = await this.pool.query(
       'SELECT data FROM synq_sends WHERE group_id=$1',

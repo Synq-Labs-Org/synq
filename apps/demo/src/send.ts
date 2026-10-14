@@ -152,7 +152,22 @@ export function sendMandate(input: {
   asset: Mandate['inputAsset'];
   members: { memberId: string; signer: Address }[];
   now: number;
+  /** Defaults are the demo group's; funds created from the Messages app pass their own. */
+  limits?: {
+    perActionCap: bigint;
+    cumulativeBudget: bigint;
+    reviewMax: bigint;
+    validSeconds: number;
+    maxExecutions: number;
+  };
 }): Mandate {
+  const limits = input.limits ?? {
+    perActionCap: SEND_UNITS.perActionCap,
+    cumulativeBudget: SEND_UNITS.cumulativeBudget,
+    reviewMax: SEND_UNITS.reviewMax,
+    validSeconds: 7 * 86_400,
+    maxExecutions: 10,
+  };
   return MandateSchema.parse({
     schemaVersion: 2,
     mandateId: MANDATE_ID,
@@ -174,8 +189,8 @@ export function sendMandate(input: {
     recipients: input.recipients,
     inputAsset: input.asset,
     outputAssets: [],
-    perActionCap: String(SEND_UNITS.perActionCap),
-    cumulativeBudget: String(SEND_UNITS.cumulativeBudget),
+    perActionCap: String(limits.perActionCap),
+    cumulativeBudget: String(limits.cumulativeBudget),
     maxNativeValue: '0',
     cumulativeNativeBudget: '0',
     maxSlippageBps: 0,
@@ -183,7 +198,7 @@ export function sendMandate(input: {
     maxLeverageBps: 0,
     maxAllocationBps: 10_000,
     tierPolicy: {
-      tokenSpend: { autoMax: '0', reviewMax: String(SEND_UNITS.reviewMax) },
+      tokenSpend: { autoMax: '0', reviewMax: String(limits.reviewMax) },
       nativeSpend: { autoMax: '0', reviewMax: '0' },
       actionFloors: [],
       newOutputAsset: 'CONSENSUS',
@@ -199,13 +214,13 @@ export function sendMandate(input: {
     delegationScope: null,
     members: input.members.map((m) => ({ ...m, active: true })),
     validAfter: input.now - 60,
-    validUntil: input.now + 7 * 86_400,
+    validUntil: input.now + limits.validSeconds,
     quoteTtlSeconds: 300,
     evidenceTtlSeconds: 300,
     simulationTtlSeconds: 300,
     maxGrantTtlSeconds: 300,
     minIntervalSeconds: 0,
-    maxExecutions: 10,
+    maxExecutions: limits.maxExecutions,
   });
 }
 

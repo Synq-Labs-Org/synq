@@ -39,6 +39,7 @@ import {
   safeTransactionTypedData,
   type SafeGovernanceTransaction,
 } from './safe-transaction.js';
+import { fundJoinTypedData, type FundJoin } from './fund-join.js';
 
 export const MERA_DERIVATION = 'bip44-ethereum-0-v1' as const;
 export type MeraCredential = {
@@ -389,6 +390,59 @@ export async function signMeraSafeTransaction(
   );
 }
 
+/** Joins a forming group fund under the record's principal and the chosen display name. */
+export async function signMeraFundJoin(
+  record: MeraCredential,
+  join: FundJoin,
+  options: MeraOptions = {},
+): Promise<Hex> {
+  if (join.principalId !== record.principalId)
+    throw new MeraAdapterError(
+      'CHALLENGE_MISMATCH',
+      'join is for another principal',
+    );
+  return withRecordAccount(record, options, (account) =>
+    account.signTypedData(fundJoinTypedData(join)),
+  );
+}
+
+/**
+ * Activates a launched fund in one passkey ceremony: the group membership
+ * challenge (when the member has not joined yet) and the owner signatures over
+ * the fund's setup Safe transactions (when setup is still collecting them).
+ */
+export async function activateMeraMembership(
+  record: MeraCredential,
+  input: {
+    challenge: IdentityChallenge | null;
+    safeTransactions: readonly SafeGovernanceTransaction[];
+  },
+  options: MeraOptions = {},
+): Promise<{ joinSignature: Hex | null; safeSignatures: Hex[] }> {
+  const { challenge } = input;
+  if (
+    challenge &&
+    (!same(challenge.signer, record.signer) ||
+      challenge.principalId !== record.principalId ||
+      challenge.rpId !== record.rpId ||
+      challenge.purpose !== 'JOIN')
+  )
+    throw new MeraAdapterError(
+      'CHALLENGE_MISMATCH',
+      'challenge is for another principal',
+    );
+  return withRecordAccount(record, options, async (account) => ({
+    joinSignature: challenge
+      ? await account.signTypedData(identityChallengeTypedData(challenge))
+      : null,
+    safeSignatures: await Promise.all(
+      input.safeTransactions.map((tx) =>
+        account.signTypedData(safeTransactionTypedData(tx)),
+      ),
+    ),
+  }));
+}
+
 /** Synq Send sender confirmation of the exact previewed recipient, amount, chain and expiry. */
 export async function signMeraSendConfirmation(
   record: MeraCredential,
@@ -435,3 +489,4 @@ export async function signMeraSendAccess(
   );
 }
 export { SendAccessChallengeSchema } from './send-access.js';
+export { safeTransactionHash } from './safe-transaction.js';
