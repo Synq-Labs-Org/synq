@@ -6,10 +6,10 @@ import { api, describeError } from '../../../../../lib/api';
 
 const TripSchema = z.looseObject({
   tripId: z.string(),
-  origin: z.string(),
-  destination: z.string(),
-  departureDate: z.string(),
-  travelers: z.number(),
+  kind: z.enum(['FLIGHT', 'GIFT']),
+  title: z.string(),
+  travelers: z.number().optional(),
+  maxPrice: z.string().optional(),
   state: z.string(),
   options: z.array(
     z.looseObject({
@@ -99,19 +99,18 @@ export default function TripPage({
   if (!trip)
     return (
       <>
-        <h1>Group trip</h1>
+        <h1>Group pick</h1>
         <p className="lead">{message ?? 'Loading…'}</p>
       </>
     );
   return (
     <>
-      <h1>
-        {trip.origin} → {trip.destination}
-      </h1>
+      <h1>{trip.title}</h1>
       <p className="lead">
-        {trip.departureDate} · {trip.travelers} traveller
-        {trip.travelers === 1 ? '' : 's'} ·{' '}
-        {trip.state.toLowerCase().replace('_', ' ')}
+        {trip.kind === 'GIFT'
+          ? `Budget $${trip.maxPrice ?? ''}`
+          : `${trip.travelers ?? 1} traveller${trip.travelers === 1 ? '' : 's'}`}{' '}
+        · {trip.state.toLowerCase().replace('_', ' ')}
       </p>
       <ul>
         {trip.options.map((o) => (
@@ -132,8 +131,8 @@ export default function TripPage({
       </ul>
       {trip.state === 'BOOKED' && (
         <div className="status ok">
-          Booked
-          {trip.booking?.reference ? ` · ref ${trip.booking.reference}` : ''}
+          {trip.kind === 'GIFT' ? 'Bought' : 'Booked'}
+          {trip.booking?.reference ? ` · ${trip.booking.reference}` : ''}
         </div>
       )}
       {trip.error && <div className="status bad">{trip.error}</div>}
