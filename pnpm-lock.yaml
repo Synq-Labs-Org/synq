@@ -298,6 +298,9 @@ importers:
       '@synq/offer-exchange':
         specifier: workspace:*
         version: link:../../packages/offer-exchange
+      '@synq/plugin-commerce':
+        specifier: workspace:*
+        version: link:../../plugins/commerce
       '@synq/plugin-duffel':
         specifier: workspace:*
         version: link:../../plugins/duffel

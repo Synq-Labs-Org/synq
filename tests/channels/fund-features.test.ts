@@ -17,6 +17,7 @@ const fund = (state = 'ACTIVE'): FundView =>
     members: [{ name: 'Ana' }, { name: 'Ben' }],
     threshold: 2,
     treasury: { balance: '250', symbol: 'AUSD' },
+    maxPayment: '500',
     recipients: [
       { name: 'Ana', recipientId: 'member:member_0' },
       { name: 'Ben', recipientId: 'member:member_1' },
@@ -109,6 +110,29 @@ describe('Ask Synq', () => {
     });
     const bad = await assistant('not json').ask(fund(), 'hi', 1);
     expect(bad.action).toBeNull();
+  });
+
+  it('suggests a gift search within the fund limit and only when live', async () => {
+    const ok = await assistant({
+      reply: 'Let me look.',
+      action: { kind: 'GIFT_SEARCH', query: ' car  gifts ', maxPrice: '50' },
+    }).ask(fund(), 'find a gift related to cars', 1);
+    expect(ok.action).toEqual({
+      kind: 'GIFT_SEARCH',
+      query: 'car gifts',
+      maxPrice: '50',
+    });
+    for (const [state, maxPrice] of [
+      ['ACTIVE', '900'],
+      ['ACTIVE', 'fifty'],
+      ['SETUP', '50'],
+    ] as const) {
+      const r = await assistant({
+        reply: 'ok',
+        action: { kind: 'GIFT_SEARCH', query: 'car gifts', maxPrice },
+      }).ask(fund(state), 'x', 1);
+      expect(r.action).toBeNull();
+    }
   });
 
   it('rate-limits each fund', async () => {
@@ -288,6 +312,63 @@ describe('group trips', () => {
       state: 'FAILED',
       error: 'The fare changed beyond what the group paid (MISMATCH).',
     });
+  });
+
+  it('runs a gift pick: live options, vote, group payment, sandbox purchase', async () => {
+    const h = harness();
+    const bought: string[] = [];
+    const gifts = {
+      search: async () => [option('cccccccccccc', '26.99')],
+      buy: async ({
+        option: o,
+        maxTotal,
+      }: {
+        option: TripOption;
+        maxTotal: string;
+      }) => {
+        bought.push(`${o.optionId}<=${maxTotal}`);
+        return {
+          status: 'BOOKED' as const,
+          reference: 'card ••1318',
+          bookingId: 'tx_1',
+        };
+      },
+    };
+    const service = new TripService(h.service.store, {
+      ...h.service.ports,
+      gifts,
+    });
+    const gift = await service.startGift('fnd_1', {
+      key,
+      query: 'gifts for car lovers',
+      maxPrice: '50',
+    });
+    expect(gift).toMatchObject({
+      kind: 'GIFT',
+      title: 'Gift: gifts for car lovers',
+      state: 'VOTING',
+    });
+    expect(gift.label).toContain('sandbox virtual card');
+    await service.choose('fnd_1', {
+      key,
+      tripId: gift.tripId,
+      optionId: 'cccccccccccc',
+    });
+    h.pay('INDEXED', '26.99');
+    await service.tick(groupOf);
+    await service.tick(groupOf);
+    expect(bought).toEqual(['cccccccccccc<=26.99']);
+    expect(h.booked).toEqual([]);
+    expect(await service.get('fnd_1', key, gift.tripId, null)).toMatchObject({
+      state: 'BOOKED',
+      booking: { reference: 'card ••1318' },
+    });
+    await expect(
+      service.startGift('fnd_1', { key, query: 'x', maxPrice: '5000' }),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    await expect(
+      h.service.startGift('fnd_1', { key, query: 'x', maxPrice: '10' }),
+    ).rejects.toMatchObject({ code: 'WRONG_STATE' });
   });
 
   it('validates trip requests and fund keys', async () => {

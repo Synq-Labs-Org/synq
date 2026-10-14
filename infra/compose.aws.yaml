@@ -83,6 +83,10 @@ services:
       SYNQ_CARD_LINK_KEY: ${SYNQ_CARD_LINK_KEY:-}
       # Duffel test-mode token (duffel_test_…); hotels are off without it.
       DUFFEL_TEST_TOKEN: ${DUFFEL_TEST_TOKEN:-}
+      # Gifts: live product search (read only) and Lithic sandbox virtual cards.
+      SEARCHAPI_KEY: ${SEARCHAPI_KEY:-}
+      LITHIC_API_KEY: ${LITHIC_API_KEY:-}
+      LITHIC_ENV: ${LITHIC_ENV:-}
     volumes:
       - bot-state:/app/.synq-local
       - bot-evidence:/app/bounty-evidence

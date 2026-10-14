@@ -104,6 +104,7 @@ import { registerFundRoutes } from './fund-routes.js';
 import { FundAssistant } from './fund-assistant.js';
 import { PostgresTripStore, TripService } from './fund-trips.js';
 import { duffelTripPorts } from './duffel-trips.js';
+import { giftPorts } from './gifts.js';
 import { erc20TransferPlugin } from './transfer-plugin.js';
 import { transferVertical } from './vertical.js';
 import {
@@ -718,8 +719,15 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     const tripStore = new PostgresTripStore(pool);
     await tripStore.migrate();
     const duffelToken = process.env.DUFFEL_TEST_TOKEN ?? '';
+    const searchApiKey = process.env.SEARCHAPI_KEY ?? '';
+    const lithicKey = process.env.LITHIC_API_KEY ?? '';
+    const gifts =
+      searchApiKey && lithicKey && process.env.LITHIC_ENV === 'sandbox'
+        ? giftPorts({ searchApiKey, lithicApiKey: lithicKey })
+        : undefined;
     const trips = /^duffel_test_/.test(duffelToken)
       ? new TripService(tripStore, {
+          ...(gifts ? { gifts } : {}),
           now: clock.now,
           fund: (fundId, key) => funds.view(fundId, key),
           ...duffelTripPorts(duffelToken, clock.now),
@@ -733,7 +741,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         })
       : undefined;
     log(
-      `funds: assistant ${assistant ? 'on' : 'off'}, hotels ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}`,
+      `funds: assistant ${assistant ? 'on' : 'off'}, flights ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}, gifts ${gifts ? 'live search + Lithic sandbox' : 'off'}`,
     );
     registerFundRoutes(app, funds, {
       ...(assistant ? { assistant } : {}),

@@ -3,7 +3,9 @@ import type { SendRecord } from '@synq/funding';
 import { FundError, type FundView } from './fund-service.js';
 
 /**
- * Group trips for a fund (flights, Duffel test mode). Someone searches, the chat
+ * Group picks for a fund: flights (Duffel test mode) and gifts (live product
+ * search; bought with a Lithic sandbox virtual card against a simulated
+ * merchant). Someone searches, the chat
  * votes on up to three options (a non-binding preference), and the group then
  * pays the chosen total from its Safe to the Synq Travel settlement account
  * with the usual passkey approvals. Once that payment is on chain the operator
@@ -36,11 +38,17 @@ export type Trip = {
   schemaVersion: 1;
   tripId: string;
   fundId: string;
-  kind: 'FLIGHT';
-  origin: string;
-  destination: string;
-  departureDate: string;
-  travelers: number;
+  kind: 'FLIGHT' | 'GIFT';
+  /** e.g. "DEL → GOI · 2026-12-05" or "Gift: car gifts" */
+  title: string;
+  // FLIGHT
+  origin?: string;
+  destination?: string;
+  departureDate?: string;
+  travelers?: number;
+  // GIFT
+  query?: string;
+  maxPrice?: string;
   createdAt: number;
   updatedAt: number;
   options: TripOption[];
@@ -79,6 +87,10 @@ export interface TripStore {
   createdSince(fundId: string, at: number): Promise<number>;
 }
 
+export type FulfilResult =
+  | { status: 'BOOKED'; reference: string | null; bookingId: string | null }
+  | { status: 'FAILED'; reason: string };
+
 export type TripPorts = {
   now(): number;
   /** Authorizes the fund key and returns the fund's current view. */
@@ -95,10 +107,17 @@ export type TripPorts = {
     trip: Trip;
     maxTotal: string;
     idempotencyKey: string;
-  }): Promise<
-    | { status: 'BOOKED'; reference: string | null; bookingId: string | null }
-    | { status: 'FAILED'; reason: string }
-  >;
+  }): Promise<FulfilResult>;
+  /** Gift search and purchase; absent when not configured. */
+  gifts?: {
+    search(input: { query: string; maxPrice: string }): Promise<TripOption[]>;
+    buy(input: {
+      option: TripOption;
+      trip: Trip;
+      maxTotal: string;
+      idempotencyKey: string;
+    }): Promise<FulfilResult>;
+  };
   settlement: { address: string; recipientId: string; label: string };
   /** The fund's Sends, newest first. */
   sends(groupId: string): Promise<SendRecord[]>;
@@ -134,7 +153,9 @@ export class TripService {
       leading,
       myVote: voterId ? (trip.votes[voterId] ?? null) : null,
       label:
-        'Duffel test mode: Duffel Airways test flights, no real ticket or charge',
+        trip.kind === 'GIFT'
+          ? 'Live product prices; bought with a Lithic sandbox virtual card at a simulated merchant, no real order'
+          : 'Duffel test mode: Duffel Airways test flights, no real ticket or charge',
       payTo:
         trip.state === 'AWAITING_PAYMENT'
           ? {
@@ -193,6 +214,7 @@ export class TripService {
       tripId: `trp_${randomBytes(8).toString('hex')}`,
       fundId,
       kind: 'FLIGHT',
+      title: `${origin} → ${destination} · ${input.departureDate}`,
       origin,
       destination,
       departureDate: input.departureDate,
@@ -212,6 +234,52 @@ export class TripService {
     await this.store.create(trip);
     this.ports.log(
       `fund ${fundId}: trip ${trip.tripId} (${options.length} options)`,
+    );
+    return this.view(trip, null);
+  }
+
+  async startGift(
+    fundId: string,
+    input: { key: string; query: string; maxPrice: string },
+  ): Promise<TripView> {
+    const gifts = this.ports.gifts;
+    if (!gifts) throw new FundError('WRONG_STATE', 409, 'gifts are off');
+    const fund = await this.ports.fund(fundId, input.key);
+    if (fund.state !== 'ACTIVE') throw new FundError('WRONG_STATE', 409);
+    const query = input.query.replace(/\s+/g, ' ').trim();
+    const max = Number(input.maxPrice);
+    if (
+      !query ||
+      query.length > 80 ||
+      !/^\d{1,4}(\.\d{1,2})?$/.test(input.maxPrice) ||
+      !(max >= 1 && max <= Number(fund.maxPayment ?? '500'))
+    )
+      throw new FundError('INVALID_REQUEST', 400, 'gift');
+    const now = this.ports.now();
+    if ((await this.store.createdSince(fundId, now - 86_400)) >= 10)
+      throw new FundError('RATE_LIMITED', 429);
+    const options = await gifts.search({ query, maxPrice: input.maxPrice });
+    const trip: Trip = {
+      schemaVersion: 1,
+      tripId: `trp_${randomBytes(8).toString('hex')}`,
+      fundId,
+      kind: 'GIFT',
+      title: `Gift: ${query}`,
+      query,
+      maxPrice: input.maxPrice,
+      createdAt: now,
+      updatedAt: now,
+      options,
+      votes: {},
+      state: options.length ? 'VOTING' : 'FAILED',
+      chosen: null,
+      payment: null,
+      booking: null,
+      error: options.length ? null : 'No products found under that price.',
+    };
+    await this.store.create(trip);
+    this.ports.log(
+      `fund ${fundId}: gift ${trip.tripId} (${options.length} options)`,
     );
     return this.view(trip, null);
   }
@@ -336,12 +404,19 @@ export class TripService {
   private async runBooking(t: Trip) {
     const option = t.options.find((o) => o.optionId === t.chosen);
     if (!option || !t.payment) return;
-    const result = await this.ports.book({
+    const input = {
       option,
       trip: t,
       maxTotal: t.payment.amount,
       idempotencyKey: `synq-${t.tripId}`,
-    });
+    };
+    const result =
+      t.kind === 'GIFT'
+        ? ((await this.ports.gifts?.buy(input)) ?? {
+            status: 'FAILED' as const,
+            reason: 'Gift purchases are off.',
+          })
+        : await this.ports.book(input);
     await this.store.mutate(t.tripId, (x) => ({
       ...x,
       state: result.status === 'BOOKED' ? 'BOOKED' : 'FAILED',

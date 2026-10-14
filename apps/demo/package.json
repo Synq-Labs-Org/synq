@@ -17,6 +17,7 @@
     "@synq/identity": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/offer-exchange": "workspace:*",
+    "@synq/plugin-commerce": "workspace:*",
     "@synq/plugin-duffel": "workspace:*",
     "@synq/plugin-sdk": "workspace:*",
     "@synq/read-model": "workspace:*",

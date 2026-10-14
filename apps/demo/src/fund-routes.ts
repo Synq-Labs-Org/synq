@@ -39,6 +39,11 @@ const TripBody = z.strictObject({
   departureDate: z.string().max(10),
   travelers: z.number().int(),
 });
+const GiftBody = z.strictObject({
+  key: Key,
+  query: z.string().min(1).max(80),
+  maxPrice: z.string().max(8),
+});
 const VoteBody = z.strictObject({
   key: Key,
   voterId: VoterId,
@@ -116,6 +121,11 @@ export function registerFundRoutes(
     app.post('/v1/funds/:fundId/trips', (request, reply) =>
       handle(reply, () =>
         trips.start(fundIdOf(request), TripBody.parse(request.body)),
+      ),
+    );
+    app.post('/v1/funds/:fundId/gifts', (request, reply) =>
+      handle(reply, () =>
+        trips.startGift(fundIdOf(request), GiftBody.parse(request.body)),
       ),
     );
     app.get('/v1/funds/:fundId/trips', (request, reply) =>
