@@ -126,3 +126,11 @@ code {
   font-size: 0.9em;
   overflow-wrap: anywhere;
 }
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  width: auto;
+}
