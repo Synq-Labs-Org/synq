@@ -80,6 +80,8 @@ struct FundView: Codable, Equatable {
     let recipients: [FundRecipient]
     let proposals: [FundProposal]
     let canRequestTestFunds: Bool
+    /// Largest single payment, as a decimal (absent from older servers).
+    let maxPayment: String?
 
     var stateText: String {
         switch state {
@@ -98,26 +100,125 @@ struct FundView: Codable, Equatable {
     }
 }
 
+// MARK: - Ask Synq and trips
+
+/// One suggested next step from Ask Synq; it only pre-fills a flow.
+enum AskAction: Decodable, Equatable {
+    case send(recipientId: String, recipient: String, amount: String)
+    case flightSearch(origin: String, destination: String, departureDate: String, travelers: Int)
+    case testMoney
+
+    private enum Keys: String, CodingKey {
+        case kind, recipientId, recipient, amount, origin, destination, departureDate, travelers
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "SEND":
+            self = .send(recipientId: try c.decode(String.self, forKey: .recipientId),
+                         recipient: try c.decode(String.self, forKey: .recipient),
+                         amount: try c.decode(String.self, forKey: .amount))
+        case "FLIGHT_SEARCH":
+            self = .flightSearch(origin: try c.decode(String.self, forKey: .origin),
+                                 destination: try c.decode(String.self, forKey: .destination),
+                                 departureDate: try c.decode(String.self, forKey: .departureDate),
+                                 travelers: try c.decode(Int.self, forKey: .travelers))
+        default:
+            self = .testMoney
+        }
+    }
+}
+
+struct AskReply: Decodable, Equatable {
+    let reply: String
+    let action: AskAction?
+}
+
+struct TripOptionView: Decodable, Equatable, Identifiable {
+    let optionId: String
+    let title: String
+    let detail: String
+    let total: String
+    let currency: String
+    let refundable: Bool
+    let votes: Int
+    var id: String { optionId }
+}
+
+struct TripPayment: Decodable, Equatable {
+    let amount: String
+    let intentHash: String?
+}
+
+struct TripBooking: Decodable, Equatable {
+    let reference: String?
+}
+
+struct TripPayTo: Decodable, Equatable {
+    let recipientId: String
+    let label: String
+}
+
+struct TripView: Decodable, Equatable, Identifiable {
+    let tripId: String
+    let origin: String
+    let destination: String
+    let departureDate: String
+    let travelers: Int
+    /// VOTING, AWAITING_PAYMENT, BOOKING, BOOKED or FAILED.
+    let state: String
+    let options: [TripOptionView]
+    let voteCount: Int
+    let leading: String?
+    let myVote: String?
+    let chosen: String?
+    let payment: TripPayment?
+    let booking: TripBooking?
+    let error: String?
+    let label: String
+    let payTo: TripPayTo?
+    var id: String { tripId }
+
+    var title: String { "\(origin) → \(destination) · \(departureDate)" }
+    var stateText: String {
+        switch state {
+        case "VOTING": return voteCount == 1 ? "1 vote" : "\(voteCount) votes"
+        case "AWAITING_PAYMENT": return "Waiting for the group to pay"
+        case "BOOKING": return "Booking…"
+        case "BOOKED": return "Booked ✓"
+        default: return "Could not book"
+        }
+    }
+    var chosenOption: TripOptionView? { options.first { $0.optionId == chosen } }
+}
+
+private struct TripList: Decodable { let trips: [TripView] }
+
 // MARK: - Links carried in MSMessage.url
 
-/// `https://<host>/fund/<fundId>#k=<key>` (invite) or
-/// `https://<host>/fund/<fundId>/p/<intentHash>#k=<key>` (payment).
+/// `https://<host>/fund/<fundId>#k=<key>` (invite),
+/// `https://<host>/fund/<fundId>/p/<intentHash>#k=<key>` (payment) or
+/// `https://<host>/fund/<fundId>/t/<tripId>#k=<key>` (trip).
 /// The key sits in the fragment so browsers never send it to the server.
 enum FundLink: Equatable {
     case invite(fundId: String, key: String)
     case proposal(fundId: String, key: String, intentHash: String)
+    case trip(fundId: String, key: String, tripId: String)
 
     var fundId: String {
         switch self {
-        case .invite(let id, _), .proposal(let id, _, _): return id
+        case .invite(let id, _), .proposal(let id, _, _), .trip(let id, _, _): return id
         }
     }
 
     var key: String {
         switch self {
-        case .invite(_, let k), .proposal(_, let k, _): return k
+        case .invite(_, let k), .proposal(_, let k, _), .trip(_, let k, _): return k
         }
     }
+
+    static let tripPattern = "^trp_[0-9a-f]{16}$"
 
     static let fundIdPattern = "^fnd_[0-9a-f]{20}$"
     static let keyPattern = "^[A-Za-z0-9_-]{32}$"
@@ -138,6 +239,8 @@ enum FundLink: Equatable {
             self = .invite(fundId: parts[1], key: key)
         } else if parts.count == 4, parts[2] == "p", FundLink.matches(parts[3], FundLink.hashPattern) {
             self = .proposal(fundId: parts[1], key: key, intentHash: parts[3])
+        } else if parts.count == 4, parts[2] == "t", FundLink.matches(parts[3], FundLink.tripPattern) {
+            self = .trip(fundId: parts[1], key: key, tripId: parts[3])
         } else {
             return nil
         }
@@ -150,6 +253,7 @@ enum FundLink: Equatable {
         switch self {
         case .invite(let id, _): c.path = "/fund/\(id)"
         case .proposal(let id, _, let hash): c.path = "/fund/\(id)/p/\(hash)"
+        case .trip(let id, _, let trip): c.path = "/fund/\(id)/t/\(trip)"
         }
         c.fragment = "k=\(key)"
         return c.url!
@@ -222,6 +326,45 @@ struct FundClient {
         _ = try await send(request("/funds/\(fundId)/launch", method: "POST", body: ["adminKey": adminKey]), as: Status.self)
     }
 
+    func ask(fundId: String, key: String, text: String) async throws -> AskReply {
+        try await send(request("/funds/\(fundId)/ask", method: "POST", body: ["key": key, "text": text]),
+                       as: AskReply.self)
+    }
+
+    func startTrip(fundId: String, key: String, origin: String, destination: String,
+                   departureDate: String, travelers: Int) async throws -> TripView {
+        try await send(request("/funds/\(fundId)/trips", method: "POST", body: [
+            "key": key, "origin": origin, "destination": destination,
+            "departureDate": departureDate, "travelers": travelers,
+        ]), as: TripView.self)
+    }
+
+    private func readRequest(_ path: String, key: String, voter: String) -> URLRequest {
+        var r = request(path)
+        var c = URLComponents(url: r.url!, resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "k", value: key), URLQueryItem(name: "v", value: voter)]
+        r.url = c.url
+        return r
+    }
+
+    func trips(fundId: String, key: String, voter: String) async throws -> [TripView] {
+        try await send(readRequest("/funds/\(fundId)/trips", key: key, voter: voter), as: TripList.self).trips
+    }
+
+    func trip(fundId: String, key: String, tripId: String, voter: String) async throws -> TripView {
+        try await send(readRequest("/funds/\(fundId)/trips/\(tripId)", key: key, voter: voter), as: TripView.self)
+    }
+
+    func vote(fundId: String, key: String, tripId: String, voter: String, optionId: String) async throws -> TripView {
+        try await send(request("/funds/\(fundId)/trips/\(tripId)/votes", method: "POST",
+                               body: ["key": key, "voterId": voter, "optionId": optionId]), as: TripView.self)
+    }
+
+    func choose(fundId: String, key: String, tripId: String, optionId: String) async throws -> TripView {
+        try await send(request("/funds/\(fundId)/trips/\(tripId)/choose", method: "POST",
+                               body: ["key": key, "optionId": optionId]), as: TripView.self)
+    }
+
     func requestTestFunds(fundId: String, key: String) async throws -> FundView {
         try await send(request("/funds/\(fundId)/test-funds", method: "POST", body: ["key": key]), as: FundView.self)
     }
@@ -243,6 +386,10 @@ struct FundClient {
             URLQueryItem(name: "amount", value: amount),
         ]
         return c.url!
+    }
+
+    func tripPaymentPage(groupId: String, payTo: TripPayTo, amount: String) -> URL {
+        sendPage(groupId: groupId, recipientId: payTo.recipientId, amount: amount)
     }
 
     func approvalPage(_ intentHash: String) -> URL {
@@ -300,6 +447,14 @@ struct FundBook {
         save(refs)
         return ref
     }
+}
+
+/// One anonymous id per device for non-binding trip votes.
+func deviceVoterId(_ defaults: UserDefaults = .standard) -> String {
+    if let id = defaults.string(forKey: "synq.voter.v1") { return id }
+    let id = UUID().uuidString.lowercased()
+    defaults.set(id, forKey: "synq.voter.v1")
+    return id
 }
 
 /// Decimal text a person typed, normalised to at most six places; nil when invalid.

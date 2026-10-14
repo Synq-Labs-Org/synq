@@ -77,10 +77,12 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
                 let ref = book.remember(fundId: fund.fundId, key: fund.key,
                                         name: book.ref(fund.fundId)?.name, conversation: key)
                 mode = .fund
-                if case .proposal(_, _, let hash) = fund {
-                    model.show(ref, proposal: hash)
-                } else {
-                    model.show(ref)
+                switch fund {
+                case .proposal(_, _, let hash): model.show(ref, proposal: hash)
+                case .trip(_, _, let tripId):
+                    model.show(ref, trip: tripId)
+                    model.loadTrip(tripId)
+                case .invite: model.show(ref)
                 }
                 return
             }
@@ -106,6 +108,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         FundActions(
             insertInvite: { [weak self] ref, view in self?.insertInvite(ref, view: view) },
             insertProposal: { [weak self] ref, proposal in self?.insertProposal(ref, proposal) },
+            insertTrip: { [weak self] ref, trip in self?.insertTrip(ref, trip) },
             open: { [weak self] url in self?.openSecurely(url) },
             expand: { [weak self] in
                 if self?.presentationStyle == .compact { self?.requestPresentationStyle(.expanded) }
@@ -172,6 +175,22 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         message.layout = MSMessageLiveLayout(alternateLayout: template)
         message.url = url
         message.summaryText = "Synq: \(proposal.title)"
+        insert(message, into: conversation)
+    }
+
+    private func insertTrip(_ ref: FundRef, _ trip: TripView) {
+        guard let conversation = activeConversation else { return }
+        let url = FundLink.trip(fundId: ref.fundId, key: ref.key, tripId: trip.tripId).url(host: config.webHost)
+        let template = MSMessageTemplateLayout()
+        template.caption = "Trip: \(trip.title)"
+        template.subcaption = "\(model.view?.name ?? ref.name) · vote on Synq"
+        template.trailingCaption = trip.stateText
+        let session = conversation.selectedMessage?.url == url
+            ? (conversation.selectedMessage?.session ?? MSSession()) : MSSession()
+        let message = MSMessage(session: session)
+        message.layout = MSMessageLiveLayout(alternateLayout: template)
+        message.url = url
+        message.summaryText = "Synq trip: \(trip.title)"
         insert(message, into: conversation)
     }
 
@@ -281,7 +300,15 @@ struct FundScreen: View {
     let actions: FundActions
 
     var body: some View {
-        if let hash = model.selectedProposal {
+        if let tripId = model.selectedTrip {
+            if let trip = model.trips.first(where: { $0.tripId == tripId }) {
+                TripDetailView(model: model, trip: trip, actions: actions)
+            } else if let error = model.error {
+                Text(error).font(.footnote).foregroundStyle(.red).padding()
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else if let hash = model.selectedProposal {
             if let ref = model.ref, let p = model.view?.proposals.first(where: { $0.intentHash == hash }) {
                 ProposalDetailView(
                     proposal: p,
@@ -307,7 +334,10 @@ struct FundBubble: View {
     @ObservedObject var model: FundModel
 
     var body: some View {
-        if let hash = model.selectedProposal {
+        if let tripId = model.selectedTrip {
+            FundTripBubble(trip: model.trips.first { $0.tripId == tripId },
+                           fundName: model.view?.name ?? model.ref?.name)
+        } else if let hash = model.selectedProposal {
             FundProposalBubble(proposal: model.view?.proposals.first { $0.intentHash == hash },
                                fundName: model.view?.name ?? model.ref?.name)
         } else {
