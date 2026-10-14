@@ -12,6 +12,8 @@
 #   scripts/deploy/aws.sh status      container status and the deployed commit
 #   scripts/deploy/aws.sh logs [svc]  last 200 log lines (bot, web, caddy, postgres)
 #   scripts/deploy/aws.sh console "approve alice last"   operator console of the Telegram service
+#   scripts/deploy/aws.sh stop        pause the host (site and bot go offline; data and IP are kept)
+#   scripts/deploy/aws.sh start       resume it; the stack restarts on boot
 #
 # Values are never printed. AWS profile/region default to make-it-happen / ap-southeast-2.
 set -euo pipefail
@@ -118,5 +120,15 @@ console)
   cmd=$(printf '%s' "$*" | base64 | tr -d '\n')
   remote "echo '$cmd' | base64 -d | docker compose --env-file /opt/synq/.env -f /opt/synq/repo/infra/compose.aws.yaml exec -T bot sh -c 'cat >> .synq-local/telegram/console.in; echo >> .synq-local/telegram/console.in'; sleep 4; docker compose --env-file /opt/synq/.env -f /opt/synq/repo/infra/compose.aws.yaml logs --no-color --tail 15 bot" 120 console
   ;;
-*) sed -n '2,17p' "$0"; exit 2 ;;
+stop)
+  aws ec2 stop-instances --instance-ids "$(instance)" --query 'StoppingInstances[0].CurrentState.Name' --output text
+  aws ec2 wait instance-stopped --instance-ids "$(instance)"
+  echo "stopped: no compute charges; the disk and the Elastic IP remain"
+  ;;
+start)
+  aws ec2 start-instances --instance-ids "$(instance)" --query 'StartingInstances[0].CurrentState.Name' --output text
+  aws ec2 wait instance-status-ok --instance-ids "$(instance)"
+  echo "running at $(out PublicIp); containers come back up on their own (allow a minute or two)"
+  ;;
+*) sed -n '2,18p' "$0"; exit 2 ;;
 esac
