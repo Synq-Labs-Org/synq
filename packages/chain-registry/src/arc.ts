@@ -171,7 +171,18 @@ export type ContractKind =
   | 'MULTICALL3'
   | 'PERMIT2'
   | 'ERC8004_IDENTITY_REGISTRY'
-  | 'ERC8183_AGENTIC_COMMERCE';
+  | 'ERC8183_AGENTIC_COMMERCE'
+  | 'SAFE_L2_SINGLETON'
+  | 'SAFE_SINGLETON'
+  | 'SAFE_PROXY_FACTORY'
+  | 'SAFE_FALLBACK_HANDLER'
+  | 'SAFE_MULTI_SEND_CALL_ONLY'
+  | 'SAFE_SINGLETON_FACTORY'
+  | 'SYNQ_ARC_VAULT_FACTORY'
+  | 'SYNQ_ARC_VAULT_SETUP'
+  | 'SYNQ_MILESTONE_ESCROW'
+  | 'SYNQ_ARC_VAULT_SAFE'
+  | 'SYNQ_ARC_VAULT_POLICY';
 
 type ContractEntry = Readonly<{
   chain: ChainName;
@@ -222,6 +233,17 @@ const RegistrySchema = z.strictObject({
         'PERMIT2',
         'ERC8004_IDENTITY_REGISTRY',
         'ERC8183_AGENTIC_COMMERCE',
+        'SAFE_L2_SINGLETON',
+        'SAFE_SINGLETON',
+        'SAFE_PROXY_FACTORY',
+        'SAFE_FALLBACK_HANDLER',
+        'SAFE_MULTI_SEND_CALL_ONLY',
+        'SAFE_SINGLETON_FACTORY',
+        'SYNQ_ARC_VAULT_FACTORY',
+        'SYNQ_ARC_VAULT_SETUP',
+        'SYNQ_MILESTONE_ESCROW',
+        'SYNQ_ARC_VAULT_SAFE',
+        'SYNQ_ARC_VAULT_POLICY',
       ]),
       address: Address,
       codeHash: Hash.nullable(),

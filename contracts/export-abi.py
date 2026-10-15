@@ -11,6 +11,9 @@ contracts = (
     "SafeL2",
     "SafeProxyFactory",
     "RiskAttestationRegistry",
+    "SynqArcVaultFactory",
+    "SynqArcVaultPolicy",
+    "SynqMilestoneEscrow",
 )
 for name in contracts:
     artifact = json.loads((root / "out" / f"{name}.sol" / f"{name}.json").read_text())

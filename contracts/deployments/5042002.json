@@ -1,0 +1,69 @@
+{
+  "chainId": 5042002,
+  "deployer": "0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD",
+  "gitCommit": "deployed from the build/arc-vault working tree before commit; contracts/src/arc is committed unchanged (see reports/phases/P07-COMPLETION.md)",
+  "compiler": "solc 0.8.28, cancun, optimizer 200, via-IR (contracts/foundry.toml)",
+  "safeVersion": "1.4.1",
+  "safeInfrastructure": {
+    "SAFE_L2_SINGLETON": {
+      "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+      "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff"
+    },
+    "SAFE_PROXY_FACTORY": {
+      "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+      "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317"
+    },
+    "SAFE_FALLBACK_HANDLER": {
+      "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+      "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
+    }
+  },
+  "token": {
+    "address": "0x3600000000000000000000000000000000000000",
+    "codeHash": "0xc9987bd3af6b26a030951faa7eacc017b68343aeedf3ce5fe68f821c4b93939d"
+  },
+  "SynqArcVaultFactory": {
+    "address": "0xAA30B3D3765805BEeEe44b06a4631566068bAe35",
+    "codeHash": "0xe872f8663a4b80c1f1caa4b26da5153f98b0ff99504108b3497efef74f1ba42e",
+    "tx": "0x0a5d59cb2cf9d626ee159741e7cf9d7b9d27cb9393052a1ded2a48d09f0b2522",
+    "block": "67400775"
+  },
+  "SynqArcVaultSetup": {
+    "address": "0xf373447e3787d5Bb72A563bc62F166506EDEE798",
+    "codeHash": "0x59a0d818cceb593c913bb01dca3a2b9c475d3fbe69719795538d0f8da0d24728",
+    "tx": "0x0a5d59cb2cf9d626ee159741e7cf9d7b9d27cb9393052a1ded2a48d09f0b2522"
+  },
+  "SynqMilestoneEscrow": {
+    "address": "0x823Cc50BaCaa83851Cd75976f0a3730700fEB48A",
+    "codeHash": "0xafac522a02c980fb5cd44d861aec8877424691487f5fa12f32413f20066a6549",
+    "tx": "0xb2c8a8369f6345e8444b93d11938f568f1c77bbd085b20721b566167f5f3ce9e",
+    "block": "67400786"
+  },
+  "upgradeAuthority": "none: factory, setup helper and escrow have no owner, proxy or admin",
+  "proofVault": {
+    "safe": "0xE7dE12993f6fA97619ADB09df4e5Fc271d4cB594",
+    "safeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
+    "policy": "0xAe48e2A54BAEB36b6eF280b7329C8Bc6F51F9999",
+    "policyCodeHash": "0x331df830efbdb36484c4d1a756c7fd3d253ed31834ed38817c2995ffd374a875",
+    "vaultId": "0x71fe58eab60979269eff9f1f593de95624a7fab9e1a09f858582e79b50f55ce3",
+    "createTx": "0xe91c35503a1fd0d9409b3fafa54c08bfae8a2ea8d8bab715ba5933e4a8de0d62",
+    "singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
+  },
+  "abortedProofVault": {
+    "safe": "0x6011ad60a1Ed17Ea6d286260233C8bEE6093ad89",
+    "policy": "0x3fd237Ee7Cad784d9fB0BE0E3A1C4B8DDb2317D0",
+    "createTx": "0xbb0a62f902d86211bb1c40331b517dbbcf3454a4258a4ea4518bcabb23ba25dd",
+    "note": "first proof run stopped after its successful 2-of-3 withdrawal (0xcbc677fa\u2026) because the script mis-declared ExecutionSuccess as non-indexed; balance swept by 2-of-3 in 0x20ac5a27f428f99457e29f7ac8aacfd5c4e2b0ac23b0cf6c8ae158107a3be6a3"
+  },
+  "safeTxVector": {
+    "note": "first SafeTx of the proof vault; safeTxHash equals Safe.getTransactionHash read on chain before execution (tx 0x516ef51ab8f5f30d7751a4169f398a7c5254f385d3f9fc214f27da88a3824a17)",
+    "chainId": 5042002,
+    "safe": "0xE7dE12993f6fA97619ADB09df4e5Fc271d4cB594",
+    "to": "0x3600000000000000000000000000000000000000",
+    "recipient": "0xC597f082c02A3c4Ff2CB8Cf7Fc69Ea59ffc72981",
+    "amount": "10000",
+    "operation": 0,
+    "nonce": "0",
+    "safeTxHash": "0xcef83d91857161bd0cc550f13b6bb77d735598ce86153eb9e7e572833d7f9aca"
+  }
+}
