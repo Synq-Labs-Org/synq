@@ -14,10 +14,15 @@ import {
   VAULT_POLICY_ABI,
   collectSignatures,
   packSignatures,
+  SAFE_FALLBACK_HANDLER_SLOT,
+  SAFE_GUARD_SLOT,
+  readVault,
   revertReason,
   safeTxHash,
   type SafeTx,
 } from '@synq/execution-worker/vault';
+import { CHAINS } from '@synq/chain-registry/arc';
+import type { ArcChain } from '@synq/execution-worker/arc';
 
 const ownerA = privateKeyToAccount(`0x${'11'.repeat(32)}`);
 const ownerB = privateKeyToAccount(`0x${'22'.repeat(32)}`);
@@ -92,6 +97,7 @@ describe('Arc governed vault (Safe v1.4.1 + SynqArcVaultPolicy)', () => {
     for (const kind of [
       'SYNQ_ARC_VAULT_FACTORY',
       'SYNQ_ARC_VAULT_SETUP',
+      'SYNQ_ARC_FALLBACK_HANDLER',
       'SYNQ_ARC_VAULT_POLICY',
       'SYNQ_MILESTONE_ESCROW',
     ] as const) {
@@ -117,5 +123,78 @@ describe('Arc governed vault (Safe v1.4.1 + SynqArcVaultPolicy)', () => {
           'The contract function "execTransaction" reverted with the following reason:\nGS020',
       }),
     ).toBe('GS020');
+  });
+
+  it('P07-07 readVault reports a vault healthy only with the pinned singleton, Synq handler, bound policy and no extra module', async () => {
+    const safe = contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE').address;
+    const policy = contract('arc-testnet', 'SYNQ_ARC_VAULT_POLICY').address;
+    const word = (a: string) =>
+      `0x${'0'.repeat(24)}${a.slice(2).toLowerCase()}` as const;
+    const sentinel = '0x0000000000000000000000000000000000000001';
+    const fake = (o: {
+      handler?: string;
+      singleton?: string;
+      modules?: string[];
+      policySafe?: string;
+    }) =>
+      ({
+        profile: CHAINS['arc-testnet'],
+        client: {
+          readContract: async ({
+            functionName,
+            args,
+          }: {
+            functionName: string;
+            args?: readonly unknown[];
+          }) => {
+            switch (functionName) {
+              case 'getOwners':
+                return [ownerA.address, ownerB.address, ownerC.address];
+              case 'getThreshold':
+                return 2n;
+              case 'nonce':
+                return 0n;
+              case 'VERSION':
+                return '1.4.1';
+              case 'getModulesPaginated':
+                return [o.modules ?? [policy], sentinel];
+              case 'safe':
+                return o.policySafe ?? safe;
+              case 'getStorageAt': {
+                const slot = args![0] as bigint;
+                if (slot === SAFE_GUARD_SLOT) return word(policy);
+                if (slot === SAFE_FALLBACK_HANDLER_SLOT)
+                  return word(
+                    o.handler ??
+                      contract('arc-testnet', 'SYNQ_ARC_FALLBACK_HANDLER')
+                        .address,
+                  );
+                return word(
+                  o.singleton ??
+                    contract('arc-testnet', 'SAFE_L2_SINGLETON').address,
+                );
+              }
+              default:
+                throw new Error(functionName);
+            }
+          },
+        },
+      }) as unknown as ArcChain;
+    expect((await readVault(fake({}), safe)).healthy).toBe(true);
+    const stock = contract('arc-testnet', 'SAFE_FALLBACK_HANDLER').address;
+    const bad = [
+      await readVault(fake({ handler: stock }), safe),
+      await readVault(fake({ modules: [policy, ownerC.address] }), safe),
+      await readVault(fake({ policySafe: ownerC.address }), safe),
+      await readVault(
+        fake({ singleton: contract('arc-testnet', 'SAFE_SINGLETON').address }),
+        safe,
+      ),
+    ];
+    for (const r of bad) expect(r.healthy).toBe(false);
+    expect(bad[0]!.problems.join()).toMatch(/fallbackHandler/);
+    expect(bad[1]!.problems.join()).toMatch(/unexpected modules/);
+    expect(bad[2]!.problems.join()).toMatch(/not bound/);
+    expect(bad[3]!.problems.join()).toMatch(/singleton/);
   });
 });

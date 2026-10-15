@@ -12,30 +12,45 @@ Owner recovery, owner rotation, threshold changes and module enable/disable are 
 
 ## Arc governed vault and milestone escrow (`src/arc/`)
 
-Safe v1.4.1 is deployed on Arc testnet (5042002) at the canonical addresses, and the live code hashes equal the Monad pins (see `sources/arc_registry.json`). Arc vaults therefore reuse the canonical Safe for custody. They do not reuse any Monad Synq deployment, grant or threshold. A fresh, non-upgradeable Arc layer sits on top:
+Safe v1.4.1 is deployed on Arc testnet (5042002) at the canonical addresses, and the live code hashes equal the Monad pins (see `sources/arc_registry.json`). Arc vaults therefore reuse the canonical Safe singleton and proxy factory for custody. They do not reuse any Monad Synq deployment, grant or threshold. A fresh, non-upgradeable Arc layer sits on top:
 
-- `SynqArcVaultFactory` creates a Safe proxy through the canonical SafeProxyFactory. In the same transaction it deploys a `SynqArcVaultPolicy` and installs it as both module and guard, via `SynqArcVaultSetup` (delegatecall-only, and it works only while the factory is creating that exact proxy). The scoped operator may not be an owner.
+- `SynqArcVaultFactory` creates a Safe proxy through the canonical SafeProxyFactory. In the same transaction it:
+  - deploys a `SynqArcVaultPolicy` and installs it as both module and guard, via `SynqArcVaultSetup` (delegatecall-only, and it works only while the factory is creating that exact proxy);
+  - installs `SynqArcFallbackHandler` as the fallback handler;
+  - verifies all three slots.
+
+  The scoped operator may be neither an owner nor its own recipient. `deployReplacementPolicy` (callable only by the Safe itself) mints a replacement policy already bound to that Safe.
 - `SynqArcVaultPolicy` (Safe guard + module):
   - Owners spend with M-of-N EIP-712 SafeTx signatures and the Safe nonce.
-  - These operations must be queued by an owner-quorum transaction and wait `delay` (1h..30d, immutable), then execute once within 14 days:
+  - These operations must be queued by an owner-quorum transaction and wait `delay` (1h..30d, immutable), then execute once within 14 days. An expired id can be queued again.
     - every Safe self-call (owners, threshold, modules, guard, fallback handler);
     - every DELEGATECALL (the only way to change the Safe singleton);
-    - every operator-scope expansion.
+    - every operator-scope expansion;
+    - an owner-initiated `unpause` or `setGuardian`.
+  - A queued `setGuard` is refused unless the new guard is already bound to this Safe.
   - Safe gas refunds and non-zero `safeTxGas` are rejected, so Safe transactions are atomic.
   - The operator can only `pay(recipient, amount, ref)` in USDC, to allowlisted recipients, within per-payment and 24h caps.
-  - The guardian can freeze outflows for at most 7 days. It cannot move funds or govern. The owners can unpause, replace the guardian, revoke the operator and run timelocked recovery while paused.
+  - The guardian can freeze outflows for at most 7 days, then must wait a 2-day cooldown before pausing again.
+    - The guardian can unpause at once. The owner quorum can lift a pause or replace the guardian only through the timelock, so a stolen quorum cannot undo a pause for min(7 days, delay).
+    - Timelocked recovery (owner rotation, guard and guardian replacement) still runs while paused.
+- `SynqArcFallbackHandler` replaces the stock `CompatibilityFallbackHandler`.
+  - The stock handler validates ERC-1271 against owner signatures. That would let a quorum sign USDC `transferWithAuthorization` / `receiveWithAuthorization` / `permit` (FiatToken bytes-signature overloads) and move funds with no Safe transaction, which bypasses the guard.
+  - The Synq handler accepts 1271 only as an empty signature over a message the Safe marked as signed. Only a timelocked SignMessageLib DELEGATECALL can set that mark, and the handler rejects everything while the guard is paused.
+  - It keeps the hashing, `getModules`, `simulate` and token-receiver functions.
 - `SynqMilestoneEscrow`: a payer funds N milestones for one payee in one transfer, with exact balance-delta checks.
   - Release is by the payer or the arbiter. Withdrawal pays only the payee, and only after release.
   - The timeout refund (anyone may trigger it), the arbiter refund and the payee refund all go to the original payer, once.
-  - A dispute freezes payer release and timeout refund until the arbiter acts.
+  - A dispute (each party at most once per deal; the raiser may withdraw it) freezes payer release and the timeout refund for `DISPUTE_PERIOD` (30 days) so the arbiter can settle. After that both resume.
   - Every mutating entry point is nonReentrant.
 
-Upgrade authority (stated in `UPGRADE_AUTHORITY` on the policy and escrow, and tested in `P07_07_UpgradeTimelock.t.sol`):
+Upgrade authority (stated in `UPGRADE_AUTHORITY` on the policy, handler and escrow, and tested in `P07_07_UpgradeTimelock.t.sol`):
 
-- The factory, setup helper, policy and escrow have no proxy, owner or admin.
-- A vault's code (policy swap or Safe singleton migration) changes only by owner quorum after the policy timelock.
+- The factory, setup helper, handler, policy and escrow have no proxy, owner or admin.
+- A vault's code (policy, handler or Safe singleton) changes only by owner quorum after the policy timelock.
 
-Tests are in `test/unit/arc/P07_0{1..7}_*.t.sol` and are named by acceptance id. They cover quorum, operator scope, escrow release, reentrancy (hook token, reentrant operator, signature replay), refund, guardian pause and upgrade/timelock, with fuzzing where it is cheap. The deployment is in `deployments/5042002.json`. The live proof is `scripts/arc-vault-proof.ts`.
+Monitoring must watch USDC `Transfer` events *from the Safe* (and `Approval`), not only Safe `ExecutionSuccess`. Operator payments go through `execTransactionFromModule`, and any future module would too.
+
+Tests are in `test/unit/arc/P07_0{1..7}_*.t.sol` and are named by acceptance id. They cover quorum, operator scope, escrow release, reentrancy (hook token, reentrant operator, signature replay), refund, guardian pause and upgrade/timelock, with fuzzing where it is cheap. `test/unit/arc/CriticFindings.t.sol` holds the regressions for the independent critic's findings F1–F7. The deployment is in `deployments/5042002.json`. The live proof is `scripts/arc-vault-proof.ts`.
 
 ## Vendored dependencies
 

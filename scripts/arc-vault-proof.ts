@@ -2,7 +2,7 @@
  * Arc governed vault, milestone escrow and recovery: live proof on Arc testnet.
  *
  *   node --import tsx scripts/arc-vault-proof.ts deploy [--out-dir DIR]
- *   node --import tsx scripts/arc-vault-proof.ts prove  [--out-dir DIR]
+ *   node --import tsx scripts/arc-vault-proof.ts prove  [--legacy-safe 0x…] [--out-dir DIR]
  *   node --import tsx scripts/arc-vault-proof.ts sweep --safe 0x… [--out-dir DIR]
  *
  * `deploy` deploys SynqArcVaultFactory (which deploys its setup helper) and
@@ -27,7 +27,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import {
+  concat,
+  encodeAbiParameters,
   encodeDeployData,
+  parseAbi,
+  parseAbiParameters,
   encodeFunctionData,
   erc20Abi,
   getAddress,
@@ -61,6 +65,8 @@ import {
   encodeExecTransaction,
   packSignatures,
   readVault,
+  revertReason,
+  safeMessageHash,
   safeTxHash,
   simulate,
   verifySafeInfrastructure,
@@ -225,7 +231,6 @@ async function deploy() {
       args: [
         infra.SAFE_L2_SINGLETON!.address,
         infra.SAFE_PROXY_FACTORY!.address,
-        infra.SAFE_FALLBACK_HANDLER!.address,
         usdc.address,
       ],
     }),
@@ -251,6 +256,18 @@ async function deploy() {
     abi: parseSetupAbi,
     functionName: 'setupHelper',
   });
+  const handler = await chain.client.readContract({
+    address: factory,
+    abi: VAULT_FACTORY_ABI,
+    functionName: 'fallbackHandler',
+  });
+  const file = resolve('contracts', 'deployments', '5042002.json');
+  let previous: unknown = null;
+  try {
+    previous = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    previous = null;
+  }
   const out = {
     chainId: chain.profile.chainId,
     deployer: deployer.address,
@@ -271,6 +288,11 @@ async function deploy() {
       codeHash: await codeHashOf(setupHelper),
       tx: factoryTx.hash,
     },
+    SynqArcFallbackHandler: {
+      address: handler,
+      codeHash: await codeHashOf(handler),
+      tx: factoryTx.hash,
+    },
     SynqMilestoneEscrow: {
       address: escrow,
       codeHash: await codeHashOf(escrow),
@@ -278,9 +300,9 @@ async function deploy() {
       block: String(escrowTx.receipt.blockNumber),
     },
     upgradeAuthority:
-      'none: factory, setup helper and escrow have no owner, proxy or admin',
+      'none: factory, setup helper, fallback handler and escrow have no owner, proxy or admin',
+    superseded: previous,
   };
-  const file = resolve('contracts', 'deployments', '5042002.json');
   writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
   console.log(JSON.stringify(out, null, 2));
   console.log(`deployment -> ${file}`);
@@ -296,6 +318,88 @@ const parseSetupAbi = [
   },
 ] as const;
 
+// ---------------------------------------------------------------- 1271 probe
+
+const USDC_3009_ABI = parseAbi([
+  'function DOMAIN_SEPARATOR() view returns (bytes32)',
+  'function TRANSFER_WITH_AUTHORIZATION_TYPEHASH() view returns (bytes32)',
+  'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, bytes signature)',
+]);
+
+/**
+ * Simulates (eth_call only) a USDC EIP-3009 transfer out of `safe` authorized
+ * by owner signatures over the Safe's ERC-1271 message format.
+ */
+async function probe1271(safe: Address, signers: Signer[]) {
+  const [domain, typehash] = await Promise.all([
+    chain.client.readContract({
+      address: usdc.address,
+      abi: USDC_3009_ABI,
+      functionName: 'DOMAIN_SEPARATOR',
+    }),
+    chain.client.readContract({
+      address: usdc.address,
+      abi: USDC_3009_ABI,
+      functionName: 'TRANSFER_WITH_AUTHORIZATION_TYPEHASH',
+    }),
+  ]);
+  const nonce = keccak256(toHex(`synq-1271-probe:${safe}:${Date.now()}`));
+  const value = units('0.001');
+  const validBefore = 2n ** 255n;
+  const digest = keccak256(
+    concat([
+      '0x1901',
+      domain,
+      keccak256(
+        encodeAbiParameters(
+          parseAbiParameters(
+            'bytes32, address, address, uint256, uint256, uint256, bytes32',
+          ),
+          [typehash, safe, deployer.address, value, 0n, validBefore, nonce],
+        ),
+      ),
+    ]),
+  );
+  const messageHash = safeMessageHash(
+    chain.profile.chainId,
+    safe,
+    encodeAbiParameters(parseAbiParameters('bytes32'), [digest]),
+  );
+  const sigs = await Promise.all(
+    signers.map(async (s) => ({
+      owner: s.address,
+      signature: await s.sign({ hash: messageHash }),
+    })),
+  );
+  const signature = packSignatures(sigs);
+  let isValidSignature: string;
+  try {
+    isValidSignature = await chain.client.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'isValidSignature',
+      args: [digest, signature],
+    });
+  } catch (error) {
+    isValidSignature = `revert ${revertReason(error)}`;
+  }
+  const transfer = await simulate(
+    chain,
+    deployer.address,
+    usdc.address,
+    encodeFunctionData({
+      abi: USDC_3009_ABI,
+      functionName: 'transferWithAuthorization',
+      args: [safe, deployer.address, value, 0n, validBefore, nonce, signature],
+    }),
+  );
+  return {
+    isValidSignature,
+    magicAccepted: isValidSignature === '0x1626ba7e',
+    transfer,
+  };
+}
+
 // ---------------------------------------------------------------- prove
 
 async function prove() {
@@ -303,6 +407,8 @@ async function prove() {
   const factoryEntry = contract('arc-testnet', 'SYNQ_ARC_VAULT_FACTORY');
   const escrowEntry = contract('arc-testnet', 'SYNQ_MILESTONE_ESCROW');
   const setupEntry = contract('arc-testnet', 'SYNQ_ARC_VAULT_SETUP');
+  const handlerEntry = contract('arc-testnet', 'SYNQ_ARC_FALLBACK_HANDLER');
+  await verifyCode(chain, handlerEntry.address, handlerEntry.codeHash);
   await verifyCode(chain, factoryEntry.address, factoryEntry.codeHash);
   await verifyCode(chain, escrowEntry.address, escrowEntry.codeHash);
   await verifyCode(chain, setupEntry.address, setupEntry.codeHash);
@@ -343,7 +449,7 @@ async function prove() {
   if (
     bound.safeSingleton !== infra.SAFE_L2_SINGLETON!.address ||
     bound.safeProxyFactory !== infra.SAFE_PROXY_FACTORY!.address ||
-    bound.fallbackHandler !== infra.SAFE_FALLBACK_HANDLER!.address ||
+    bound.fallbackHandler !== handlerEntry.address ||
     getAddress(bound.token) !== getAddress(usdc.address) ||
     getAddress(bound.escrowToken) !== getAddress(usdc.address)
   )
@@ -419,6 +525,11 @@ async function prove() {
     threshold: String(vault.threshold),
     guard: vault.guard,
     policyIsModule: vault.moduleEnabled,
+    modules: vault.modules,
+    fallbackHandler: vault.fallbackHandler,
+    policyBoundToSafe: vault.policySafe,
+    healthy: vault.healthy,
+    problems: vault.problems,
     upgradeAuthority: await read<string>(
       policy,
       VAULT_POLICY_ABI,
@@ -432,6 +543,7 @@ async function prove() {
     explorer: addrLink(safe),
   };
   if (
+    !vault.healthy ||
     vault.guard !== policy ||
     !vault.moduleEnabled ||
     vault.threshold !== 2n ||
@@ -798,6 +910,110 @@ async function prove() {
     ),
     /OutflowsPaused/,
   );
+  // The pause holds against the quorum: lifting it needs the timelock.
+  const unpauseData = encodeFunctionData({
+    abi: VAULT_POLICY_ABI,
+    functionName: 'unpause',
+  });
+  const instantUnpause: SafeTx = {
+    to: policy,
+    value: 0n,
+    data: unpauseData,
+    operation: OPERATION.CALL,
+    nonce: await safeNonce(),
+  };
+  expectRevert(
+    'P07-06 full quorum lifts the pause instantly',
+    deployer.address,
+    await simulate(
+      chain,
+      deployer.address,
+      safe,
+      encodeExecTransaction(
+        instantUnpause,
+        packSignatures(
+          await collectSignatures(id, safe, instantUnpause, [
+            client,
+            contractor,
+          ]),
+        ),
+      ),
+    ),
+    /NotQueued/,
+  );
+  const queueUnpause: SafeTx = {
+    to: policy,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: VAULT_POLICY_ABI,
+      functionName: 'queue',
+      args: [policy, 0n, unpauseData, 0],
+    }),
+    operation: OPERATION.CALL,
+    nonce: await safeNonce(),
+  };
+  const queuedUnpause = await tx(
+    'P07-06 quorum queues unpause while paused',
+    deployer,
+    safe,
+    encodeExecTransaction(
+      queueUnpause,
+      packSignatures(
+        await collectSignatures(id, safe, queueUnpause, [client, contractor]),
+      ),
+    ),
+  );
+  const [uev] = parseEventLogs({
+    abi: VAULT_POLICY_ABI,
+    logs: queuedUnpause.logs,
+    eventName: 'OperationQueued',
+  });
+  if (!uev) throw new Error('no OperationQueued for unpause');
+  const earlyUnpause: SafeTx = {
+    to: policy,
+    value: 0n,
+    data: unpauseData,
+    operation: OPERATION.CALL,
+    nonce: await safeNonce(),
+  };
+  expectRevert(
+    'P07-06 quorum executes queued unpause before eta',
+    deployer.address,
+    await simulate(
+      chain,
+      deployer.address,
+      safe,
+      encodeExecTransaction(
+        earlyUnpause,
+        packSignatures(
+          await collectSignatures(id, safe, earlyUnpause, [client, contractor]),
+        ),
+      ),
+    ),
+    /NotReady/,
+  );
+  const stillPaused: SafeTx = { ...withdrawal, nonce: await safeNonce() };
+  expectRevert(
+    'P07-06 quorum withdrawal still frozen after queuing unpause',
+    deployer.address,
+    await simulate(
+      chain,
+      deployer.address,
+      safe,
+      encodeExecTransaction(
+        stillPaused,
+        packSignatures(
+          await collectSignatures(id, safe, stillPaused, [client, contractor]),
+        ),
+      ),
+    ),
+    /OutflowsPaused/,
+  );
+  record({
+    step: 'P07-06 queued unpause',
+    id: uev.args.id,
+    eta: String(uev.args.eta),
+  });
   const cancelTx: SafeTx = {
     to: policy,
     value: 0n,
@@ -849,6 +1065,42 @@ async function prove() {
     policy,
     encodeFunctionData({ abi: VAULT_POLICY_ABI, functionName: 'unpause' }),
   );
+  expectRevert(
+    'P07-06 guardian re-pauses inside the cooldown',
+    deployer.address,
+    await simulate(
+      chain,
+      deployer.address,
+      policy,
+      encodeFunctionData({ abi: VAULT_POLICY_ABI, functionName: 'pause' }),
+    ),
+    /PauseCooldown/,
+  );
+
+  // 8b. Off-Safe ERC-1271 path: owner signatures over a USDC EIP-3009 authorization must not move funds.
+  const legacy = process.argv.includes('--legacy-safe')
+    ? getAddress(arg('legacy-safe', ''))
+    : null;
+  for (const target of legacy ? [safe, legacy] : [safe]) {
+    const probe = await probe1271(target, [deployer, client]);
+    const isNew = target === safe;
+    const pass = isNew
+      ? !probe.magicAccepted && !probe.transfer.ok
+      : probe.magicAccepted && probe.transfer.ok;
+    record({
+      step: isNew
+        ? 'P07-01 owner 1271 signatures cannot authorize USDC transferWithAuthorization (Synq handler)'
+        : 'control: retired vault with stock CompatibilityFallbackHandler accepts the same owner 1271 authorization',
+      mode: 'eth_call',
+      safe: target,
+      isValidSignature: probe.isValidSignature,
+      transferWithAuthorization: probe.transfer.ok
+        ? 'would succeed'
+        : probe.transfer.reason,
+      pass,
+    });
+    if (!pass) throw new Error(`1271 probe unexpected on ${target}`);
+  }
 
   // 9. P07-03 / P07-05: milestone escrow release and refund.
   const m = units('0.01');
@@ -1093,6 +1345,7 @@ async function sweep() {
   record({
     step: 'sweep checks',
     safe,
+    vaultHealthProblems: vault.problems,
     signers: sigs.map((s) => s.owner),
     transfer: moved.map((m) => ({ ...m, value: dec(m.value) })),
     pass:

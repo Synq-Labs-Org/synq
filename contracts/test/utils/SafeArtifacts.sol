@@ -8,3 +8,4 @@ import {SafeProxyFactory} from "@safe-global/safe-smart-account/contracts/proxie
 import {CompatibilityFallbackHandler} from
     "@safe-global/safe-smart-account/contracts/handler/CompatibilityFallbackHandler.sol";
 import {MultiSendCallOnly} from "@safe-global/safe-smart-account/contracts/libraries/MultiSendCallOnly.sol";
+import {SignMessageLib} from "@safe-global/safe-smart-account/contracts/libraries/SignMessageLib.sol";

@@ -12,10 +12,6 @@
     "SAFE_PROXY_FACTORY": {
       "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
       "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317"
-    },
-    "SAFE_FALLBACK_HANDLER": {
-      "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
-      "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
     }
   },
   "token": {
@@ -23,47 +19,58 @@
     "codeHash": "0xc9987bd3af6b26a030951faa7eacc017b68343aeedf3ce5fe68f821c4b93939d"
   },
   "SynqArcVaultFactory": {
-    "address": "0xAA30B3D3765805BEeEe44b06a4631566068bAe35",
-    "codeHash": "0xe872f8663a4b80c1f1caa4b26da5153f98b0ff99504108b3497efef74f1ba42e",
-    "tx": "0x0a5d59cb2cf9d626ee159741e7cf9d7b9d27cb9393052a1ded2a48d09f0b2522",
-    "block": "67400775"
+    "address": "0x883f80e404b4122084F9a877790A502b3d7f621c",
+    "codeHash": "0x71612c9d395cc6fff833eafb885e041bb5ff9ffd25fe1bf3e840f8163ff1742a",
+    "tx": "0xbbe5191c88fd309650e70f76a9175e940d8c1e8c9b1b5ac92f2f3f9f05339362",
+    "block": "67404727"
   },
   "SynqArcVaultSetup": {
-    "address": "0xf373447e3787d5Bb72A563bc62F166506EDEE798",
-    "codeHash": "0x59a0d818cceb593c913bb01dca3a2b9c475d3fbe69719795538d0f8da0d24728",
-    "tx": "0x0a5d59cb2cf9d626ee159741e7cf9d7b9d27cb9393052a1ded2a48d09f0b2522"
+    "address": "0x85742244b0F439EE28ce5e9f412eC73AD38eD7Cf",
+    "codeHash": "0xc95fa718415ec2d5511e1df9bbc22b13ac64d2b63bb089e1f18f882c2c01b3ff",
+    "tx": "0xbbe5191c88fd309650e70f76a9175e940d8c1e8c9b1b5ac92f2f3f9f05339362"
+  },
+  "SynqArcFallbackHandler": {
+    "address": "0x925B2C16FfF6a0912F02327384df25903054dB0c",
+    "codeHash": "0x3c38f3cb89817ad00b92658911f233c458a93db004ae9584607ba939e7bbe549",
+    "tx": "0xbbe5191c88fd309650e70f76a9175e940d8c1e8c9b1b5ac92f2f3f9f05339362"
   },
   "SynqMilestoneEscrow": {
-    "address": "0x823Cc50BaCaa83851Cd75976f0a3730700fEB48A",
-    "codeHash": "0xafac522a02c980fb5cd44d861aec8877424691487f5fa12f32413f20066a6549",
-    "tx": "0xb2c8a8369f6345e8444b93d11938f568f1c77bbd085b20721b566167f5f3ce9e",
-    "block": "67400786"
+    "address": "0xB9894B4224CCD0EaECC7637fc40AEdD600783b7D",
+    "codeHash": "0x1997f79edab885d9e9da5990cf958372eb492f492fe4ca0725b86f1dec33b862",
+    "tx": "0xdf411e00a107d70a86d216ee3cf838273fbeda3019b8930abf73b36d3d518c31",
+    "block": "67404738"
   },
-  "upgradeAuthority": "none: factory, setup helper and escrow have no owner, proxy or admin",
+  "upgradeAuthority": "none: factory, setup helper, fallback handler and escrow have no owner, proxy or admin",
   "proofVault": {
-    "safe": "0xE7dE12993f6fA97619ADB09df4e5Fc271d4cB594",
+    "safe": "0x4aD226BDc7964B8B54802436C3D961942b2d58e1",
     "safeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
-    "policy": "0xAe48e2A54BAEB36b6eF280b7329C8Bc6F51F9999",
-    "policyCodeHash": "0x331df830efbdb36484c4d1a756c7fd3d253ed31834ed38817c2995ffd374a875",
-    "vaultId": "0x71fe58eab60979269eff9f1f593de95624a7fab9e1a09f858582e79b50f55ce3",
-    "createTx": "0xe91c35503a1fd0d9409b3fafa54c08bfae8a2ea8d8bab715ba5933e4a8de0d62",
-    "singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762"
-  },
-  "abortedProofVault": {
-    "safe": "0x6011ad60a1Ed17Ea6d286260233C8bEE6093ad89",
-    "policy": "0x3fd237Ee7Cad784d9fB0BE0E3A1C4B8DDb2317D0",
-    "createTx": "0xbb0a62f902d86211bb1c40331b517dbbcf3454a4258a4ea4518bcabb23ba25dd",
-    "note": "first proof run stopped after its successful 2-of-3 withdrawal (0xcbc677fa\u2026) because the script mis-declared ExecutionSuccess as non-indexed; balance swept by 2-of-3 in 0x20ac5a27f428f99457e29f7ac8aacfd5c4e2b0ac23b0cf6c8ae158107a3be6a3"
+    "policy": "0xaD1C4188379001939Fb94d999556292574D1e86c",
+    "policyCodeHash": "0xd2f9597f1d9dd15c749811386f06acfd55264f14fb39fa09292590e3f4451f09",
+    "vaultId": "0xf6e9bb528745cbca22beb99a5fee1b8bddcfe77c641b0f60e60ce6a6b1bd1669",
+    "createTx": "0xd674e524737c3b86da5cf3d6c056ae58276ebceb482ffe752331dc885da197a9",
+    "singleton": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+    "fallbackHandler": "0x925B2C16FfF6a0912F02327384df25903054dB0c"
   },
   "safeTxVector": {
-    "note": "first SafeTx of the proof vault; safeTxHash equals Safe.getTransactionHash read on chain before execution (tx 0x516ef51ab8f5f30d7751a4169f398a7c5254f385d3f9fc214f27da88a3824a17)",
+    "note": "first SafeTx of the proof vault; safeTxHash equals Safe.getTransactionHash read on chain before execution (tx 0x214675adabe146ecd17284995f2be7b5ed1350600747a228696f90f5a7e8e72b)",
     "chainId": 5042002,
-    "safe": "0xE7dE12993f6fA97619ADB09df4e5Fc271d4cB594",
+    "safe": "0x4aD226BDc7964B8B54802436C3D961942b2d58e1",
     "to": "0x3600000000000000000000000000000000000000",
     "recipient": "0xC597f082c02A3c4Ff2CB8Cf7Fc69Ea59ffc72981",
     "amount": "10000",
     "operation": 0,
     "nonce": "0",
-    "safeTxHash": "0xcef83d91857161bd0cc550f13b6bb77d735598ce86153eb9e7e572833d7f9aca"
+    "safeTxHash": "0xdb6e6de245be5bf838b3b531572b1e710fec2f2fd5ff8fcd855f59719f9cae79"
+  },
+  "retired": {
+    "note": "first deployment (commit 135e2ae), superseded after the independent critic review; its proof vault was swept by 2-of-3",
+    "SynqArcVaultFactory": "0xAA30B3D3765805BEeEe44b06a4631566068bAe35",
+    "SynqArcVaultSetup": "0xf373447e3787d5Bb72A563bc62F166506EDEE798",
+    "SynqMilestoneEscrow": "0x823Cc50BaCaa83851Cd75976f0a3730700fEB48A",
+    "proofVaultSafe": "0xE7dE12993f6fA97619ADB09df4e5Fc271d4cB594",
+    "proofVaultPolicy": "0xAe48e2A54BAEB36b6eF280b7329C8Bc6F51F9999",
+    "proofVaultSweepTx": "0xea7afcde17dbd9b72caed4f957b21f66d940684cedaa58c4cc7e5c83f532ea07",
+    "abortedVaultSafe": "0x6011ad60a1Ed17Ea6d286260233C8bEE6093ad89",
+    "abortedVaultSweepTx": "0x20ac5a27f428f99457e29f7ac8aacfd5c4e2b0ac23b0cf6c8ae158107a3be6a3"
   }
 }

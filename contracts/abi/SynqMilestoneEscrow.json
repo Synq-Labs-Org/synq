@@ -12,6 +12,19 @@
   },
   {
     "type": "function",
+    "name": "DISPUTE_PERIOD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_MILESTONES",
     "inputs": [],
     "outputs": [
@@ -86,6 +99,26 @@
             "name": "termsHash",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "disputedBy",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "disputeDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "payerDisputed",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "payeeDisputed",
+            "type": "bool",
+            "internalType": "bool"
           }
         ]
       }
@@ -117,6 +150,25 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "disputeActive",
+    "inputs": [
+      {
+        "name": "dealId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -274,6 +326,19 @@
     "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "withdrawDispute",
+    "inputs": [
+      {
+        "name": "dealId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
     "type": "event",
     "name": "DealOpened",
     "inputs": [
@@ -324,6 +389,25 @@
   },
   {
     "type": "event",
+    "name": "DisputeWithdrawn",
+    "inputs": [
+      {
+        "name": "dealId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "by",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Disputed",
     "inputs": [
       {
@@ -337,6 +421,12 @@
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "deadline",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
       }
     ],
     "anonymous": false
@@ -441,6 +531,11 @@
   },
   {
     "type": "error",
+    "name": "DisputeAlreadyUsed",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidAmount",
     "inputs": []
   },
@@ -464,6 +559,11 @@
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "NotDisputeRaiser",
+    "inputs": []
   },
   {
     "type": "error",

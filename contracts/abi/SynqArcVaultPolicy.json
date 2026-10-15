@@ -94,6 +94,19 @@
   },
   {
     "type": "function",
+    "name": "PAUSE_COOLDOWN",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "UPGRADE_AUTHORITY",
     "inputs": [],
     "outputs": [
@@ -961,6 +974,17 @@
   },
   {
     "type": "error",
+    "name": "InvalidReplacement",
+    "inputs": [
+      {
+        "name": "guard",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NotFactory",
     "inputs": []
   },
@@ -1010,6 +1034,17 @@
     "type": "error",
     "name": "OutflowsPaused",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PauseCooldown",
+    "inputs": [
+      {
+        "name": "availableAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

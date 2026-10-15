@@ -14,6 +14,7 @@ contracts = (
     "SynqArcVaultFactory",
     "SynqArcVaultPolicy",
     "SynqMilestoneEscrow",
+    "SynqArcFallbackHandler",
 )
 for name in contracts:
     artifact = json.loads((root / "out" / f"{name}.sol" / f"{name}.json").read_text())

@@ -97,19 +97,26 @@ contract P07_06_GuardianPauseTest is ArcVaultBase {
         assertEq(token.balanceOf(guardian), 0);
     }
 
-    function test_P07_06_pauseIsBoundedAndOwnersCanUnpauseOrReplaceGuardian() public {
+    function test_P07_06_pauseIsBoundedCooledDownAndOwnersActOnlyThroughTimelock() public {
         _pause();
-        assertEq(policy.pausedUntil(), block.timestamp + policy.MAX_PAUSE());
-        vm.warp(block.timestamp + policy.MAX_PAUSE());
+        uint256 until = policy.pausedUntil();
+        assertEq(until, vm.getBlockTimestamp() + policy.MAX_PAUSE());
+        vm.warp(until);
         assertFalse(policy.paused(), "pause expires on its own");
+        uint256 cooldown = policy.PAUSE_COOLDOWN();
+        vm.prank(guardian);
+        vm.expectRevert(abi.encodeWithSelector(SynqArcVaultPolicy.PauseCooldown.selector, until + cooldown));
+        policy.pause();
 
+        vm.warp(until + cooldown);
         _pause();
-        quorum(address(policy), abi.encodeCall(SynqArcVaultPolicy.unpause, ()));
+        // Replacing the guardian and lifting the pause both wait out the delay, and both run while paused.
+        address newGuardian = makeAddr("newGuardian");
+        timelocked(address(policy), 0, abi.encodeCall(SynqArcVaultPolicy.setGuardian, (newGuardian)), CALL);
+        assertTrue(policy.paused());
+        assertEq(policy.guardian(), newGuardian);
+        timelocked(address(policy), 0, abi.encodeCall(SynqArcVaultPolicy.unpause, ()), CALL);
         assertFalse(policy.paused());
-
-        _pause();
-        quorum(address(policy), abi.encodeCall(SynqArcVaultPolicy.setGuardian, (makeAddr("newGuardian"))));
-        quorum(address(policy), abi.encodeCall(SynqArcVaultPolicy.unpause, ()));
         vm.prank(guardian);
         vm.expectRevert(SynqArcVaultPolicy.NotGuardian.selector);
         policy.pause();
