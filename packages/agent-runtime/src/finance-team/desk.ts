@@ -4,6 +4,7 @@ import type { Invoice } from '@synq/invoices';
 import type { Obligation, Vendor, VendorInvoice } from '@synq/payables';
 import type { ArcWorldSnapshot } from '@synq/world-model';
 import type { StructuredReasoner } from '../ports.js';
+import type { FinanceBudgetLedger } from './budget.js';
 import type { PaymentKernelPort } from './kernel-port.js';
 
 const Address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
@@ -77,6 +78,8 @@ export type FinanceDesk = Readonly<{
   kernel?: PaymentKernelPort;
   reasoner?: StructuredReasoner;
   receipts?: (txHash: `0x${string}`) => Promise<ChainReceipt | null>;
+  /** Per-workspace/session budget shared across Supervisor runs. */
+  budget?: FinanceBudgetLedger;
   /** ISO date and unix seconds for this run. */
   today: string;
   now: number;

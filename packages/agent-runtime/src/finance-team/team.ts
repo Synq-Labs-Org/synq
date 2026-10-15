@@ -30,6 +30,11 @@ import {
   type SpecialistRole,
 } from './manifests.js';
 
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  typeof v === 'object' &&
+  v !== null &&
+  typeof (v as { then?: unknown }).then === 'function';
+
 export type FinanceAgent = Readonly<{
   handle: AgentHandle;
   role: FinanceRole;
@@ -133,7 +138,44 @@ export class FinanceTeam {
       );
     this.manager.charge(agent.handle.agentId, { toolCalls: 1 }, tool);
     this.toolLog.push({ agentId: agent.handle.agentId, tool });
-    return run();
+    const out = run();
+    if (!isThenable(out)) return out;
+    return this.withinDeadline(agent, tool, out) as T;
+  }
+
+  /**
+   * Races an async tool against the agent's abort signal (wall clock, budget
+   * or parent cancellation). A result that arrives after the deadline is
+   * discarded, so a late Kernel grant can never be returned.
+   */
+  private async withinDeadline<R>(
+    agent: FinanceAgent,
+    tool: FinanceTool,
+    work: PromiseLike<R>,
+  ): Promise<R> {
+    const signal = agent.handle.signal;
+    const cancelled = () =>
+      new AgentRuntimeError(
+        'CANCELLED',
+        `${tool} did not finish before the deadline`,
+      );
+    if (signal.aborted) throw cancelled();
+    let onAbort: (() => void) | null = null;
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(cancelled());
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      const value = await Promise.race([Promise.resolve(work), aborted]);
+      if (signal.aborted) throw cancelled();
+      return value;
+    } catch (error) {
+      if (error instanceof AgentRuntimeError && error.kind === 'CANCELLED')
+        this.manager.finding('CANCELLED', error.message, agent.handle, 'HIGH');
+      throw error;
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
   }
 
   private forbid(agent: FinanceAgent, detail: string): never {
@@ -237,8 +279,16 @@ export class FinanceTeam {
       );
       return { parsed: null, record: done('PROVIDER_ERROR', null) };
     }
-    const used = result.inputTokens + result.outputTokens;
     try {
+      if (
+        !Number.isFinite(result.inputTokens) ||
+        !Number.isFinite(result.outputTokens)
+      )
+        this.manager.record(agent.handle.agentId, { tokens: Number.NaN });
+      // Provider-reported usage is untrusted: never negative, and the
+      // reservation is the floor (no refunds).
+      const used =
+        Math.max(0, result.inputTokens) + Math.max(0, result.outputTokens);
       this.manager.record(agent.handle.agentId, {
         tokens: used - reservation.tokens,
         paidMicroUsd:

@@ -7,11 +7,12 @@ import {
   issueTypedData,
   type Invoice,
 } from '@synq/invoices';
-import type {
-  Decision,
-  ExecutionGrant,
-  PaymentIntent,
-  PaymentPurpose,
+import {
+  intentApprovalTypedData,
+  type Decision,
+  type ExecutionGrant,
+  type PaymentIntent,
+  type PaymentPurpose,
 } from '@synq/kernel/arc';
 import {
   assessPayable,
@@ -24,7 +25,9 @@ import {
 } from '@synq/payables';
 import { canonicalArtifactHash } from '@synq/schemas';
 import {
+  cashBeforeBuffer,
   cite,
+  evaluateArcSnapshot,
   usdcDisplay,
   type ArcWorldSnapshot,
   type FieldCitation,
@@ -70,17 +73,32 @@ const daysBetween = (a: string, b: string) =>
 const age = (c: FieldCitation) =>
   `${c.path} from ${c.source}${c.ageSeconds === null ? ', time unknown' : `, observed ${c.ageSeconds}s ago`} (${c.freshness})`;
 
-function citations(s: ArcWorldSnapshot, paths: string[]): FieldCitation[] {
-  return paths.map((p) => cite(s, p));
+/** Citations aged at use time (`now`), never at snapshot build time. */
+function citations(
+  s: ArcWorldSnapshot,
+  paths: string[],
+  now: number,
+): FieldCitation[] {
+  return paths.map((p) => cite(s, p, now));
 }
 
-/** Snapshot read through the agent's own tool fence (charged, allowlisted). */
+/** Untrusted text interpolated into typed outputs is bounded, never a crash. */
+export const clip = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`;
+
+/**
+ * Snapshot read through the agent's own tool fence (charged, allowlisted),
+ * with freshness re-evaluated at the desk's current time.
+ */
 function readWorld(
   team: FinanceTeam,
   agent: FinanceAgent,
   snapshot: ArcWorldSnapshot,
+  now: number,
 ): ArcWorldSnapshot {
-  return team.tool(agent, 'world.snapshot', () => snapshot);
+  return team.tool(agent, 'world.snapshot', () =>
+    evaluateArcSnapshot(snapshot, now),
+  );
 }
 
 function vendorOf(desk: FinanceDesk, vi: VendorInvoice): Vendor | null {
@@ -115,7 +133,7 @@ export async function invoiceAgentDraft(
   intent: FinanceIntent,
   message: string,
 ): Promise<InvoiceOutcome> {
-  const s = readWorld(team, agent, snapshot);
+  const s = readWorld(team, agent, snapshot, desk.now);
   const none = {
     draft: null,
     proposal: null,
@@ -123,16 +141,21 @@ export async function invoiceAgentDraft(
     typedData: null,
   } as const;
   const user = s.identity.user.value;
+  // Both the issuing wallet and the payout wallet must belong to the current
+  // user and carry an independent verification.
+  const mine = (w: (typeof s.identity.wallets.value)[number]) =>
+    w.chain === s.primaryChain &&
+    w.ownerPrincipalId === user?.principalId &&
+    w.verifiedBy !== null;
   const owner = s.identity.wallets.value.find(
-    (w) =>
-      w.kind === 'OWNER_EOA' &&
-      w.chain === s.primaryChain &&
-      w.ownerPrincipalId === user?.principalId,
+    (w) => w.kind === 'OWNER_EOA' && mine(w),
   );
-  const payout =
+  const payoutCandidate =
     s.identity.wallets.value.find(
       (w) => w.role === 'PAYOUT' && w.chain === s.primaryChain,
     ) ?? owner;
+  const payout =
+    payoutCandidate && mine(payoutCandidate) ? payoutCandidate : null;
   if (
     !user ||
     !owner ||
@@ -142,7 +165,8 @@ export async function invoiceAgentDraft(
   )
     return {
       status: 'REFUSED',
-      reason: 'issuer identity or wallet is not fresh in the WorldSnapshot',
+      reason:
+        'issuer identity or a verified, user-owned issuing/payout wallet is not fresh in the WorldSnapshot',
       termsSource: null,
       ...none,
     };
@@ -160,7 +184,7 @@ export async function invoiceAgentDraft(
       payer: intent.counterparty,
       amount: intent.amount,
       asset: intent.asset ?? 'USDC',
-      description: `Services for ${intent.counterparty}`,
+      description: `Services for ${intent.counterparty.slice(0, 120)}`,
       dueInDays: netDays,
     };
     termsSource = 'RULES';
@@ -185,6 +209,14 @@ export async function invoiceAgentDraft(
       termsSource = 'MODEL';
     }
   }
+  if (terms && (terms.payer.length > 120 || terms.description.length > 200))
+    return {
+      status: 'NEEDS_DETAILS',
+      reason:
+        'the payer name or description is too long; give a shorter legal name',
+      termsSource,
+      ...none,
+    };
   if (!terms)
     return {
       status: 'NEEDS_DETAILS',
@@ -315,7 +347,7 @@ export function cfoLiquidity(
   desk: FinanceDesk,
   snapshot: ArcWorldSnapshot,
 ): LiquidityReport {
-  const s = readWorld(team, agent, snapshot);
+  const s = readWorld(team, agent, snapshot, desk.now);
   const position = team.tool(agent, 'treasury.position', () => ({
     free: s.treasury.availableToSpend.value,
     buffer: s.treasury.reserves.value?.minimumReserve ?? null,
@@ -339,12 +371,16 @@ export function cfoLiquidity(
   );
   const out = payables.reduce((a, p) => a + BigInt(p.amount), 0n);
   const inflow = receivables.reduce((a, r) => a + BigInt(r.amountDue), 0n);
-  const cites = citations(s, [
-    ...CASH_PATHS,
-    'obligations.payables',
-    'obligations.receivables',
-    'treasury.gatewayAvailable',
-  ]);
+  const cites = citations(
+    s,
+    [
+      ...CASH_PATHS,
+      'obligations.payables',
+      'obligations.receivables',
+      'treasury.gatewayAvailable',
+    ],
+    desk.now,
+  );
   const grade = s.decision.decisionGrade;
   const net = out - inflow;
   const runwayDays =
@@ -375,7 +411,7 @@ export function cfoLiquidity(
     gatewayAvailableBaseUnits: position.gateway.toString(),
     cctpInFlightBaseUnits: position.cctp.toString(),
     runwayDays: grade ? runwayDays : null,
-    explanation,
+    explanation: clip(explanation, 1200),
     citations: cites,
   });
 }
@@ -391,10 +427,10 @@ export function cfoTiming(
   snapshot: ArcWorldSnapshot,
   vi: VendorInvoice,
 ): { timing: TimingRecommendation; reallocation: ReallocationProposal | null } {
-  const s = readWorld(team, agent, snapshot);
+  const s = readWorld(team, agent, snapshot, desk.now);
   const vendor = vendorOf(desk, vi);
-  const who = `${vendor?.name ?? vi.vendorId} ${vi.number}`;
-  const cites = citations(s, [...CASH_PATHS, 'obligations.payables']);
+  const who = `${clip(vendor?.name ?? vi.vendorId, 60)} ${clip(vi.number, 30)}`;
+  const cites = citations(s, [...CASH_PATHS, 'obligations.payables'], desk.now);
   const base = {
     kind: 'TIMING_RECOMMENDATION' as const,
     vendorInvoiceId: vi.vendorInvoiceId,
@@ -404,7 +440,15 @@ export function cfoTiming(
   };
   const free = s.treasury.availableToSpend.value;
   const buffer = s.treasury.reserves.value?.minimumReserve ?? null;
-  if (!s.decision.decisionGrade || free === null || buffer === null) {
+  // Cash before the buffer comes from the confirmed balance, not from the
+  // clamped availableToSpend (which hides a balance already under the buffer).
+  const before = cashBeforeBuffer(s);
+  if (
+    !s.decision.decisionGrade ||
+    free === null ||
+    buffer === null ||
+    before === null
+  ) {
     const stale = cites.filter((c) => c.freshness !== 'FRESH');
     return {
       timing: TimingRecommendationSchema.parse({
@@ -423,7 +467,7 @@ export function cfoTiming(
     };
   }
   const { timing, freeBefore } = team.tool(agent, 'payables.timing', () => {
-    const freeBefore = BigInt(free) + BigInt(buffer);
+    const freeBefore = before > 0n ? before : 0n;
     return {
       freeBefore,
       timing: paymentTiming({
@@ -495,7 +539,7 @@ export function cfoTiming(
       cashAfterBaseUnits: after.toString(),
       savingBaseUnits: (action === 'PAY_EARLY' ? timing.saving : 0n).toString(),
       reason,
-      explanation,
+      explanation: clip(explanation, 1200),
     }),
     reallocation,
   };
@@ -520,7 +564,7 @@ export function riskAgentAssess(
   vi: VendorInvoice,
   intent: PaymentIntent | null,
 ): RiskRecommendation {
-  const s = readWorld(team, agent, snapshot);
+  const s = readWorld(team, agent, snapshot, desk.now);
   const vendor = team.tool(agent, 'vendors.verifiedPayout', () =>
     vendorOf(desk, vi),
   );
@@ -545,7 +589,9 @@ export function riskAgentAssess(
         today: desk.today,
       }),
     );
-    flags.push(...assessed.flags);
+    flags.push(
+      ...assessed.flags.map((f) => ({ ...f, detail: clip(f.detail, 400) })),
+    );
     const verified = verifiedAddress(vendor, vi.chainId);
     if (intent && (!verified || lower(intent.recipient) !== lower(verified)))
       flags.push({
@@ -594,7 +640,11 @@ export function riskAgentAssess(
     kind: 'RISK_RECOMMENDATION',
     subject: vi.vendorInvoiceId,
     recommendation: hard ? 'VETO' : flags.length ? 'REVIEW' : 'CLEAR',
-    flags,
+    flags: flags.map((f) => ({
+      code: clip(f.code, 64),
+      severity: f.severity,
+      detail: clip(f.detail, 400),
+    })),
     injectionSignals: signals,
   });
 }
@@ -602,7 +652,12 @@ export function riskAgentAssess(
 // ---------------------------------------------------------------- Payment Agent
 
 export type PreparedPayment = Readonly<{
-  status: 'PREPARED' | 'REFUSED_STALE' | 'NO_MANDATE' | 'UNKNOWN_VENDOR';
+  status:
+    | 'PREPARED'
+    | 'REFUSED_STALE'
+    | 'NO_MANDATE'
+    | 'UNKNOWN_VENDOR'
+    | 'NO_VERIFIED_PAYOUT';
   reason: string;
   proposal: PaymentProposal | null;
   intent: PaymentIntent | null;
@@ -625,7 +680,7 @@ export async function paymentAgentPrepare(
   snapshot: ArcWorldSnapshot,
   vi: VendorInvoice,
 ): Promise<PreparedPayment> {
-  const s = readWorld(team, agent, snapshot);
+  const s = readWorld(team, agent, snapshot, desk.now);
   const empty = { proposal: null, intent: null, modelDraft: null };
   if (!s.decision.decisionGrade)
     return {
@@ -650,6 +705,13 @@ export async function paymentAgentPrepare(
   const verified = team.tool(agent, 'vendors.verifiedPayout', () =>
     verifiedAddress(vendor, vi.chainId),
   );
+  if (!verified)
+    return {
+      status: 'NO_VERIFIED_PAYOUT',
+      reason: `${clip(vendor.name, 60)} has no verified payout address on this chain; verify one out of band before paying`,
+      disagreements: [],
+      ...empty,
+    };
   const purpose = purposeFor(vendor);
   const mandate = s.obligations.mandates.value.find(
     (m) => !m.revoked && m.purposes.includes(purpose),
@@ -663,7 +725,8 @@ export async function paymentAgentPrepare(
       ...empty,
     };
   const disagreements: string[] = [];
-  let recipient = vi.payTo as Address;
+  // Default to the vendor master's verified address, never the invoice's payTo.
+  let recipient = verified as Address;
   let modelDraft: PreparedPayment['modelDraft'] = null;
   if (desk.reasoner) {
     const doc = wrapUntrusted({
@@ -727,15 +790,20 @@ export async function paymentAgentPrepare(
           : 'model call blocked or failed',
       };
   }
-  if (!verified)
-    disagreements.push(`${vendor.name} has no verified payout address on Arc`);
-  else if (lower(recipient) !== lower(verified))
+  const name = clip(vendor.name, 60);
+  if (lower(vi.payTo) !== lower(verified))
     disagreements.push(
-      `the invoice asks to pay ${recipient}, but ${vendor.name}'s verified payout address is ${verified}`,
+      `the invoice asks to pay ${vi.payTo}, but ${name}'s verified payout address is ${verified}`,
+    );
+  if (lower(recipient) !== lower(verified))
+    disagreements.push(
+      `the Payment Agent's model draft chose ${recipient} instead of the verified ${verified}`,
     );
   const asset = token(chainNameOf(s), 'USDC');
   const { proposal, intent } = team.tool(agent, 'payment.prepare', () => {
-    const intentId = `int_${vi.vendorInvoiceId}_${desk.now}`;
+    // Deterministic per obligation, so an owner confirmation signed over
+    // intentApprovalTypedData in one run matches the intent rebuilt in the next.
+    const intentId = `int_${vi.vendorInvoiceId}`;
     const evidenceHash = canonicalArtifactHash({
       vendorInvoiceId: vi.vendorInvoiceId,
       document: documentHash(vi.documentText),
@@ -785,45 +853,96 @@ function chainNameOf(s: ArcWorldSnapshot): ChainName {
   return s.primaryChain;
 }
 
-export type KernelSubmission = Readonly<{
-  status: 'GRANTED' | 'OWNER_APPROVAL_REQUIRED' | 'DENIED' | 'NO_KERNEL';
-  decision: Decision | null;
-  grant: ExecutionGrant | null;
+/** What the owner signs (EIP-712) to confirm one exact payment intent. */
+export type OwnerConfirmation = Readonly<{
+  intent: PaymentIntent;
+  typedData: ReturnType<typeof intentApprovalTypedData>;
+  /** The mandate owner must sign; a chat "yes" is never a confirmation. */
+  note: string;
 }>;
+
+export type KernelSubmission = Readonly<{
+  status:
+    | 'GRANTED'
+    | 'PROPOSED'
+    | 'OWNER_APPROVAL_REQUIRED'
+    | 'DENIED'
+    | 'NO_KERNEL';
+  /** Outcome and every reason; the grant itself is never repeated here. */
+  decision: Readonly<{
+    outcome: Decision['outcome'];
+    reasons: string[];
+  }> | null;
+  /**
+   * The MAC'd ExecutionGrant for the restricted executor. Non-enumerable, so
+   * JSON serialisation and logs skip it. It must never reach a model prompt,
+   * a log line or a chat message; hand it only to the executor.
+   */
+  grant: ExecutionGrant | null;
+  confirmation: OwnerConfirmation | null;
+}>;
+
+function submission(
+  status: KernelSubmission['status'],
+  decision: KernelSubmission['decision'],
+  grant: ExecutionGrant | null,
+  confirmation: OwnerConfirmation | null,
+): KernelSubmission {
+  const out = { status, decision, confirmation } as {
+    status: KernelSubmission['status'];
+    decision: KernelSubmission['decision'];
+    confirmation: OwnerConfirmation | null;
+    grant: ExecutionGrant | null;
+  };
+  Object.defineProperty(out, 'grant', { value: grant, enumerable: false });
+  return Object.freeze(out);
+}
 
 /**
  * Hands the intent and the Risk Agent's deterministic flags to the Kernel.
- * Missing risk output is `available: false`, which fails closed above the
- * Kernel's high-value threshold.
+ * With `requireOwnerApproval` (questions and confirmation flows) the Kernel
+ * evaluates everything but grants only with a valid owner EIP-712 signature
+ * over `intentApprovalTypedData(intent)`; without one the result is PROPOSED
+ * with the typed data to sign.
  */
 export async function paymentAgentSubmit(
   team: FinanceTeam,
   agent: FinanceAgent,
   desk: FinanceDesk,
   intent: PaymentIntent,
-  risk: RiskRecommendation | null,
+  risk: RiskRecommendation,
+  options: { requireOwnerApproval?: boolean; ownerApproval?: Hex } = {},
 ): Promise<KernelSubmission> {
   const kernel = desk.kernel;
-  if (!kernel) return { status: 'NO_KERNEL', decision: null, grant: null };
+  if (!kernel) return submission('NO_KERNEL', null, null, null);
   const decision = await team.tool(agent, 'payment.submitToKernel', () =>
     kernel.decide({
       intent,
-      risk: {
-        flags: risk?.flags ?? [],
-        available: risk !== null,
-      },
+      risk: { flags: risk.flags, available: true },
+      ...(options.requireOwnerApproval ? { requireOwnerApproval: true } : {}),
+      ...(options.ownerApproval
+        ? { ownerApproval: options.ownerApproval }
+        : {}),
     }),
   );
-  return {
-    status:
-      decision.outcome === 'ALLOW'
-        ? 'GRANTED'
-        : decision.outcome === 'REQUIRE_OWNER_APPROVAL'
-          ? 'OWNER_APPROVAL_REQUIRED'
-          : 'DENIED',
-    decision,
-    grant: decision.outcome === 'ALLOW' ? decision.grant : null,
+  const summary = { outcome: decision.outcome, reasons: [...decision.reasons] };
+  if (decision.outcome === 'ALLOW')
+    return submission('GRANTED', summary, decision.grant, null);
+  if (decision.outcome === 'DENY')
+    return submission('DENIED', summary, null, null);
+  const confirmation: OwnerConfirmation = {
+    intent,
+    typedData: intentApprovalTypedData(intent),
+    note: 'Sign with the mandate owner wallet and pass the signature as `confirm.ownerApproval`; nothing is paid until then.',
   };
+  return submission(
+    options.requireOwnerApproval && !options.ownerApproval
+      ? 'PROPOSED'
+      : 'OWNER_APPROVAL_REQUIRED',
+    summary,
+    null,
+    confirmation,
+  );
 }
 
 // ---------------------------------------------------------------- Audit Agent
@@ -908,8 +1027,12 @@ export async function auditAgentExplain(
   const ledgerBalanced = cash === null ? null : cash + debits === 0n;
   let chainCheck: AuditExplanation['chainCheck'] = 'NOT_CHECKED';
   let chainDetail: string | null = null;
-  if (desk.receipts) {
-    const r = await desk.receipts(e.payout.hash as `0x${string}`);
+  const readReceipt = desk.receipts;
+  if (readReceipt) {
+    // Chain reads go through the fenced, charged, deadline-raced tool.
+    const r = await team.tool(agent, 'chain.receipt', () =>
+      readReceipt(e.payout.hash as `0x${string}`),
+    );
     const expected = units(e.payout.amount);
     const hit = r?.transfers.find(
       (t) => lower(t.to) === lower(e.sarahVerified) && t.baseUnits === expected,
@@ -966,7 +1089,7 @@ export async function auditAgentExplain(
     chainCheck,
     chainDetail,
     relatedRefusals: refusals,
-    explanation,
+    explanation: clip(explanation, 1200),
     sources: [
       `evidence:payout:${e.payout.hash}`,
       e.payout.explorer,

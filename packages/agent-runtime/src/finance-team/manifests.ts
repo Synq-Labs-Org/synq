@@ -22,6 +22,7 @@ export const FINANCE_CAPABILITIES = [
   'INVOICE_READ',
   'PAYABLE_READ',
   'EVIDENCE_READ',
+  'CHAIN_READ',
   'RECEIVABLE_TRACK',
   'INVOICE_DRAFT',
   'INVOICE_ISSUANCE_REQUEST',
@@ -68,6 +69,7 @@ export const FINANCE_TOOLS = {
   'risk.assessPayable': { capability: 'RISK_FLAG', effect: 'READ' },
   'risk.scanDocument': { capability: 'RISK_FLAG', effect: 'READ' },
   'evidence.lookup': { capability: 'EVIDENCE_READ', effect: 'READ' },
+  'chain.receipt': { capability: 'CHAIN_READ', effect: 'READ' },
 } as const satisfies Record<
   string,
   { capability: FinanceCapability; effect: 'READ' | 'PROPOSE' }
@@ -292,6 +294,7 @@ export const SPECIALIST_MANIFESTS: Readonly<
       'INVOICE_READ',
       'PAYABLE_READ',
       'EVIDENCE_READ',
+      'CHAIN_READ',
     ],
     runtimeCapabilities: ['READ_MARKET'],
     tools: [
@@ -300,6 +303,7 @@ export const SPECIALIST_MANIFESTS: Readonly<
       'invoices.list',
       'payables.list',
       'evidence.lookup',
+      'chain.receipt',
     ],
     proposals: [],
     readOnly: true,

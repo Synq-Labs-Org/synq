@@ -5,7 +5,13 @@ import type { SpecialistRole } from './manifests.js';
  * Fast-path intent classifier. Simple reads (balance, cash, receipt) map to
  * deterministic handlers with no model call; finance requests map to one
  * specialist. Only an unrecognised request is offered to the Supervisor
- * model, and the model can only pick one of these typed intents.
+ * model, and the model can only pick one of these typed intents (and never
+ * the money path: the Supervisor refuses model-classified payments).
+ *
+ * Payments: only an explicit imperative ("Pay Sarah's invoice") is
+ * PAY_INVOICE. Questions and wishes ("can I pay…?") are PAY_CHECK, which
+ * ends in a typed owner confirmation and never in a grant. Negations go to
+ * timing advice and past tense ("did I pay…?") to the Audit read path.
  */
 
 export const INTENT_KINDS = [
@@ -14,6 +20,7 @@ export const INTENT_KINDS = [
   'CREATE_INVOICE',
   'RECEIVABLES',
   'PAY_INVOICE',
+  'PAY_CHECK',
   'PAYMENT_TIMING',
   'RUNWAY',
   'EXPLAIN_TRANSACTION',
@@ -31,6 +38,8 @@ export type FinanceIntent = Readonly<{
   amount: string | null;
   asset: 'USDC' | 'EURC' | null;
   txHash: `0x${string}` | null;
+  /** Explicit invoice number in the request ("INV-0043"), if any. */
+  invoiceNumber: string | null;
   classifiedBy: 'RULES' | 'MODEL';
 }>;
 
@@ -45,6 +54,7 @@ export const ROUTES: Readonly<
   CREATE_INVOICE: { route: 'SPECIALIST', role: 'INVOICE' },
   RECEIVABLES: { route: 'SPECIALIST', role: 'INVOICE' },
   PAY_INVOICE: { route: 'SPECIALIST', role: 'PAYMENT' },
+  PAY_CHECK: { route: 'SPECIALIST', role: 'PAYMENT' },
   PAYMENT_TIMING: { route: 'SPECIALIST', role: 'CFO' },
   RUNWAY: { route: 'SPECIALIST', role: 'CFO' },
   EXPLAIN_TRANSACTION: { route: 'SPECIALIST', role: 'AUDIT' },
@@ -78,6 +88,7 @@ function intent(
     amount: null,
     asset: null,
     txHash: null,
+    invoiceNumber: null,
     classifiedBy: 'RULES',
     ...extra,
   };
@@ -92,16 +103,65 @@ export function fromModelIntent(m: ModelIntent): FinanceIntent {
   });
 }
 
+const NOT_NAMES = new Set([
+  'pay',
+  'settle',
+  'please',
+  'ok',
+  'okay',
+  'now',
+  'can',
+  'could',
+  'should',
+  'did',
+  'do',
+  'does',
+  "don't",
+  'how',
+  'what',
+  'when',
+  'i',
+  'we',
+  'go',
+  'kindly',
+  'yes',
+]);
+/** Drops sentence-initial verbs and pronouns a capitalised-name match can swallow. */
+function cleanName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const words = raw.split(/\s+/);
+  while (words.length && NOT_NAMES.has(words[0]!.toLowerCase())) words.shift();
+  return words.length ? words.join(' ') : null;
+}
+
+const PAY_WORD = /\b(pay|paying|settle|settling)\b/;
+const NEGATED =
+  /\b(don'?t|do not|never|not yet|no need to|stop|hold off|cancel|shouldn'?t|won'?t|wouldn'?t)\b/;
+const PAST =
+  /\b(did|didn'?t|have|has|had|was|were)\b[^.?!]*\b(pay|paid|settle|settled)\b|\b(paid|settled)\b/;
+const QUESTION =
+  /\?\s*$|^(can|could|should|shall|may|might|would|will|is|are|am|do|does|how|what|when|why|who|which)\b/;
+const IMPERATIVE =
+  /^(?:(?:please|ok(?:ay)?|now|kindly|go ahead and)[,!]?\s+)*(pay|settle)\b/;
+
 export function classifyIntent(message: string): FinanceIntent {
   const text = message.replace(/\s+/g, ' ').trim();
   const t = text.toLowerCase();
   const tx = (TX.exec(text)?.[0] ?? null) as `0x${string}` | null;
-  const possessive = new RegExp(`\\b${NAME}'s\\b`).exec(text)?.[1] ?? null;
+  const possessive = cleanName(
+    new RegExp(`\\b${NAME}'s\\b`).exec(text)?.[1] ?? null,
+  );
+  const invoiceNumber = /\bINV[-# ]?\d{1,8}\b/i.exec(text)?.[0] ?? null;
 
   if (/\bexplain\b|\bwhat happened\b|\bwhy did\b/.test(t)) {
-    if (/\b(payment|payout|transaction|transfer|tx|paid)\b/.test(t) || tx)
+    if (/\b(payment|payout|transaction|transfer|tx|paid|pay)\b/.test(t) || tx)
       return intent('EXPLAIN_TRANSACTION', { txHash: tx });
   }
+  if (PAST.test(t))
+    return intent('EXPLAIN_TRANSACTION', {
+      txHash: tx,
+      counterparty: possessive,
+    });
   if (tx || /\breceipt\b/.test(t)) return intent('RECEIPT', { txHash: tx });
 
   if (
@@ -114,7 +174,7 @@ export function classifyIntent(message: string): FinanceIntent {
       'i',
     ).exec(text);
     return intent('CREATE_INVOICE', {
-      counterparty: m?.[1] ?? null,
+      counterparty: cleanName(m?.[1]),
       amount: m?.[2] ?? null,
       asset: m ? ((m[3]?.toUpperCase() ?? 'USDC') as 'USDC' | 'EURC') : null,
     });
@@ -124,23 +184,32 @@ export function classifyIntent(message: string): FinanceIntent {
   )
     return intent('RUNWAY');
   if (
-    /\bwhen should i pay\b|\b(timing|pay early|early payment|discount)\b/.test(
+    /\bwhen should (i|we) pay\b|\b(timing|pay early|early payment|discount)\b/.test(
       t,
-    )
+    ) ||
+    (PAY_WORD.test(t) && NEGATED.test(t))
   )
-    return intent('PAYMENT_TIMING', { counterparty: possessive });
+    return intent('PAYMENT_TIMING', {
+      counterparty: possessive,
+      invoiceNumber,
+    });
   if (
     /\b(fraud|suspicious|scam|legit|changed (wallet|address)|new (wallet|address))\b/.test(
       t,
     )
   )
-    return intent('RISK_REVIEW', { counterparty: possessive });
-  if (/\b(can i |should i |please |go ahead and )?(pay|settle)\b/.test(t)) {
-    const direct =
+    return intent('RISK_REVIEW', { counterparty: possessive, invoiceNumber });
+  if (PAY_WORD.test(t)) {
+    const counterparty =
       possessive ??
-      new RegExp(`\\b(?:pay|settle)\\s+${NAME}\\b`).exec(text)?.[1] ??
-      null;
-    return intent('PAY_INVOICE', { counterparty: direct });
+      cleanName(
+        new RegExp(`\\b(?:[Pp]ay|[Ss]ettle)\\s+${NAME}`).exec(text)?.[1],
+      );
+    const imperative = IMPERATIVE.test(t) && !QUESTION.test(t);
+    return intent(imperative ? 'PAY_INVOICE' : 'PAY_CHECK', {
+      counterparty,
+      invoiceNumber,
+    });
   }
   if (
     /\b(who owes|receivables?|outstanding invoices?|unpaid invoices?|overdue)\b/.test(

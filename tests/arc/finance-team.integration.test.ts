@@ -57,7 +57,7 @@ describe.skipIf(!liveModel)('finance team with a live model', () => {
 
   it('a live model on a clean invoice still pays only the verified address', async () => {
     const r = await superviseFinance(
-      "can I pay Sarah's invoice",
+      "Pay Sarah's invoice",
       await desk([cleanInvoice], { reasoner: reasoner() }),
     );
     expect(r.modelCalls[0]).toMatchObject({ role: 'PAYMENT', mode: 'LIVE' });

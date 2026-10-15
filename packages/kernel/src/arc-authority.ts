@@ -81,6 +81,11 @@ export type MandateState = Readonly<{
   revoked: boolean;
   /** Payments (amount, time) already executed under this mandate. */
   spends: readonly { amount: bigint; at: number }[];
+  /**
+   * Obligations (invoice / payable / milestone refs) already granted or paid
+   * under this mandate. A second grant for the same obligation is denied.
+   */
+  settledObligations?: readonly string[];
 }>;
 
 export type Decision =
@@ -315,6 +320,11 @@ export async function decide(input: {
   simulationOk: boolean;
   now: number;
   ownerApproval?: Hex;
+  /**
+   * When true, even an in-cap intent needs `ownerApproval` (a confirmation
+   * step): without it the result is REQUIRE_OWNER_APPROVAL and no grant.
+   */
+  requireOwnerApproval?: boolean;
 }): Promise<Decision> {
   const { mandate: m, intent: i, state, risk, now } = input;
   const deny = (...reasons: string[]): Decision => ({
@@ -341,6 +351,10 @@ export async function decide(input: {
   if (!m.purposes.includes(i.purpose))
     denials.push(`purpose ${i.purpose} not allowed`);
   if (i.amount <= 0n) denials.push('amount must be positive');
+  if (state.settledObligations?.includes(i.obligationRef))
+    denials.push(
+      `obligation ${i.obligationRef} was already granted or paid under this mandate`,
+    );
   for (const f of risk.flags.filter((x) => x.severity === 'HARD'))
     denials.push(`risk ${f.code}: ${f.detail}`);
   if (!risk.available && i.amount >= input.config.riskRequiredAbove)
@@ -359,11 +373,16 @@ export async function decide(input: {
     `period spend ${spent + i.amount} of ${m.periodBudget}`,
     ...risk.flags.map((f) => `soft risk ${f.code}: ${f.detail}`),
   ];
-  if (i.amount > m.perActionCap) {
+  const overCap = i.amount > m.perActionCap;
+  if (overCap || input.requireOwnerApproval) {
     if (!input.ownerApproval)
       return {
         outcome: 'REQUIRE_OWNER_APPROVAL',
-        reasons: [`amount ${i.amount} above per-action cap ${m.perActionCap}`],
+        reasons: [
+          overCap
+            ? `amount ${i.amount} above per-action cap ${m.perActionCap}`
+            : 'owner confirmation required for this payment',
+        ],
       };
     const signer = await recoverTypedDataAddress({
       ...intentApprovalTypedData(i),
@@ -371,7 +390,7 @@ export async function decide(input: {
     }).catch(() => null);
     if (!signer || lower(signer) !== lower(m.owner))
       return deny('owner approval signature does not match the mandate owner');
-    reasons.push('owner approved above cap');
+    reasons.push(overCap ? 'owner approved above cap' : 'owner confirmed');
   }
   return {
     outcome: 'ALLOW',

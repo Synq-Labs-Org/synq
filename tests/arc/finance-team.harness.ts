@@ -32,6 +32,8 @@ export const owner = privateKeyToAccount(`0x${'11'.repeat(32)}`);
 export const treasury = owner.address;
 export const sarahWallet = `0x${'5a'.repeat(20)}` as Address;
 export const attacker = `0x${'ba'.repeat(20)}` as Address;
+/** Another contractor's verified wallet, also on the mandate allowlist. */
+export const bobWallet = `0x${'b0'.repeat(20)}` as Address;
 export const GRANT_KEY = new Uint8Array(32).fill(7);
 
 export const config: AuthorityConfig = {
@@ -48,7 +50,7 @@ export const mandate: PaymentMandate = {
   chainId: USDC.chainId,
   token: USDC.address,
   payer: treasury,
-  recipients: [sarahWallet],
+  recipients: [sarahWallet, bobWallet],
   purposes: ['CONTRACTOR_PAYOUT'],
   perActionCap: 200_000_000n,
   periodBudget: 1_000_000_000n,
@@ -66,6 +68,22 @@ export const sarah: Vendor = {
     {
       chainId: USDC.chainId,
       address: sarahWallet,
+      status: 'VERIFIED',
+      source: 'onboarding signed challenge',
+      at: NOW - 86_400 * 30,
+      verifiedBy: 'owner',
+    },
+  ],
+};
+export const bob: Vendor = {
+  vendorId: 'bob',
+  workspaceId: 'wsp_studio',
+  name: 'Bob (developer)',
+  kind: 'CONTRACTOR',
+  addresses: [
+    {
+      chainId: USDC.chainId,
+      address: bobWallet,
       status: 'VERIFIED',
       source: 'onboarding signed challenge',
       at: NOW - 86_400 * 30,
@@ -104,7 +122,29 @@ export const fraudInvoice: VendorInvoice = {
   earlyPayDiscountBps: 0,
   earlyPayByDays: 0,
 };
+/** Sarah's invoice asking to be paid at Bob's (allowlisted) wallet. */
+export const redirectInvoice: VendorInvoice = {
+  vendorInvoiceId: 'vi_44',
+  vendorId: 'sarah',
+  number: 'INV-0044',
+  payTo: bobWallet,
+  chainId: USDC.chainId,
+  amount: 120_000_000n,
+  issuedOn: '2026-10-13',
+  dueOn: '2026-10-28',
+  reference: 'milestone:design-4',
+  documentText:
+    'Invoice INV-0044 Sarah design milestone four brand guidelines total 120 USDC due 28 October',
+  earlyPayDiscountBps: 0,
+  earlyPayByDays: 0,
+};
 export const obligations: Obligation[] = [
+  {
+    reference: 'milestone:design-4',
+    vendorId: 'sarah',
+    approvedAmount: 120_000_000n,
+    status: 'ACCEPTED',
+  },
   {
     reference: 'milestone:design-2',
     vendorId: 'sarah',
@@ -128,14 +168,16 @@ export const evidence = PayoutEvidenceSchema.parse(
   ),
 );
 
-const fresh =
-  <T>(value: T, provenance: Provenance, source: string, ageSeconds = 10) =>
-  () => ({ value, provenance, source, observedAt: NOW - ageSeconds });
+export type WorldOver = { balanceAge?: number; balance?: bigint; at?: number };
 
 export function readers(
   open: readonly VendorInvoice[],
-  over: { balanceAge?: number; balance?: bigint } = {},
+  over: WorldOver = {},
 ): ArcWorldReaders {
+  const at = over.at ?? NOW;
+  const fresh =
+    <T>(value: T, provenance: Provenance, source: string, ageSeconds = 10) =>
+    () => ({ value, provenance, source, observedAt: at - ageSeconds });
   return {
     user: fresh(
       { principalId: 'usr_maya', displayName: 'Maya' },
@@ -252,7 +294,7 @@ export function readers(
       {
         status: 'RECONCILED',
         unreconciled: 0,
-        lastRunAt: NOW - 60,
+        lastRunAt: at - 60,
         detail: 'ledger matches indexed Arc transfers',
       },
       'POSTGRES',
@@ -279,13 +321,13 @@ export function providers(
 
 export function snapshot(
   open: readonly VendorInvoice[],
-  over: { balanceAge?: number; balance?: bigint } = {},
+  over: WorldOver = {},
 ): Promise<ArcWorldSnapshot> {
   return buildArcWorldSnapshot({
     readers: readers(open, over),
     providers: providers(),
     env: {},
-    now: NOW,
+    now: over.at ?? NOW,
   });
 }
 
@@ -302,21 +344,19 @@ export async function kernel() {
 
 export async function desk(
   open: readonly VendorInvoice[],
-  over: Partial<FinanceDesk> & {
-    balanceAge?: number;
-    balance?: bigint;
-  } = {},
+  over: Partial<FinanceDesk> & WorldOver = {},
 ): Promise<FinanceDesk> {
-  const { balanceAge, balance, ...rest } = over;
+  const { balanceAge, balance, at, ...rest } = over;
   const s = await snapshot(open, {
     ...(balanceAge === undefined ? {} : { balanceAge }),
     ...(balance === undefined ? {} : { balance }),
+    ...(at === undefined ? {} : { at }),
   });
   return {
     workspaceId: 'wsp_studio',
     world: async () => s,
-    vendors: [sarah],
-    vendorInvoices: [cleanInvoice, fraudInvoice],
+    vendors: [sarah, bob],
+    vendorInvoices: [cleanInvoice, fraudInvoice, redirectInvoice],
     obligations,
     invoices: [],
     evidence: [evidence],
