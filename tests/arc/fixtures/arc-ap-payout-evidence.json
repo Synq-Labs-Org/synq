@@ -1,0 +1,39 @@
+{
+  "environment": "ARC_TESTNET",
+  "owner": "0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD",
+  "agent": "0x250991A47f021935ca86d7D11dd319cE527756AD",
+  "sarahVerified": "0xB781505e5156E68594414D190190fE1FaeDD6780",
+  "payout": {
+    "softFlags": [],
+    "decision": "ALLOW",
+    "reasons": [
+      "recipient on allowlist",
+      "amount 40000 within cap 100000",
+      "period spend 40000 of 500000"
+    ],
+    "grantId": "grt_9f6ab957e7066ab0750192c1",
+    "hash": "0xbd0e957a00f4ce34662b62ac0d04250aecf9e1f01b2d18104f7e804ed6f9528b",
+    "explorer": "https://explorer.testnet.arc.io/tx/0xbd0e957a00f4ce34662b62ac0d04250aecf9e1f01b2d18104f7e804ed6f9528b",
+    "amount": "0.04",
+    "apLedger": {
+      "CASH_ARC_USDC": "-0.041223",
+      "CONTRACTOR_EXPENSE": "0.04",
+      "NETWORK_FEES": "0.001223"
+    }
+  },
+  "fraud": {
+    "requestedPayTo": "0x52d38F022BF94c91AfdACcc7A6B0F64AbA6adA03",
+    "riskFlags": [
+      {
+        "code": "PAYOUT_ADDRESS_CHANGED",
+        "severity": "HARD",
+        "detail": "invoice asks for 0x52d38F022BF94c91AfdACcc7A6B0F64AbA6adA03; Sarah (designer)'s verified address is 0xB781505e5156E68594414D190190fE1FaeDD6780. Verify the change independently before paying."
+      }
+    ],
+    "decision": "DENY",
+    "auditReasons": [
+      "recipient 0x52d38F022BF94c91AfdACcc7A6B0F64AbA6adA03 is not on the mandate allowlist"
+    ],
+    "agentNonceUnchanged": true
+  }
+}

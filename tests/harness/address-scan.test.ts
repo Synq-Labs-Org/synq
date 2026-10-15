@@ -21,6 +21,8 @@ const ALLOWED_PATHS = [
   /^bounty-evidence\//,
   // Recorded provider responses replayed by the Kuru tests.
   /^tests\/(kuru\/fixtures\/[\w.-]+|fixtures\/kuru-flow-read-only-evidence)\.json$/,
+  // Public Arc testnet payout evidence (tx hash, EOAs, Kernel decision) explained by the Audit Agent test.
+  /^tests\/arc\/fixtures\/arc-ap-payout-evidence\.json$/,
   // Standalone mm plugin pin of the registry; drift-tested by tests/metamask-plugin/network.test.ts.
   /^packages\/metamask-synq-plugin\/src\/core\/network\.json$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
