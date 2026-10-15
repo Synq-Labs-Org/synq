@@ -30,7 +30,16 @@ export type ChannelRouteDeps = {
     botId: number;
     required: boolean;
     verify(raw: unknown, nowSeconds: number): string | null;
+    /** Telegram Mini App initData: proven user id and its hash, or null. */
+    verifyInitData?(
+      raw: unknown,
+      nowSeconds: number,
+    ): { telegramUserId: string; hash: string } | null;
+    /** True only the first time an initData hash is presented. */
+    consumeInitData?(hash: string, nowSeconds: number): Promise<boolean>;
   };
+  /** getMe privacy/guest facts for the capability report. */
+  telegramProbe?: () => { privacyMode: boolean; guestQueries: boolean } | null;
   env?: Readonly<Record<string, string | undefined>>;
   /** Local iMessage bridge (BlueBubbles pushes webhooks to the API on the same Mac). */
   imessage?: {
@@ -45,6 +54,7 @@ const RedeemSchema = z.strictObject({
   code: CodeSchema,
   groupId: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
   telegramLogin: z.record(z.string(), z.unknown()).optional(),
+  telegramInitData: z.string().min(1).max(8192).optional(),
 });
 const REDEEM_STATUS: Record<string, number> = {
   LINKED: 200,
@@ -185,6 +195,24 @@ export async function channelRoutes(
     if (!session)
       return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
     let proven: string | undefined;
+    if (
+      body.data.telegramLogin !== undefined &&
+      body.data.telegramInitData !== undefined
+    )
+      return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    if (body.data.telegramInitData !== undefined) {
+      const login = deps.telegramLogin;
+      const identity = login?.verifyInitData?.(
+        body.data.telegramInitData,
+        deps.now(),
+      );
+      if (!identity || !login?.consumeInitData)
+        return reply.code(401).send({ error: 'TELEGRAM_MINIAPP_INVALID' });
+      // initData stays valid for its max age; accept each one once.
+      if (!(await login.consumeInitData(identity.hash, deps.now())))
+        return reply.code(401).send({ error: 'TELEGRAM_MINIAPP_REPLAYED' });
+      proven = identity.telegramUserId;
+    }
     if (body.data.telegramLogin !== undefined) {
       const id = deps.telegramLogin?.verify(
         body.data.telegramLogin,
@@ -296,6 +324,8 @@ export async function channelRoutes(
   });
 
   api.get('/v1/channels/capabilities', async () =>
-    channelCapabilities(deps.env ?? {}),
+    channelCapabilities(deps.env ?? {}, {
+      telegram: deps.telegramProbe?.() ?? null,
+    }),
   );
 }

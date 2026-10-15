@@ -34,6 +34,17 @@ function telegramLoginFromFragment(): Record<string, unknown> | null {
     return null;
   }
 }
+/**
+ * Opened as a Telegram Mini App, the page receives Telegram.WebApp.initData
+ * in the launch fragment (#tgWebAppData=...). The API verifies its
+ * signature and age and accepts it once; the page only forwards it.
+ */
+function telegramInitDataFromFragment(): string | null {
+  const data = new URLSearchParams(window.location.hash.slice(1)).get(
+    'tgWebAppData',
+  );
+  return data && data.length <= 8192 ? data : null;
+}
 const AccessSessionSchema = z.looseObject({
   token: z.string(),
   memberId: z.string(),
@@ -59,10 +70,12 @@ export default function ChannelLinkPage() {
     string,
     unknown
   > | null>(null);
+  const [telegramInitData, setTelegramInitData] = useState<string | null>(null);
 
   useEffect(() => {
     setRecord(loadCredential());
     setTelegramLogin(telegramLoginFromFragment());
+    setTelegramInitData(telegramInitDataFromFragment());
     const c = new URLSearchParams(window.location.search).get('code') ?? '';
     setCode(c);
     if (c)
@@ -91,7 +104,15 @@ export default function ChannelLinkPage() {
         await api.post(
           '/v1/channels/links/redeem',
           LinkedSchema,
-          { code, groupId, ...(telegramLogin ? { telegramLogin } : {}) },
+          {
+            code,
+            groupId,
+            ...(telegramLogin
+              ? { telegramLogin }
+              : telegramInitData
+                ? { telegramInitData }
+                : {}),
+          },
           session.token,
         ),
       );
@@ -106,8 +127,8 @@ export default function ChannelLinkPage() {
     const back = window.location.href.split('#')[0]!;
     window.location.href = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent(window.location.origin)}&request_access=write&return_to=${encodeURIComponent(back)}`;
   }
-  const needsTelegram =
-    !!preview?.telegramLogin?.required && telegramLogin === null;
+  const telegramProven = telegramLogin !== null || telegramInitData !== null;
+  const needsTelegram = !!preview?.telegramLogin?.required && !telegramProven;
 
   return (
     <>
@@ -152,8 +173,10 @@ export default function ChannelLinkPage() {
             <p>
               {telegramLogin
                 ? 'Telegram account verified for this link.'
-                : 'Prove this Telegram account is yours: '}
-              {!telegramLogin && (
+                : telegramInitData
+                  ? 'Opened from Telegram: your Telegram account will be verified when you link.'
+                  : 'Prove this Telegram account is yours: '}
+              {!telegramProven && (
                 <button
                   data-testid="link-telegram"
                   onClick={() => verifyTelegram(preview.telegramLogin!.botId)}

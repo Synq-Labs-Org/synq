@@ -11,6 +11,12 @@ import {
 import { HELP_TEXT, parseCommand, parseSendArgs } from './commands.js';
 import type { ChannelStore, GroupLink, RedeemOutcome } from './store.js';
 import {
+  CONTEXT_DEFAULT_RETENTION_SECONDS,
+  CONTEXT_PURPOSE,
+  clampRetention,
+  type ChatContextService,
+} from './context.js';
+import {
   ReviewPathSchema,
   type CardResolution,
   type InteractiveCard,
@@ -74,6 +80,23 @@ export type BrainProposalSummary = {
   reviewPath?: string | null;
 };
 export type BrainReply = { text: string; proposals: BrainProposalSummary[] };
+/** A consented, unexpired chat message handed to the Brain as untrusted context. */
+export type BrainContextMessage = {
+  messageId: string;
+  principalId: string;
+  text: string;
+  textSha256: string;
+  sentAt: number;
+};
+export type GuestReplyInput = {
+  text: string;
+  reference: {
+    messageId: string;
+    text: string;
+    textSha256: string;
+  } | null;
+  runId: string;
+};
 
 /**
  * What the gateway may ask of Synq. Every port is read-only or proposes
@@ -100,7 +123,14 @@ export interface ChannelPorts {
     text: string;
     runId: string;
     intent: 'ASK' | 'PROPOSE';
+    /** Present only for chats with memory on; never contains guest data. */
+    context?: readonly BrainContextMessage[];
   }): Promise<BrainReply>;
+  /**
+   * Draft-only reply to a guest invocation: it sees the triggering text and
+   * at most one referenced message, no group data, and cannot propose.
+   */
+  guest?(input: GuestReplyInput): Promise<{ text: string }>;
 }
 
 export type GatewayOutcome = {
@@ -129,6 +159,10 @@ export type ChannelGatewayOptions = {
   maxClockSkewSeconds?: number;
   linkCodeTtlSeconds?: number;
   brainCooldownSeconds?: number;
+  /** Minimum seconds between guest answers for one caller (default 5). */
+  guestCooldownSeconds?: number;
+  /** Consented chat memory; without it every chat is ENROLLED_ON_DEMAND. */
+  context?: ChatContextService;
   /** A claimed event whose processing never completed may be retried after this. */
   eventLeaseSeconds?: number;
   /** Distinct confirmed members required before a new chat speaks for a group. */
@@ -357,14 +391,22 @@ export class ChannelGateway {
       return this.result('STALE');
     switch (event.type) {
       case 'MEMBER_LEFT':
-        for (const m of event.members)
+        for (const m of event.members) {
           await this.options.store.revokeUser(
             envelope.channel,
             envelope.externalGroupId,
             m.externalUserId,
             now,
           );
+          await this.options.context?.store.revokeConsent(
+            envelope.channel,
+            envelope.externalGroupId,
+            m.externalUserId,
+          );
+        }
         return this.result('RECORDED', 'MEMBER_LEFT');
+      case 'GUEST_QUERY':
+        return this.guest(event, now);
       case 'GROUP_CREATED':
         return this.replyOutcome(envelope, 'HANDLED', 'GROUP_CREATED', {
           text: 'Synq is here. A member can type /synq to link this chat to a Synq group. Approvals always happen on the Synq web page with a passkey.',
@@ -392,8 +434,118 @@ export class ChannelGateway {
         return this.result('REFUSED', 'CALLBACK_NOT_AN_APPROVAL');
       }
       case 'MESSAGE_RECEIVED':
+        await this.capture(envelope);
         return this.message(envelope);
     }
+  }
+
+  /** Keeps a group message only under the chat's disclosed memory policy and the sender's consent. */
+  private async capture(envelope: Envelope) {
+    const context = this.options.context;
+    if (!context || envelope.chatKind !== 'GROUP' || !envelope.externalUserId)
+      return;
+    const store = this.options.store;
+    const group = await store.groupLink(
+      envelope.channel,
+      envelope.externalGroupId,
+    );
+    if (group?.status !== 'ACTIVE') return;
+    const user = await store.userLink(
+      envelope.channel,
+      envelope.externalGroupId,
+      envelope.externalUserId,
+    );
+    await context.capture({
+      envelope,
+      groupId: group.groupId,
+      principalId: user?.status === 'ACTIVE' ? user.principalId : null,
+    });
+  }
+
+  /**
+   * Guest mode: one draft-only answer through the adapter's guest path. No
+   * chat link, member, treasury, memory or proposal is read or written; the
+   * chat id is not trusted to name an installed chat.
+   */
+  private async guest(
+    event: Extract<ChannelEvent, { type: 'GUEST_QUERY' }>,
+    now: number,
+  ): Promise<GatewayOutcome> {
+    const envelope = event.envelope;
+    if (envelope.verifiedSender.isBot || !envelope.externalUserId)
+      return this.result('IGNORED', 'NOT_A_HUMAN_SENDER');
+    const adapter = this.adapters.get(envelope.channel);
+    if (!adapter?.answerGuest)
+      return this.result('REFUSED', 'GUEST_MODE_UNSUPPORTED');
+    const key = `guest:${envelope.channel}:${envelope.externalUserId}`;
+    if (
+      now - (this.lastBrain.get(key) ?? -Infinity) <
+      (this.options.guestCooldownSeconds ?? 5)
+    )
+      return this.result('REFUSED', 'GUEST_RATE_LIMITED');
+    if (
+      !(await this.options.store.claimNotification(
+        envelope.channel,
+        'guest',
+        `guest:${event.guestQueryId}`,
+        now,
+      ))
+    )
+      return this.result('DUPLICATE', 'GUEST_ALREADY_ANSWERED');
+    this.lastBrain.set(key, now);
+    const text = await this.guestText(event);
+    try {
+      await adapter.answerGuest(event.guestQueryId, {
+        text,
+        buttons: [{ label: 'Open Synq', url: this.web('/') }],
+      });
+    } catch (error) {
+      await this.handle({
+        type: 'MESSAGE_DELIVERY_FAILED',
+        channel: envelope.channel,
+        externalGroupId: envelope.externalGroupId,
+        reason:
+          error instanceof ChannelDeliveryError
+            ? `GUEST ${error.code}: ${error.message}`.slice(0, 500)
+            : 'GUEST UNEXPECTED_DELIVERY_ERROR',
+        attempts: error instanceof ChannelDeliveryError ? error.attempts : 1,
+        at: now,
+      }).catch(() => undefined);
+      return this.result('REFUSED', 'GUEST_ANSWER_FAILED', 0, 1);
+    }
+    return this.result('HANDLED', 'GUEST_ANSWERED', 1, 0);
+  }
+
+  private async guestText(
+    event: Extract<ChannelEvent, { type: 'GUEST_QUERY' }>,
+  ): Promise<string> {
+    const asked = stripMention(event.envelope.body);
+    const scope = event.reference
+      ? 'I can see only your message and the one you replied to'
+      : 'I can see only your message';
+    const footer = `${scope}: not this chat's history or members, and I keep nothing. As a guest I cannot move money, approve or create proposals here; group spending happens in a linked Synq group and is approved on the web with a passkey.`;
+    if (APPROVAL_WORDS.test(asked) || /^\/?(approve|confirm)\b/i.test(asked))
+      return `Chat messages never approve anything, and a guest reply least of all. ${footer}`;
+    const port = this.options.ports.guest;
+    if (port && asked) {
+      try {
+        const reply = await port({
+          text: asked.slice(0, 4096),
+          reference: event.reference
+            ? {
+                messageId: event.reference.messageId,
+                text: event.reference.text,
+                textSha256: event.reference.textSha256,
+              }
+            : null,
+          runId: `guest_${createHash('sha256').update(event.guestQueryId).digest('hex').slice(0, 16)}`,
+        });
+        return `${reply.text.slice(0, 3000)}\n\n${footer}`;
+      } catch {
+        // fall through to the static reply
+      }
+    }
+    return `Hi, I'm Synq. ${footer}`;
   }
 
   /** Read-only: answers a card's refresh button with the canonical quorum for this chat's group. */
@@ -488,6 +640,8 @@ export class ChannelGateway {
       return this.link(envelope);
     if (parsed.kind === 'COMMAND' && parsed.name === 'unlink')
       return this.unlink(envelope);
+    if (parsed.kind === 'COMMAND' && parsed.name === 'memory')
+      return this.memory(envelope, parsed.args);
 
     const access = await this.access(envelope);
     if ('refusal' in access) return access.refusal;
@@ -595,6 +749,166 @@ export class ChannelGateway {
         ),
       };
     return { group, memberId: member.memberId, principalId: user.principalId };
+  }
+
+  /**
+   * `/memory [on <days>|off|optin|optout]`: consented future-message memory.
+   * Turning it on needs an active member who is a chat admin and is
+   * disclosed in the chat; each member opts in for their own messages.
+   */
+  private async memory(
+    envelope: Envelope,
+    args: string,
+  ): Promise<GatewayOutcome> {
+    const context = this.options.context;
+    if (!context)
+      return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_UNAVAILABLE', {
+        text: 'Synq memory is not available in this deployment. Synq keeps no chat messages here.',
+      });
+    const access = await this.access(envelope);
+    if ('refusal' in access) return access.refusal;
+    const { group, principalId } = access;
+    const [verb = 'status', amount] = args
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    const chat = envelope.externalGroupId;
+    const channel = envelope.channel;
+    const now = this.options.now();
+    const store = context.store;
+    const adminOnly = async () =>
+      (await this.isChatAdmin(channel, chat, envelope.externalUserId!))
+        ? null
+        : this.replyOutcome(envelope, 'REFUSED', 'MEMORY_ADMIN_ONLY', {
+            text: 'Only a chat admin can turn Synq memory on or off.',
+          });
+    switch (verb) {
+      case 'on': {
+        const refusal = await adminOnly();
+        if (refusal) return refusal;
+        const days = amount === undefined ? NaN : Number(amount);
+        if (amount !== undefined && !/^[1-9][0-9]{0,2}$/.test(amount))
+          return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_DAYS_INVALID', {
+            text: 'Usage: /memory on <days>, for example /memory on 30 (1 to 90 days).',
+          });
+        const retentionSeconds = clampRetention(
+          Number.isFinite(days)
+            ? days * 86_400
+            : CONTEXT_DEFAULT_RETENTION_SECONDS,
+        );
+        const visibility =
+          (await this.adapters
+            .get(channel)
+            ?.groupVisibility?.(chat)
+            .catch(() => 'ADDRESSED_ONLY' as const)) ?? 'ADDRESSED_ONLY';
+        const policy = {
+          channel,
+          externalGroupId: chat,
+          groupId: group.groupId,
+          retentionSeconds,
+          purpose: CONTEXT_PURPOSE,
+          visibility,
+          enrolledByPrincipalId: principalId,
+          enrolledAt: now,
+          disclosedAt: null,
+        };
+        await store.setPolicy(policy);
+        const outcome = await this.replyOutcome(
+          envelope,
+          'HANDLED',
+          'MEMORY_ON',
+          { text: memoryDisclosure(retentionSeconds, visibility) },
+        );
+        // Nothing is kept unless the chat was actually told.
+        if (outcome.delivered)
+          await store.setPolicy({ ...policy, disclosedAt: now });
+        return outcome.delivered
+          ? outcome
+          : { ...outcome, status: 'REFUSED', code: 'MEMORY_NOT_DISCLOSED' };
+      }
+      case 'off': {
+        const refusal = await adminOnly();
+        if (refusal) return refusal;
+        const deleted = await store.clearPolicy(channel, chat);
+        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OFF', {
+          text: `Synq memory is off for this chat. Deleted ${deleted} stored message${deleted === 1 ? '' : 's'} and every opt-in. Commands still work.`,
+        });
+      }
+      case 'optin': {
+        const policy = await store.policy(channel, chat);
+        if (
+          !policy ||
+          policy.disclosedAt === null ||
+          policy.groupId !== group.groupId
+        )
+          return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_NOT_ON', {
+            text: 'Synq memory is off for this chat, so there is nothing to opt in to. A chat admin can type /memory on <days>.',
+          });
+        await store.grantConsent({
+          channel,
+          externalGroupId: chat,
+          externalUserId: envelope.externalUserId!,
+          principalId,
+          consentedAt: now,
+        });
+        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OPTIN', {
+          text: `Opted in: Synq keeps the messages it receives from you here from now on, for ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals. Nothing from before now. /memory optout deletes them.`,
+        });
+      }
+      case 'optout': {
+        const deleted = await store.revokeConsent(
+          channel,
+          chat,
+          envelope.externalUserId!,
+        );
+        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OPTOUT', {
+          text: `Opted out: deleted ${deleted} stored message${deleted === 1 ? '' : 's'} of yours. Synq keeps nothing more from you in this chat.`,
+        });
+      }
+      case 'status': {
+        const policy = await store.policy(channel, chat);
+        const on =
+          policy &&
+          policy.disclosedAt !== null &&
+          policy.groupId === group.groupId;
+        const visibility =
+          (await this.adapters
+            .get(channel)
+            ?.groupVisibility?.(chat)
+            .catch(() => 'ADDRESSED_ONLY' as const)) ?? 'ADDRESSED_ONLY';
+        const lines = [
+          `Mode: ${on ? 'ENROLLED_CONTEXT' : 'ENROLLED_ON_DEMAND'}.`,
+          visibilityLine(visibility),
+        ];
+        if (on) {
+          const consent = await store.consent(
+            channel,
+            chat,
+            envelope.externalUserId!,
+          );
+          const total = await store.countMessages(channel, chat, now);
+          const mine = await store.countMessages(
+            channel,
+            chat,
+            now,
+            envelope.externalUserId!,
+          );
+          lines.push(
+            `Memory is on: kept ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals, only from members who opted in.`,
+            `Stored now: ${total} message${total === 1 ? '' : 's'} (${mine} yours). You are ${consent ? 'opted in' : 'not opted in'}.`,
+          );
+        } else
+          lines.push(
+            'Memory is off: Synq keeps no messages from this chat. A chat admin can type /memory on <days>.',
+          );
+        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_STATUS', {
+          text: lines.join('\n'),
+        });
+      }
+    }
+    return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_USAGE', {
+      text: 'Usage: /memory, /memory optin, /memory optout; chat admins: /memory on <days>, /memory off',
+    });
   }
 
   private async link(envelope: Envelope): Promise<GatewayOutcome> {
@@ -844,6 +1158,10 @@ export class ChannelGateway {
       envelope.externalGroupId,
       this.options.now(),
     );
+    await this.options.context?.store.clearPolicy(
+      envelope.channel,
+      envelope.externalGroupId,
+    );
     return this.replyOutcome(envelope, 'HANDLED', 'UNLINKED', {
       text: g
         ? 'Unlinked: this chat no longer speaks for any Synq group, and every member link in it was removed. Members can /synq again.'
@@ -872,6 +1190,10 @@ export class ChannelGateway {
       input.channel,
       input.externalGroupId,
       this.options.now(),
+    );
+    await this.options.context?.store.clearPolicy(
+      input.channel,
+      input.externalGroupId,
     );
     await this.post(input.channel, input.externalGroupId, {
       text: 'Unlinked by a member from the Synq web app: this chat no longer speaks for that Synq group.',
@@ -1077,6 +1399,26 @@ export class ChannelGateway {
       ))
     )
       return this.result('IGNORED', 'BRAIN_ALREADY_RUN_FOR_EVENT');
+    const context = this.options.context
+      ? (
+          await this.options.context
+            .contextFor({
+              channel: envelope.channel,
+              externalGroupId: envelope.externalGroupId,
+              groupId: group.groupId,
+              now,
+            })
+            .catch(() => [])
+        )
+          .filter((m) => m.messageId !== envelope.messageId)
+          .map((m) => ({
+            messageId: m.messageId,
+            principalId: m.principalId,
+            text: m.text,
+            textSha256: m.textSha256,
+            sentAt: m.sentAt,
+          }))
+      : [];
     let reply: BrainReply;
     try {
       reply = await brain({
@@ -1084,6 +1426,7 @@ export class ChannelGateway {
         memberId,
         principalId,
         text: stripMention(text),
+        ...(context.length ? { context } : {}),
         runId: `chan_${envelope.channel}_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`,
         intent,
       });
@@ -1277,6 +1620,25 @@ export class ChannelGateway {
 function reviewPath(a: ApprovalSummary) {
   const own = ReviewPathSchema.safeParse(a.reviewPath);
   return own.success ? own.data : `/intents/${a.intentHash}`;
+}
+
+function visibilityLine(v: 'ALL_MESSAGES' | 'ADDRESSED_ONLY') {
+  return v === 'ALL_MESSAGES'
+    ? 'Synq receives new messages in this chat (privacy mode off or Synq is an admin). It never sees messages from before it joined.'
+    : 'Telegram privacy mode is on for Synq here: it receives only commands, @mentions and replies to it, not every message, and nothing from before it joined.';
+}
+
+function memoryDisclosure(
+  retentionSeconds: number,
+  visibility: 'ALL_MESSAGES' | 'ADDRESSED_ONLY',
+) {
+  return [
+    'Synq memory is ON for this chat.',
+    `Purpose: drafting this Synq group's financial proposals, nothing else. Kept for ${Math.round(retentionSeconds / 86_400)} days, then deleted.`,
+    'Synq keeps messages only from linked members who type /memory optin, and only messages sent after they opt in. Everyone else is not stored.',
+    visibilityLine(visibility),
+    'Stored messages are context, never approvals. /memory shows what is kept; /memory optout deletes yours; a chat admin can /memory off to delete all.',
+  ].join('\n');
 }
 
 function stripMention(text: string) {

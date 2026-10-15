@@ -19,17 +19,28 @@ export type ChannelCapability = {
   reason: string | null;
 };
 
+/** getMe facts about the running bot; absent means unknown and nothing is claimed. */
+export type TelegramProbe = {
+  privacyMode: boolean;
+  guestQueries: boolean;
+};
+
 export function channelCapabilities(
   env: Readonly<Record<string, string | undefined>>,
+  probe: { telegram?: TelegramProbe | null } = {},
 ): ChannelCapability[] {
   const has = (name: string) => (env[name] ?? '').trim().length > 0;
+  const tg = probe.telegram ?? null;
+  // Privacy mode unless getMe said otherwise: never claim full visibility.
+  const privacy = tg?.privacyMode ?? true;
   return [
     {
       channel: 'telegram',
       status: has('TELEGRAM_BOT_TOKEN') ? 'AVAILABLE' : 'CREDENTIALS_MISSING',
       evidence: has('TELEGRAM_BOT_TOKEN') ? 'REAL_PROVIDER' : 'FIXTURE_ONLY',
-      groupModel:
-        'Bot added to any Telegram group; privacy mode limits it to commands, mentions and replies',
+      groupModel: privacy
+        ? 'Bot added to a Telegram group; privacy mode limits it to commands, mentions and replies (all new messages only where it is an admin). No pre-join history.'
+        : 'Bot added to a Telegram group with privacy mode off: receives new group messages. No pre-join history; stored only under /memory consent.',
       ingress: ['WEBHOOK_SECRET_TOKEN', 'BOT_API_POLL'],
       features: [
         'commands',
@@ -37,6 +48,11 @@ export function channelCapabilities(
         'url-buttons',
         'receipts',
         'approval-count',
+        privacy
+          ? 'group-visibility:addressed-only'
+          : 'group-visibility:new-messages',
+        'consented-memory',
+        ...(tg?.guestQueries ? ['guest-mode'] : []),
       ],
       reason: has('TELEGRAM_BOT_TOKEN')
         ? null

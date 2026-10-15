@@ -1,4 +1,11 @@
 import { ChannelIdSchema, type ChannelId } from './events.js';
+import {
+  CONTEXT_PURPOSE,
+  type ChatContextPolicy,
+  type ChatContextStore,
+  type ContextConsent,
+  type ContextMessage,
+} from './context.js';
 import type {
   ChannelStore,
   DeliveryFailure,
@@ -417,5 +424,220 @@ export class PostgresChannelStore implements ChannelStore {
       'INSERT INTO synq_channel_delivery_failure (channel, external_group_id, reason, attempts, at) VALUES ($1,$2,$3,$4,$5)',
       [f.channel, f.externalGroupId, f.reason.slice(0, 500), f.attempts, f.at],
     );
+  }
+}
+
+/** Consented chat memory: per-chat policy, per-user consent and expiring messages. */
+const CONTEXT_MIGRATION = `
+CREATE TABLE IF NOT EXISTS synq_channel_context_policy (
+  channel text NOT NULL, external_group_id text NOT NULL, group_id text NOT NULL,
+  retention_seconds integer NOT NULL CHECK (retention_seconds > 0),
+  purpose text NOT NULL, visibility text NOT NULL CHECK (visibility IN ('ALL_MESSAGES','ADDRESSED_ONLY')),
+  enrolled_by_principal_id text NOT NULL, enrolled_at bigint NOT NULL, disclosed_at bigint,
+  PRIMARY KEY (channel, external_group_id));
+CREATE TABLE IF NOT EXISTS synq_channel_context_consent (
+  channel text NOT NULL, external_group_id text NOT NULL, external_user_id text NOT NULL,
+  principal_id text NOT NULL, consented_at bigint NOT NULL,
+  PRIMARY KEY (channel, external_group_id, external_user_id));
+CREATE TABLE IF NOT EXISTS synq_channel_context_message (
+  channel text NOT NULL, external_group_id text NOT NULL, message_id text NOT NULL,
+  event_id text NOT NULL, external_user_id text NOT NULL, principal_id text NOT NULL,
+  text text NOT NULL, text_sha256 text NOT NULL, reply_to text,
+  sent_at bigint NOT NULL, expires_at bigint NOT NULL,
+  PRIMARY KEY (channel, external_group_id, message_id));
+CREATE INDEX IF NOT EXISTS synq_channel_context_message_expiry ON synq_channel_context_message (expires_at);
+`;
+
+const policyRow = (r: Record<string, unknown>): ChatContextPolicy => ({
+  channel: channel(r.channel),
+  externalGroupId: String(r.external_group_id),
+  groupId: String(r.group_id),
+  retentionSeconds: Number(r.retention_seconds),
+  purpose: CONTEXT_PURPOSE,
+  visibility:
+    r.visibility === 'ALL_MESSAGES' ? 'ALL_MESSAGES' : 'ADDRESSED_ONLY',
+  enrolledByPrincipalId: String(r.enrolled_by_principal_id),
+  enrolledAt: Number(r.enrolled_at),
+  disclosedAt: r.disclosed_at === null ? null : Number(r.disclosed_at),
+});
+const contextRow = (r: Record<string, unknown>): ContextMessage => ({
+  channel: channel(r.channel),
+  externalGroupId: String(r.external_group_id),
+  messageId: String(r.message_id),
+  eventId: String(r.event_id),
+  externalUserId: String(r.external_user_id),
+  principalId: String(r.principal_id),
+  text: String(r.text),
+  textSha256: String(r.text_sha256),
+  replyTo: r.reply_to === null ? null : String(r.reply_to),
+  sentAt: Number(r.sent_at),
+  expiresAt: Number(r.expires_at),
+});
+
+export class PostgresChatContextStore implements ChatContextStore {
+  constructor(private readonly pool: ChannelSqlPool) {}
+
+  async migrate() {
+    await this.pool.query(CONTEXT_MIGRATION);
+  }
+  async policy(c: ChannelId, externalGroupId: string) {
+    const r = await this.pool.query(
+      'SELECT * FROM synq_channel_context_policy WHERE channel=$1 AND external_group_id=$2',
+      [c, externalGroupId],
+    );
+    return r.rows[0] ? policyRow(r.rows[0]) : null;
+  }
+  async setPolicy(p: ChatContextPolicy) {
+    await this.pool.query(
+      `INSERT INTO synq_channel_context_policy (channel, external_group_id, group_id, retention_seconds, purpose, visibility, enrolled_by_principal_id, enrolled_at, disclosed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (channel, external_group_id) DO UPDATE SET group_id=EXCLUDED.group_id,
+         retention_seconds=EXCLUDED.retention_seconds, purpose=EXCLUDED.purpose, visibility=EXCLUDED.visibility,
+         enrolled_by_principal_id=EXCLUDED.enrolled_by_principal_id, enrolled_at=EXCLUDED.enrolled_at,
+         disclosed_at=EXCLUDED.disclosed_at`,
+      [
+        p.channel,
+        p.externalGroupId,
+        p.groupId,
+        p.retentionSeconds,
+        p.purpose,
+        p.visibility,
+        p.enrolledByPrincipalId,
+        p.enrolledAt,
+        p.disclosedAt,
+      ],
+    );
+  }
+  private async tx<T>(run: (c: ChannelSqlClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await run(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async clearPolicy(c: ChannelId, externalGroupId: string) {
+    return this.tx(async (client) => {
+      const args = [c, externalGroupId];
+      await client.query(
+        'DELETE FROM synq_channel_context_policy WHERE channel=$1 AND external_group_id=$2',
+        args,
+      );
+      await client.query(
+        'DELETE FROM synq_channel_context_consent WHERE channel=$1 AND external_group_id=$2',
+        args,
+      );
+      const r = await client.query(
+        'DELETE FROM synq_channel_context_message WHERE channel=$1 AND external_group_id=$2',
+        args,
+      );
+      return r.rowCount ?? 0;
+    });
+  }
+  async consent(c: ChannelId, externalGroupId: string, externalUserId: string) {
+    const r = await this.pool.query(
+      'SELECT * FROM synq_channel_context_consent WHERE channel=$1 AND external_group_id=$2 AND external_user_id=$3',
+      [c, externalGroupId, externalUserId],
+    );
+    const row = r.rows[0];
+    return row
+      ? ({
+          channel: channel(row.channel),
+          externalGroupId: String(row.external_group_id),
+          externalUserId: String(row.external_user_id),
+          principalId: String(row.principal_id),
+          consentedAt: Number(row.consented_at),
+        } satisfies ContextConsent)
+      : null;
+  }
+  async grantConsent(x: ContextConsent) {
+    await this.pool.query(
+      'INSERT INTO synq_channel_context_consent (channel, external_group_id, external_user_id, principal_id, consented_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',
+      [
+        x.channel,
+        x.externalGroupId,
+        x.externalUserId,
+        x.principalId,
+        x.consentedAt,
+      ],
+    );
+  }
+  async revokeConsent(
+    c: ChannelId,
+    externalGroupId: string,
+    externalUserId: string,
+  ) {
+    return this.tx(async (client) => {
+      const args = [c, externalGroupId, externalUserId];
+      await client.query(
+        'DELETE FROM synq_channel_context_consent WHERE channel=$1 AND external_group_id=$2 AND external_user_id=$3',
+        args,
+      );
+      const r = await client.query(
+        'DELETE FROM synq_channel_context_message WHERE channel=$1 AND external_group_id=$2 AND external_user_id=$3',
+        args,
+      );
+      return r.rowCount ?? 0;
+    });
+  }
+  async storeMessage(m: ContextMessage) {
+    const r = await this.pool.query(
+      `INSERT INTO synq_channel_context_message (channel, external_group_id, message_id, event_id, external_user_id, principal_id, text, text_sha256, reply_to, sent_at, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+      [
+        m.channel,
+        m.externalGroupId,
+        m.messageId,
+        m.eventId,
+        m.externalUserId,
+        m.principalId,
+        m.text,
+        m.textSha256,
+        m.replyTo,
+        m.sentAt,
+        m.expiresAt,
+      ],
+    );
+    return r.rowCount === 1;
+  }
+  async messages(
+    c: ChannelId,
+    externalGroupId: string,
+    now: number,
+    limit: number,
+  ) {
+    const r = await this.pool.query(
+      `SELECT * FROM (SELECT * FROM synq_channel_context_message
+         WHERE channel=$1 AND external_group_id=$2 AND expires_at > $3
+         ORDER BY sent_at DESC, message_id DESC LIMIT $4) recent ORDER BY sent_at, message_id`,
+      [c, externalGroupId, now, limit],
+    );
+    return r.rows.map(contextRow);
+  }
+  async countMessages(
+    c: ChannelId,
+    externalGroupId: string,
+    now: number,
+    externalUserId?: string,
+  ) {
+    const r = await this.pool.query(
+      `SELECT count(*)::int AS n FROM synq_channel_context_message
+       WHERE channel=$1 AND external_group_id=$2 AND expires_at > $3 AND ($4::text IS NULL OR external_user_id=$4)`,
+      [c, externalGroupId, now, externalUserId ?? null],
+    );
+    return Number(r.rows[0]?.n ?? 0);
+  }
+  async purgeExpired(now: number) {
+    const r = await this.pool.query(
+      'DELETE FROM synq_channel_context_message WHERE expires_at <= $1',
+      [now],
+    );
+    return r.rowCount ?? 0;
   }
 }
