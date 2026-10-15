@@ -5,6 +5,8 @@ import {
   type ChatContextStore,
   type ContextConsent,
   type ContextMessage,
+  type PolicyTerms,
+  type StoreOutcome,
 } from './context.js';
 import type {
   ChannelStore,
@@ -427,7 +429,7 @@ export class PostgresChannelStore implements ChannelStore {
   }
 }
 
-/** Consented chat memory: per-chat policy, per-user consent and expiring messages. */
+/** Consented chat memory: per-chat versioned policy, per-user consent and expiring messages. */
 const CONTEXT_MIGRATION = `
 CREATE TABLE IF NOT EXISTS synq_channel_context_policy (
   channel text NOT NULL, external_group_id text NOT NULL, group_id text NOT NULL,
@@ -435,10 +437,12 @@ CREATE TABLE IF NOT EXISTS synq_channel_context_policy (
   purpose text NOT NULL, visibility text NOT NULL CHECK (visibility IN ('ALL_MESSAGES','ADDRESSED_ONLY')),
   enrolled_by_principal_id text NOT NULL, enrolled_at bigint NOT NULL, disclosed_at bigint,
   PRIMARY KEY (channel, external_group_id));
+ALTER TABLE synq_channel_context_policy ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS synq_channel_context_consent (
   channel text NOT NULL, external_group_id text NOT NULL, external_user_id text NOT NULL,
   principal_id text NOT NULL, consented_at bigint NOT NULL,
   PRIMARY KEY (channel, external_group_id, external_user_id));
+ALTER TABLE synq_channel_context_consent ADD COLUMN IF NOT EXISTS policy_version integer NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS synq_channel_context_message (
   channel text NOT NULL, external_group_id text NOT NULL, message_id text NOT NULL,
   event_id text NOT NULL, external_user_id text NOT NULL, principal_id text NOT NULL,
@@ -452,6 +456,7 @@ const policyRow = (r: Record<string, unknown>): ChatContextPolicy => ({
   channel: channel(r.channel),
   externalGroupId: String(r.external_group_id),
   groupId: String(r.group_id),
+  version: Number(r.version),
   retentionSeconds: Number(r.retention_seconds),
   purpose: CONTEXT_PURPOSE,
   visibility:
@@ -474,39 +479,28 @@ const contextRow = (r: Record<string, unknown>): ContextMessage => ({
   expiresAt: Number(r.expires_at),
 });
 
+/**
+ * Readable rows: the sender still consents (same principal), the chat's
+ * policy is disclosed, and neither the stored expiry nor the current
+ * retention has passed.
+ */
+const READABLE = `FROM synq_channel_context_message m
+  JOIN synq_channel_context_policy p ON p.channel=m.channel AND p.external_group_id=m.external_group_id AND p.disclosed_at IS NOT NULL
+  JOIN synq_channel_context_consent c ON c.channel=m.channel AND c.external_group_id=m.external_group_id
+    AND c.external_user_id=m.external_user_id AND c.principal_id=m.principal_id
+  WHERE m.channel=$1 AND m.external_group_id=$2 AND LEAST(m.expires_at, m.sent_at + p.retention_seconds) > $3`;
+
+/**
+ * Lock order everywhere: policy row, then consent row, then messages.
+ * storeMessage holds FOR SHARE on both while it inserts, so a concurrent
+ * opt-out, memory off or re-enrollment either waits for the insert (and
+ * then deletes or caps it) or wins and the insert is refused.
+ */
 export class PostgresChatContextStore implements ChatContextStore {
   constructor(private readonly pool: ChannelSqlPool) {}
 
   async migrate() {
     await this.pool.query(CONTEXT_MIGRATION);
-  }
-  async policy(c: ChannelId, externalGroupId: string) {
-    const r = await this.pool.query(
-      'SELECT * FROM synq_channel_context_policy WHERE channel=$1 AND external_group_id=$2',
-      [c, externalGroupId],
-    );
-    return r.rows[0] ? policyRow(r.rows[0]) : null;
-  }
-  async setPolicy(p: ChatContextPolicy) {
-    await this.pool.query(
-      `INSERT INTO synq_channel_context_policy (channel, external_group_id, group_id, retention_seconds, purpose, visibility, enrolled_by_principal_id, enrolled_at, disclosed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       ON CONFLICT (channel, external_group_id) DO UPDATE SET group_id=EXCLUDED.group_id,
-         retention_seconds=EXCLUDED.retention_seconds, purpose=EXCLUDED.purpose, visibility=EXCLUDED.visibility,
-         enrolled_by_principal_id=EXCLUDED.enrolled_by_principal_id, enrolled_at=EXCLUDED.enrolled_at,
-         disclosed_at=EXCLUDED.disclosed_at`,
-      [
-        p.channel,
-        p.externalGroupId,
-        p.groupId,
-        p.retentionSeconds,
-        p.purpose,
-        p.visibility,
-        p.enrolledByPrincipalId,
-        p.enrolledAt,
-        p.disclosedAt,
-      ],
-    );
   }
   private async tx<T>(run: (c: ChannelSqlClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
@@ -521,6 +515,53 @@ export class PostgresChatContextStore implements ChatContextStore {
     } finally {
       client.release();
     }
+  }
+  async policy(c: ChannelId, externalGroupId: string) {
+    const r = await this.pool.query(
+      'SELECT * FROM synq_channel_context_policy WHERE channel=$1 AND external_group_id=$2',
+      [c, externalGroupId],
+    );
+    return r.rows[0] ? policyRow(r.rows[0]) : null;
+  }
+  async enroll(t: PolicyTerms) {
+    return this.tx(async (client) => {
+      const r = await client.query(
+        `INSERT INTO synq_channel_context_policy (channel, external_group_id, group_id, retention_seconds, purpose, visibility, enrolled_by_principal_id, enrolled_at, disclosed_at, version)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,1)
+         ON CONFLICT (channel, external_group_id) DO UPDATE SET group_id=EXCLUDED.group_id,
+           retention_seconds=EXCLUDED.retention_seconds, purpose=EXCLUDED.purpose, visibility=EXCLUDED.visibility,
+           enrolled_by_principal_id=EXCLUDED.enrolled_by_principal_id, enrolled_at=EXCLUDED.enrolled_at,
+           disclosed_at=NULL, version=synq_channel_context_policy.version + 1
+         RETURNING *`,
+        [
+          t.channel,
+          t.externalGroupId,
+          t.groupId,
+          t.retentionSeconds,
+          t.purpose,
+          t.visibility,
+          t.enrolledByPrincipalId,
+          t.enrolledAt,
+        ],
+      );
+      await client.query(
+        'UPDATE synq_channel_context_message SET expires_at = LEAST(expires_at, sent_at + $3) WHERE channel=$1 AND external_group_id=$2',
+        [t.channel, t.externalGroupId, t.retentionSeconds],
+      );
+      return policyRow(r.rows[0]!);
+    });
+  }
+  async markDisclosed(
+    c: ChannelId,
+    externalGroupId: string,
+    version: number,
+    at: number,
+  ) {
+    const r = await this.pool.query(
+      'UPDATE synq_channel_context_policy SET disclosed_at=$4 WHERE channel=$1 AND external_group_id=$2 AND version=$3',
+      [c, externalGroupId, version, at],
+    );
+    return r.rowCount === 1;
   }
   async clearPolicy(c: ChannelId, externalGroupId: string) {
     return this.tx(async (client) => {
@@ -552,19 +593,25 @@ export class PostgresChatContextStore implements ChatContextStore {
           externalGroupId: String(row.external_group_id),
           externalUserId: String(row.external_user_id),
           principalId: String(row.principal_id),
+          policyVersion: Number(row.policy_version),
           consentedAt: Number(row.consented_at),
         } satisfies ContextConsent)
       : null;
   }
   async grantConsent(x: ContextConsent) {
     await this.pool.query(
-      'INSERT INTO synq_channel_context_consent (channel, external_group_id, external_user_id, principal_id, consented_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING',
+      `INSERT INTO synq_channel_context_consent (channel, external_group_id, external_user_id, principal_id, consented_at, policy_version)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (channel, external_group_id, external_user_id) DO UPDATE SET
+         principal_id=EXCLUDED.principal_id, consented_at=EXCLUDED.consented_at, policy_version=EXCLUDED.policy_version
+       WHERE synq_channel_context_consent.policy_version <> EXCLUDED.policy_version`,
       [
         x.channel,
         x.externalGroupId,
         x.externalUserId,
         x.principalId,
         x.consentedAt,
+        x.policyVersion,
       ],
     );
   }
@@ -586,25 +633,55 @@ export class PostgresChatContextStore implements ChatContextStore {
       return r.rowCount ?? 0;
     });
   }
-  async storeMessage(m: ContextMessage) {
-    const r = await this.pool.query(
-      `INSERT INTO synq_channel_context_message (channel, external_group_id, message_id, event_id, external_user_id, principal_id, text, text_sha256, reply_to, sent_at, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-      [
-        m.channel,
-        m.externalGroupId,
-        m.messageId,
-        m.eventId,
-        m.externalUserId,
-        m.principalId,
-        m.text,
-        m.textSha256,
-        m.replyTo,
-        m.sentAt,
-        m.expiresAt,
-      ],
-    );
-    return r.rowCount === 1;
+  async storeMessage(
+    m: ContextMessage,
+    guard: { groupId: string; policyVersion: number },
+  ): Promise<StoreOutcome> {
+    return this.tx(async (client) => {
+      const policy = await client.query(
+        `SELECT 1 FROM synq_channel_context_policy WHERE channel=$1 AND external_group_id=$2
+           AND group_id=$3 AND version=$4 AND disclosed_at IS NOT NULL AND disclosed_at <= $5 FOR SHARE`,
+        [
+          m.channel,
+          m.externalGroupId,
+          guard.groupId,
+          guard.policyVersion,
+          m.sentAt,
+        ],
+      );
+      if (!policy.rows.length) return 'REFUSED';
+      const consent = await client.query(
+        `SELECT 1 FROM synq_channel_context_consent WHERE channel=$1 AND external_group_id=$2
+           AND external_user_id=$3 AND principal_id=$4 AND policy_version=$5 AND consented_at <= $6 FOR SHARE`,
+        [
+          m.channel,
+          m.externalGroupId,
+          m.externalUserId,
+          m.principalId,
+          guard.policyVersion,
+          m.sentAt,
+        ],
+      );
+      if (!consent.rows.length) return 'REFUSED';
+      const r = await client.query(
+        `INSERT INTO synq_channel_context_message (channel, external_group_id, message_id, event_id, external_user_id, principal_id, text, text_sha256, reply_to, sent_at, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+        [
+          m.channel,
+          m.externalGroupId,
+          m.messageId,
+          m.eventId,
+          m.externalUserId,
+          m.principalId,
+          m.text,
+          m.textSha256,
+          m.replyTo,
+          m.sentAt,
+          m.expiresAt,
+        ],
+      );
+      return r.rowCount === 1 ? 'STORED' : 'DUPLICATE';
+    });
   }
   async messages(
     c: ChannelId,
@@ -613,9 +690,8 @@ export class PostgresChatContextStore implements ChatContextStore {
     limit: number,
   ) {
     const r = await this.pool.query(
-      `SELECT * FROM (SELECT * FROM synq_channel_context_message
-         WHERE channel=$1 AND external_group_id=$2 AND expires_at > $3
-         ORDER BY sent_at DESC, message_id DESC LIMIT $4) recent ORDER BY sent_at, message_id`,
+      `SELECT * FROM (SELECT m.* ${READABLE}
+         ORDER BY m.sent_at DESC, m.message_id DESC LIMIT $4) recent ORDER BY sent_at, message_id`,
       [c, externalGroupId, now, limit],
     );
     return r.rows.map(contextRow);
@@ -627,8 +703,7 @@ export class PostgresChatContextStore implements ChatContextStore {
     externalUserId?: string,
   ) {
     const r = await this.pool.query(
-      `SELECT count(*)::int AS n FROM synq_channel_context_message
-       WHERE channel=$1 AND external_group_id=$2 AND expires_at > $3 AND ($4::text IS NULL OR external_user_id=$4)`,
+      `SELECT count(*)::int AS n ${READABLE} AND ($4::text IS NULL OR m.external_user_id=$4)`,
       [c, externalGroupId, now, externalUserId ?? null],
     );
     return Number(r.rows[0]?.n ?? 0);

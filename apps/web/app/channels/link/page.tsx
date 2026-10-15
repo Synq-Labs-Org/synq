@@ -45,6 +45,21 @@ function telegramInitDataFromFragment(): string | null {
   );
   return data && data.length <= 8192 ? data : null;
 }
+/**
+ * Opened from t.me/<bot>/<app>?startapp=<code>, the link code arrives as the
+ * Mini App start parameter (tgWebAppStartParam, or start_param in initData).
+ */
+function miniAppStartCode(): string {
+  const fromQuery = new URLSearchParams(window.location.search).get(
+    'tgWebAppStartParam',
+  );
+  const initData = telegramInitDataFromFragment();
+  const fromInitData = initData
+    ? new URLSearchParams(initData).get('start_param')
+    : null;
+  const code = fromQuery ?? fromInitData ?? '';
+  return /^[A-Za-z0-9_-]{16,64}$/.test(code) ? code : '';
+}
 const AccessSessionSchema = z.looseObject({
   token: z.string(),
   memberId: z.string(),
@@ -76,7 +91,9 @@ export default function ChannelLinkPage() {
     setRecord(loadCredential());
     setTelegramLogin(telegramLoginFromFragment());
     setTelegramInitData(telegramInitDataFromFragment());
-    const c = new URLSearchParams(window.location.search).get('code') ?? '';
+    const c =
+      new URLSearchParams(window.location.search).get('code') ??
+      miniAppStartCode();
     setCode(c);
     if (c)
       api

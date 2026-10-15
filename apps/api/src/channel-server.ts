@@ -61,14 +61,24 @@ const ChannelEnvSchema = z.object({
     .max(7 * 86_400)
     .default(43_200),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
-  /** Consented chat memory (/memory); off keeps no chat messages at all. */
-  SYNQ_CHANNEL_MEMORY: z.enum(['0', '1']).default('1'),
+  /**
+   * Consented chat memory (/memory); off keeps no chat messages at all.
+   * Off by default: the Brain does not yet read stored context.
+   */
+  SYNQ_CHANNEL_MEMORY: z.enum(['0', '1']).default('0'),
   SYNQ_CHANNEL_MEMORY_PURGE_MS: z.coerce
     .number()
     .int()
     .min(10_000)
     .default(600_000),
 });
+
+/** Whether consented chat memory is on for this deployment (default off). */
+export function channelMemoryEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+) {
+  return ChannelEnvSchema.parse(env).SYNQ_CHANNEL_MEMORY === '1';
+}
 
 export type ChannelLog = (
   message: string,
@@ -277,8 +287,14 @@ export async function registerChannels(input: {
               store.claimNotification(
                 'telegram',
                 'miniapp',
-                `initdata:${hash}`,
+                telegram!.miniAppReplayKey(hash),
                 at,
+              ),
+            releaseInitData: (hash: string) =>
+              store.releaseNotification(
+                'telegram',
+                'miniapp',
+                telegram!.miniAppReplayKey(hash),
               ),
           },
           telegramProbe: () => telegram!.profile,

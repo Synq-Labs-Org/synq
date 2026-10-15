@@ -37,6 +37,8 @@ export type ChannelRouteDeps = {
     ): { telegramUserId: string; hash: string } | null;
     /** True only the first time an initData hash is presented. */
     consumeInitData?(hash: string, nowSeconds: number): Promise<boolean>;
+    /** Returns an initData hash to unused when the redemption it proved did not link. */
+    releaseInitData?(hash: string): Promise<void>;
   };
   /** getMe privacy/guest facts for the capability report. */
   telegramProbe?: () => { privacyMode: boolean; guestQueries: boolean } | null;
@@ -195,6 +197,7 @@ export async function channelRoutes(
     if (!session)
       return reply.code(401).send({ error: 'MEMBER_ACCESS_REQUIRED' });
     let proven: string | undefined;
+    let spentInitData: string | null = null;
     if (
       body.data.telegramLogin !== undefined &&
       body.data.telegramInitData !== undefined
@@ -212,6 +215,7 @@ export async function channelRoutes(
       if (!(await login.consumeInitData(identity.hash, deps.now())))
         return reply.code(401).send({ error: 'TELEGRAM_MINIAPP_REPLAYED' });
       proven = identity.telegramUserId;
+      spentInitData = identity.hash;
     }
     if (body.data.telegramLogin !== undefined) {
       const id = deps.telegramLogin?.verify(
@@ -221,12 +225,26 @@ export async function channelRoutes(
       if (!id) return reply.code(401).send({ error: 'TELEGRAM_LOGIN_INVALID' });
       proven = id;
     }
-    const outcome = await deps.gateway.redeemLinkCode({
-      code: body.data.code,
-      groupId,
-      principalId: session.principalId,
-      ...(proven !== undefined ? { provenExternalUserId: proven } : {}),
-    });
+    // The initData is spent only by a successful link; any other outcome returns it.
+    const unspend = async () => {
+      if (spentInitData !== null)
+        await deps.telegramLogin
+          ?.releaseInitData?.(spentInitData)
+          .catch(() => undefined);
+    };
+    let outcome: Awaited<ReturnType<typeof deps.gateway.redeemLinkCode>>;
+    try {
+      outcome = await deps.gateway.redeemLinkCode({
+        code: body.data.code,
+        groupId,
+        principalId: session.principalId,
+        ...(proven !== undefined ? { provenExternalUserId: proven } : {}),
+      });
+    } catch (error) {
+      await unspend();
+      throw error;
+    }
+    if (outcome.status !== 'LINKED') await unspend();
     return reply.code(REDEEM_STATUS[outcome.status] ?? 409).send(
       outcome.status === 'LINKED'
         ? {

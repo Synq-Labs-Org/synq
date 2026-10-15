@@ -180,6 +180,9 @@ const MessageSchema = z.looseObject({
       caption: z.string().optional(),
     })
     .optional(),
+  forward_origin: z.unknown().optional(),
+  forward_date: z.number().int().optional(),
+  is_automatic_forward: z.boolean().optional(),
   /** Set on a guest message; answer it with answerGuestQuery. */
   guest_query_id: z.string().min(1).max(256).optional(),
   new_chat_members: z.array(UserSchema).optional(),
@@ -395,6 +398,11 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.options.api.verifyMiniAppInitData(raw, nowSeconds);
   }
 
+  /** One-time-use key for a verified initData hash, scoped to this bot. */
+  miniAppReplayKey(hash: string) {
+    return `initdata:${this.bot?.id ?? 'unbound'}:${hash}`;
+  }
+
   get botId() {
     return this.bot?.id ?? null;
   }
@@ -414,7 +422,8 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!parsed.success || !this.bot) return [];
     const update = parsed.data;
     const bot = this.bot;
-    const eventId = `update:${update.update_id}`;
+    // update_id is unique per bot only: scope dedup keys to this bot.
+    const eventId = `update:${bot.id}:${update.update_id}`;
     const base = (
       chat: z.output<typeof ChatSchema>,
       from: TgUser | undefined,
@@ -493,6 +502,7 @@ export class TelegramAdapter implements ChannelAdapter {
       return [
         {
           type: 'GUEST_QUERY',
+          receiver: `bot:${bot.id}`,
           guestQueryId: g.guest_query_id,
           reference: g.reply_to_message
             ? guestReference(g.reply_to_message)
@@ -575,6 +585,11 @@ export class TelegramAdapter implements ChannelAdapter {
         type: 'MESSAGE_RECEIVED',
         envelope: {
           ...env,
+          ...(msg.forward_origin !== undefined ||
+          msg.forward_date !== undefined ||
+          msg.is_automatic_forward === true
+            ? { forwarded: true }
+            : {}),
           body: text,
           replyTo: msg.reply_to_message
             ? String(msg.reply_to_message.message_id)

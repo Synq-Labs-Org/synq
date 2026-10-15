@@ -77,7 +77,7 @@ describe('telegram adapter', () => {
     expect(cmd).toMatchObject({
       type: 'MESSAGE_RECEIVED',
       envelope: {
-        eventId: 'update:7',
+        eventId: 'update:42:7',
         externalGroupId: '-100',
         externalUserId: '111',
         chatKind: 'GROUP',

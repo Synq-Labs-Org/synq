@@ -63,6 +63,8 @@ export const EnvelopeSchema = z.strictObject({
   interaction: InteractionSchema,
   attachments: z.array(AttachmentSchema).max(20),
   verifiedSender: VerifiedSenderSchema,
+  /** The sender forwarded someone else's content; it is not their own words. */
+  forwarded: z.boolean().optional(),
 });
 export type Envelope = z.output<typeof EnvelopeSchema>;
 
@@ -123,6 +125,8 @@ export const ChannelEventSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('GUEST_QUERY'),
     envelope: EnvelopeSchema,
+    /** The bot that received it (e.g. `bot:<id>`); guest query ids are scoped to it. */
+    receiver: ExternalIdSchema,
     guestQueryId: z.string().min(1).max(256),
     reference: GuestReferenceSchema.nullable(),
   }),
