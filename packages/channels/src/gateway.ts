@@ -444,6 +444,10 @@ export class ChannelGateway {
     const context = this.options.context;
     if (!context || envelope.chatKind !== 'GROUP' || !envelope.externalUserId)
       return;
+    if (
+      !(await context.store.policy(envelope.channel, envelope.externalGroupId))
+    )
+      return;
     const store = this.options.store;
     const group = await store.groupLink(
       envelope.channel,
@@ -455,10 +459,15 @@ export class ChannelGateway {
       envelope.externalGroupId,
       envelope.externalUserId,
     );
+    // Linked in this chat is not enough: the sender must still be a member of the group.
+    const member =
+      user?.status === 'ACTIVE'
+        ? await this.options.ports.activeMember(group.groupId, user.principalId)
+        : null;
     await context.capture({
       envelope,
       groupId: group.groupId,
-      principalId: user?.status === 'ACTIVE' ? user.principalId : null,
+      principalId: member && user ? user.principalId : null,
     });
   }
 
@@ -487,7 +496,7 @@ export class ChannelGateway {
       !(await this.options.store.claimNotification(
         envelope.channel,
         'guest',
-        `guest:${event.guestQueryId}`,
+        `guest:${event.receiver}:${event.guestQueryId}`,
         now,
       ))
     )
@@ -753,8 +762,10 @@ export class ChannelGateway {
 
   /**
    * `/memory [on <days>|off|optin|optout]`: consented future-message memory.
-   * Turning it on needs an active member who is a chat admin and is
-   * disclosed in the chat; each member opts in for their own messages.
+   * Anyone can see the status and withdraw their own consent; turning it on
+   * needs an active member who is a chat admin, and is disclosed in the
+   * chat; each active member opts in for their own messages and for the
+   * current terms only.
    */
   private async memory(
     envelope: Envelope,
@@ -765,19 +776,33 @@ export class ChannelGateway {
       return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_UNAVAILABLE', {
         text: 'Synq memory is not available in this deployment. Synq keeps no chat messages here.',
       });
-    const access = await this.access(envelope);
-    if ('refusal' in access) return access.refusal;
-    const { group, principalId } = access;
     const [verb = 'status', amount] = args
       .toLowerCase()
       .split(/\s+/)
       .filter(Boolean);
     const chat = envelope.externalGroupId;
     const channel = envelope.channel;
-    const now = this.options.now();
+    const user = envelope.externalUserId!;
     const store = context.store;
+    // Withdrawing consent never depends on still being a member.
+    if (verb === 'optout') {
+      const deleted = await store.revokeConsent(channel, chat, user);
+      return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OPTOUT', {
+        text: `Opted out: deleted ${deleted} stored message${deleted === 1 ? '' : 's'} of yours. Synq keeps nothing more from you in this chat.`,
+      });
+    }
+    if (verb === 'status') {
+      const group = await this.options.store.groupLink(channel, chat);
+      if (group?.status !== 'ACTIVE')
+        return this.result('UNAUTHORIZED', 'GROUP_NOT_LINKED');
+      return this.memoryStatus(envelope, group.groupId);
+    }
+    const access = await this.access(envelope);
+    if ('refusal' in access) return access.refusal;
+    const { group, principalId } = access;
+    const now = this.options.now();
     const adminOnly = async () =>
-      (await this.isChatAdmin(channel, chat, envelope.externalUserId!))
+      (await this.isChatAdmin(channel, chat, user))
         ? null
         : this.replyOutcome(envelope, 'REFUSED', 'MEMORY_ADMIN_ONLY', {
             text: 'Only a chat admin can turn Synq memory on or off.',
@@ -786,22 +811,18 @@ export class ChannelGateway {
       case 'on': {
         const refusal = await adminOnly();
         if (refusal) return refusal;
-        const days = amount === undefined ? NaN : Number(amount);
         if (amount !== undefined && !/^[1-9][0-9]{0,2}$/.test(amount))
           return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_DAYS_INVALID', {
             text: 'Usage: /memory on <days>, for example /memory on 30 (1 to 90 days).',
           });
         const retentionSeconds = clampRetention(
-          Number.isFinite(days)
-            ? days * 86_400
+          amount !== undefined
+            ? Number(amount) * 86_400
             : CONTEXT_DEFAULT_RETENTION_SECONDS,
         );
-        const visibility =
-          (await this.adapters
-            .get(channel)
-            ?.groupVisibility?.(chat)
-            .catch(() => 'ADDRESSED_ONLY' as const)) ?? 'ADDRESSED_ONLY';
-        const policy = {
+        const visibility = await this.visibility(channel, chat);
+        // New terms: a new version, undisclosed, earlier rows capped to the new retention.
+        const policy = await store.enroll({
           channel,
           externalGroupId: chat,
           groupId: group.groupId,
@@ -810,9 +831,7 @@ export class ChannelGateway {
           visibility,
           enrolledByPrincipalId: principalId,
           enrolledAt: now,
-          disclosedAt: null,
-        };
-        await store.setPolicy(policy);
+        });
         const outcome = await this.replyOutcome(
           envelope,
           'HANDLED',
@@ -820,9 +839,10 @@ export class ChannelGateway {
           { text: memoryDisclosure(retentionSeconds, visibility) },
         );
         // Nothing is kept unless the chat was actually told.
-        if (outcome.delivered)
-          await store.setPolicy({ ...policy, disclosedAt: now });
-        return outcome.delivered
+        const disclosed =
+          outcome.delivered > 0 &&
+          (await store.markDisclosed(channel, chat, policy.version, now));
+        return disclosed
           ? outcome
           : { ...outcome, status: 'REFUSED', code: 'MEMORY_NOT_DISCLOSED' };
       }
@@ -847,67 +867,66 @@ export class ChannelGateway {
         await store.grantConsent({
           channel,
           externalGroupId: chat,
-          externalUserId: envelope.externalUserId!,
+          externalUserId: user,
           principalId,
+          policyVersion: policy.version,
           consentedAt: now,
         });
         return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OPTIN', {
-          text: `Opted in: Synq keeps the messages it receives from you here from now on, for ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals. Nothing from before now. /memory optout deletes them.`,
-        });
-      }
-      case 'optout': {
-        const deleted = await store.revokeConsent(
-          channel,
-          chat,
-          envelope.externalUserId!,
-        );
-        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_OPTOUT', {
-          text: `Opted out: deleted ${deleted} stored message${deleted === 1 ? '' : 's'} of yours. Synq keeps nothing more from you in this chat.`,
-        });
-      }
-      case 'status': {
-        const policy = await store.policy(channel, chat);
-        const on =
-          policy &&
-          policy.disclosedAt !== null &&
-          policy.groupId === group.groupId;
-        const visibility =
-          (await this.adapters
-            .get(channel)
-            ?.groupVisibility?.(chat)
-            .catch(() => 'ADDRESSED_ONLY' as const)) ?? 'ADDRESSED_ONLY';
-        const lines = [
-          `Mode: ${on ? 'ENROLLED_CONTEXT' : 'ENROLLED_ON_DEMAND'}.`,
-          visibilityLine(visibility),
-        ];
-        if (on) {
-          const consent = await store.consent(
-            channel,
-            chat,
-            envelope.externalUserId!,
-          );
-          const total = await store.countMessages(channel, chat, now);
-          const mine = await store.countMessages(
-            channel,
-            chat,
-            now,
-            envelope.externalUserId!,
-          );
-          lines.push(
-            `Memory is on: kept ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals, only from members who opted in.`,
-            `Stored now: ${total} message${total === 1 ? '' : 's'} (${mine} yours). You are ${consent ? 'opted in' : 'not opted in'}.`,
-          );
-        } else
-          lines.push(
-            'Memory is off: Synq keeps no messages from this chat. A chat admin can type /memory on <days>.',
-          );
-        return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_STATUS', {
-          text: lines.join('\n'),
+          text: `Opted in: Synq keeps the messages it receives from you here from now on, for ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals. Nothing from before now, nothing you forward. /memory optout deletes them.`,
         });
       }
     }
     return this.replyOutcome(envelope, 'REFUSED', 'MEMORY_USAGE', {
       text: 'Usage: /memory, /memory optin, /memory optout; chat admins: /memory on <days>, /memory off',
+    });
+  }
+
+  private async visibility(channel: ChannelId, chat: string) {
+    return (
+      (await this.adapters
+        .get(channel)
+        ?.groupVisibility?.(chat)
+        .catch(() => 'ADDRESSED_ONLY' as const)) ?? 'ADDRESSED_ONLY'
+    );
+  }
+
+  private async memoryStatus(
+    envelope: Envelope,
+    groupId: string,
+  ): Promise<GatewayOutcome> {
+    const store = this.options.context!.store;
+    const channel = envelope.channel;
+    const chat = envelope.externalGroupId;
+    const user = envelope.externalUserId!;
+    const now = this.options.now();
+    const policy = await store.policy(channel, chat);
+    const on =
+      policy && policy.disclosedAt !== null && policy.groupId === groupId;
+    const lines = [
+      `Mode: ${on ? 'ENROLLED_CONTEXT' : 'ENROLLED_ON_DEMAND'}.`,
+      visibilityLine(await this.visibility(channel, chat)),
+    ];
+    if (on) {
+      const consent = await store.consent(channel, chat, user);
+      const total = await store.countMessages(channel, chat, now);
+      const mine = await store.countMessages(channel, chat, now, user);
+      lines.push(
+        `Memory is on: kept ${Math.round(policy.retentionSeconds / 86_400)} days, only to draft this group's proposals, only from members who opted in.`,
+        `Stored now: ${total} message${total === 1 ? '' : 's'} (${mine} yours). You are ${
+          !consent
+            ? 'not opted in'
+            : consent.policyVersion === policy.version
+              ? 'opted in'
+              : 'opted in to earlier terms only; /memory optin to accept the current ones'
+        }.`,
+      );
+    } else
+      lines.push(
+        'Memory is off: Synq keeps no messages from this chat. A chat admin can type /memory on <days>.',
+      );
+    return this.replyOutcome(envelope, 'HANDLED', 'MEMORY_STATUS', {
+      text: lines.join('\n'),
     });
   }
 
@@ -1153,20 +1172,29 @@ export class ChannelGateway {
       return this.replyOutcome(envelope, 'REFUSED', 'UNLINK_ADMIN_ONLY', {
         text: 'Only a chat admin can unlink this chat from its Synq group.',
       });
-    const g = await this.options.store.revokeGroupLink(
-      envelope.channel,
-      envelope.externalGroupId,
-      this.options.now(),
-    );
-    await this.options.context?.store.clearPolicy(
-      envelope.channel,
-      envelope.externalGroupId,
-    );
+    const g = await this.endChat(envelope.channel, envelope.externalGroupId);
     return this.replyOutcome(envelope, 'HANDLED', 'UNLINKED', {
       text: g
         ? 'Unlinked: this chat no longer speaks for any Synq group, and every member link in it was removed. Members can /synq again.'
         : 'This chat was not linked to a Synq group.',
     });
+  }
+
+  /**
+   * Unlinks a chat and ends its memory. Memory is cleared first, so a
+   * failure never leaves a revoked chat with stored messages, and again
+   * after, in case `/memory on` ran in between. clearPolicy is idempotent.
+   */
+  private async endChat(channel: ChannelId, chat: string) {
+    const context = this.options.context;
+    await context?.store.clearPolicy(channel, chat);
+    const g = await this.options.store.revokeGroupLink(
+      channel,
+      chat,
+      this.options.now(),
+    );
+    await context?.store.clearPolicy(channel, chat);
+    return g;
   }
 
   /** Web/API unlink by an authenticated member of the group the chat is bound to. */
@@ -1186,15 +1214,7 @@ export class ChannelGateway {
       !(await this.options.ports.activeMember(input.groupId, input.principalId))
     )
       return 'NOT_A_MEMBER';
-    await this.options.store.revokeGroupLink(
-      input.channel,
-      input.externalGroupId,
-      this.options.now(),
-    );
-    await this.options.context?.store.clearPolicy(
-      input.channel,
-      input.externalGroupId,
-    );
+    await this.endChat(input.channel, input.externalGroupId);
     await this.post(input.channel, input.externalGroupId, {
       text: 'Unlinked by a member from the Synq web app: this chat no longer speaks for that Synq group.',
     });
@@ -1399,7 +1419,7 @@ export class ChannelGateway {
       ))
     )
       return this.result('IGNORED', 'BRAIN_ALREADY_RUN_FOR_EVENT');
-    const context = this.options.context
+    const stored = this.options.context
       ? (
           await this.options.context
             .contextFor({
@@ -1409,16 +1429,27 @@ export class ChannelGateway {
               now,
             })
             .catch(() => [])
-        )
-          .filter((m) => m.messageId !== envelope.messageId)
-          .map((m) => ({
-            messageId: m.messageId,
-            principalId: m.principalId,
-            text: m.text,
-            textSha256: m.textSha256,
-            sentAt: m.sentAt,
-          }))
+        ).filter((m) => m.messageId !== envelope.messageId)
       : [];
+    // Only members still in the group contribute context.
+    const stillMember = new Map<string, boolean>();
+    for (const m of stored)
+      if (!stillMember.has(m.principalId))
+        stillMember.set(
+          m.principalId,
+          (await this.options.ports
+            .activeMember(group.groupId, m.principalId)
+            .catch(() => null)) !== null,
+        );
+    const context = stored
+      .filter((m) => stillMember.get(m.principalId))
+      .map((m) => ({
+        messageId: m.messageId,
+        principalId: m.principalId,
+        text: m.text,
+        textSha256: m.textSha256,
+        sentAt: m.sentAt,
+      }));
     let reply: BrainReply;
     try {
       reply = await brain({

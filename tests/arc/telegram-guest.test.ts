@@ -48,6 +48,7 @@ function botApi(opts: {
   guest?: boolean;
   admins?: Set<string>;
   failGuest?: 'network';
+  botId?: number;
 }) {
   const calls: Call[] = [];
   let n = 0;
@@ -63,7 +64,7 @@ function botApi(opts: {
     switch (method) {
       case 'getMe':
         return ok({
-          id: 42,
+          id: opts.botId ?? 42,
           is_bot: true,
           first_name: 'Synq',
           username: 'synq_bot',
@@ -93,7 +94,10 @@ function botApi(opts: {
 }
 
 async function world(
-  opts: Parameters<typeof botApi>[0] & { memory?: boolean } = {},
+  opts: Parameters<typeof botApi>[0] & {
+    memory?: boolean;
+    store?: MemoryChannelStore;
+  } = {},
 ) {
   const clock = { t: NOW };
   const api = botApi({ canReadAll: false, admins: new Set(['111']), ...opts });
@@ -109,7 +113,7 @@ async function world(
     transport: 'WEBHOOK_SECRET_TOKEN',
   });
   await adapter.init();
-  const store = new MemoryChannelStore();
+  const store = opts.store ?? new MemoryChannelStore();
   store.groups.set(k('telegram', CHAT), {
     channel: 'telegram',
     externalGroupId: CHAT,
@@ -239,6 +243,7 @@ async function world(
   const lastText = () => String(sent().at(-1)?.text ?? '');
   return {
     clock,
+    members,
     api,
     adapter,
     store,
@@ -277,8 +282,14 @@ async function routes(w: Awaited<ReturnType<typeof world>>) {
         (w.store as ChannelStore).claimNotification(
           'telegram',
           'miniapp',
-          `initdata:${hash}`,
+          w.adapter.miniAppReplayKey(hash),
           at,
+        ),
+      releaseInitData: (hash) =>
+        w.store.releaseNotification(
+          'telegram',
+          'miniapp',
+          w.adapter.miniAppReplayKey(hash),
         ),
     },
     telegramProbe: () => w.adapter.profile,
@@ -652,11 +663,10 @@ describe('Telegram Guest Mode and message ingress', () => {
     ]);
     const first = await redeem(initData);
     expect(first.json()).toEqual({ error: 'CODE_INVALID' }); // proof accepted; the code is unknown
-    const replay = await redeem(initData);
-    expect([replay.statusCode, replay.json()]).toEqual([
-      401,
-      { error: 'TELEGRAM_MINIAPP_REPLAYED' },
-    ]);
+    // A failed redemption does not spend the initData; a successful one does,
+    // and its replay is refused (see "spent only by a successful link").
+    const retry = await redeem(initData);
+    expect(retry.json()).toEqual({ error: 'CODE_INVALID' });
   });
 
   it('P04-06 only consented, disclosed, unexpired messages are stored; retention is enforced', async () => {
@@ -739,6 +749,11 @@ describe('Telegram Guest Mode and message ingress', () => {
       90 * DAY,
     );
 
+    // New terms need a fresh opt-in.
+    w.clock.t += 1;
+    await w.say(ALICE, 'under new terms, no fresh consent');
+    expect(w.memory.stored.size).toBe(0);
+    await w.say(ALICE, '/memory optin');
     // Opt-out deletes that member's messages; memory off deletes everything.
     w.clock.t += 1;
     await w.say(ALICE, 'second note');
@@ -770,6 +785,7 @@ describe('Telegram Guest Mode and message ingress', () => {
       externalGroupId: CHAT,
       externalUserId: '111',
       principalId: 'principal_alice',
+      policyVersion: 1,
       consentedAt: NOW,
     });
     quiet.clock.t += 5;
@@ -843,5 +859,169 @@ describe('Telegram Guest Mode and message ingress', () => {
     expect(
       w.api.calls.filter((c) => c.method === 'answerGuestQuery'),
     ).toHaveLength(1);
+  });
+});
+
+describe('Telegram ingress: review regressions', () => {
+  it('P04-06 a member removed from the Synq group is no longer captured or read, and can still see status and opt out', async () => {
+    const w = await world();
+    await w.say(ALICE, '/memory on 7');
+    await w.say(BOB, '/memory optin');
+    w.clock.t += 1;
+    await w.say(BOB, 'bob note');
+    expect(w.memory.stored.size).toBe(1);
+    delete w.members.principal_bob; // removed from the Synq group, still linked in the chat
+    w.clock.t += 1;
+    await w.say(BOB, 'after removal');
+    expect([...w.memory.stored.values()].map((m) => m.text)).toEqual([
+      'bob note',
+    ]);
+    await w.say(ALICE, '/propose pay the deposit');
+    expect(w.brainCalls.at(-1)?.context ?? []).toEqual([]);
+    await w.say(BOB, '/memory');
+    expect(w.lastText()).toMatch(/^Mode: ENROLLED_CONTEXT/);
+    await w.say(BOB, '/memory optout');
+    expect(w.lastText()).toMatch(/^Opted out: deleted 1 stored message/);
+    expect(w.memory.stored.size).toBe(0);
+  });
+
+  it('P04-06 shortening retention applies to stored rows; a new policy needs a fresh opt-in', async () => {
+    const w = await world();
+    const service = new ChatContextService(w.memory);
+    const read = () =>
+      service.contextFor({
+        channel: 'telegram',
+        externalGroupId: CHAT,
+        groupId: GROUP,
+        now: w.clock.t,
+      });
+    await w.say(ALICE, '/memory on 30');
+    await w.say(ALICE, '/memory optin');
+    w.clock.t += 1;
+    await w.say(ALICE, 'old note');
+    expect((await read()).map((m) => m.text)).toEqual(['old note']);
+    await w.say(ALICE, '/memory on 1'); // shorter retention
+    w.clock.t += DAY + 10;
+    expect(await read()).toEqual([]);
+    expect(await service.purge(w.clock.t)).toBe(1);
+    await w.say(ALICE, '/memory on 30'); // longer again: earlier opt-ins do not carry over
+    w.clock.t += 1;
+    await w.say(ALICE, 'new note without fresh consent');
+    expect(w.memory.stored.size).toBe(0);
+    await w.say(ALICE, '/memory optin');
+    w.clock.t += 1;
+    await w.say(ALICE, 'newer note');
+    expect((await read()).map((m) => m.text)).toEqual(['newer note']);
+  });
+
+  it('P04-06 forwarded messages are never stored as the forwarder’s words', async () => {
+    const w = await world();
+    await w.say(ALICE, '/memory on 7');
+    await w.say(ALICE, '/memory optin');
+    w.clock.t += 1;
+    const base = w.groupUpdate(ALICE, '@synq_bot forwarded quote');
+    const forwarded = {
+      ...base,
+      message: {
+        ...base.message,
+        forward_origin: {
+          type: 'user',
+          date: w.clock.t - 99,
+          sender_user: { id: 999, is_bot: false, first_name: 'Someone' },
+        },
+      },
+    };
+    const [event] = w.adapter.normalize(forwarded);
+    expect(event?.type === 'MESSAGE_RECEIVED' && event.envelope.forwarded).toBe(
+      true,
+    );
+    await w.deliver(forwarded);
+    const auto = w.groupUpdate(ALICE, '@synq_bot channel post');
+    await w.deliver({
+      ...auto,
+      message: { ...auto.message, is_automatic_forward: true },
+    });
+    expect(w.memory.stored.size).toBe(0);
+    await w.say(ALICE, '@synq_bot my own words');
+    expect([...w.memory.stored.values()].map((m) => m.text)).toEqual([
+      '@synq_bot my own words',
+    ]);
+  });
+
+  it('P04-06 chat memory is off by default until the Brain consumes it as untrusted input', async () => {
+    const { channelMemoryEnabled } =
+      await import('../../apps/api/src/channel-server.js');
+    expect(channelMemoryEnabled({})).toBe(false);
+    expect(channelMemoryEnabled({ SYNQ_CHANNEL_MEMORY: '1' })).toBe(true);
+    const tg = (env: Record<string, string>) =>
+      channelCapabilities({ TELEGRAM_BOT_TOKEN: 'x', ...env }).find(
+        (c) => c.channel === 'telegram',
+      )!.features;
+    expect(tg({})).not.toContain('consented-memory');
+    expect(tg({ SYNQ_CHANNEL_MEMORY: '1' })).toContain('consented-memory');
+  });
+
+  it('P04-07 dedup keys are scoped to the receiving bot', async () => {
+    const a = await world();
+    const b = await world({ botId: 43, store: a.store });
+    const update = a.groupUpdate(ALICE, '/propose pay the deposit');
+    expect(await a.deliver(update)).toMatchObject([{ status: 'HANDLED' }]);
+    expect(await b.deliver(update)).toMatchObject([{ status: 'HANDLED' }]);
+    expect(await a.deliver(update)).toMatchObject([{ status: 'DUPLICATE' }]);
+    const guest = a.guestUpdate({ guest_query_id: 'gq-shared' });
+    expect(await a.deliver(guest)).toMatchObject([{ code: 'GUEST_ANSWERED' }]);
+    expect(await b.deliver(guest)).toMatchObject([{ code: 'GUEST_ANSWERED' }]);
+    const [event] = a.adapter.normalize(update);
+    expect(event?.type === 'MESSAGE_RECEIVED' && event.envelope.eventId).toBe(
+      `update:42:${update.update_id}`,
+    );
+    expect(a.adapter.miniAppReplayKey('ab')).toBe('initdata:42:ab');
+    expect(b.adapter.miniAppReplayKey('ab')).toBe('initdata:43:ab');
+  });
+
+  it('P04-05 a Mini App initData is spent only by a successful link', async () => {
+    const w = await world();
+    app = await routes(w);
+    const code = 'abcdefghijklmnop5678';
+    await w.store.createLinkCode({
+      codeHash: createHash('sha256')
+        .update(`synq-channel-link:${code}`)
+        .digest('hex'),
+      channel: 'telegram',
+      externalGroupId: '-1002',
+      externalUserId: '111',
+      displayName: '@alice',
+      createdAt: NOW,
+      expiresAt: NOW + 900,
+    });
+    const initData = signTelegramMiniAppInitDataForTest(
+      {
+        auth_date: String(NOW - 60),
+        user: JSON.stringify({ id: 111, first_name: 'Alice' }),
+      },
+      TOKEN,
+    );
+    const redeem = (c: string) =>
+      app!.inject({
+        method: 'POST',
+        url: '/v1/channels/links/redeem',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer alice-session',
+        },
+        payload: JSON.stringify({
+          code: c,
+          groupId: GROUP,
+          telegramInitData: initData,
+        }),
+      });
+    expect((await redeem('zzzzzzzzzzzzzzzz0000')).json()).toEqual({
+      error: 'CODE_INVALID',
+    });
+    const linked = await redeem(code);
+    expect(linked.json()).toMatchObject({ status: 'LINKED' });
+    expect((await redeem(code)).json()).toEqual({
+      error: 'TELEGRAM_MINIAPP_REPLAYED',
+    });
   });
 });

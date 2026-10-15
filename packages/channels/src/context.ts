@@ -25,6 +25,8 @@ export type ChatContextPolicy = {
   channel: ChannelId;
   externalGroupId: string;
   groupId: string;
+  /** Bumped on every `/memory on`: consent is given to one version of the terms. */
+  version: number;
   retentionSeconds: number;
   purpose: typeof CONTEXT_PURPOSE;
   /** What the bot can actually receive in this chat when memory was turned on. */
@@ -34,11 +36,14 @@ export type ChatContextPolicy = {
   /** When the disclosure was posted in the chat; nothing is stored before it. */
   disclosedAt: number | null;
 };
+export type PolicyTerms = Omit<ChatContextPolicy, 'version' | 'disclosedAt'>;
 export type ContextConsent = {
   channel: ChannelId;
   externalGroupId: string;
   externalUserId: string;
   principalId: string;
+  /** The policy version the member agreed to; a new version needs a new opt-in. */
+  policyVersion: number;
   consentedAt: number;
 };
 /** A stored chat message: received after consent, with provenance and an expiry. */
@@ -55,6 +60,7 @@ export type ContextMessage = {
   sentAt: number;
   expiresAt: number;
 };
+export type StoreOutcome = 'STORED' | 'DUPLICATE' | 'REFUSED';
 
 /** Durable consented memory. Every method must be atomic on its own. */
 export interface ChatContextStore {
@@ -62,14 +68,26 @@ export interface ChatContextStore {
     channel: ChannelId,
     externalGroupId: string,
   ): Promise<ChatContextPolicy | null>;
-  setPolicy(policy: ChatContextPolicy): Promise<void>;
-  /** Ends memory for the chat: deletes its policy, consents and every stored message. */
+  /**
+   * New terms for the chat: the next version, not yet disclosed. Stored
+   * messages are capped at sent time + the new retention, never extended.
+   */
+  enroll(terms: PolicyTerms): Promise<ChatContextPolicy>;
+  /** Marks `version` disclosed; false when the terms changed meanwhile. */
+  markDisclosed(
+    channel: ChannelId,
+    externalGroupId: string,
+    version: number,
+    at: number,
+  ): Promise<boolean>;
+  /** Ends memory for the chat: deletes its policy, consents and every stored message. Idempotent. */
   clearPolicy(channel: ChannelId, externalGroupId: string): Promise<number>;
   consent(
     channel: ChannelId,
     externalGroupId: string,
     externalUserId: string,
   ): Promise<ContextConsent | null>;
+  /** Records (or renews, for a new policy version) the member's consent. */
   grantConsent(consent: ContextConsent): Promise<void>;
   /** Withdraws consent and deletes that user's stored messages; returns how many. */
   revokeConsent(
@@ -77,9 +95,19 @@ export interface ChatContextStore {
     externalGroupId: string,
     externalUserId: string,
   ): Promise<number>;
-  /** Inserts once per (channel, chat, message id); true only when inserted. */
-  storeMessage(message: ContextMessage): Promise<boolean>;
-  /** Unexpired messages only, oldest first. */
+  /**
+   * Inserts once per (channel, chat, message id), and only while the chat's
+   * disclosed policy `guard` and the sender's consent to that version exist.
+   * Atomic against revokeConsent, clearPolicy and enroll.
+   */
+  storeMessage(
+    message: ContextMessage,
+    guard: { groupId: string; policyVersion: number },
+  ): Promise<StoreOutcome>;
+  /**
+   * Unexpired messages whose sender still consents, under a disclosed
+   * policy and its current retention; oldest first.
+   */
   messages(
     channel: ChannelId,
     externalGroupId: string,
@@ -126,19 +154,22 @@ export class ChatContextService {
 
   /**
    * Stores one received group message only when memory is on and disclosed
-   * for the chat's current Synq group, and the sender (an active linked
-   * member) opted in before sending it. Everything else is dropped.
+   * for the chat's current Synq group, and the sender (an active member of
+   * that group, linked in this chat) agreed to the current terms before
+   * sending it. Forwarded content is never stored. The store re-checks the
+   * policy and consent atomically with the insert.
    */
   async capture(input: {
     envelope: Envelope;
     groupId: string;
-    /** The sender's active linked principal in this chat, or null. */
+    /** The sender's principal when linked here and an active group member; else null. */
     principalId: string | null;
   }): Promise<CaptureOutcome> {
     const e = input.envelope;
     if (
       e.chatKind !== 'GROUP' ||
       e.verifiedSender.isBot ||
+      e.forwarded === true ||
       !e.externalUserId ||
       !e.messageId ||
       !['TEXT', 'MENTION', 'REPLY_TO_BOT'].includes(e.interaction.kind) ||
@@ -158,23 +189,27 @@ export class ChatContextService {
       !consent ||
       input.principalId === null ||
       consent.principalId !== input.principalId ||
+      consent.policyVersion !== policy.version ||
       e.timestamp < consent.consentedAt
     )
       return 'NO_CONSENT';
-    const stored = await this.store.storeMessage({
-      channel: e.channel,
-      externalGroupId: e.externalGroupId,
-      messageId: e.messageId,
-      eventId: e.eventId,
-      externalUserId: e.externalUserId,
-      principalId: consent.principalId,
-      text: e.body.slice(0, MAX_STORED_CHARS),
-      textSha256: createHash('sha256').update(e.body).digest('hex'),
-      replyTo: e.replyTo,
-      sentAt: e.timestamp,
-      expiresAt: e.timestamp + policy.retentionSeconds,
-    });
-    return stored ? 'STORED' : 'DUPLICATE';
+    const stored = await this.store.storeMessage(
+      {
+        channel: e.channel,
+        externalGroupId: e.externalGroupId,
+        messageId: e.messageId,
+        eventId: e.eventId,
+        externalUserId: e.externalUserId,
+        principalId: consent.principalId,
+        text: e.body.slice(0, MAX_STORED_CHARS),
+        textSha256: createHash('sha256').update(e.body).digest('hex'),
+        replyTo: e.replyTo,
+        sentAt: e.timestamp,
+        expiresAt: e.timestamp + policy.retentionSeconds,
+      },
+      { groupId: input.groupId, policyVersion: policy.version },
+    );
+    return stored === 'REFUSED' ? 'NO_CONSENT' : stored;
   }
 
   /** Stored context for an enrolled chat of `groupId`; empty otherwise. */
@@ -220,10 +255,32 @@ export class MemoryChatContextStore implements ChatContextStore {
     const p = this.policies.get(key(channel, externalGroupId));
     return p ? { ...p } : null;
   }
-  async setPolicy(policy: ChatContextPolicy) {
-    this.policies.set(key(policy.channel, policy.externalGroupId), {
-      ...policy,
-    });
+  async enroll(terms: PolicyTerms) {
+    const k = key(terms.channel, terms.externalGroupId);
+    const policy: ChatContextPolicy = {
+      ...terms,
+      version: (this.policies.get(k)?.version ?? 0) + 1,
+      disclosedAt: null,
+    };
+    this.policies.set(k, policy);
+    for (const m of this.stored.values())
+      if (
+        m.channel === terms.channel &&
+        m.externalGroupId === terms.externalGroupId
+      )
+        m.expiresAt = Math.min(m.expiresAt, m.sentAt + terms.retentionSeconds);
+    return { ...policy };
+  }
+  async markDisclosed(
+    channel: ChannelId,
+    externalGroupId: string,
+    version: number,
+    at: number,
+  ) {
+    const p = this.policies.get(key(channel, externalGroupId));
+    if (!p || p.version !== version) return false;
+    p.disclosedAt = at;
+    return true;
   }
   async clearPolicy(channel: ChannelId, externalGroupId: string) {
     this.policies.delete(key(channel, externalGroupId));
@@ -248,7 +305,9 @@ export class MemoryChatContextStore implements ChatContextStore {
       consent.externalGroupId,
       consent.externalUserId,
     );
-    if (!this.consents.has(k)) this.consents.set(k, { ...consent });
+    const prior = this.consents.get(k);
+    if (!prior || prior.policyVersion !== consent.policyVersion)
+      this.consents.set(k, { ...consent });
   }
   async revokeConsent(
     channel: ChannelId,
@@ -263,11 +322,31 @@ export class MemoryChatContextStore implements ChatContextStore {
         m.externalUserId === externalUserId,
     );
   }
-  async storeMessage(message: ContextMessage) {
+  async storeMessage(
+    message: ContextMessage,
+    guard: { groupId: string; policyVersion: number },
+  ): Promise<StoreOutcome> {
+    // No await between the checks and the insert: atomic in this process.
+    const p = this.policies.get(key(message.channel, message.externalGroupId));
+    const c = this.consents.get(
+      key(message.channel, message.externalGroupId, message.externalUserId),
+    );
+    if (
+      !p ||
+      p.groupId !== guard.groupId ||
+      p.version !== guard.policyVersion ||
+      p.disclosedAt === null ||
+      p.disclosedAt > message.sentAt ||
+      !c ||
+      c.principalId !== message.principalId ||
+      c.policyVersion !== guard.policyVersion ||
+      c.consentedAt > message.sentAt
+    )
+      return 'REFUSED';
     const k = key(message.channel, message.externalGroupId, message.messageId);
-    if (this.stored.has(k)) return false;
+    if (this.stored.has(k)) return 'DUPLICATE';
     this.stored.set(k, { ...message });
-    return true;
+    return 'STORED';
   }
   async messages(
     channel: ChannelId,
@@ -275,12 +354,16 @@ export class MemoryChatContextStore implements ChatContextStore {
     now: number,
     limit: number,
   ) {
+    const p = this.policies.get(key(channel, externalGroupId));
+    if (!p || p.disclosedAt === null) return [];
     return [...this.stored.values()]
       .filter(
         (m) =>
           m.channel === channel &&
           m.externalGroupId === externalGroupId &&
-          m.expiresAt > now,
+          Math.min(m.expiresAt, m.sentAt + p.retentionSeconds) > now &&
+          this.consents.get(key(channel, externalGroupId, m.externalUserId))
+            ?.principalId === m.principalId,
       )
       .sort((a, b) => a.sentAt - b.sentAt)
       .slice(-limit)

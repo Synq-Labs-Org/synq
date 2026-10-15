@@ -51,7 +51,8 @@ export function channelCapabilities(
         privacy
           ? 'group-visibility:addressed-only'
           : 'group-visibility:new-messages',
-        'consented-memory',
+        // Off by default until the Brain consumes stored context as untrusted input.
+        ...(env.SYNQ_CHANNEL_MEMORY === '1' ? ['consented-memory'] : []),
         ...(tg?.guestQueries ? ['guest-mode'] : []),
       ],
       reason: has('TELEGRAM_BOT_TOKEN')
