@@ -97,7 +97,7 @@ async function feeFields(chain: ArcChain) {
   return { maxFeePerGas: max * 2n, maxPriorityFeePerGas: tip };
 }
 
-async function sendCall(
+export async function sendCall(
   chain: ArcChain,
   signer: TransferSigner,
   to: Address,

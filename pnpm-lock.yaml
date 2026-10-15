@@ -94,6 +94,9 @@ importers:
       '@synq/plugin-circle-cctp':
         specifier: workspace:*
         version: link:plugins/circle-cctp
+      '@synq/plugin-circle-gateway':
+        specifier: workspace:*
+        version: link:plugins/circle-gateway
       '@synq/plugin-commerce':
         specifier: workspace:*
         version: link:plugins/commerce
@@ -737,6 +740,15 @@ importers:
         version: 4.6.5
 
   plugins/circle-cctp:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+
+  plugins/circle-gateway:
     dependencies:
       '@synq/chain-registry':
         specifier: workspace:*

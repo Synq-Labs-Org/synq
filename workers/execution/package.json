@@ -10,7 +10,8 @@
     "./journal": "./src/journal.ts",
     "./integrity": "./src/integrity.ts",
     "./arc": "./src/arc.ts",
-    "./cctp": "./src/cctp.ts"
+    "./cctp": "./src/cctp.ts",
+    "./gateway": "./src/gateway.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
