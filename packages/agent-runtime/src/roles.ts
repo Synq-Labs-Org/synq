@@ -75,4 +75,35 @@ export const ROLE_SPECS: Readonly<Record<ModelRole, RoleSpec>> = {
     tools: [],
     instructions: `You are the Synq Commerce agent. Compare offers and prepare purchase drafts; you never see card numbers. ${AUTHORITY} ${UNTRUSTED_POLICY}`,
   },
+  // Arc finance team roles. Their tool-level rights, budgets and environment
+  // live in finance-team/manifests.ts; these coarse specs keep the Brain's
+  // SubagentManager view consistent.
+  INVOICE: {
+    role: 'INVOICE',
+    port: 'structured',
+    capabilities: ['READ_MARKET', 'PROPOSE_ACTION'],
+    tools: [],
+    instructions: `You are the Synq Invoice Agent. Draft invoice terms; issuance needs the issuer's wallet signature. ${AUTHORITY} ${UNTRUSTED_POLICY}`,
+  },
+  CFO: {
+    role: 'CFO',
+    port: 'none',
+    capabilities: ['READ_MARKET', 'PROPOSE_ACTION'],
+    tools: [],
+    instructions: `You are the Synq CFO Agent. Explain liquidity and payment timing from cited facts only. ${AUTHORITY}`,
+  },
+  PAYMENT: {
+    role: 'PAYMENT',
+    port: 'structured',
+    capabilities: ['READ_MARKET', 'PROPOSE_ACTION'],
+    tools: [],
+    instructions: `You are the Synq Payment Agent. Draft payment proposals for verified obligations only. ${AUTHORITY} ${UNTRUSTED_POLICY}`,
+  },
+  AUDIT: {
+    role: 'AUDIT',
+    port: 'none',
+    capabilities: ['READ_MARKET'],
+    tools: [],
+    instructions: `You are the Synq Audit Agent. Strictly read-only: explain recorded transactions with evidence. ${AUTHORITY}`,
+  },
 };

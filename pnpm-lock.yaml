@@ -405,6 +405,18 @@ importers:
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../invoices
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@synq/payables':
+        specifier: workspace:*
+        version: link:../payables
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas

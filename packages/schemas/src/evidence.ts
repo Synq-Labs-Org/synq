@@ -41,6 +41,10 @@ export const MODEL_ROLES = [
   'FUNDING',
   'TRADING',
   'COMMERCE',
+  'INVOICE',
+  'CFO',
+  'PAYMENT',
+  'AUDIT',
 ] as const;
 export const ModelRoleSchema = z.enum(MODEL_ROLES);
 export type ModelRole = z.output<typeof ModelRoleSchema>;
