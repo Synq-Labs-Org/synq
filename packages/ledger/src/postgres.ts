@@ -1,4 +1,9 @@
-import type { JournalEntry, LedgerStore } from './index.js';
+import type {
+  ConsumerInbox,
+  JournalEntry,
+  LedgerStore,
+  OutboxEvent,
+} from './index.js';
 
 type Sql = {
   query(
@@ -28,6 +33,23 @@ export const LEDGER_MIGRATIONS: readonly {
     CREATE INDEX IF NOT EXISTS synq_ledger_entries_ws ON synq_ledger_entries (workspace_id, occurred_at);
     CREATE UNIQUE INDEX IF NOT EXISTS synq_ledger_one_reversal ON synq_ledger_entries (reversal_of) WHERE reversal_of IS NOT NULL;`,
     down: `DROP TABLE IF EXISTS synq_ledger_entries;`,
+  },
+  {
+    version: 2,
+    up: `CREATE TABLE IF NOT EXISTS synq_event_outbox (
+      seq bigserial PRIMARY KEY,
+      event_id text NOT NULL UNIQUE,
+      entry_id text NOT NULL REFERENCES synq_ledger_entries(entry_id),
+      topic text NOT NULL,
+      payload jsonb NOT NULL,
+      published_at timestamptz);
+    CREATE INDEX IF NOT EXISTS synq_event_outbox_pending ON synq_event_outbox (seq) WHERE published_at IS NULL;
+    CREATE TABLE IF NOT EXISTS synq_consumer_inbox (
+      consumer text NOT NULL,
+      event_id text NOT NULL,
+      claimed_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (consumer, event_id));`,
+    down: `DROP TABLE IF EXISTS synq_consumer_inbox; DROP TABLE IF EXISTS synq_event_outbox;`,
   },
 ];
 
@@ -74,10 +96,18 @@ export class PostgresLedgerStore implements LedgerStore {
   async migrate() {
     await migrateFinance(this.sql);
   }
-  async insert(e: JournalEntry) {
+  async insert(e: JournalEntry, events: readonly OutboxEvent[] = []) {
+    // One statement, so the entry and its events commit or fail together.
     const r = await this.sql.query(
-      `INSERT INTO synq_ledger_entries (entry_id, workspace_id, idempotency_key, occurred_at, reversal_of, data)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (idempotency_key) DO NOTHING RETURNING data`,
+      `WITH entry AS (
+         INSERT INTO synq_ledger_entries (entry_id, workspace_id, idempotency_key, occurred_at, reversal_of, data)
+         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (idempotency_key) DO NOTHING RETURNING entry_id),
+       ev AS (
+         INSERT INTO synq_event_outbox (event_id, entry_id, topic, payload)
+         SELECT x.event_id, entry.entry_id, x.topic, x.payload
+         FROM entry, jsonb_to_recordset($7::jsonb) AS x(event_id text, topic text, payload jsonb)
+         RETURNING event_id)
+       SELECT entry_id FROM entry`,
       [
         e.entryId,
         e.workspaceId,
@@ -85,6 +115,17 @@ export class PostgresLedgerStore implements LedgerStore {
         e.occurredAt,
         e.reversalOf,
         enc(e),
+        JSON.stringify(
+          events.map((v) => ({
+            event_id: v.eventId,
+            topic: v.topic,
+            payload: JSON.parse(
+              JSON.stringify(v.payload ?? null, (_k, x) =>
+                typeof x === 'bigint' ? `${x}n` : x,
+              ),
+            ),
+          })),
+        ),
       ],
     );
     if (r.rows[0]) return { entry: e, created: true };
@@ -114,5 +155,40 @@ export class PostgresLedgerStore implements LedgerStore {
       [workspaceId],
     );
     return r.rows.map((x) => dec(x.data));
+  }
+  async pendingEvents(limit: number): Promise<OutboxEvent[]> {
+    const r = await this.sql.query(
+      'SELECT event_id, topic, payload FROM synq_event_outbox WHERE published_at IS NULL ORDER BY seq LIMIT $1',
+      [limit],
+    );
+    return r.rows.map((x) => ({
+      eventId: String(x.event_id),
+      topic: String(x.topic),
+      payload: x.payload,
+    }));
+  }
+  async markPublished(ids: readonly string[]) {
+    if (!ids.length) return;
+    await this.sql.query(
+      'UPDATE synq_event_outbox SET published_at = now() WHERE event_id = ANY($1::text[]) AND published_at IS NULL',
+      [ids],
+    );
+  }
+}
+
+export class PostgresConsumerInbox implements ConsumerInbox {
+  constructor(readonly sql: Sql) {}
+  async claim(consumer: string, eventId: string) {
+    const r = await this.sql.query(
+      'INSERT INTO synq_consumer_inbox (consumer, event_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING 1',
+      [consumer, eventId],
+    );
+    return r.rows.length > 0;
+  }
+  async release(consumer: string, eventId: string) {
+    await this.sql.query(
+      'DELETE FROM synq_consumer_inbox WHERE consumer=$1 AND event_id=$2',
+      [consumer, eventId],
+    );
   }
 }

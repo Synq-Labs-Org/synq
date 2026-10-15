@@ -11,7 +11,8 @@
     "./integrity": "./src/integrity.ts",
     "./arc": "./src/arc.ts",
     "./cctp": "./src/cctp.ts",
-    "./gateway": "./src/gateway.ts"
+    "./gateway": "./src/gateway.ts",
+    "./arc-outbox": "./src/arc-outbox.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

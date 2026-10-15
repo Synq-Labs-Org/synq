@@ -53,13 +53,30 @@ const unverified = privateKeyToAccount(generatePrivateKey()).address; // e.g. an
 const chain = await connectChain('arc-testnet');
 const usdc = token('arc-testnet', 'USDC');
 const amount = moneyFromDecimal(usdc, arg('amount', '0.05'));
-const out: Record<string, unknown> = { environment: 'ARC_TESTNET', owner: owner.address, agent: agent.address, contractor: contractor.address, unverified };
+const out: Record<string, unknown> = {
+  environment: 'ARC_TESTNET',
+  owner: owner.address,
+  agent: agent.address,
+  contractor: contractor.address,
+  unverified,
+};
 
 // 1. Owner funds the agent's operational wallet (a capped float, not the treasury).
 const float = moneyFromDecimal(usdc, arg('fund', '1'));
-if ((await balanceOf(chain, usdc, agent.address)).baseUnits < amount.baseUnits * 3n) {
-  const funded = await executeTransfer(chain, owner, { from: owner.address, to: agent.address, amount: float });
-  out.agentFunding = { hash: funded.hash, explorer: funded.explorer, amount: moneyToDecimal(float) };
+if (
+  (await balanceOf(chain, usdc, agent.address)).baseUnits <
+  amount.baseUnits * 3n
+) {
+  const funded = await executeTransfer(chain, owner, {
+    from: owner.address,
+    to: agent.address,
+    amount: float,
+  });
+  out.agentFunding = {
+    hash: funded.hash,
+    explorer: funded.explorer,
+    amount: moneyToDecimal(float),
+  };
 }
 
 // 2. Owner signs the mandate: agent may pay the contractor only, ≤ 0.10 per payout, ≤ 0.50 / 30 days.
@@ -81,7 +98,12 @@ const mandate: PaymentMandate = {
   validUntil: now + 7 * 86_400,
 };
 const mandateSignature = await owner.signTypedData(mandateTypedData(mandate));
-const config = { grantKey: randomBytes(32), operator: 'arc-executor', grantTtlSeconds: 120, riskRequiredAbove: moneyFromDecimal(usdc, '50').baseUnits };
+const config = {
+  grantKey: randomBytes(32),
+  operator: 'arc-executor',
+  grantTtlSeconds: 120,
+  riskRequiredAbove: moneyFromDecimal(usdc, '50').baseUnits,
+};
 const fence = new MemoryNonceFence();
 const intentFor = (recipient: `0x${string}`, intentId: string) => ({
   intentId,
@@ -99,29 +121,111 @@ const intentFor = (recipient: `0x${string}`, intentId: string) => ({
 });
 
 // 3. Legitimate payout: simulate first (prepare), then decide, then execute under the grant.
-await prepareTransfer(chain, { from: agent.address, to: contractor.address, amount });
-const allowed = await decide({ config, mandate, mandateSignature, state: { revoked: false, spends: [] }, intent: intentFor(contractor.address, 'int_payout_ok'), risk: { available: true, flags: [] }, simulationOk: true, now });
-if (allowed.outcome !== 'ALLOW') throw new Error(`expected ALLOW: ${allowed.reasons.join('; ')}`);
+await prepareTransfer(chain, {
+  from: agent.address,
+  to: contractor.address,
+  amount,
+});
+const allowed = await decide({
+  config,
+  mandate,
+  mandateSignature,
+  state: { revoked: false, spends: [] },
+  intent: intentFor(contractor.address, 'int_payout_ok'),
+  risk: { available: true, flags: [] },
+  simulationOk: true,
+  now,
+});
+if (allowed.outcome !== 'ALLOW')
+  throw new Error(`expected ALLOW: ${allowed.reasons.join('; ')}`);
 const before = await balanceOf(chain, usdc, contractor.address);
-const paid = await executeGrantedTransfer({ chain, signer: agent, grant: allowed.grant, grantKey: config.grantKey, fence, mandateRevoked: false, transfer: { from: agent.address, to: contractor.address, amount }, now: Math.floor(Date.now() / 1000) });
+const paid = await executeGrantedTransfer({
+  chain,
+  signer: agent,
+  grant: allowed.grant,
+  grantKey: config.grantKey,
+  fence,
+  mandateRevoked: false,
+  transfer: { from: agent.address, to: contractor.address, amount },
+  now: Math.floor(Date.now() / 1000),
+});
 const after = await balanceOf(chain, usdc, contractor.address);
-out.payout = { decision: allowed.outcome, reasons: allowed.reasons, grantId: allowed.grant.grantId, hash: paid.hash, block: String(paid.blockNumber), explorer: paid.explorer, amount: moneyToDecimal(amount), contractorBefore: moneyToDecimal(before), contractorAfter: moneyToDecimal(after), creditedExactly: after.baseUnits - before.baseUnits === amount.baseUnits, feeUsdc: paid.feeUsdc && moneyToDecimal(paid.feeUsdc) };
+out.payout = {
+  decision: allowed.outcome,
+  reasons: allowed.reasons,
+  grantId: allowed.grant.grantId,
+  hash: paid.hash,
+  block: String(paid.blockNumber),
+  explorer: paid.explorer,
+  amount: moneyToDecimal(amount),
+  contractorBefore: moneyToDecimal(before),
+  contractorAfter: moneyToDecimal(after),
+  creditedExactly: after.baseUnits - before.baseUnits === amount.baseUnits,
+  feeUsdc: paid.feeUsdc && moneyToDecimal(paid.feeUsdc),
+};
 
 // 4. Fraud: same payout to an address that is not the verified contractor wallet.
-const redirected = await decide({ config, mandate, mandateSignature, state: { revoked: false, spends: [{ amount: amount.baseUnits, at: now }] }, intent: intentFor(unverified, 'int_payout_redirected'), risk: { available: true, flags: [{ code: 'PAYOUT_ADDRESS_CHANGED', severity: 'HARD', detail: `requested ${unverified}, verified ${contractor.address}` }] }, simulationOk: true, now });
+const redirected = await decide({
+  config,
+  mandate,
+  mandateSignature,
+  state: { revoked: false, spends: [{ amount: amount.baseUnits, at: now }] },
+  intent: intentFor(unverified, 'int_payout_redirected'),
+  risk: {
+    available: true,
+    flags: [
+      {
+        code: 'PAYOUT_ADDRESS_CHANGED',
+        severity: 'HARD',
+        detail: `requested ${unverified}, verified ${contractor.address}`,
+      },
+    ],
+  },
+  simulationOk: true,
+  now,
+});
 out.redirectedDecision = redirected;
 
 // 5. Even with a real grant in hand, signing a changed recipient is refused before broadcast.
-const second = await decide({ config, mandate, mandateSignature, state: { revoked: false, spends: [{ amount: amount.baseUnits, at: now }] }, intent: intentFor(contractor.address, 'int_payout_2'), risk: { available: true, flags: [] }, simulationOk: true, now });
+const second = await decide({
+  config,
+  mandate,
+  mandateSignature,
+  state: { revoked: false, spends: [{ amount: amount.baseUnits, at: now }] },
+  intent: intentFor(contractor.address, 'int_payout_2'),
+  risk: { available: true, flags: [] },
+  simulationOk: true,
+  now,
+});
 if (second.outcome !== 'ALLOW') throw new Error('expected second ALLOW');
-const agentBefore = await chain.client.getTransactionCount({ address: agent.address });
+const agentBefore = await chain.client.getTransactionCount({
+  address: agent.address,
+});
 try {
-  await executeGrantedTransfer({ chain, signer: agent, grant: second.grant, grantKey: config.grantKey, fence, mandateRevoked: false, transfer: { from: agent.address, to: unverified, amount }, now: Math.floor(Date.now() / 1000) });
+  await executeGrantedTransfer({
+    chain,
+    signer: agent,
+    grant: second.grant,
+    grantKey: config.grantKey,
+    fence,
+    mandateRevoked: false,
+    transfer: { from: agent.address, to: unverified, amount },
+    now: Math.floor(Date.now() / 1000),
+  });
   out.mutatedRecipient = 'EXECUTED (unexpected)';
 } catch (e) {
-  out.mutatedRecipient = { refused: (e as { code?: string }).code, nonceUnchanged: (await chain.client.getTransactionCount({ address: agent.address })) === agentBefore };
+  out.mutatedRecipient = {
+    refused: (e as { code?: string }).code,
+    nonceUnchanged:
+      (await chain.client.getTransactionCount({ address: agent.address })) ===
+      agentBefore,
+  };
 }
-out.mandate = { ...mandate, perActionCap: String(mandate.perActionCap), periodBudget: String(mandate.periodBudget) };
+out.mandate = {
+  ...mandate,
+  perActionCap: String(mandate.perActionCap),
+  periodBudget: String(mandate.periodBudget),
+};
 const dir = join(process.cwd(), 'bounty-evidence', 'arc');
 mkdirSync(dir, { recursive: true });
 const file = join(dir, `granted-payout-${paid.hash.slice(0, 10)}.json`);

@@ -4,7 +4,10 @@ import { token } from '@synq/chain-registry/arc';
 import {
   LEDGER_MIGRATIONS,
   Ledger,
+  PostgresConsumerInbox,
   PostgresLedgerStore,
+  consumeOnce,
+  relayOutbox,
   migrateFinance,
   type JournalEntry,
 } from '@synq/ledger';
@@ -12,7 +15,7 @@ import { ensureP08Database } from '../treasury/pg.js';
 
 const URL =
   process.env.SYNQ_ARC_FINANCE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_arc_finance';
+  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_arc_finance';
 const USDC = token('arc-testnet', 'USDC');
 let pool: pg.Pool;
 
@@ -69,7 +72,7 @@ describe('finance schema on Postgres', { timeout: 30_000 }, () => {
         "SELECT to_regclass('synq_ledger_entries') AS t",
       );
       expect(gone.rows[0]!.t).toBeNull();
-      expect(await migrateFinance(c)).toBe(1);
+      expect(await migrateFinance(c)).toBe(LEDGER_MIGRATIONS.at(-1)!.version);
       await c.query('ROLLBACK');
     } finally {
       c.release();
@@ -88,5 +91,40 @@ describe('finance schema on Postgres', { timeout: 30_000 }, () => {
       ).toBe(false);
     expect(await ledger.balances('wsp_pg', USDC.assetId)).toEqual(once);
     expect(once.CASH_ARC_USDC).toBe(6_000_000n);
+  });
+
+  it('P08-06 the entry and its outbox events commit together; the inbox fences duplicates', async () => {
+    const store = new PostgresLedgerStore(pool);
+    const ledger = new Ledger(store);
+    const event = {
+      eventId: 'evt_pg_paid_4',
+      topic: 'invoice.paid',
+      payload: { invoice: 'inv_4', amount: 4_000_000n },
+    };
+    expect((await ledger.post(entry(4), [event])).created).toBe(true);
+    expect((await ledger.post(entry(4), [event])).created).toBe(false);
+    const pending = await store.pendingEvents(10);
+    expect(pending.map((e) => e.eventId)).toEqual(['evt_pg_paid_4']);
+    expect(pending[0]!.payload).toEqual({
+      invoice: 'inv_4',
+      amount: '4000000n',
+    });
+    const inbox = new PostgresConsumerInbox(pool);
+    const seen: string[] = [];
+    const deliver = (e: (typeof pending)[number]) =>
+      consumeOnce(inbox, 'audit', e, async (x) => void seen.push(x.eventId));
+    await expect(
+      relayOutbox(store, async (e) => {
+        await deliver(e);
+        throw new Error('relay crash');
+      }),
+    ).rejects.toThrow();
+    expect(await relayOutbox(store, async (e) => void (await deliver(e)))).toBe(
+      1,
+    );
+    expect(await relayOutbox(store, async (e) => void (await deliver(e)))).toBe(
+      0,
+    );
+    expect(seen).toEqual(['evt_pg_paid_4']);
   });
 });

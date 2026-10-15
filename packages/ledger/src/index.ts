@@ -149,10 +149,26 @@ export function checkCounterparties(
   }
 }
 
+/** A domain event committed atomically with the journal entry that caused it. */
+export type OutboxEvent = Readonly<{
+  eventId: string;
+  topic: string;
+  payload: unknown;
+}>;
+
 export interface LedgerStore {
   migrate(): Promise<void>;
-  /** Inserts unless the idempotency key exists; returns the stored entry. */
-  insert(e: JournalEntry): Promise<{ entry: JournalEntry; created: boolean }>;
+  /**
+   * Inserts unless the idempotency key exists; returns the stored entry. Events
+   * are written in the same atomic step and only when the entry is new.
+   */
+  insert(
+    e: JournalEntry,
+    events?: readonly OutboxEvent[],
+  ): Promise<{ entry: JournalEntry; created: boolean }>;
+  /** Unpublished outbox events, oldest first. */
+  pendingEvents(limit: number): Promise<OutboxEvent[]>;
+  markPublished(eventIds: readonly string[]): Promise<void>;
   get(entryId: string): Promise<JournalEntry | null>;
   reversed(entryId: string): Promise<boolean>;
   entries(workspaceId: string): Promise<JournalEntry[]>;
@@ -166,10 +182,11 @@ export class Ledger {
 
   async post(
     e: JournalEntry,
+    events: readonly OutboxEvent[] = [],
   ): Promise<{ entry: JournalEntry; created: boolean }> {
     validateEntry(e);
     checkCounterparties(e, this.vendors);
-    const r = await this.store.insert(e);
+    const r = await this.store.insert(e, events);
     if (
       !r.created &&
       JSON.stringify(normalize(r.entry.postings)) !==
@@ -264,13 +281,25 @@ export function availableToSpend(input: {
 export class MemoryLedgerStore implements LedgerStore {
   private byId = new Map<string, JournalEntry>();
   private byKey = new Map<string, string>();
+  private outbox: { event: OutboxEvent; published: boolean }[] = [];
   async migrate() {}
-  async insert(e: JournalEntry) {
+  async insert(e: JournalEntry, events: readonly OutboxEvent[] = []) {
     const existing = this.byKey.get(e.idempotencyKey);
     if (existing) return { entry: this.byId.get(existing)!, created: false };
     this.byId.set(e.entryId, e);
     this.byKey.set(e.idempotencyKey, e.entryId);
+    for (const event of events) this.outbox.push({ event, published: false });
     return { entry: e, created: true };
+  }
+  async pendingEvents(limit: number) {
+    return this.outbox
+      .filter((o) => !o.published)
+      .slice(0, limit)
+      .map((o) => o.event);
+  }
+  async markPublished(ids: readonly string[]) {
+    for (const o of this.outbox)
+      if (ids.includes(o.event.eventId)) o.published = true;
   }
   async get(id: string) {
     return this.byId.get(id) ?? null;
@@ -283,4 +312,93 @@ export class MemoryLedgerStore implements LedgerStore {
   }
 }
 
+/**
+ * Holds on confirmed Arc cash. A reservation is admitted only against
+ * `availableToSpend` at that moment, so the total held can never exceed
+ * confirmed cash; re-reserving the same id is idempotent.
+ */
+export class CashReservations {
+  private held = new Map<string, bigint>();
+  total(): bigint {
+    let t = 0n;
+    for (const v of this.held.values()) t += v;
+    return t;
+  }
+  reserve(
+    id: string,
+    amount: bigint,
+    view: { confirmedCash: bigint; escrow: bigint; minimumReserve: bigint },
+  ): void {
+    const prior = this.held.get(id);
+    if (prior !== undefined) {
+      if (prior !== amount)
+        throw new LedgerError('IDEMPOTENCY_CONFLICT', `${id} held ${prior}`);
+      return;
+    }
+    if (amount <= 0n) throw new LedgerError('ZERO_POSTING', id);
+    const free = availableToSpend({ ...view, reservations: this.total() });
+    if (amount > free)
+      throw new LedgerError('OVER_RESERVED', `${amount} > ${free} free`);
+    this.held.set(id, amount);
+  }
+  release(id: string): bigint {
+    const v = this.held.get(id) ?? 0n;
+    this.held.delete(id);
+    return v;
+  }
+}
+
+/**
+ * Consumer-side fence: a consumer handles each event id at most once
+ * logically. `claim` is atomic; a duplicate delivery gets false and does
+ * nothing. Handlers must still post with idempotency keys derived from the
+ * event id, so a crash between claim and effect is repaired by redelivery
+ * after `release`.
+ */
+export interface ConsumerInbox {
+  claim(consumer: string, eventId: string): Promise<boolean>;
+  release(consumer: string, eventId: string): Promise<void>;
+}
+
+export class MemoryConsumerInbox implements ConsumerInbox {
+  private seen = new Set<string>();
+  async claim(consumer: string, eventId: string) {
+    const k = `${consumer}\u0000${eventId}`;
+    if (this.seen.has(k)) return false;
+    this.seen.add(k);
+    return true;
+  }
+  async release(consumer: string, eventId: string) {
+    this.seen.delete(`${consumer}\u0000${eventId}`);
+  }
+}
+
+export async function consumeOnce<T>(
+  inbox: ConsumerInbox,
+  consumer: string,
+  event: OutboxEvent,
+  handle: (e: OutboxEvent) => Promise<T>,
+): Promise<{ handled: boolean; result?: T }> {
+  if (!(await inbox.claim(consumer, event.eventId))) return { handled: false };
+  try {
+    return { handled: true, result: await handle(event) };
+  } catch (err) {
+    await inbox.release(consumer, event.eventId);
+    throw err;
+  }
+}
+
+/** Publishes pending outbox events; a crash before `markPublished` re-publishes (consumers fence). */
+export async function relayOutbox(
+  store: LedgerStore,
+  publish: (e: OutboxEvent) => Promise<void>,
+  limit = 100,
+): Promise<number> {
+  const batch = await store.pendingEvents(limit);
+  for (const e of batch) await publish(e);
+  await store.markPublished(batch.map((e) => e.eventId));
+  return batch.length;
+}
+
 export * from './postgres.js';
+export * from './arc-indexer.js';
