@@ -41,12 +41,32 @@ export async function recoverSigner(
   }
 }
 
-export function deepFreeze<T>(value: T): T {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+/**
+ * Freezes the whole tree, including children of nodes the caller had already
+ * shallow-frozen, so no governance record keeps a mutable branch.
+ */
+export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value && typeof value === 'object' && !seen.has(value)) {
+    seen.add(value);
+    for (const v of Object.values(value)) deepFreeze(v, seen);
     Object.freeze(value);
-    for (const v of Object.values(value)) deepFreeze(v);
   }
   return value;
+}
+
+/** Stable JSON (sorted keys, bigint as decimal string) for hashing records. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_k, v: unknown) =>
+    typeof v === 'bigint'
+      ? v.toString()
+      : v && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(
+            Object.entries(v as Record<string, unknown>).sort(([a], [b]) =>
+              a < b ? -1 : a > b ? 1 : 0,
+            ),
+          )
+        : v,
+  );
 }
 
 export const isSafeTime = (t: number) => Number.isSafeInteger(t) && t >= 0;

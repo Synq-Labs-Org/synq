@@ -11,27 +11,34 @@ import {
 } from '@synq/identity/server';
 import {
   DelegationRegistry,
-  GovernanceError,
+  MemoryCouncilStore,
   admitChallenge,
   admitVote,
   applyPolicyChange,
   approveCouncilAction,
   assentTypedData,
-  assertExecutable,
   challengeTypedData,
+  councilActionDigest,
   councilActionTypedData,
+  currentTerm,
+  decisionStatus,
+  deepFreeze,
   delegationConcentration,
   delegationId,
   delegationTypedData,
+  establishCouncil,
+  executeDecision,
   installTermFromBallot,
   isActiveAt,
   launchReadiness,
   launchTermsHash,
   policyChangeHash,
+  policyHash,
   requireAssent,
   resnapshot,
   revocationTypedData,
   rotateTerm,
+  snapshotIdOf,
   takeSnapshot,
   tally,
   termHash,
@@ -47,8 +54,11 @@ import {
   type Choice,
   type Contribution,
   type CouncilAction,
+  type CouncilDecision,
+  type CouncilStore,
   type CouncilTerm,
   type Delegation,
+  type DelegationRecord,
   type EligibleMember,
   type GovernancePolicy,
   type LaunchTerms,
@@ -154,28 +164,57 @@ const actionFor = (
   kind: CouncilAction['kind'],
   actionHash: Hex,
   label: string,
+  over: Partial<CouncilAction> = {},
 ): CouncilAction => ({
   councilId: t.councilId,
   workspaceId: t.workspaceId,
   chainId: t.chainId,
   termId: t.termId,
   termHash: termHash(t),
+  policyHash: policyHash(policyV1),
   kind,
   actionHash,
   nonce: nonce(label),
+  proposedAt: NOW - 60,
   expiresAt: NOW + 30 * DAY,
+  ...over,
 });
 const signAction = (signers: PrivateKeyAccount[], a: CouncilAction) =>
   Promise.all(signers.map((s) => s.signTypedData(councilActionTypedData(a))));
+async function newCouncil(): Promise<CouncilStore> {
+  const store = new MemoryCouncilStore();
+  await establishCouncil({ store, term: term1, policy: policyV1 });
+  return store;
+}
+const approve = async (
+  store: CouncilStore,
+  action: CouncilAction,
+  signers: PrivateKeyAccount[],
+  now = NOW,
+  term = term1,
+  policy = policyV1,
+) =>
+  approveCouncilAction({
+    store,
+    term,
+    policy,
+    action,
+    signatures: await signAction(signers, action),
+    now,
+  });
 
 describe('P05 principal linking and large-group governance', () => {
-  it('P05-01 a copied Telegram handle cannot bind a wallet without the signed challenge', async () => {
+  it('P05-01 a copied Telegram handle or captured login cannot bind a wallet without the challenge', async () => {
     const BOT = 'p05-test-bot-token';
     let clock = NOW;
+    const outbox = new Map<string, string>(); // bot DMs: channel user id -> code
     const store = new MemoryChannelLinkStore();
     const links = new ChannelLinkService(store, {
       now: () => clock,
       challengeTtlSeconds: 300,
+      deliverCode: async ({ channelUserId, code }) => {
+        outbox.set(channelUserId, code);
+      },
       verifiers: {
         telegram: (proof, now) => {
           const id = verifyTelegramLogin(proof, BOT, now);
@@ -193,130 +232,164 @@ describe('P05 principal linking and large-group governance', () => {
     });
     const alice = accountFor('alice');
     const bob = accountFor('bob');
+    const carol = accountFor('carol');
     const mallory = accountFor('mallory');
     const login = (id: number, username: string) =>
       signTelegramLoginForTest({ id, username, auth_date: clock }, BOT);
+    const resolve = (channelUserId: string) =>
+      links.resolve({
+        workspaceId: WORKSPACE,
+        channel: 'telegram',
+        channelUserId,
+      });
+    const request = (proof: unknown, wallet: Address) =>
+      links.requestLink({
+        workspaceId: WORKSPACE,
+        channel: 'telegram',
+        channelProof: proof,
+        wallet,
+      });
 
-    // Alice proves Telegram user 1001 and signs the wallet challenge.
-    const c1 = await links.requestLink({
-      workspaceId: WORKSPACE,
-      channel: 'telegram',
-      channelProof: login(1001, 'alice'),
-      wallet: alice.address,
-    });
+    // Alice proves Telegram user 1001, reads the code the bot DMs her, and signs.
+    const aliceLogin = login(1001, 'alice');
+    const c1 = await request(aliceLogin, alice.address);
     expect(c1).toMatchObject({ channelUserId: '1001', displayHandle: 'alice' });
     const sig1 = await alice.signTypedData(channelLinkTypedData(c1));
     const linked = await links.completeLink({
       challengeId: c1.challengeId,
+      channelCode: outbox.get('1001')!,
       signature: sig1,
     });
     expect(linked.wallet).toBe(alice.address);
-    expect(
-      await links.resolve({
-        workspaceId: WORKSPACE,
-        channel: 'telegram',
-        channelUserId: '1001',
-      }),
-    ).toBe(alice.address);
+    expect(await resolve('1001')).toBe(alice.address);
 
-    // A copied handle is not a channel proof, and a forged login hash fails Telegram's HMAC.
+    // A copied handle is not a channel proof; a forged hash fails Telegram's HMAC;
+    // a login payload is accepted once only.
     await expectCode(
-      links.requestLink({
-        workspaceId: WORKSPACE,
-        channel: 'telegram',
-        channelProof: { username: 'alice' },
-        wallet: mallory.address,
-      }),
+      request({ username: 'alice' }, mallory.address),
       'UNAUTHORIZED',
     );
     await expectCode(
-      links.requestLink({
-        workspaceId: WORKSPACE,
-        channel: 'telegram',
-        channelProof: {
-          id: 1001,
-          username: 'alice',
-          auth_date: clock,
-          hash: '0'.repeat(64),
-        },
-        wallet: mallory.address,
-      }),
+      request(
+        { id: 1001, username: 'alice', auth_date: clock, hash: '0'.repeat(64) },
+        mallory.address,
+      ),
       'UNAUTHORIZED',
     );
-    // Handles are never identities: resolving by handle is refused, not searched.
+    await expectCode(request(aliceLogin, mallory.address), 'UNAUTHORIZED');
     for (const handle of ['alice', '@alice'])
-      await expectCode(
-        links.resolve({
-          workspaceId: WORKSPACE,
-          channel: 'telegram',
-          channelUserId: handle,
-        }),
-        'INVALID_INPUT',
-      );
+      await expectCode(resolve(handle), 'INVALID_INPUT');
 
-    // Mallory renames her own Telegram account (6666) to "bob" and claims Bob's wallet:
-    // she gets a challenge for Bob's wallet but cannot sign it.
-    const c2 = await links.requestLink({
-      workspaceId: WORKSPACE,
-      channel: 'telegram',
-      channelProof: login(6666, 'bob'),
-      wallet: bob.address,
-    });
+    // Regression: an attacker holding Bob's valid, unused login payload can no
+    // longer bind Bob's Telegram id to their own wallet. The code goes to Bob.
+    const bobLogin = login(2002, 'bob');
+    const stolen = await request(bobLogin, mallory.address);
+    const malloriesSig = await mallory.signTypedData(
+      channelLinkTypedData(stolen),
+    );
+    for (let i = 0; i < 3; i++)
+      await expectCode(
+        links.completeLink({
+          challengeId: stolen.challengeId,
+          channelCode: '00000000',
+          signature: malloriesSig,
+        }),
+        'CHALLENGE_MISMATCH',
+      );
+    await expectCode(
+      links.completeLink({
+        challengeId: stolen.challengeId,
+        channelCode: outbox.get('2002')!,
+        signature: malloriesSig,
+      }),
+      'CHALLENGE_CONSUMED',
+    );
+    expect(await resolve('2002')).toBeNull();
+
+    // Mallory renames her own Telegram account (6666) to "bob" and claims Bob's
+    // wallet: she receives her own code but cannot sign for Bob's wallet.
+    const c2 = await request(login(6666, 'bob'), bob.address);
+    const code6666 = outbox.get('6666')!;
     await expectCode(
       links.completeLink({
         challengeId: c2.challengeId,
+        channelCode: code6666,
         signature: await mallory.signTypedData(channelLinkTypedData(c2)),
       }),
       'SIGNATURE_MISMATCH',
     );
-    // Alice's earlier signature does not transfer to another challenge.
-    await expectCode(
-      links.completeLink({ challengeId: c2.challengeId, signature: sig1 }),
-      'SIGNATURE_MISMATCH',
-    );
-    // A chat reply is not a signature.
     await expectCode(
       links.completeLink({
         challengeId: c2.challengeId,
+        channelCode: code6666,
+        signature: sig1,
+      }),
+      'SIGNATURE_MISMATCH',
+    );
+    await expectCode(
+      links.completeLink({
+        challengeId: c2.challengeId,
+        channelCode: code6666,
         signature: 'yes, link it',
       }),
       'SIGNATURE_MISMATCH',
     );
-    expect(
-      await links.resolve({
-        workspaceId: WORKSPACE,
-        channel: 'telegram',
-        channelUserId: '6666',
-      }),
-    ).toBeNull();
+    expect(await resolve('6666')).toBeNull();
 
     // One-use and expiring.
     await expectCode(
-      links.completeLink({ challengeId: c1.challengeId, signature: sig1 }),
+      links.completeLink({
+        challengeId: c1.challengeId,
+        channelCode: outbox.get('1001')!,
+        signature: sig1,
+      }),
       'CHALLENGE_CONSUMED',
     );
-    const c3 = await links.requestLink({
-      workspaceId: WORKSPACE,
-      channel: 'telegram',
-      channelProof: login(2002, 'bob'),
-      wallet: bob.address,
-    });
+    clock += 1;
+    const c3 = await request(login(2002, 'bob'), bob.address);
     clock += 301;
     await expectCode(
       links.completeLink({
         challengeId: c3.challengeId,
+        channelCode: outbox.get('2002')!,
         signature: await bob.signTypedData(channelLinkTypedData(c3)),
       }),
       'CHALLENGE_EXPIRED',
     );
 
-    // Unlink needs the bound wallet's signature; Mallory cannot unlink Alice.
+    // Regression: completion is atomic per wallet. Two pending challenges for
+    // one wallet from different Telegram ids cannot both bind.
+    const ca = await request(login(3003, 'carol'), carol.address);
+    const cb = await request(login(4004, 'carol2'), carol.address);
+    await links.completeLink({
+      challengeId: ca.challengeId,
+      channelCode: outbox.get('3003')!,
+      signature: await carol.signTypedData(channelLinkTypedData(ca)),
+    });
+    await expectCode(
+      links.completeLink({
+        challengeId: cb.challengeId,
+        channelCode: outbox.get('4004')!,
+        signature: await carol.signTypedData(channelLinkTypedData(cb)),
+      }),
+      'PRINCIPAL_EXISTS',
+    );
+
+    // Wallet unlink needs the bound wallet; requests are rate limited per link.
     const u = await links.requestUnlink({
       workspaceId: WORKSPACE,
       channel: 'telegram',
       channelUserId: '1001',
     });
     expect(u.wallet).toBe(alice.address);
+    await expectCode(
+      links.requestUnlink({
+        workspaceId: WORKSPACE,
+        channel: 'telegram',
+        channelUserId: '1001',
+      }),
+      'RATE_LIMITED',
+    );
     await expectCode(
       links.completeUnlink({
         challengeId: u.challengeId,
@@ -328,14 +401,33 @@ describe('P05 principal linking and large-group governance', () => {
       challengeId: u.challengeId,
       signature: await alice.signTypedData(channelLinkTypedData(u)),
     });
-    expect(ended.unlinkedAt).toBe(clock);
-    expect(
-      await links.resolve({
-        workspaceId: WORKSPACE,
-        channel: 'telegram',
-        channelUserId: '1001',
+    expect(ended).toMatchObject({ unlinkedAt: clock, unlinkedBy: 'WALLET' });
+    expect(await resolve('1001')).toBeNull();
+
+    // Carol lost her wallet: she unlinks her own Telegram id with a fresh
+    // channel proof and the code delivered to her.
+    clock += 1;
+    const cu = await links.requestChannelUnlink({
+      workspaceId: WORKSPACE,
+      channel: 'telegram',
+      channelProof: login(3003, 'carol'),
+    });
+    await expectCode(
+      links.completeChannelUnlink({
+        challengeId: cu.challengeId,
+        channelCode: '12345678',
       }),
-    ).toBeNull();
+      'CHALLENGE_MISMATCH',
+    );
+    const carolEnded = await links.completeChannelUnlink({
+      challengeId: cu.challengeId,
+      channelCode: outbox.get('3003')!,
+    });
+    expect(carolEnded).toMatchObject({
+      unlinkedBy: 'CHANNEL',
+      wallet: carol.address,
+    });
+    expect(await resolve('3003')).toBeNull();
   });
 
   it('P05-02 1,000 eligible with 600 voters records 400 abstentions, never unanimity', async () => {
@@ -354,7 +446,7 @@ describe('P05 principal linking and large-group governance', () => {
     expect(snapshot.eligibleCount).toBe(1_000);
     expect(snapshot.flags).toEqual([]);
     expect(Object.isFrozen(snapshot.members)).toBe(true);
-    verifySnapshot(snapshot);
+    verifySnapshot(snapshot, policyV1);
 
     const accepted: AcceptedVote[] = [];
     for (const voter of accounts.slice(0, 600)) {
@@ -397,8 +489,20 @@ describe('P05 principal linking and large-group governance', () => {
       }),
       'DUPLICATE_VOTE',
     );
+    // A vote object altered after admission does not survive the tally's re-verification.
+    const forged = { ...accepted[0]!, choice: 'NO' as const };
+    await expectCode(
+      tally({
+        snapshot,
+        policy: policyV1,
+        votes: [forged, ...accepted.slice(1)],
+        delegations: [],
+        at: snapshot.closesAt,
+      }),
+      'BAD_SIGNATURE',
+    );
 
-    const open = tally({
+    const open = await tally({
       snapshot,
       policy: policyV1,
       votes: accepted,
@@ -406,7 +510,7 @@ describe('P05 principal linking and large-group governance', () => {
       at: NOW + DAY,
     });
     expect(open.status).toBe('OPEN');
-    const result = tally({
+    const result = await tally({
       snapshot,
       policy: policyV1,
       votes: accepted,
@@ -432,6 +536,37 @@ describe('P05 principal linking and large-group governance', () => {
     expect(result.summary).toContain('400 did not vote');
     expect(result.summary).not.toMatch(/100%|unanim/i);
   }, 120_000);
+
+  it('P05-02 unanimity is only reported on a final, current-policy result', async () => {
+    const [a, b] = [accountFor('unan-a'), accountFor('unan-b')];
+    const snapshot = takeSnapshot({
+      ballotId: 'bal_unanimous',
+      proposalHash: keccak256(toHex('unanimous')),
+      policy: policyV1,
+      members: [member('ua', a.address), member('ub', b.address)],
+      now: NOW,
+    });
+    const votes: AcceptedVote[] = [];
+    for (const v of [a, b]) {
+      const s = await signedVote(v, snapshot, 'YES');
+      votes.push(
+        await admitVote({
+          snapshot,
+          policy: policyV1,
+          delegations: [],
+          accepted: votes,
+          ...s,
+          now: NOW + 60,
+        }),
+      );
+    }
+    const at = (t: number, policy = policyV1) =>
+      tally({ snapshot, policy, votes, delegations: [], at: t });
+    expect((await at(NOW + 100)).unanimous).toBe(false); // OPEN
+    const stale = await at(snapshot.closesAt, { ...policyV1, version: 2 });
+    expect(stale).toMatchObject({ status: 'STALE_POLICY', unanimous: false });
+    expect((await at(snapshot.closesAt)).unanimous).toBe(true);
+  });
 
   it('P05-03 delegation cycles and votes through revoked or expired delegations are rejected', async () => {
     const [A, B, C, D, E, F] = ['A', 'B', 'C', 'D', 'E', 'F'].map((l) =>
@@ -555,7 +690,7 @@ describe('P05 principal linking and large-group governance', () => {
       await A.signTypedData(revocationTypedData(revokeA)),
       NOW + 5_000,
     );
-    const result = tally({
+    const result = await tally({
       snapshot,
       policy: policyV1,
       votes: accepted,
@@ -571,6 +706,133 @@ describe('P05 principal linking and large-group governance', () => {
     expect(delegationId(registry.list()[0]!.delegation)).toBe(
       registry.list()[0]!.id,
     );
+
+    // Regression: hand-made delegation records are re-verified, not trusted.
+    const aRecord = registry.list().find((r) => r.id === aId)!;
+    const redirected: DelegationRecord = {
+      ...aRecord,
+      delegation: { ...aRecord.delegation, delegate: E.address },
+    };
+    const unsignedRevocation: DelegationRecord = {
+      ...registry.list().find((r) => r.delegation.delegator === B.address)!,
+      revokedAt: NOW + 50,
+      revocation: null,
+      revocationSignature: null,
+    };
+    const dRecord = registry.list().find((r) => r.id === dId)!;
+    const revokedByOther: DelegationRecord = {
+      ...dRecord,
+      revocationSignature: await E.signTypedData(
+        revocationTypedData(dRecord.revocation!),
+      ),
+    };
+    const others = registry.list().filter((r) => r.id !== aId);
+    await expectCode(
+      tally({
+        snapshot,
+        policy: policyV1,
+        votes: accepted,
+        delegations: [
+          revokedByOther,
+          ...registry.list().filter((r) => r.id !== dId),
+        ],
+        at: snapshot.closesAt,
+      }),
+      'BAD_SIGNATURE',
+    );
+    await expectCode(
+      tally({
+        snapshot,
+        policy: policyV1,
+        votes: accepted,
+        delegations: [redirected, ...others],
+        at: snapshot.closesAt,
+      }),
+      'DELEGATION_INVALID',
+    );
+    await expectCode(
+      admitVote({
+        snapshot,
+        policy: policyV1,
+        delegations: [
+          unsignedRevocation,
+          ...registry
+            .list()
+            .filter((r) => r.delegation.delegator !== B.address),
+        ],
+        accepted: [],
+        ...(await signedVote(C, snapshot, 'YES', [], NOW + 70)),
+        now: NOW + 70,
+      }),
+      'DELEGATION_INVALID',
+    );
+  });
+
+  it('P05-03 a downstream delegation cannot wipe out representation that resolves upstream', async () => {
+    // Regression: with maxDepth 3, X -> A -> B -> C and A votes for X; then
+    // C -> D is added. X must stay represented by A.
+    const [X, A, B, C, D] = ['X', 'A', 'B', 'C', 'D'].map((l) =>
+      accountFor(`depth-${l}`),
+    ) as [
+      PrivateKeyAccount,
+      PrivateKeyAccount,
+      PrivateKeyAccount,
+      PrivateKeyAccount,
+      PrivateKeyAccount,
+    ];
+    const registry = new DelegationRegistry(policyV1);
+    const link = async (
+      from: PrivateKeyAccount,
+      to: PrivateKeyAccount,
+      now: number,
+    ) => {
+      const d: Delegation = {
+        workspaceId: WORKSPACE,
+        chainId: CHAIN,
+        delegator: from.address,
+        delegate: to.address,
+        issuedAt: now,
+        expiresAt: now + 30 * DAY,
+        nonce: nonce(`depth:${from.address}`),
+      };
+      return registry.register(
+        d,
+        await from.signTypedData(delegationTypedData(d)),
+        now,
+      );
+    };
+    await link(X, A, NOW);
+    await link(A, B, NOW);
+    await link(B, C, NOW);
+    const snapshot = takeSnapshot({
+      ballotId: 'bal_depth',
+      proposalHash: keccak256(toHex('depth')),
+      policy: policyV1,
+      members: [X, A, B, C, D].map((a, i) => member(`d${i}`, a.address)),
+      now: NOW,
+    });
+    const v = await signedVote(A, snapshot, 'YES', [X.address], NOW + 60);
+    const accepted = [
+      await admitVote({
+        snapshot,
+        policy: policyV1,
+        delegations: registry.list(),
+        accepted: [],
+        ...v,
+        now: NOW + 60,
+      }),
+    ];
+    await link(C, D, NOW + 100); // pushes X's full chain to four hops
+    const result = await tally({
+      snapshot,
+      policy: policyV1,
+      votes: accepted,
+      delegations: registry.list(),
+      at: snapshot.closesAt,
+    });
+    expect(result.yes.count).toBe(2); // A and X via A
+    expect(result.viaDelegate).toBe(1);
+    expect(result.droppedRepresentations).toEqual([]);
   });
 
   it('P05-03 representation stops at the closest voting delegate; late delegations cannot rewrite a tally', async () => {
@@ -646,7 +908,7 @@ describe('P05 principal linking and large-group governance', () => {
       snapshot.closesAt + 100,
     );
     expect(isActiveAt(late, snapshot.closesAt)).toBe(false);
-    const result = tally({
+    const result = await tally({
       snapshot,
       policy: policyV1,
       votes: accepted,
@@ -775,7 +1037,8 @@ describe('P05 principal linking and large-group governance', () => {
     requireAssent({ terms: termsV2, contributor: y.address, assents });
   });
 
-  it('P05-05 four-of-seven council signatures are rejected under a five-of-seven policy', async () => {
+  it('P05-05 four-of-seven council signatures are rejected under a five-of-seven policy; approvals execute once', async () => {
+    const store = await newCouncil();
     validateTerm(term1, policyV1);
     const vault = `0x${'a1'.repeat(20)}` as Address;
     const recipient = `0x${'5a'.repeat(20)}` as Address;
@@ -792,15 +1055,8 @@ describe('P05 principal linking and large-group governance', () => {
       withdrawalActionHash(transfer),
       'withdraw-1',
     );
-    const four = await signAction(council.slice(0, 4), withdraw);
     const err = await expectCode(
-      approveCouncilAction({
-        term: term1,
-        policy: policyV1,
-        action: withdraw,
-        signatures: four,
-        now: NOW,
-      }),
+      approve(store, withdraw, council.slice(0, 4)),
       'QUORUM_NOT_MET',
     );
     expect(err.message).toBe(
@@ -809,7 +1065,7 @@ describe('P05 principal linking and large-group governance', () => {
 
     // Padding the four with a repeat, an outsider, or a seat holder's signature
     // over a different amount never reaches five independent signers.
-    const outsider = accountFor('outsider');
+    const four = await signAction(council.slice(0, 4), withdraw);
     const otherAmount = actionFor(
       term1,
       'WITHDRAWAL',
@@ -819,11 +1075,14 @@ describe('P05 principal linking and large-group governance', () => {
     const padded = [
       ...four,
       four[0]!,
-      await outsider.signTypedData(councilActionTypedData(withdraw)),
+      await accountFor('outsider').signTypedData(
+        councilActionTypedData(withdraw),
+      ),
       await council[4]!.signTypedData(councilActionTypedData(otherAmount)),
       'approved in chat',
     ];
     const report = await verifyCouncilSignatures({
+      store,
       term: term1,
       policy: policyV1,
       action: withdraw,
@@ -840,6 +1099,7 @@ describe('P05 principal linking and large-group governance', () => {
     ]);
     await expectCode(
       approveCouncilAction({
+        store,
         term: term1,
         policy: policyV1,
         action: withdraw,
@@ -849,36 +1109,87 @@ describe('P05 principal linking and large-group governance', () => {
       'QUORUM_NOT_MET',
     );
 
-    // Five distinct seat holders approve; execution still waits out the challenge window.
-    const five = await signAction(council.slice(0, 5), withdraw);
-    const decision = await approveCouncilAction({
-      term: term1,
-      policy: policyV1,
-      action: withdraw,
-      signatures: five,
-      now: NOW,
-    });
+    // Five distinct seat holders approve; execution waits out the challenge window.
+    const decision = await approve(store, withdraw, council.slice(0, 5));
+    expect(decision.signatures).toHaveLength(5);
     const exec = (
+      d: Pick<CouncilDecision, 'digest'>,
       now: number,
-      challenges = [] as Awaited<ReturnType<typeof admitChallenge>>[],
       hash = withdraw.actionHash,
     ) =>
-      assertExecutable({
-        decision,
-        term: term1,
-        challenges,
+      executeDecision({
+        store,
+        decision: d,
+        policy: policyV1,
         now,
         kind: 'WITHDRAWAL',
         actionHash: hash,
       });
-    await expectCode(() => exec(NOW + DAY), 'CHALLENGE_WINDOW_OPEN');
+    await expectCode(exec(decision, NOW + DAY), 'CHALLENGE_WINDOW_OPEN');
     await expectCode(
-      () => exec(NOW + 3 * DAY, [], otherAmount.actionHash),
+      exec(decision, NOW + 3 * DAY, otherAmount.actionHash),
       'ACTION_MISMATCH',
     );
-    exec(NOW + 2 * DAY);
+    const receipt = await exec(decision, NOW + 2 * DAY);
+    expect(receipt.signers).toHaveLength(5);
+    // Regression: the same decision cannot execute a second time.
+    await expectCode(exec(decision, NOW + 2 * DAY + 1), 'ALREADY_EXECUTED');
+    expect(
+      await decisionStatus({
+        store,
+        digest: decision.digest,
+        policy: policyV1,
+        now: NOW + 3 * DAY,
+      }),
+    ).toBe('EXECUTED');
+    // Nor can another approval that reuses its nonce.
+    const sameNonce = await approve(
+      store,
+      { ...withdraw, expiresAt: withdraw.expiresAt + 1 },
+      council.slice(2, 7),
+    );
+    await expectCode(exec(sameNonce, NOW + 3 * DAY), 'ALREADY_EXECUTED');
 
-    // A seat with two seats' worth of one wallet is not an independent council.
+    // Regression: a hand-made decision is not trusted. Unrecorded, it is unknown;
+    // written straight into the store, its signatures and window are re-derived.
+    const fakeAction = actionFor(
+      term1,
+      'WITHDRAWAL',
+      withdraw.actionHash,
+      'withdraw-fake',
+    );
+    const fake: CouncilDecision = {
+      digest: councilActionDigest(fakeAction),
+      action: fakeAction,
+      signatures: [],
+      signers: council.slice(0, 5).map((c) => c.address),
+      approvedAt: 0,
+      challengeEndsAt: 0,
+    };
+    await expectCode(exec(fake, NOW + 3 * DAY), 'UNKNOWN_DECISION');
+    await store.insertDecision(fake);
+    await expectCode(exec(fake, NOW + 3 * DAY), 'QUORUM_NOT_MET');
+    const earlyAction = actionFor(
+      term1,
+      'WITHDRAWAL',
+      withdraw.actionHash,
+      'withdraw-early',
+      { proposedAt: NOW + DAY },
+    );
+    await store.insertDecision({
+      digest: councilActionDigest(earlyAction),
+      action: earlyAction,
+      signatures: await signAction(council.slice(0, 5), earlyAction),
+      signers: [],
+      approvedAt: 0,
+      challengeEndsAt: 0,
+    });
+    await expectCode(
+      exec({ digest: councilActionDigest(earlyAction) }, NOW + 2 * DAY),
+      'CHALLENGE_WINDOW_OPEN',
+    );
+
+    // One wallet holding two seats is not an independent council.
     const sharedSeat = {
       ...term1,
       seats: term1.seats.map((s, i) =>
@@ -887,30 +1198,40 @@ describe('P05 principal linking and large-group governance', () => {
     };
     await expectCode(() => validateTerm(sharedSeat, policyV1), 'BAD_COUNCIL');
 
-    // A signed challenge inside the window halts the decision.
+    // A signed challenge inside the window halts a decision.
+    const withdraw2 = actionFor(
+      term1,
+      'WITHDRAWAL',
+      withdraw.actionHash,
+      'withdraw-2',
+    );
+    const decision2 = await approve(store, withdraw2, council.slice(0, 5));
     const objector = accountFor('member-objector');
     const challenge = {
       chainId: CHAIN,
-      decisionDigest: decision.digest,
+      decisionDigest: decision2.digest,
       challenger: objector.address,
       reasonHash: keccak256(toHex('recipient not on vendor master')),
       raisedAt: NOW + 3_600,
     };
-    const accepted = await admitChallenge({
-      decision,
+    await admitChallenge({
+      store,
+      policy: policyV1,
+      digest: decision2.digest,
       challenge,
       signature: await objector.signTypedData(challengeTypedData(challenge)),
       challengers: [objector.address, ...council.map((c) => c.address)],
       now: NOW + 3_600,
     });
-    await expectCode(() => exec(NOW + 3 * DAY, [accepted]), 'CHALLENGED');
+    await expectCode(exec(decision2, NOW + 3 * DAY), 'CHALLENGED');
+    const late = { ...challenge, raisedAt: NOW + 3 * DAY };
     await expectCode(
       admitChallenge({
-        decision,
-        challenge: { ...challenge, raisedAt: NOW + 3 * DAY },
-        signature: await objector.signTypedData(
-          challengeTypedData({ ...challenge, raisedAt: NOW + 3 * DAY }),
-        ),
+        store,
+        policy: policyV1,
+        digest: decision2.digest,
+        challenge: late,
+        signature: await objector.signTypedData(challengeTypedData(late)),
         challengers: [objector.address],
         now: NOW + 3 * DAY,
       }),
@@ -918,7 +1239,8 @@ describe('P05 principal linking and large-group governance', () => {
     );
   });
 
-  it('P05-05 term rotation retires old seat holders and needs the sitting quorum', async () => {
+  it('P05-05 term rotation retires the old term, refuses forks and back-dating, and needs the sitting quorum', async () => {
+    const store = await newCouncil();
     const newcomers = [accountFor('seat-new-a'), accountFor('seat-new-b')];
     const term2: CouncilTerm = {
       ...term1,
@@ -930,54 +1252,126 @@ describe('P05 principal linking and large-group governance', () => {
       startsAt: NOW + 3 * DAY,
       endsAt: NOW + 360 * DAY,
     };
+    const term2Fork: CouncilTerm = { ...term2, endsAt: term2.endsAt - DAY };
+    const term2Back: CouncilTerm = {
+      ...term2,
+      startsAt: NOW,
+      endsAt: NOW + 300 * DAY,
+    };
     const rotate = actionFor(term1, 'ROTATE_TERM', termHash(term2), 'rotate-1');
     await expectCode(
-      approveCouncilAction({
-        term: term1,
-        policy: policyV1,
-        action: rotate,
-        signatures: await signAction(council.slice(2, 6), rotate),
-        now: NOW,
-      }),
+      approve(store, rotate, council.slice(2, 6)),
       'QUORUM_NOT_MET',
     );
-    const decision = await approveCouncilAction({
-      term: term1,
-      policy: policyV1,
-      action: rotate,
-      signatures: await signAction(council.slice(2, 7), rotate),
-      now: NOW,
-    });
+    const decision = await approve(store, rotate, council.slice(2, 7));
+    const fork = await approve(
+      store,
+      actionFor(term1, 'ROTATE_TERM', termHash(term2Fork), 'rotate-fork'),
+      council.slice(0, 5),
+    );
+    const back = await approve(
+      store,
+      actionFor(term1, 'ROTATE_TERM', termHash(term2Back), 'rotate-back'),
+      council.slice(0, 5),
+    );
+    const pendingPay = await approve(
+      store,
+      actionFor(term1, 'WITHDRAWAL', keccak256(toHex('pay')), 'pay-1'),
+      council.slice(0, 5),
+    );
+
     await expectCode(
-      () =>
-        rotateTerm({
-          current: term1,
-          next: term2,
-          policy: policyV1,
-          decision,
-          challenges: [],
-          now: NOW + DAY,
-        }),
+      rotateTerm({
+        store,
+        next: term2,
+        policy: policyV1,
+        decision,
+        now: NOW + DAY,
+      }),
       'CHALLENGE_WINDOW_OPEN',
     );
-    const active = rotateTerm({
-      current: term1,
+    await expectCode(
+      rotateTerm({
+        store,
+        next: term2Back,
+        policy: policyV1,
+        decision: back,
+        now: NOW + 2 * DAY,
+      }),
+      'BAD_COUNCIL',
+    );
+    const active = await rotateTerm({
+      store,
       next: term2,
       policy: policyV1,
       decision,
-      challenges: [],
       now: NOW + 2 * DAY,
     });
-    expect(active.termId).toBe(2);
+    expect(active.term.termId).toBe(2);
+    // Regression: a second, competing rotation from term 1 is a fork and is refused.
+    await expectCode(
+      rotateTerm({
+        store,
+        next: term2Fork,
+        policy: policyV1,
+        decision: fork,
+        now: NOW + 2 * DAY + 10,
+      }),
+      'BAD_COUNCIL',
+    );
+    const terms = await store.terms(term1.councilId);
+    expect(terms.map((t) => [t.term.termId, t.effectiveEnd])).toEqual([
+      [1, term2.startsAt],
+      [2, term2.endsAt],
+    ]);
 
-    // Retired holders (seats 5, 6) no longer count; term-1 actions do not bind term 2.
+    // Regression: after the handover, the old term object can neither approve nor execute.
     const later = NOW + 4 * DAY;
-    const pay = {
-      ...actionFor(term2, 'WITHDRAWAL', keccak256(toHex('pay')), 'pay-2'),
-      expiresAt: later + 30 * DAY,
-    };
+    expect(
+      (await currentTerm(store, term1.councilId, later))?.term.termId,
+    ).toBe(2);
+    const oldTermPay = actionFor(
+      term1,
+      'WITHDRAWAL',
+      keccak256(toHex('pay')),
+      'pay-old',
+      { proposedAt: later },
+    );
+    await expectCode(
+      approve(store, oldTermPay, council.slice(0, 5), later, term1),
+      'TERM_INACTIVE',
+    );
+    await expectCode(
+      executeDecision({
+        store,
+        decision: pendingPay,
+        policy: policyV1,
+        now: later,
+        kind: 'WITHDRAWAL',
+        actionHash: keccak256(toHex('pay')),
+      }),
+      'TERM_INACTIVE',
+    );
+    expect(
+      await decisionStatus({
+        store,
+        digest: pendingPay.digest,
+        policy: policyV1,
+        now: later,
+      }),
+    ).toBe('TERM_ENDED');
+
+    // Retired holders (seats 5, 6) do not count toward term 2.
+    const pay = actionFor(
+      term2,
+      'WITHDRAWAL',
+      keccak256(toHex('pay')),
+      'pay-2',
+      { proposedAt: later, expiresAt: later + 30 * DAY },
+    );
     const report = await verifyCouncilSignatures({
-      term: active,
+      store,
+      term: term2,
       policy: policyV1,
       action: pay,
       signatures: await signAction(
@@ -995,49 +1389,39 @@ describe('P05 principal linking and large-group governance', () => {
     });
     expect(report.signers).toHaveLength(4);
     expect(report.met).toBe(false);
-    const stale = {
-      ...actionFor(term1, 'WITHDRAWAL', keccak256(toHex('pay')), 'pay-1'),
-    };
-    await expectCode(
-      verifyCouncilSignatures({
-        term: active,
-        policy: policyV1,
-        action: stale,
-        signatures: [],
-        now: later,
-      }),
-      'ACTION_MISMATCH',
-    );
 
-    // If the sitting council lapses, members install the next term only by a passed ballot on it.
-    const members = Array.from({ length: 10 }, (_, i) =>
+    // If the sitting council lapses, members install the next term by a passed
+    // ballot; the tally is recomputed from the signed votes, not trusted.
+    const voters = Array.from({ length: 10 }, (_, i) =>
       accountFor(`installer-${i}`),
     );
+    const closes = later + policyV1.votingPeriodSeconds;
     const term3: CouncilTerm = {
       ...term2,
       termId: 3,
-      startsAt: term2.endsAt,
-      endsAt: term2.endsAt + 300 * DAY,
+      startsAt: closes + 10,
+      endsAt: closes + 300 * DAY,
     };
-    const snapshot = takeSnapshot({
+    const ballot = takeSnapshot({
       ballotId: 'bal_term3',
       proposalHash: termHash(term3),
       policy: policyV1,
-      members: members.map((a, i) => member(`i${i}`, a.address)),
+      members: voters.map((a, i) => member(`i${i}`, a.address)),
       now: later,
     });
+    expect(ballot.closesAt).toBe(closes);
     const votes: AcceptedVote[] = [];
-    for (const m of members.slice(0, 7)) {
+    for (const m of voters.slice(0, 7)) {
       const { vote, signature } = await signedVote(
         m,
-        snapshot,
+        ballot,
         'YES',
         [],
         later + 10,
       );
       votes.push(
         await admitVote({
-          snapshot,
+          snapshot: ballot,
           policy: policyV1,
           delegations: [],
           accepted: votes,
@@ -1047,33 +1431,28 @@ describe('P05 principal linking and large-group governance', () => {
         }),
       );
     }
-    const result = tally({
-      snapshot,
-      policy: policyV1,
-      votes,
-      delegations: [],
-      at: snapshot.closesAt,
-    });
-    expect(
+    const install = (next: CouncilTerm, v = votes, s = ballot) =>
       installTermFromBallot({
-        previous: term2,
-        next: term3,
+        store,
+        next,
         policy: policyV1,
-        result,
-        now: snapshot.closesAt,
-      }).termId,
-    ).toBe(3);
+        snapshot: s,
+        votes: v,
+        delegations: [],
+        now: ballot.closesAt,
+      });
+    await expectCode(install(term3, votes.slice(0, 2)), 'QUORUM_NOT_MET'); // recomputed: 2 of 10 is no quorum
     await expectCode(
-      () =>
-        installTermFromBallot({
-          previous: term2,
-          next: { ...term3, endsAt: term3.endsAt - 1 },
-          policy: policyV1,
-          result,
-          now: snapshot.closesAt,
-        }),
+      install({ ...term3, endsAt: term3.endsAt - 1 }),
       'QUORUM_NOT_MET',
     );
+    const tampered = {
+      ...ballot,
+      members: ballot.members.slice(3),
+    } as BallotSnapshot;
+    await expectCode(install(term3, votes, tampered), 'BAD_SNAPSHOT');
+    expect((await install(term3)).term.termId).toBe(3);
+    await expectCode(install(term3), 'BAD_COUNCIL'); // the same ballot cannot install twice
   }, 60_000);
 
   it('P05-06 concentration and duplicate-eligibility flags are surfaced', async () => {
@@ -1098,27 +1477,36 @@ describe('P05 principal linking and large-group governance', () => {
         ),
         member('dup-a', twin.address, ['telegram:900']),
         member('dup-b', twin.address, ['telegram:901']),
+        // The same Telegram id written two ways is still one identity.
         member('tg-x', tgA.address, ['telegram:777']),
-        member('tg-y', tgB.address, ['telegram:777']),
+        member('tg-y', tgB.address, ['Telegram:0777']),
       ],
       now: NOW,
     });
     const codes = snapshot.flags.map((f) => [
       f.code,
       f.severity,
+      f.subject,
       [...f.memberIds],
     ]);
     expect(codes).toContainEqual([
       'DUPLICATE_WALLET',
       'HARD',
+      twin.address,
       ['dup-a', 'dup-b'],
     ]);
     expect(codes).toContainEqual([
       'DUPLICATE_CHANNEL_ID',
       'HARD',
+      'telegram:777',
       ['tg-x', 'tg-y'],
     ]);
-    expect(codes).toContainEqual(['MEMBER_CONCENTRATION', 'SOFT', ['s19']]);
+    expect(codes).toContainEqual([
+      'MEMBER_CONCENTRATION',
+      'SOFT',
+      people[19]!.address,
+      ['s19'],
+    ]);
     expect(snapshot.quarantined.map((m) => m.memberId).sort()).toEqual([
       'dup-a',
       'dup-b',
@@ -1128,7 +1516,7 @@ describe('P05 principal linking and large-group governance', () => {
     expect(snapshot.eligibleCount).toBe(20);
     expect(snapshot.eligibleWeight).toBe(24n);
 
-    // Quarantined entries cannot vote.
+    // Quarantined entries cannot vote directly...
     const q = await signedVote(twin, snapshot, 'YES');
     await expectCode(
       admitVote({
@@ -1142,24 +1530,57 @@ describe('P05 principal linking and large-group governance', () => {
       'NOT_ELIGIBLE',
     );
 
-    // Five members delegating to s0 gives s0 6/24 = 25% of eligible weight.
     const registry = new DelegationRegistry(policyV1);
-    for (const a of people.slice(1, 6)) {
+    const link = async (from: PrivateKeyAccount, to: PrivateKeyAccount) => {
       const d: Delegation = {
         workspaceId: WORKSPACE,
         chainId: CHAIN,
-        delegator: a.address,
-        delegate: people[0]!.address,
+        delegator: from.address,
+        delegate: to.address,
         issuedAt: NOW,
         expiresAt: NOW + 30 * DAY,
-        nonce: nonce(`conc-${a.address}`),
+        nonce: nonce(`conc-${from.address}`),
       };
       await registry.register(
         d,
-        await a.signTypedData(delegationTypedData(d)),
+        await from.signTypedData(delegationTypedData(d)),
         NOW,
       );
-    }
+    };
+    // ...nor as a delegate (regression), and a quarantined wallet breaks a chain through it.
+    await link(people[6]!, twin);
+    await link(twin, people[7]!);
+    const asDelegate = await signedVote(twin, snapshot, 'YES', [
+      people[6]!.address,
+    ]);
+    await expectCode(
+      admitVote({
+        snapshot,
+        policy: policyV1,
+        delegations: registry.list(),
+        accepted: [],
+        ...asDelegate,
+        now: NOW + 60,
+      }),
+      'NOT_ELIGIBLE',
+    );
+    const through = await signedVote(people[7]!, snapshot, 'YES', [
+      people[6]!.address,
+    ]);
+    await expectCode(
+      admitVote({
+        snapshot,
+        policy: policyV1,
+        delegations: registry.list(),
+        accepted: [],
+        ...through,
+        now: NOW + 60,
+      }),
+      'NOT_ELIGIBLE',
+    );
+
+    // Five members delegating to s0 gives s0 6/24 = 25% of eligible weight.
+    for (const a of people.slice(1, 6)) await link(a, people[0]!);
     const flags = delegationConcentration({
       snapshot,
       records: registry.list(),
@@ -1174,7 +1595,7 @@ describe('P05 principal linking and large-group governance', () => {
         detail: expect.stringContaining('2500 bps'),
       }),
     ]);
-    const result = tally({
+    const result = await tally({
       snapshot,
       policy: policyV1,
       votes: [],
@@ -1190,10 +1611,13 @@ describe('P05 principal linking and large-group governance', () => {
   });
 
   it('P05-07 a policy change after the ballot requires a resnapshot and proper assent', async () => {
+    const store = await newCouncil();
     const voters = Array.from({ length: 10 }, (_, i) =>
       accountFor(`reset-${i}`),
     );
-    const members = voters.map((a, i) => member(`r${i}`, a.address));
+    const members = voters.map((a, i) =>
+      member(`r${i}`, a.address, [`telegram:${7_000 + i}`]),
+    );
     const s1 = takeSnapshot({
       ballotId: 'bal_launch',
       proposalHash: keccak256(toHex('launch under current terms')),
@@ -1214,6 +1638,18 @@ describe('P05 principal linking and large-group governance', () => {
       }),
     );
 
+    // A withdrawal approved under v1 is still pending when the policy changes.
+    const pendingPay = await approve(
+      store,
+      actionFor(
+        term1,
+        'WITHDRAWAL',
+        keccak256(toHex('pending')),
+        'pending-pay',
+      ),
+      council.slice(0, 5),
+    );
+
     // The council moves to policy v2 (new launch terms, higher quorum).
     const policyV2: GovernancePolicy = {
       ...policyV1,
@@ -1228,22 +1664,15 @@ describe('P05 principal linking and large-group governance', () => {
       'policy-v2',
     );
     await expectCode(
-      approveCouncilAction({
-        term: term1,
-        policy: policyV1,
-        action: change,
-        signatures: await signAction(council.slice(0, 4), change),
-        now: NOW + 100,
-      }),
+      approve(store, change, council.slice(0, 4), NOW + 100),
       'QUORUM_NOT_MET',
     );
-    const decision = await approveCouncilAction({
-      term: term1,
-      policy: policyV1,
-      action: change,
-      signatures: await signAction(council.slice(1, 6), change),
-      now: NOW + 100,
-    });
+    const decision = await approve(
+      store,
+      change,
+      council.slice(1, 6),
+      NOW + 100,
+    );
     const x = accountFor('contributor-x');
     const y = accountFor('contributor-y');
     const contributions: Contribution[] = [x, y].map((who, i) => ({
@@ -1274,23 +1703,44 @@ describe('P05 principal linking and large-group governance', () => {
     ];
     const apply = (now: number, newTerms?: LaunchTerms) =>
       applyPolicyChange({
+        store,
         current: policyV1,
         proposed: policyV2,
-        term: term1,
         decision,
-        challenges: [],
         now,
         contributions,
         assents,
         ...(newTerms ? { newTerms } : {}),
       });
-    await expectCode(() => apply(NOW + DAY, termsV2), 'CHALLENGE_WINDOW_OPEN');
-    await expectCode(() => apply(NOW + 3 * DAY), 'BAD_TERMS');
-    const applied = apply(NOW + 3 * DAY, termsV2);
+    await expectCode(apply(NOW + DAY, termsV2), 'CHALLENGE_WINDOW_OPEN');
+    await expectCode(apply(NOW + 3 * DAY), 'BAD_TERMS');
+    const applied = await apply(NOW + 3 * DAY, termsV2);
     expect(applied.requiresResnapshot).toBe(true);
     expect(applied.materialTermsChange).toBe(true);
     expect(applied.contributorRights?.pending).toEqual([x.address]);
     expect(applied.contributorRights?.bound.baseUnits).toBe(25_000_000n);
+    await expectCode(apply(NOW + 3 * DAY + 1, termsV2), 'ALREADY_EXECUTED');
+
+    // Regression: council decisions signed under v1 are void under v2.
+    expect(
+      await decisionStatus({
+        store,
+        digest: pendingPay.digest,
+        policy: policyV2,
+        now: NOW + 3 * DAY,
+      }),
+    ).toBe('POLICY_CHANGED');
+    await expectCode(
+      executeDecision({
+        store,
+        decision: pendingPay,
+        policy: policyV2,
+        now: NOW + 3 * DAY,
+        kind: 'WITHDRAWAL',
+        actionHash: keccak256(toHex('pending')),
+      }),
+      'POLICY_CHANGED',
+    );
 
     // The old snapshot is void under v2: no new votes, no result.
     const late = await signedVote(voters[1]!, s1, 'YES', [], NOW + 3 * DAY);
@@ -1305,7 +1755,7 @@ describe('P05 principal linking and large-group governance', () => {
       }),
       'RESNAPSHOT_REQUIRED',
     );
-    const stale = tally({
+    const stale = await tally({
       snapshot: s1,
       policy: policyV2,
       votes,
@@ -1316,6 +1766,7 @@ describe('P05 principal linking and large-group governance', () => {
       status: 'STALE_POLICY',
       quorumMet: false,
       approvalMet: false,
+      unanimous: false,
     });
 
     // Resnapshot: fresh window under the new hash; old signatures do not carry over.
@@ -1365,9 +1816,54 @@ describe('P05 principal linking and large-group governance', () => {
     });
     expect(v.snapshotId).toBe(s2.snapshotId);
 
-    // A tampered snapshot is detected.
-    const tampered = { ...s2, members: s2.members.slice(1) } as BallotSnapshot;
-    await expectCode(() => verifySnapshot(tampered), 'BAD_SNAPSHOT');
-    expect(GovernanceError).toBeDefined();
+    // Regression: every snapshot field is covered by its id, and with the policy
+    // a re-hashed forgery is caught by rebuilding from the raw entries.
+    verifySnapshot(s2, policyV2);
+    const edits: Partial<BallotSnapshot>[] = [
+      { members: s2.members.slice(1) },
+      {
+        flags: [
+          {
+            code: 'DUPLICATE_WALLET',
+            severity: 'HARD',
+            subject: 'x',
+            memberIds: [],
+            detail: '',
+          },
+        ],
+      },
+      { quarantined: [s2.members[0]!] },
+      { policyId: 'pol_other' },
+      { policyVersion: 9 },
+      {
+        members: s2.members.map((m, i) =>
+          i === 0 ? { ...m, channelIds: ['telegram:1'] } : m,
+        ),
+      },
+    ];
+    for (const edit of edits)
+      await expectCode(
+        () => verifySnapshot({ ...s2, ...edit } as BallotSnapshot),
+        'BAD_SNAPSHOT',
+      );
+    const { snapshotId: _id, ...body } = { ...s2, quarantined: [], flags: [] };
+    const rehashed = {
+      ...body,
+      members: s2.members.map((m, i) =>
+        i === 0 ? { ...m, channelIds: ['telegram:7001'] } : m,
+      ),
+    };
+    const forgery = {
+      snapshotId: snapshotIdOf(rehashed),
+      ...rehashed,
+    } as BallotSnapshot;
+    await expectCode(() => verifySnapshot(forgery, policyV2), 'BAD_SNAPSHOT');
+  });
+
+  it('deepFreeze freezes children of an already shallow-frozen record', () => {
+    const inner = { weight: 1 };
+    const outer = Object.freeze({ inner });
+    deepFreeze(outer);
+    expect(Object.isFrozen(inner)).toBe(true);
   });
 });
