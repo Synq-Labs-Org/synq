@@ -45,6 +45,7 @@ import type {
   TimingRecommendation,
 } from './proposals.js';
 import { FinanceTeam, type ModelCallRecord } from './team.js';
+import { auditSettlementExplain, findSettlement } from './settlement-audit.js';
 
 export type BalanceView = Readonly<{
   freeCashBaseUnits: string | null;
@@ -396,7 +397,12 @@ export async function superviseFinance(
       case 'EXPLAIN_TRANSACTION': {
         const a = team.spawn(sup, 'AUDIT');
         handledBy.push('AUDIT');
-        const audit = await auditAgentExplain(team, a, desk, intent.txHash);
+        const settlement = team.tool(a, 'evidence.lookup', () =>
+          findSettlement(desk, intent.txHash),
+        );
+        const audit = settlement
+          ? await auditSettlementExplain(team, a, desk, s, settlement)
+          : await auditAgentExplain(team, a, desk, intent.txHash);
         team.complete(a);
         return reply('ANSWERED', audit.explanation, { audit });
       }

@@ -6,6 +6,7 @@ import type { ArcWorldSnapshot } from '@synq/world-model';
 import type { StructuredReasoner } from '../ports.js';
 import type { FinanceBudgetLedger } from './budget.js';
 import type { PaymentKernelPort } from './kernel-port.js';
+import type { SettlementEvidence } from './settlement-audit.js';
 
 const Address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const TxHash = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
@@ -74,6 +75,8 @@ export type FinanceDesk = Readonly<{
   obligations: readonly Obligation[];
   invoices: readonly Invoice[];
   evidence: readonly PayoutEvidence[];
+  /** Reconciled invoice payment routes (e.g. CCTP burn, attestation, mint). */
+  settlements?: readonly SettlementEvidence[];
   ledgerEntries?: readonly JournalEntry[];
   kernel?: PaymentKernelPort;
   reasoner?: StructuredReasoner;

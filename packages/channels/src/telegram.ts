@@ -829,6 +829,59 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
+  /**
+   * Updates a message Synq already posted, in place: the guest answer (by its
+   * inline_message_id) or a chat message (by chat and message id). Used to
+   * keep the original conversation current with status and receipt links
+   * instead of posting a new message per state.
+   */
+  async edit(
+    target: { inlineMessageId: string } | { chatId: string; messageId: string },
+    message: OutboundMessage,
+  ): Promise<void> {
+    const where =
+      'inlineMessageId' in target
+        ? /^[\x21-\x7e]{1,256}$/.test(target.inlineMessageId)
+          ? { inline_message_id: target.inlineMessageId }
+          : null
+        : /^-?[0-9]{1,20}$/.test(target.chatId) &&
+            /^[0-9]{1,20}$/.test(target.messageId)
+          ? {
+              chat_id: Number(target.chatId),
+              message_id: Number(target.messageId),
+            }
+          : null;
+    if (!where)
+      throw new ChannelDeliveryError('PROVIDER_REJECTED', 0, 'invalid target');
+    const buttons = (message.buttons ?? []).filter(
+      (b) => !isLocalUrl(b.url) && b.url.startsWith('https://'),
+    );
+    const local = (message.buttons ?? []).filter((b) => isLocalUrl(b.url));
+    const params = {
+      ...where,
+      text: [message.text, ...local.map((b) => `${b.label}: ${b.url}`)]
+        .join('\n')
+        .slice(0, 4096),
+      link_preview_options: { is_disabled: true },
+      ...(buttons.length
+        ? {
+            reply_markup: {
+              inline_keyboard: buttons
+                .slice(0, 3)
+                .map((b) => [{ text: b.label.slice(0, 64), url: b.url }]),
+            },
+          }
+        : {}),
+    };
+    const key =
+      'inline_message_id' in where
+        ? `inline:${where.inline_message_id}`
+        : String(where.chat_id);
+    await this.limiter.run(key, () =>
+      this.retrying(() => this.options.api.call('editMessageText', params)),
+    );
+  }
+
   async acknowledgeAction(callbackId: string, text: string) {
     await this.options.api.call('answerCallbackQuery', {
       callback_query_id: callbackId,
