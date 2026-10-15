@@ -12,6 +12,11 @@ import {
 } from 'viem';
 import { money, moneyToDecimal, type Money } from '@synq/domain';
 import {
+  admitGrant,
+  type ExecutionGrant,
+  type NonceFence,
+} from '@synq/kernel/arc';
+import {
   arcNativeToUsdc,
   chainProfile,
   contract,
@@ -409,3 +414,42 @@ export async function balanceOf(
 
 export const describeTransfer = (e: TransferEvidence) =>
   `${moneyToDecimal(e.amount)} ${e.amount.asset.symbol} ${e.from} -> ${e.to} on ${e.chain} (${e.hash})`;
+
+/**
+ * The only way the Arc executor moves value on behalf of an agent or workflow:
+ * a Kernel grant for exactly this call. The grant is admitted (authentic,
+ * unexpired, unrevoked, matching, nonce consumed) against the transfer as
+ * prepared and simulated, and only then signed. A grant for recipient A can
+ * never sign a transfer to B.
+ */
+export async function executeGrantedTransfer(input: {
+  chain: ArcChain;
+  signer: TransferSigner;
+  grant: ExecutionGrant;
+  grantKey: Uint8Array;
+  fence: NonceFence;
+  mandateRevoked: boolean;
+  transfer: Parameters<typeof prepareTransfer>[1];
+  now: number;
+  onBroadcast?: (hash: Hex, prepared: PreparedTransfer) => Promise<void> | void;
+}): Promise<TransferEvidence> {
+  const prepared = await prepareTransfer(input.chain, input.transfer);
+  await admitGrant({
+    grantKey: input.grantKey,
+    grant: input.grant,
+    call: {
+      chainId: prepared.chainId,
+      token: prepared.token,
+      payer: prepared.from,
+      recipient: prepared.to,
+      amount: prepared.amount.baseUnits,
+    },
+    now: input.now,
+    mandateRevoked: input.mandateRevoked,
+    fence: input.fence,
+  });
+  const { raw, hash } = await signPrepared(input.signer, prepared);
+  await input.onBroadcast?.(hash, prepared);
+  await input.chain.client.sendRawTransaction({ serializedTransaction: raw });
+  return reconcileTransfer(input.chain, prepared, hash);
+}
