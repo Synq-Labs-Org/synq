@@ -191,6 +191,11 @@ export interface ChannelAdapter {
     guestQueryId: string,
     message: OutboundMessage,
   ): Promise<{ inlineMessageId: string }>;
+  /** Edits a message Synq posted earlier; `modified: false` when nothing changed. */
+  edit?(
+    target: { inlineMessageId: string } | { chatId: string; messageId: string },
+    message: OutboundMessage,
+  ): Promise<{ modified: boolean }>;
   /** What the bot can receive in a group (privacy mode limits it); absent means addressed-only. */
   groupVisibility?(
     externalGroupId: string,

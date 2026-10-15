@@ -838,7 +838,7 @@ export class TelegramAdapter implements ChannelAdapter {
   async edit(
     target: { inlineMessageId: string } | { chatId: string; messageId: string },
     message: OutboundMessage,
-  ): Promise<void> {
+  ): Promise<{ modified: boolean }> {
     const where =
       'inlineMessageId' in target
         ? /^[\x21-\x7e]{1,256}$/.test(target.inlineMessageId)
@@ -877,9 +877,21 @@ export class TelegramAdapter implements ChannelAdapter {
       'inline_message_id' in where
         ? `inline:${where.inline_message_id}`
         : String(where.chat_id);
-    await this.limiter.run(key, () =>
-      this.retrying(() => this.options.api.call('editMessageText', params)),
-    );
+    try {
+      await this.limiter.run(key, () =>
+        this.retrying(() => this.options.api.call('editMessageText', params)),
+      );
+      return { modified: true };
+    } catch (error) {
+      // Telegram answers 400 "message is not modified" when the text and
+      // markup are identical: the conversation already shows this status.
+      if (
+        error instanceof ChannelDeliveryError &&
+        /message is not modified/i.test(error.message)
+      )
+        return { modified: false };
+      throw error;
+    }
   }
 
   async acknowledgeAction(callbackId: string, text: string) {

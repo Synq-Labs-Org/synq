@@ -130,8 +130,51 @@ export interface ChannelPorts {
    * Draft-only reply to a guest invocation: it sees the triggering text and
    * at most one referenced message, no group data, and cannot propose.
    */
-  guest?(input: GuestReplyInput): Promise<{ text: string }>;
+  guest?(
+    input: GuestReplyInput,
+  ): Promise<{ text: string; trackAs?: string | null }>;
+  /**
+   * Personal finance in a direct message. The gateway resolves the sender's
+   * stable channel id to a linked principal first (identity channel link);
+   * only a linked sender reaches `direct`, always with `origin: 'CHAT'`.
+   */
+  directLink?(
+    channel: ChannelId,
+    externalUserId: string,
+  ): Promise<{ principalId: string; workspaceId: string } | null>;
+  direct?(input: DirectRequest): Promise<DirectReply>;
+  /** DM from a sender with no link yet: onboarding only (start, link code). */
+  directOnboarding?(input: {
+    channel: ChannelId;
+    externalUserId: string;
+    text: string;
+    runId: string;
+  }): Promise<DirectReply>;
 }
+
+export type DirectRequest = {
+  channel: ChannelId;
+  externalUserId: string;
+  principalId: string;
+  workspaceId: string;
+  text: string;
+  runId: string;
+  /** Set by the gateway: a chat message never carries owner approval. */
+  origin: 'CHAT';
+};
+export type DirectReply = {
+  text: string;
+  buttons?: OutboundMessage['buttons'];
+  /** Track the posted reply under this key so `updateStatus` can edit it. */
+  trackAs?: string | null;
+};
+
+/** A message Synq posted and may later edit in place (status/receipt updates). */
+export type StatusTarget = Readonly<{
+  channel: ChannelId;
+  target: { inlineMessageId: string } | { chatId: string; messageId: string };
+  expiresAt: number;
+}>;
 
 export type GatewayOutcome = {
   status:
@@ -145,6 +188,8 @@ export type GatewayOutcome = {
   code: string | null;
   delivered: number;
   failed: number;
+  /** Reference of the message Synq posted (e.g. a guest answer's inline id). */
+  messageRef?: string | null;
 };
 
 export type ChannelGatewayOptions = {
@@ -174,6 +219,12 @@ export type ChannelGatewayOptions = {
   /** Channels whose link redemption must carry a verified provider identity. */
   requireExternalProof?: Partial<Record<ChannelId, boolean>>;
   onEvent?: (event: ChannelEvent, outcome: GatewayOutcome) => void;
+  /**
+   * Status updates in place. When set, a guest answer or DM reply whose port
+   * asks for tracking keeps ONLY that message's reference (never its text or
+   * the chat's content) for `retentionSeconds`, and the guest footer says so.
+   */
+  statusUpdates?: { retentionSeconds: number };
   /** Render approvals, receipts and balances as interactive cards; links are group-bound when `links` is set. */
   cards?: { links?: CardLinkIssuer | null };
 };
@@ -205,6 +256,7 @@ const short = (v: string) =>
 export class ChannelGateway {
   private readonly adapters: Map<ChannelId, ChannelAdapter>;
   private readonly lastBrain = new Map<string, number>();
+  private readonly tracked = new Map<string, StatusTarget[]>();
   readonly cards: InteractiveCardService | null;
   constructor(private readonly options: ChannelGatewayOptions) {
     this.adapters = new Map(options.adapters.map((a) => [a.channel, a]));
@@ -502,12 +554,13 @@ export class ChannelGateway {
     )
       return this.result('DUPLICATE', 'GUEST_ALREADY_ANSWERED');
     this.lastBrain.set(key, now);
-    const text = await this.guestText(event);
+    const { text, trackAs } = await this.guestText(event);
+    let inlineMessageId: string;
     try {
-      await adapter.answerGuest(event.guestQueryId, {
+      ({ inlineMessageId } = await adapter.answerGuest(event.guestQueryId, {
         text,
         buttons: [{ label: 'Open Synq', url: this.web('/') }],
-      });
+      }));
     } catch (error) {
       await this.handle({
         type: 'MESSAGE_DELIVERY_FAILED',
@@ -522,19 +575,93 @@ export class ChannelGateway {
       }).catch(() => undefined);
       return this.result('REFUSED', 'GUEST_ANSWER_FAILED', 0, 1);
     }
-    return this.result('HANDLED', 'GUEST_ANSWERED', 1, 0);
+    if (trackAs)
+      this.track(trackAs, envelope.channel, { inlineMessageId }, now);
+    return {
+      ...this.result('HANDLED', 'GUEST_ANSWERED', 1, 0),
+      messageRef: inlineMessageId,
+    };
+  }
+
+  private track(
+    key: string,
+    channel: ChannelId,
+    target: StatusTarget['target'],
+    now: number,
+  ) {
+    const retention = this.options.statusUpdates?.retentionSeconds;
+    if (!retention) return;
+    const live = (this.tracked.get(key) ?? []).filter((t) => t.expiresAt > now);
+    live.push({ channel, target, expiresAt: now + retention });
+    this.tracked.set(key, live);
+  }
+
+  /** Messages tracked under `key` that are still within the retention window. */
+  statusTargets(key: string): StatusTarget[] {
+    const now = this.options.now();
+    return (this.tracked.get(key) ?? []).filter((t) => t.expiresAt > now);
+  }
+
+  /**
+   * Edits every message tracked under `key` in place. Expired references are
+   * dropped (retention), an unchanged message is not an error, and a failed
+   * edit is recorded as a delivery failure, never thrown.
+   */
+  async updateStatus(
+    key: string,
+    message: OutboundMessage,
+  ): Promise<{ updated: number; unchanged: number; failed: number }> {
+    const out = { updated: 0, unchanged: 0, failed: 0 };
+    const now = this.options.now();
+    const all = this.tracked.get(key) ?? [];
+    const live = all.filter((t) => t.expiresAt > now);
+    if (live.length !== all.length) this.tracked.set(key, live);
+    for (const t of live) {
+      const adapter = this.adapters.get(t.channel);
+      if (!adapter?.edit) {
+        out.failed++;
+        continue;
+      }
+      try {
+        const r = await adapter.edit(t.target, message);
+        if (r.modified) out.updated++;
+        else out.unchanged++;
+      } catch (error) {
+        out.failed++;
+        await this.handle({
+          type: 'MESSAGE_DELIVERY_FAILED',
+          channel: t.channel,
+          externalGroupId: 'chatId' in t.target ? t.target.chatId : 'inline',
+          reason:
+            error instanceof ChannelDeliveryError
+              ? `EDIT ${error.code}: ${error.message}`.slice(0, 500)
+              : 'EDIT UNEXPECTED_DELIVERY_ERROR',
+          attempts: error instanceof ChannelDeliveryError ? error.attempts : 1,
+          at: now,
+        }).catch(() => undefined);
+      }
+    }
+    return out;
   }
 
   private async guestText(
     event: Extract<ChannelEvent, { type: 'GUEST_QUERY' }>,
-  ): Promise<string> {
+  ): Promise<{ text: string; trackAs: string | null }> {
     const asked = stripMention(event.envelope.body);
     const scope = event.reference
       ? 'I can see only your message and the one you replied to'
       : 'I can see only your message';
-    const footer = `${scope}: not this chat's history or members, and I keep nothing. As a guest I cannot move money, approve or create proposals here; group spending happens in a linked Synq group and is approved on the web with a passkey.`;
+    const limits =
+      'As a guest I cannot move money, approve or create proposals here; group spending happens in a linked Synq group and is approved on the web with a passkey.';
+    const keepNothing = `${scope}: not this chat's history or members, and I keep nothing. ${limits}`;
+    const retention = this.options.statusUpdates?.retentionSeconds;
+    const keepReference = (days: number) =>
+      `${scope}: not this chat's history or members. I keep nothing from this chat except this reply's message reference, for ${days} day${days === 1 ? '' : 's'}, only to update its status here. ${limits}`;
     if (APPROVAL_WORDS.test(asked) || /^\/?(approve|confirm)\b/i.test(asked))
-      return `Chat messages never approve anything, and a guest reply least of all. ${footer}`;
+      return {
+        text: `Chat messages never approve anything, and a guest reply least of all. ${keepNothing}`,
+        trackAs: null,
+      };
     const port = this.options.ports.guest;
     if (port && asked) {
       try {
@@ -549,12 +676,16 @@ export class ChannelGateway {
             : null,
           runId: `guest_${createHash('sha256').update(event.guestQueryId).digest('hex').slice(0, 16)}`,
         });
-        return `${reply.text.slice(0, 3000)}\n\n${footer}`;
+        const trackAs = retention && reply.trackAs ? reply.trackAs : null;
+        return {
+          text: `${reply.text.slice(0, 3000)}\n\n${trackAs ? keepReference(Math.max(1, Math.round(retention! / 86_400))) : keepNothing}`,
+          trackAs,
+        };
       } catch {
         // fall through to the static reply
       }
     }
-    return `Hi, I'm Synq. ${footer}`;
+    return { text: `Hi, I'm Synq. ${keepNothing}`, trackAs: null };
   }
 
   /** Read-only: answers a card's refresh button with the canonical quorum for this chat's group. */
@@ -641,6 +772,15 @@ export class ChannelGateway {
       parsed.name === 'confirm'
     )
       return this.confirm(envelope, parsed.args);
+    if (
+      envelope.chatKind === 'DIRECT' &&
+      this.options.ports.direct &&
+      this.options.ports.directLink
+    )
+      return this.direct(
+        envelope,
+        parsed.kind === 'TEXT' ? parsed.text : envelope.body,
+      );
     if (envelope.chatKind !== 'GROUP')
       return this.replyOutcome(envelope, 'REFUSED', 'GROUP_CHAT_REQUIRED', {
         text: 'Use Synq from your group chat. Direct messages cannot act on a group treasury.',
@@ -695,6 +835,78 @@ export class ChannelGateway {
         );
     }
     return this.result('IGNORED', 'UNHANDLED_COMMAND');
+  }
+
+  /**
+   * Direct message to Synq's personal finance desk. The sender's stable
+   * platform id must resolve to a wallet-linked principal; otherwise only
+   * onboarding runs. The request always carries `origin: 'CHAT'`.
+   */
+  private async direct(envelope: Envelope, text: string) {
+    const ports = this.options.ports;
+    const userId = envelope.externalUserId!;
+    const runId = `dm_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`;
+    const linked = await ports.directLink!(envelope.channel, userId).catch(
+      () => null,
+    );
+    let reply: DirectReply;
+    let code: string;
+    if (linked) {
+      reply = await ports.direct!({
+        channel: envelope.channel,
+        externalUserId: userId,
+        principalId: linked.principalId,
+        workspaceId: linked.workspaceId,
+        text,
+        runId,
+        origin: 'CHAT',
+      });
+      code = 'DIRECT_ANSWERED';
+    } else if (ports.directOnboarding) {
+      reply = await ports.directOnboarding({
+        channel: envelope.channel,
+        externalUserId: userId,
+        text,
+        runId,
+      });
+      code = 'DIRECT_ONBOARDING';
+    } else
+      return this.replyOutcome(envelope, 'UNAUTHORIZED', 'NOT_LINKED', {
+        text: 'Link your wallet to Synq first; until then I cannot act on your finances.',
+      });
+    const adapter = this.adapters.get(envelope.channel);
+    if (!adapter) return this.result('REFUSED', 'CHANNEL_UNAVAILABLE', 0, 1);
+    try {
+      const sent = await adapter.send(envelope.externalGroupId, {
+        text: reply.text,
+        ...(reply.buttons ? { buttons: reply.buttons } : {}),
+        replyTo: envelope.messageId,
+      });
+      if (reply.trackAs)
+        this.track(
+          reply.trackAs,
+          envelope.channel,
+          { chatId: envelope.externalGroupId, messageId: sent.messageId },
+          this.options.now(),
+        );
+      return {
+        ...this.result(linked ? 'HANDLED' : 'UNAUTHORIZED', code, 1, 0),
+        messageRef: sent.messageId,
+      };
+    } catch (error) {
+      await this.handle({
+        type: 'MESSAGE_DELIVERY_FAILED',
+        channel: envelope.channel,
+        externalGroupId: envelope.externalGroupId,
+        reason:
+          error instanceof ChannelDeliveryError
+            ? `${error.code}: ${error.message}`.slice(0, 500)
+            : 'UNEXPECTED_DELIVERY_ERROR',
+        attempts: error instanceof ChannelDeliveryError ? error.attempts : 1,
+        at: this.options.now(),
+      }).catch(() => undefined);
+      return this.result('REFUSED', 'DIRECT_REPLY_FAILED', 0, 1);
+    }
   }
 
   private async access(
