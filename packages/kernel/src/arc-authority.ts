@@ -334,16 +334,18 @@ export async function decide(input: {
   if (i.chainId !== m.chainId) return deny(`wrong chain ${i.chainId}`);
   if (lower(i.token) !== lower(m.token)) return deny('wrong asset');
   if (lower(i.payer) !== lower(m.payer)) return deny('wrong paying account');
+  // Independent checks all report, so the audit trail shows every reason.
+  const denials: string[] = [];
   if (!m.recipients.some((r) => lower(r) === lower(i.recipient)))
-    return deny(`recipient ${i.recipient} is not on the mandate allowlist`);
+    denials.push(`recipient ${i.recipient} is not on the mandate allowlist`);
   if (!m.purposes.includes(i.purpose))
-    return deny(`purpose ${i.purpose} not allowed`);
-  if (i.amount <= 0n) return deny('amount must be positive');
-  const hard = risk.flags.filter((f) => f.severity === 'HARD');
-  if (hard.length)
-    return deny(...hard.map((f) => `risk ${f.code}: ${f.detail}`));
+    denials.push(`purpose ${i.purpose} not allowed`);
+  if (i.amount <= 0n) denials.push('amount must be positive');
+  for (const f of risk.flags.filter((x) => x.severity === 'HARD'))
+    denials.push(`risk ${f.code}: ${f.detail}`);
   if (!risk.available && i.amount >= input.config.riskRequiredAbove)
-    return deny('risk service unavailable: high-value payment fails closed');
+    denials.push('risk service unavailable: high-value payment fails closed');
+  if (denials.length) return deny(...denials);
   const windowStart = now - m.periodSeconds;
   const spent = state.spends
     .filter((s) => s.at > windowStart)

@@ -576,24 +576,15 @@ importers:
 
   packages/payables:
     dependencies:
-      '@synq/chain-registry':
-        specifier: workspace:*
-        version: link:../chain-registry
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain
-      '@synq/kernel':
-        specifier: workspace:*
-        version: link:../kernel
       '@synq/ledger':
         specifier: workspace:*
         version: link:../ledger
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
-      zod:
-        specifier: 4.6.5
-        version: 4.6.5
 
   packages/plugin-sdk:
     dependencies:

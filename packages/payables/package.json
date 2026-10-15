@@ -8,11 +8,8 @@
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
-    "@synq/kernel": "workspace:*",
     "@synq/ledger": "workspace:*",
-    "viem": "2.57.4",
-    "zod": "4.6.5"
+    "viem": "2.57.4"
   }
 }
