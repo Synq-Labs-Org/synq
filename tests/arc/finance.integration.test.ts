@@ -136,6 +136,30 @@ describe('finance schema on Postgres', { timeout: 30_000 }, () => {
     expect(seen).toEqual(['evt_pg_paid_4']);
   });
 
+  it("a workspace-scoped relay publishes only that workspace's events", async () => {
+    const store = new PostgresLedgerStore(pool);
+    const ledger = new Ledger(store);
+    await ledger.post({ ...entry(5), workspaceId: 'wsp_pg_a' }, [
+      { eventId: 'evt_pg_a', topic: 'invoice.paid', payload: {} },
+    ]);
+    await ledger.post({ ...entry(6), workspaceId: 'wsp_pg_b' }, [
+      { eventId: 'evt_pg_b', topic: 'invoice.paid', payload: {} },
+    ]);
+    const seen: string[] = [];
+    expect(
+      await relayOutbox(
+        store,
+        async (e) => void seen.push(e.eventId),
+        100,
+        'wsp_pg_b',
+      ),
+    ).toBe(1);
+    expect(seen).toEqual(['evt_pg_b']);
+    expect(
+      (await store.pendingEvents(10, 'wsp_pg_a')).map((e) => e.eventId),
+    ).toEqual(['evt_pg_a']);
+  });
+
   it('P11 invoices and vendors persist with revision fencing', async () => {
     const issuer = privateKeyToAccount(`0x${'71'.repeat(32)}`);
     const store = new PostgresInvoiceStore(pool);

@@ -166,8 +166,8 @@ export interface LedgerStore {
     e: JournalEntry,
     events?: readonly OutboxEvent[],
   ): Promise<{ entry: JournalEntry; created: boolean }>;
-  /** Unpublished outbox events, oldest first. */
-  pendingEvents(limit: number): Promise<OutboxEvent[]>;
+  /** Unpublished outbox events, oldest first; only one workspace's when given. */
+  pendingEvents(limit: number, workspaceId?: string): Promise<OutboxEvent[]>;
   markPublished(eventIds: readonly string[]): Promise<void>;
   get(entryId: string): Promise<JournalEntry | null>;
   reversed(entryId: string): Promise<boolean>;
@@ -281,19 +281,32 @@ export function availableToSpend(input: {
 export class MemoryLedgerStore implements LedgerStore {
   private byId = new Map<string, JournalEntry>();
   private byKey = new Map<string, string>();
-  private outbox: { event: OutboxEvent; published: boolean }[] = [];
+  private outbox: {
+    event: OutboxEvent;
+    workspaceId: string;
+    published: boolean;
+  }[] = [];
   async migrate() {}
   async insert(e: JournalEntry, events: readonly OutboxEvent[] = []) {
     const existing = this.byKey.get(e.idempotencyKey);
     if (existing) return { entry: this.byId.get(existing)!, created: false };
     this.byId.set(e.entryId, e);
     this.byKey.set(e.idempotencyKey, e.entryId);
-    for (const event of events) this.outbox.push({ event, published: false });
+    for (const event of events)
+      this.outbox.push({
+        event,
+        workspaceId: e.workspaceId,
+        published: false,
+      });
     return { entry: e, created: true };
   }
-  async pendingEvents(limit: number) {
+  async pendingEvents(limit: number, workspaceId?: string) {
     return this.outbox
-      .filter((o) => !o.published)
+      .filter(
+        (o) =>
+          !o.published &&
+          (workspaceId === undefined || o.workspaceId === workspaceId),
+      )
       .slice(0, limit)
       .map((o) => o.event);
   }
@@ -388,13 +401,18 @@ export async function consumeOnce<T>(
   }
 }
 
-/** Publishes pending outbox events; a crash before `markPublished` re-publishes (consumers fence). */
+/**
+ * Publishes pending outbox events; a crash before `markPublished` re-publishes
+ * (consumers fence). With `workspaceId`, only that workspace's events are read
+ * and marked, so one tenant's relay never consumes another's events.
+ */
 export async function relayOutbox(
   store: LedgerStore,
   publish: (e: OutboxEvent) => Promise<void>,
   limit = 100,
+  workspaceId?: string,
 ): Promise<number> {
-  const batch = await store.pendingEvents(limit);
+  const batch = await store.pendingEvents(limit, workspaceId);
   for (const e of batch) await publish(e);
   await store.markPublished(batch.map((e) => e.eventId));
   return batch.length;
@@ -402,3 +420,4 @@ export async function relayOutbox(
 
 export * from './postgres.js';
 export * from './arc-indexer.js';
+export * from './arc-cash.js';

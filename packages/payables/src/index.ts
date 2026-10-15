@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { Address, Hex } from 'viem';
-import type { JournalEntry, VendorDirectory } from '@synq/ledger';
+import {
+  walletTag,
+  type JournalEntry,
+  type VendorDirectory,
+} from '@synq/ledger';
 
 /**
  * Accounts payable and the contractor network.
@@ -344,6 +348,8 @@ export function apEntries(input: {
     logIndex: number;
     recipient: Address;
     feeBaseUnits: bigint;
+    /** Paying wallet; when set, the cash line is booked to it. */
+    payer?: Address;
   } | null;
   at: number;
 }): JournalEntry[] {
@@ -413,6 +419,7 @@ export function apEntries(input: {
           account: 'CASH_ARC_USDC',
           assetId: input.assetId,
           amount: -(i.amount + s.feeBaseUnits),
+          ...(s.payer ? { counterpartyId: walletTag(s.payer) } : {}),
         },
       ],
       reversalOf: null,

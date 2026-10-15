@@ -12,7 +12,7 @@ import {
   type Log,
 } from 'viem';
 import type { AssetRef } from '@synq/domain';
-import type { JournalEntry } from '@synq/ledger';
+import { walletTag, type JournalEntry } from '@synq/ledger';
 
 /**
  * Invoices and receivables on Arc.
@@ -651,6 +651,8 @@ export function applyPayment(
       account: 'CASH_ARC_USDC' as const,
       assetId: asset,
       amount: p.amount,
+      // Cash is booked to the wallet that received it (per-wallet reconciliation).
+      counterpartyId: walletTag(p.recipient),
       documentRef: i.invoiceId,
     },
     ...(toAr > 0n

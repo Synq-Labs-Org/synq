@@ -173,11 +173,23 @@ export class PostgresLedgerStore implements LedgerStore {
     );
     return r.rows.map((x) => dec(x.data));
   }
-  async pendingEvents(limit: number): Promise<OutboxEvent[]> {
-    const r = await this.sql.query(
-      'SELECT event_id, topic, payload FROM synq_event_outbox WHERE published_at IS NULL ORDER BY seq LIMIT $1',
-      [limit],
-    );
+  async pendingEvents(
+    limit: number,
+    workspaceId?: string,
+  ): Promise<OutboxEvent[]> {
+    // Workspace scoping follows the event's journal entry (entry_id -> workspace).
+    const r =
+      workspaceId === undefined
+        ? await this.sql.query(
+            'SELECT event_id, topic, payload FROM synq_event_outbox WHERE published_at IS NULL ORDER BY seq LIMIT $1',
+            [limit],
+          )
+        : await this.sql.query(
+            `SELECT o.event_id, o.topic, o.payload FROM synq_event_outbox o
+             JOIN synq_ledger_entries e ON e.entry_id = o.entry_id
+             WHERE o.published_at IS NULL AND e.workspace_id = $2 ORDER BY o.seq LIMIT $1`,
+            [limit, workspaceId],
+          );
     return r.rows.map((x) => ({
       eventId: String(x.event_id),
       topic: String(x.topic),
