@@ -12,7 +12,8 @@
     "./arc": "./src/arc.ts",
     "./cctp": "./src/cctp.ts",
     "./gateway": "./src/gateway.ts",
-    "./arc-outbox": "./src/arc-outbox.ts"
+    "./arc-outbox": "./src/arc-outbox.ts",
+    "./vault": "./src/vault.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

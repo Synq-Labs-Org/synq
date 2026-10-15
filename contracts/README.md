@@ -10,6 +10,33 @@ A non-sensitive mandate supersession may only widen the mandate; any narrowing m
 
 Owner recovery, owner rotation, threshold changes and module enable/disable are Safe-native operations (`execTransaction` with quorum). They work while the module is paused. Integration details, the EIP-712 type string, events and errors are in [abi/INTEGRATION.md](abi/INTEGRATION.md).
 
+## Arc governed vault and milestone escrow (`src/arc/`)
+
+Safe v1.4.1 is deployed on Arc testnet (5042002) at the canonical addresses, and the live code hashes equal the Monad pins (see `sources/arc_registry.json`). Arc vaults therefore reuse the canonical Safe for custody. They do not reuse any Monad Synq deployment, grant or threshold. A fresh, non-upgradeable Arc layer sits on top:
+
+- `SynqArcVaultFactory` creates a Safe proxy through the canonical SafeProxyFactory. In the same transaction it deploys a `SynqArcVaultPolicy` and installs it as both module and guard, via `SynqArcVaultSetup` (delegatecall-only, and it works only while the factory is creating that exact proxy). The scoped operator may not be an owner.
+- `SynqArcVaultPolicy` (Safe guard + module):
+  - Owners spend with M-of-N EIP-712 SafeTx signatures and the Safe nonce.
+  - These operations must be queued by an owner-quorum transaction and wait `delay` (1h..30d, immutable), then execute once within 14 days:
+    - every Safe self-call (owners, threshold, modules, guard, fallback handler);
+    - every DELEGATECALL (the only way to change the Safe singleton);
+    - every operator-scope expansion.
+  - Safe gas refunds and non-zero `safeTxGas` are rejected, so Safe transactions are atomic.
+  - The operator can only `pay(recipient, amount, ref)` in USDC, to allowlisted recipients, within per-payment and 24h caps.
+  - The guardian can freeze outflows for at most 7 days. It cannot move funds or govern. The owners can unpause, replace the guardian, revoke the operator and run timelocked recovery while paused.
+- `SynqMilestoneEscrow`: a payer funds N milestones for one payee in one transfer, with exact balance-delta checks.
+  - Release is by the payer or the arbiter. Withdrawal pays only the payee, and only after release.
+  - The timeout refund (anyone may trigger it), the arbiter refund and the payee refund all go to the original payer, once.
+  - A dispute freezes payer release and timeout refund until the arbiter acts.
+  - Every mutating entry point is nonReentrant.
+
+Upgrade authority (stated in `UPGRADE_AUTHORITY` on the policy and escrow, and tested in `P07_07_UpgradeTimelock.t.sol`):
+
+- The factory, setup helper, policy and escrow have no proxy, owner or admin.
+- A vault's code (policy swap or Safe singleton migration) changes only by owner quorum after the policy timelock.
+
+Tests are in `test/unit/arc/P07_0{1..7}_*.t.sol` and are named by acceptance id. They cover quorum, operator scope, escrow release, reentrancy (hook token, reentrant operator, signature replay), refund, guardian pause and upgrade/timelock, with fuzzing where it is cheap. The deployment is in `deployments/5042002.json`. The live proof is `scripts/arc-vault-proof.ts`.
+
 ## Vendored dependencies
 
 | Dependency | Upstream | Tag | Commit | Vendored paths |
