@@ -11,6 +11,7 @@ export const ChannelIdSchema = z.enum(CHANNEL_IDS);
 export type ChannelId = z.output<typeof ChannelIdSchema>;
 
 const ExternalIdSchema = z.string().min(1).max(200);
+export const GUEST_REFERENCE_MAX_CHARS = 1000;
 
 export const InteractionSchema = z.strictObject({
   kind: z.enum([
@@ -65,6 +66,23 @@ export const EnvelopeSchema = z.strictObject({
 });
 export type Envelope = z.output<typeof EnvelopeSchema>;
 
+/**
+ * The one message a guest invocation may carry as context (the message the
+ * caller replied to). Evidence with provenance, never proof of agreement.
+ */
+export const GuestReferenceSchema = z.strictObject({
+  source: z.literal('REPLY_TO_MESSAGE'),
+  messageId: ExternalIdSchema,
+  externalUserId: ExternalIdSchema.nullable(),
+  isBot: z.boolean(),
+  timestamp: z.number().int().nonnegative().nullable(),
+  text: z.string().max(GUEST_REFERENCE_MAX_CHARS),
+  truncated: z.boolean(),
+  /** sha256 of the full text as received, so a later copy can be checked. */
+  textSha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type GuestReference = z.output<typeof GuestReferenceSchema>;
+
 const MemberRefSchema = z.strictObject({
   externalUserId: ExternalIdSchema,
   displayName: z.string().max(200).nullable(),
@@ -95,6 +113,18 @@ export const ChannelEventSchema = z.discriminatedUnion('type', [
     type: z.literal('ACTION_REQUESTED'),
     envelope: EnvelopeSchema,
     callbackId: ExternalIdSchema,
+  }),
+  /**
+   * A guest-mode invocation from a chat the bot is not a member of. It
+   * carries the triggering message and at most one referenced message: no
+   * history, no membership, no subscription. Answered once, never by
+   * sendMessage.
+   */
+  z.strictObject({
+    type: z.literal('GUEST_QUERY'),
+    envelope: EnvelopeSchema,
+    guestQueryId: z.string().min(1).max(256),
+    reference: GuestReferenceSchema.nullable(),
   }),
   z.strictObject({
     type: z.literal('APPROVAL_LINK_OPENED'),
@@ -152,6 +182,15 @@ export interface ChannelAdapter {
     message: OutboundMessage,
   ): Promise<DeliveryResult>;
   acknowledgeAction?(callbackId: string, text: string): Promise<void>;
+  /** The single reply to a guest invocation; adapters without guest mode omit it. */
+  answerGuest?(
+    guestQueryId: string,
+    message: OutboundMessage,
+  ): Promise<{ inlineMessageId: string }>;
+  /** What the bot can receive in a group (privacy mode limits it); absent means addressed-only. */
+  groupVisibility?(
+    externalGroupId: string,
+  ): Promise<'ALL_MESSAGES' | 'ADDRESSED_ONLY'>;
   /** URL that opens a private chat with the bot carrying `payload`; null if unsupported. */
   deepLink?(payload: string): string | null;
   /** The user's role in the chat as the provider reports it; absent if unsupported. */

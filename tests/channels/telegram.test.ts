@@ -309,7 +309,7 @@ describe('telegram adapter', () => {
       controller.abort();
       return { body: { ok: true, result: [] } };
     });
-    expect(await a.init()).toEqual(BOT);
+    expect(await a.init()).toMatchObject({ ...BOT, privacyMode: true });
     await a.poll({
       signal: controller.signal,
       handle: async (e) =>
@@ -325,6 +325,7 @@ describe('telegram adapter', () => {
       'message',
       'callback_query',
       'my_chat_member',
+      'guest_message',
     ]);
   });
 

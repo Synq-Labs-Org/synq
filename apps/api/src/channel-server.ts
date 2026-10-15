@@ -4,6 +4,7 @@ import {
   CardBannerRenderer,
   CardLinkIssuer,
   ChannelGateway,
+  ChatContextService,
   IMessageBridge,
   IMessageChannelAdapter,
   LinqV3Adapter,
@@ -18,6 +19,7 @@ import {
 } from '@synq/channels';
 import {
   PostgresChannelStore,
+  PostgresChatContextStore,
   type ChannelSqlPool,
 } from '@synq/channels/postgres';
 import type { SendRecord } from '@synq/funding';
@@ -59,6 +61,13 @@ const ChannelEnvSchema = z.object({
     .max(7 * 86_400)
     .default(43_200),
   SYNQ_CHANNEL_NOTIFY_MS: z.coerce.number().int().min(1000).default(5000),
+  /** Consented chat memory (/memory); off keeps no chat messages at all. */
+  SYNQ_CHANNEL_MEMORY: z.enum(['0', '1']).default('1'),
+  SYNQ_CHANNEL_MEMORY_PURGE_MS: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .default(600_000),
 });
 
 export type ChannelLog = (
@@ -98,6 +107,12 @@ export async function registerChannels(input: {
     return null;
   const store = new PostgresChannelStore(input.pool);
   await store.migrate();
+  const contextStore =
+    env.SYNQ_CHANNEL_MEMORY === '1'
+      ? new PostgresChatContextStore(input.pool)
+      : null;
+  await contextStore?.migrate();
+  const context = contextStore ? new ChatContextService(contextStore) : null;
   const adapters: ChannelAdapter[] = [];
   let telegram: TelegramAdapter | undefined;
   if (telegramMode !== 'off') {
@@ -131,6 +146,8 @@ export async function registerChannels(input: {
     input.log('telegram bot ready', {
       username: bot.username,
       mode: telegramMode,
+      privacyMode: bot.privacyMode,
+      guestQueries: bot.guestQueries,
     });
     adapters.push(telegram);
   }
@@ -210,6 +227,7 @@ export async function registerChannels(input: {
       telegram: env.SYNQ_TELEGRAM_REQUIRE_CHAT_ADMIN === '1',
     },
     pendingLinkTtlSeconds: env.SYNQ_CHAT_LINK_PENDING_TTL_SECONDS,
+    ...(context ? { context } : {}),
     requireExternalProof: {
       telegram: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
     },
@@ -253,7 +271,17 @@ export async function registerChannels(input: {
             required: env.SYNQ_TELEGRAM_LOGIN_REQUIRED === '1',
             verify: (raw: unknown, at: number) =>
               telegram!.verifyLogin(raw, at),
+            verifyInitData: (raw: unknown, at: number) =>
+              telegram!.verifyMiniAppInitData(raw, at),
+            consumeInitData: (hash: string, at: number) =>
+              store.claimNotification(
+                'telegram',
+                'miniapp',
+                `initdata:${hash}`,
+                at,
+              ),
           },
+          telegramProbe: () => telegram!.profile,
         }
       : {}),
     env: input.env,
@@ -281,6 +309,21 @@ export async function registerChannels(input: {
           }),
       ),
     );
+    if (context)
+      loops.push(
+        runContextPurge(
+          context,
+          now,
+          controller.signal,
+          env.SYNQ_CHANNEL_MEMORY_PURGE_MS,
+          (deleted) =>
+            deleted && input.log('channel memory purged', { deleted }),
+          (error) =>
+            input.log('channel memory purge error', {
+              error: String(error).slice(0, 200),
+            }),
+        ),
+      );
     if (bridge && imessage) {
       loops.push(bridge.supervise(controller.signal));
       if (imessage.transport.name === 'beeper')
@@ -315,6 +358,7 @@ export async function registerChannels(input: {
   return {
     gateway,
     store,
+    context,
     telegram,
     linq,
     whatsapp,
@@ -323,4 +367,33 @@ export async function registerChannels(input: {
     start,
     stop,
   };
+}
+
+/** Enforces chat-memory retention: deletes expired messages on an interval. */
+export async function runContextPurge(
+  context: Pick<ChatContextService, 'purge'>,
+  now: () => number,
+  signal: AbortSignal,
+  intervalMs: number,
+  onPurged: (deleted: number) => void,
+  onError: (error: unknown) => void,
+) {
+  while (!signal.aborted) {
+    try {
+      onPurged(await context.purge(now()));
+    } catch (error) {
+      onError(error);
+    }
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, intervalMs);
+      signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+  }
 }

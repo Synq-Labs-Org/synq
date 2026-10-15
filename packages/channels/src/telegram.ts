@@ -3,10 +3,12 @@ import { z } from 'zod';
 import type { InteractiveCard } from '@synq/schemas';
 import {
   ChannelDeliveryError,
+  GUEST_REFERENCE_MAX_CHARS,
   type ChannelAdapter,
   type ChannelEvent,
   type DeliveryResult,
   type Envelope,
+  type GuestReference,
   type OutboundMessage,
 } from './events.js';
 import {
@@ -16,11 +18,29 @@ import {
 } from './outbound.js';
 
 export const TELEGRAM_SECRET_HEADER = 'x-telegram-bot-api-secret-token';
+/** Bot API 10.0 added `guest_message` (guest mode); it must be requested explicitly. */
 export const TELEGRAM_ALLOWED_UPDATES = [
   'message',
   'callback_query',
   'my_chat_member',
+  'guest_message',
 ] as const;
+
+/**
+ * What the bot can see in a group. Privacy mode (the default) delivers only
+ * commands, mentions and replies to the bot; a bot never receives messages
+ * sent before it joined, whatever its settings.
+ */
+export type TelegramGroupVisibility = 'ALL_MESSAGES' | 'ADDRESSED_ONLY';
+export type TelegramBotProfile = {
+  id: number;
+  username: string;
+  /** getMe `can_read_all_group_messages` is false (or unknown). */
+  privacyMode: boolean;
+  /** getMe `supports_guest_queries`: Guest Mode enabled in BotFather. */
+  guestQueries: boolean;
+  groupVisibility: TelegramGroupVisibility;
+};
 
 export class TelegramApiError extends Error {
   constructor(
@@ -63,6 +83,10 @@ export class TelegramBotApi {
 
   verifyLogin(raw: unknown, nowSeconds: number) {
     return verifyTelegramLogin(raw, this.options.token, nowSeconds);
+  }
+
+  verifyMiniAppInitData(raw: unknown, nowSeconds: number) {
+    return verifyTelegramMiniAppInitData(raw, this.options.token, nowSeconds);
   }
 
   async call<T = unknown>(
@@ -124,6 +148,10 @@ const UserSchema = z.looseObject({
   last_name: z.string().optional(),
   username: z.string().optional(),
 });
+const GetMeSchema = UserSchema.extend({
+  can_read_all_group_messages: z.boolean().optional(),
+  supports_guest_queries: z.boolean().optional(),
+});
 const ChatSchema = z.looseObject({
   id: z.number().int(),
   type: z.enum(['private', 'group', 'supergroup', 'channel']),
@@ -144,8 +172,16 @@ const MessageSchema = z.looseObject({
   entities: z.array(EntitySchema).optional(),
   caption_entities: z.array(EntitySchema).optional(),
   reply_to_message: z
-    .looseObject({ message_id: z.number().int(), from: UserSchema.optional() })
+    .looseObject({
+      message_id: z.number().int(),
+      from: UserSchema.optional(),
+      date: z.number().int().optional(),
+      text: z.string().optional(),
+      caption: z.string().optional(),
+    })
     .optional(),
+  /** Set on a guest message; answer it with answerGuestQuery. */
+  guest_query_id: z.string().min(1).max(256).optional(),
   new_chat_members: z.array(UserSchema).optional(),
   left_chat_member: UserSchema.optional(),
   group_chat_created: z.boolean().optional(),
@@ -156,6 +192,7 @@ const MessageSchema = z.looseObject({
 const UpdateSchema = z.looseObject({
   update_id: z.number().int().nonnegative(),
   message: MessageSchema.optional(),
+  guest_message: MessageSchema.optional(),
   callback_query: z
     .looseObject({
       id: z.string(),
@@ -198,7 +235,12 @@ const isLocalUrl = (url: string) => {
 export type TelegramAdapterOptions = {
   api: TelegramBotApi;
   webhookSecret?: string;
-  bot?: { id: number; username: string };
+  bot?: {
+    id: number;
+    username: string;
+    privacyMode?: boolean;
+    guestQueries?: boolean;
+  };
   respondToAllMessages?: boolean;
   limiter?: OutboundLimiter;
   maxAttempts?: number;
@@ -224,13 +266,48 @@ export function splitCaption(
   };
 }
 
+const profileOf = (bot: NonNullable<TelegramAdapterOptions['bot']>) => {
+  // Unknown privacy settings are treated as privacy mode: never over-claim.
+  const privacyMode = bot.privacyMode ?? true;
+  return {
+    id: bot.id,
+    username: bot.username,
+    privacyMode,
+    guestQueries: bot.guestQueries ?? false,
+    groupVisibility: privacyMode
+      ? ('ADDRESSED_ONLY' as const)
+      : ('ALL_MESSAGES' as const),
+  };
+};
+
+const SentGuestMessageSchema = z.looseObject({
+  inline_message_id: z.string().min(1),
+});
+
+/** The replied-to message, truncated, with a hash of what Telegram delivered. */
+function guestReference(
+  reply: NonNullable<z.output<typeof MessageSchema>['reply_to_message']>,
+): GuestReference {
+  const full = reply.text ?? reply.caption ?? '';
+  return {
+    source: 'REPLY_TO_MESSAGE',
+    messageId: String(reply.message_id),
+    externalUserId: reply.from ? String(reply.from.id) : null,
+    isBot: reply.from?.is_bot ?? false,
+    timestamp: reply.date ?? null,
+    text: full.slice(0, GUEST_REFERENCE_MAX_CHARS),
+    truncated: full.length > GUEST_REFERENCE_MAX_CHARS,
+    textSha256: createHash('sha256').update(full).digest('hex'),
+  };
+}
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly channel = 'telegram' as const;
-  private bot: { id: number; username: string } | null;
+  private bot: TelegramBotProfile | null;
   private readonly limiter: OutboundLimiter;
   private readonly wait: Sleep;
   constructor(private readonly options: TelegramAdapterOptions) {
-    this.bot = options.bot ?? null;
+    this.bot = options.bot ? profileOf(options.bot) : null;
     this.wait = options.sleep ?? defaultSleep;
     this.limiter =
       options.limiter ??
@@ -250,11 +327,37 @@ export class TelegramAdapter implements ChannelAdapter {
     return this.bot?.username ?? null;
   }
 
-  async init() {
-    const me = UserSchema.parse(await this.options.api.call('getMe'));
+  async init(): Promise<TelegramBotProfile> {
+    const me = GetMeSchema.parse(await this.options.api.call('getMe'));
     if (!me.is_bot || !me.username) throw new Error('TELEGRAM_GETME_NOT_A_BOT');
-    this.bot = { id: me.id, username: me.username };
+    this.bot = profileOf({
+      id: me.id,
+      username: me.username,
+      privacyMode: me.can_read_all_group_messages !== true,
+      guestQueries: me.supports_guest_queries === true,
+    });
     return this.bot;
+  }
+
+  /** The bot's privacy and guest settings as getMe reported them; null before init. */
+  get profile(): TelegramBotProfile | null {
+    return this.bot ? { ...this.bot } : null;
+  }
+
+  /**
+   * What the bot can see in one group: everything new only when privacy mode
+   * is off or the bot is an administrator there. Never pre-join history.
+   */
+  async groupVisibility(chatId: string): Promise<TelegramGroupVisibility> {
+    const bot = this.bot;
+    if (!bot) return 'ADDRESSED_ONLY';
+    if (!bot.privacyMode) return 'ALL_MESSAGES';
+    const role = await this.chatRole(chatId, String(bot.id)).catch(
+      () => 'NONE' as const,
+    );
+    return role === 'ADMIN' || role === 'OWNER'
+      ? 'ALL_MESSAGES'
+      : 'ADDRESSED_ONLY';
   }
 
   /** getChatMember status: creator → OWNER, administrator → ADMIN. */
@@ -286,6 +389,10 @@ export class TelegramAdapter implements ChannelAdapter {
 
   verifyLogin(raw: unknown, nowSeconds: number) {
     return this.options.api.verifyLogin(raw, nowSeconds);
+  }
+
+  verifyMiniAppInitData(raw: unknown, nowSeconds: number) {
+    return this.options.api.verifyMiniAppInitData(raw, nowSeconds);
   }
 
   get botId() {
@@ -374,6 +481,37 @@ export class TelegramAdapter implements ChannelAdapter {
       if (!env || !joined || env.chatKind !== 'GROUP') return [];
       return [
         { type: 'GROUP_CREATED', envelope: env, title: m.chat.title ?? null },
+      ];
+    }
+    if (update.guest_message) {
+      // Guest mode: the bot is not a member here. Only this message and the
+      // one it replies to arrive; no history, no later messages.
+      const g = update.guest_message;
+      if (!g.guest_query_id) return [];
+      const env = base(g.chat, g.from, g.date, g.message_id);
+      if (!env) return [];
+      return [
+        {
+          type: 'GUEST_QUERY',
+          guestQueryId: g.guest_query_id,
+          reference: g.reply_to_message
+            ? guestReference(g.reply_to_message)
+            : null,
+          envelope: {
+            ...env,
+            body: (g.text ?? g.caption ?? '').slice(0, 4096),
+            replyTo: g.reply_to_message
+              ? String(g.reply_to_message.message_id)
+              : null,
+            interaction: {
+              kind: 'MENTION',
+              addressedToBot: true,
+              command: null,
+              args: '',
+              callbackData: null,
+            },
+          },
+        },
       ];
     }
     const msg = update.message;
@@ -617,6 +755,65 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
+  /**
+   * The one reply to a guest query, posted by Telegram as the bot into the
+   * caller's chat via answerGuestQuery (never sendMessage: the bot is not a
+   * member there). A network failure is not retried: it may have posted.
+   */
+  async answerGuest(
+    guestQueryId: string,
+    message: OutboundMessage,
+  ): Promise<{ inlineMessageId: string }> {
+    if (!/^[\x21-\x7e]{1,256}$/.test(guestQueryId))
+      throw new ChannelDeliveryError(
+        'PROVIDER_REJECTED',
+        0,
+        'invalid guest query id',
+      );
+    const buttons = (message.buttons ?? []).filter(
+      (b) => !isLocalUrl(b.url) && b.url.startsWith('https://'),
+    );
+    const result = {
+      type: 'article',
+      id: createHash('sha256').update(guestQueryId).digest('hex').slice(0, 32),
+      title: 'Synq',
+      input_message_content: {
+        message_text: message.text.slice(0, 4096),
+        link_preview_options: { is_disabled: true },
+      },
+      ...(buttons.length
+        ? {
+            reply_markup: {
+              inline_keyboard: buttons
+                .slice(0, 3)
+                .map((b) => [{ text: b.label.slice(0, 64), url: b.url }]),
+            },
+          }
+        : {}),
+    };
+    return this.limiter.run(`guest:${guestQueryId}`, async () => {
+      const sent = SentGuestMessageSchema.parse(
+        await this.retrying(async () => {
+          try {
+            return await this.options.api.call('answerGuestQuery', {
+              guest_query_id: guestQueryId,
+              result,
+            });
+          } catch (error) {
+            if (error instanceof TelegramApiError && error.httpStatus === 0)
+              throw new ChannelDeliveryError(
+                'PROVIDER_UNAVAILABLE',
+                1,
+                `DELIVERY_UNCERTAIN: ${error.description}`,
+              );
+            throw error;
+          }
+        }),
+      );
+      return { inlineMessageId: sent.inline_message_id };
+    });
+  }
+
   async acknowledgeAction(callbackId: string, text: string) {
     await this.options.api.call('answerCallbackQuery', {
       callback_query_id: callbackId,
@@ -742,4 +939,101 @@ export function signTelegramLoginForTest(
     ...fields,
     hash: createHmac('sha256', secret).update(check).digest('hex'),
   };
+}
+
+export type TelegramMiniAppIdentity = {
+  telegramUserId: string;
+  authDate: number;
+  queryId: string | null;
+  chatType: string | null;
+  chatInstance: string | null;
+  startParam: string | null;
+  /** The initData hash; callers use it to refuse a replayed initData. */
+  hash: string;
+};
+
+const MiniAppUserSchema = z.looseObject({
+  id: z.number().int().positive(),
+  is_bot: z.boolean().optional(),
+});
+
+/** HMAC-SHA256(key = "WebAppData", message = bot token), per core.telegram.org/bots/webapps. */
+const miniAppSecret = (botToken: string) =>
+  createHmac('sha256', 'WebAppData').update(botToken).digest();
+const miniAppCheckString = (fields: [string, string][]) =>
+  [...fields]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+
+/**
+ * Validates Telegram.WebApp.initData: the hash must equal
+ * HMAC-SHA256(data-check-string, HMAC-SHA256("WebAppData", token)) and
+ * auth_date must be recent. Returns the proven user or null.
+ */
+export function verifyTelegramMiniAppInitData(
+  raw: unknown,
+  botToken: string,
+  nowSeconds: number,
+  maxAgeSeconds = 3600,
+): TelegramMiniAppIdentity | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 8192)
+    return null;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(raw);
+  } catch {
+    return null;
+  }
+  const fields: [string, string][] = [];
+  const seen = new Set<string>();
+  let hash: string | null = null;
+  for (const [key, value] of params) {
+    if (seen.has(key)) return null;
+    seen.add(key);
+    if (key === 'hash') hash = value;
+    else fields.push([key, value]);
+  }
+  if (!hash || !/^[0-9a-f]{64}$/.test(hash)) return null;
+  const get = (k: string) => fields.find(([key]) => key === k)?.[1] ?? null;
+  const authRaw = get('auth_date');
+  if (!authRaw || !/^[0-9]{1,12}$/.test(authRaw)) return null;
+  const authDate = Number(authRaw);
+  if (nowSeconds - authDate > maxAgeSeconds || authDate - nowSeconds > 60)
+    return null;
+  const expected = createHmac('sha256', miniAppSecret(botToken))
+    .update(miniAppCheckString(fields))
+    .digest();
+  const given = Buffer.from(hash, 'hex');
+  if (given.length !== expected.length || !timingSafeEqual(given, expected))
+    return null;
+  let user: z.output<typeof MiniAppUserSchema>;
+  try {
+    const parsed = MiniAppUserSchema.safeParse(JSON.parse(get('user') ?? ''));
+    if (!parsed.success || parsed.data.is_bot === true) return null;
+    user = parsed.data;
+  } catch {
+    return null;
+  }
+  return {
+    telegramUserId: String(user.id),
+    authDate,
+    queryId: get('query_id'),
+    chatType: get('chat_type'),
+    chatInstance: get('chat_instance'),
+    startParam: get('start_param'),
+    hash,
+  };
+}
+
+/** Builds an initData string signed like Telegram does; tests only. */
+export function signTelegramMiniAppInitDataForTest(
+  fields: Record<string, string>,
+  botToken: string,
+): string {
+  const entries = Object.entries(fields);
+  const hash = createHmac('sha256', miniAppSecret(botToken))
+    .update(miniAppCheckString(entries))
+    .digest('hex');
+  return new URLSearchParams([...entries, ['hash', hash]]).toString();
 }
