@@ -58,6 +58,9 @@ importers:
       '@synq/funding':
         specifier: workspace:*
         version: link:packages/funding
+      '@synq/governance':
+        specifier: workspace:*
+        version: link:packages/governance
       '@synq/identity':
         specifier: workspace:*
         version: link:packages/identity
@@ -474,6 +477,18 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  packages/governance:
+    dependencies:
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
 
   packages/identity:
     dependencies:
