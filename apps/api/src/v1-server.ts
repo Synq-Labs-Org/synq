@@ -79,6 +79,7 @@ import { fundingReceipt, productionSendPorts } from './send-runtime.js';
 import { DurableKernel } from './kernel-runtime.js';
 import { indexedContributions } from '@synq/read-model';
 import { registerLithicWebhook } from './lithic-webhook.js';
+import { registerInvoiceCheckout } from './invoice-routes.js';
 
 export async function registerProductionSend(input: {
   app: FastifyInstance;
@@ -336,6 +337,8 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
   });
   // Card-program events: signature-verified, durably deduplicated inbox.
   await registerLithicWebhook({ app, pool, env });
+  // Arc invoice checkout: HMAC pay links, settlement only from Arc receipts.
+  await registerInvoiceCheckout({ app, pool, env });
   if (readModel && intents) {
     const kernel = intents instanceof DurableKernel ? intents.kernel : intents;
     const network = profileConfiguration(config.SYNQ_PROFILE).network;

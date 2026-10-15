@@ -226,9 +226,15 @@ importers:
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../../packages/invoices
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:../../plugins/chainlink-cre

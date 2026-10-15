@@ -19,7 +19,8 @@
     "./channel-server": "./src/channel-server.ts",
     "./channel-brain": "./src/channel-brain.ts",
     "./transfer-plugin": "./src/transfer-plugin.ts",
-    "./lithic-webhook": "./src/lithic-webhook.ts"
+    "./lithic-webhook": "./src/lithic-webhook.ts",
+    "./invoice-routes": "./src/invoice-routes.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -49,6 +50,8 @@
     "@synq/plugin-qwen": "workspace:*",
     "@synq/plugin-openai": "workspace:*",
     "@synq/plugin-kimi": "workspace:*",
-    "@synq/plugin-commerce": "workspace:*"
+    "@synq/plugin-commerce": "workspace:*",
+    "@synq/invoices": "workspace:*",
+    "@synq/ledger": "workspace:*"
   }
 }
