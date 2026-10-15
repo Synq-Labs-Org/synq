@@ -91,6 +91,9 @@ importers:
       '@synq/plugin-chainlink-cre':
         specifier: workspace:*
         version: link:plugins/chainlink-cre
+      '@synq/plugin-circle-cctp':
+        specifier: workspace:*
+        version: link:plugins/circle-cctp
       '@synq/plugin-commerce':
         specifier: workspace:*
         version: link:plugins/commerce
@@ -733,6 +736,15 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
+  plugins/circle-cctp:
+    dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../../packages/chain-registry
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+
   plugins/commerce:
     dependencies:
       '@synq/offer-exchange':
@@ -864,6 +876,9 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/plugin-circle-cctp':
+        specifier: workspace:*
+        version: link:../../plugins/circle-cctp
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

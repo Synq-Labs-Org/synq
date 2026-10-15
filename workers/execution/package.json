@@ -9,7 +9,8 @@
     "./persistence": "./src/persistence.ts",
     "./journal": "./src/journal.ts",
     "./integrity": "./src/integrity.ts",
-    "./arc": "./src/arc.ts"
+    "./arc": "./src/arc.ts",
+    "./cctp": "./src/cctp.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -18,6 +19,7 @@
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/plugin-circle-cctp": "workspace:*",
     "@synq/schemas": "workspace:*",
     "viem": "2.57.4",
     "zod": "4.6.5"
