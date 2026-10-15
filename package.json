@@ -79,6 +79,7 @@
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/funding": "workspace:*",
+    "@synq/governance": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/invoices": "workspace:*",
     "@synq/kernel": "workspace:*",

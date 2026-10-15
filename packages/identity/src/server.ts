@@ -17,3 +17,4 @@ export * from './directory.js';
 export * from './send-confirmation.js';
 export * from './send-access.js';
 export * from './safe-transaction.js';
+export * from './channel-link.js';
