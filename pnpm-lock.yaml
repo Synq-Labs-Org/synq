@@ -645,6 +645,9 @@ importers:
 
   packages/settlement:
     dependencies:
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../chain-registry
       '@synq/domain':
         specifier: workspace:*
         version: link:../domain

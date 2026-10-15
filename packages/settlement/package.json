@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./arc": "./src/arc-routes.ts"
+  },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/funding": "workspace:*",
     "@synq/kernel": "workspace:*",
