@@ -58,7 +58,7 @@ export type ArcWallet = Readonly<{
   address: Hex40;
   chain: ChainName;
   ownerPrincipalId: string;
-  kind: 'OWNER_EOA' | 'AGENT_EOA' | 'CIRCLE_SCA' | 'CIRCLE_DCW';
+  kind: 'OWNER_EOA' | 'AGENT_EOA' | 'CIRCLE_SCA' | 'CIRCLE_DCW' | 'SAFE_VAULT';
   role: 'TREASURY' | 'AGENT_OPERATIONAL' | 'PAYOUT';
   verifiedBy: string | null;
 }>;

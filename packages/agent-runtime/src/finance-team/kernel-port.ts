@@ -4,6 +4,7 @@ import {
   type AuthorityConfig,
   type Decision,
   type MandateState,
+  type OwnerApproval,
   type PaymentIntent,
   type PaymentMandate,
   type RiskInput,
@@ -21,8 +22,8 @@ export interface PaymentKernelPort {
   decide(input: {
     intent: PaymentIntent;
     risk: RiskInput;
-    /** Owner EIP-712 signature over `intentApprovalTypedData(intent)`. */
-    ownerApproval?: Hex;
+    /** Owner EIP-712 signature over `intentApprovalTypedData(intent, terms)`, with the terms. */
+    ownerApproval?: OwnerApproval;
     /** Confirmation step: without `ownerApproval` nothing is granted. */
     requireOwnerApproval?: boolean;
   }): Promise<Decision>;
@@ -53,19 +54,27 @@ export function arcPaymentKernel(input: {
   /** Independent simulation of the exact transfer; false or a throw denies. */
   simulate: (intent: PaymentIntent) => Promise<boolean>;
   now: () => number;
-  ownerApproval?: (intent: PaymentIntent) => Hex | undefined;
   obligations?: ObligationFence;
 }): PaymentKernelPort {
   const fence = input.obligations ?? new MemoryObligationFence();
+  // Owner-approval nonces redeemed through this port: each approval works once.
+  const redeemed = new Set<Hex>();
   return {
     async decide({ intent, risk, ownerApproval, requireOwnerApproval }) {
       const simulationOk = await input.simulate(intent).catch(() => false);
-      const approval = ownerApproval ?? input.ownerApproval?.(intent);
+      const approval = ownerApproval;
+      const state = await input.state();
       const decision = await decide({
         config: input.config,
         mandate: input.mandate,
         mandateSignature: input.mandateSignature,
-        state: await input.state(),
+        state: {
+          ...state,
+          usedApprovalNonces: [
+            ...(state.usedApprovalNonces ?? []),
+            ...redeemed,
+          ],
+        },
         intent,
         risk,
         simulationOk,
@@ -74,6 +83,7 @@ export function arcPaymentKernel(input: {
         ...(requireOwnerApproval ? { requireOwnerApproval: true } : {}),
       });
       if (decision.outcome !== 'ALLOW') return decision;
+      if (approval) redeemed.add(approval.nonce);
       // The minted grant never leaves this closure unless the obligation is new.
       if (!(await fence.reserve(intent.obligationRef)))
         return {

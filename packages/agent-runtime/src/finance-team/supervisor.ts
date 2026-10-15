@@ -1,4 +1,5 @@
 import type { Hex } from 'viem';
+import type { ApprovalTerms } from '@synq/kernel/arc';
 import { z } from 'zod';
 import { AmountError } from '@synq/domain';
 import { InvoiceError } from '@synq/invoices';
@@ -167,9 +168,17 @@ export async function superviseFinance(
     /**
      * The mandate owner's EIP-712 signature over the `PaymentApproval` typed
      * data returned by an earlier PROPOSED reply. Required to turn a payment
-     * question into a grant; a chat "yes" is never a confirmation.
+     * question into a grant; a chat "yes" is never a confirmation. `approval`
+     * carries the nonce and deadline the Kernel issued with that proposal
+     * (they are part of what the owner signed).
      */
-    confirm?: { ownerApproval: Hex };
+    confirm?: { ownerApproval: Hex; approval: ApprovalTerms };
+    /**
+     * Where the request came from, set by the channel path, not by the
+     * message. A CHAT request never uses the mandate's standing pre-approval:
+     * every chat-originated payout needs the owner's EIP-712 approval.
+     */
+    origin?: 'CHAT' | 'SYSTEM';
   } = {},
 ): Promise<SupervisorReply> {
   const runId = options.runId ?? `fin_${desk.now}`;
@@ -469,9 +478,16 @@ export async function superviseFinance(
               // only an explicit imperative may use the mandate's standing
               // pre-approval within its limits.
               requireOwnerApproval:
-                intent.kind === 'PAY_CHECK' || Boolean(options.confirm),
+                intent.kind === 'PAY_CHECK' ||
+                options.origin === 'CHAT' ||
+                Boolean(options.confirm),
               ...(options.confirm
-                ? { ownerApproval: options.confirm.ownerApproval }
+                ? {
+                    ownerApproval: {
+                      ...options.confirm.approval,
+                      signature: options.confirm.ownerApproval,
+                    },
+                  }
                 : {}),
             },
           );
@@ -505,7 +521,10 @@ export async function superviseFinance(
           risk.flags.length
             ? `Risk: ${risk.recommendation} (${risk.flags.map((f) => `${f.severity} ${f.code}`).join(', ')}).`
             : 'Risk: no flags.',
-          `Timing: ${timing.explanation}`,
+          // Timing advice only applies to a payout that may go ahead.
+          risk.recommendation === 'VETO' || status === 'DENIED'
+            ? 'Timing: not applicable; this payout must not be made as requested.'
+            : `Timing: ${timing.explanation}`,
           disagreements.length
             ? `Disagreements: ${disagreements.join(' | ')}.`
             : '',

@@ -9,12 +9,13 @@ import type { Address, Hex, LocalAccount } from 'viem';
 import { token, type ChainName } from '@synq/chain-registry/arc';
 import type { Invoice } from '@synq/invoices';
 import {
+  type ApprovalTerms,
   type AuthorityConfig,
   type MandateState,
   type PaymentIntent,
   type PaymentMandate,
 } from '@synq/kernel/arc';
-import type { JournalEntry, Ledger } from '@synq/ledger';
+import type { Ledger } from '@synq/ledger';
 import type { Obligation, Vendor, VendorInvoice } from '@synq/payables';
 import {
   ARC_PROVIDERS,
@@ -83,6 +84,15 @@ export type FinanceWiring = {
   ledger: Ledger;
   invoices: { list(workspaceId: string): Promise<Invoice[]> };
   receipts: (hash: `0x${string}`) => Promise<ChainReceipt | null>;
+  /**
+   * Per-wallet check of the books against the chain: each workspace wallet's
+   * native balance change since the run began must equal its ledger cash.
+   */
+  reconcile: () => Promise<{
+    status: 'RECONCILED' | 'UNRECONCILED';
+    unreconciled: number;
+    detail: string;
+  }>;
   reasoner?: StructuredReasoner;
   /** Session budget shared by every Supervisor run of this demo. */
   budget: FinanceBudgetLedger;
@@ -117,21 +127,6 @@ async function payables(w: FinanceWiring): Promise<Payable[]> {
       status: settled.has(i.vendorInvoiceId) ? 'PAID' : 'OPEN',
     };
   });
-}
-
-function reconciliation(entries: readonly JournalEntry[]) {
-  const cash = entries.filter((e) =>
-    e.postings.some((p) => p.account === 'CASH_ARC_USDC'),
-  );
-  const missing = cash.filter((e) => !e.evidence);
-  return {
-    status: missing.length
-      ? ('UNRECONCILED' as const)
-      : ('RECONCILED' as const),
-    unreconciled: missing.length,
-    lastRunAt: null,
-    detail: `${cash.length} cash entries; ${missing.length} without a chain receipt`,
-  };
 }
 
 /** WorldSnapshot from real readers: Arc RPC, Gateway API, Postgres books, Kernel state, provider probes. */
@@ -262,12 +257,14 @@ export function worldOf(w: FinanceWiring): () => Promise<ArcWorldSnapshot> {
           );
         },
         pendingApprovals: () => at([], 'KERNEL', 'kernel:approvals'),
-        reconciliation: async () =>
-          at(
-            reconciliation(await w.ledger.store.entries(b.workspaceId)),
-            'POSTGRES',
-            'ledger:synq_ledger_entries',
-          ),
+        reconciliation: async () => {
+          const r = await w.reconcile();
+          return at(
+            { ...r, lastRunAt: builtAt },
+            'CHAIN',
+            'reconcile:arc-native-balance-deltas=ledger-wallet-cash',
+          );
+        },
         blockers: () => at([...b.blockers], 'CONFIG', 'reports:blockers'),
       },
     });
@@ -343,47 +340,54 @@ export async function deskOf(
 export async function ask(
   w: FinanceWiring,
   message: string,
-  kernel?: ReturnType<typeof kernelOf>,
-  ownerApproval?: Hex,
+  options: {
+    kernel?: ReturnType<typeof kernelOf>;
+    /** Set by the channel path for chat messages. */
+    origin?: 'CHAT';
+    /** Owner wallet confirmation (comes from the wallet, never from chat). */
+    confirm?: { ownerApproval: Hex; approval: ApprovalTerms };
+  } = {},
 ): Promise<SupervisorReply> {
-  return superviseFinance(
-    message,
-    await deskOf(w, kernel),
-    ownerApproval ? { confirm: { ownerApproval } } : {},
-  );
+  return superviseFinance(message, await deskOf(w, options.kernel), {
+    ...(options.origin ? { origin: options.origin } : {}),
+    ...(options.confirm ? { confirm: options.confirm } : {}),
+  });
 }
 
 /**
- * The payout request with an explicit owner confirmation: the question
- * returns PROPOSED with the exact PaymentApproval typed data; the owner's
- * wallet signs it; the same question carrying that signature is decided
- * again on a freshly built snapshot. Anything other than PROPOSED (a denial,
- * a missing payable) is returned as is, and nothing is signed.
+ * The owner's wallet confirms one PROPOSED payout: it signs the exact
+ * PaymentApproval typed data (intent + Kernel-issued nonce and deadline), and
+ * the same request is decided again on a freshly built snapshot.
  */
-export async function requestPayout(input: {
+export async function confirmPayout(input: {
   wiring: FinanceWiring;
   kernel: ReturnType<typeof kernelOf>;
   owner: OwnerSigner;
-  counterparty: string;
-}): Promise<{
   message: string;
   proposal: SupervisorReply;
+}): Promise<{
   reply: SupervisorReply;
-  ownerApproval: { intentId: string; signature: Hex } | null;
-}> {
-  const message = `can I pay ${input.counterparty}'s invoice`;
-  const proposal = await ask(input.wiring, message, input.kernel);
-  const confirmation = proposal.payment?.kernel?.confirmation;
-  if (proposal.payment?.status !== 'PROPOSED' || !confirmation)
-    return { message, proposal, reply: proposal, ownerApproval: null };
+  ownerApproval: {
+    intentId: string;
+    signature: Hex;
+    nonce: Hex;
+    deadline: number;
+  };
+} | null> {
+  const confirmation = input.proposal.payment?.kernel?.confirmation;
+  if (input.proposal.payment?.status !== 'PROPOSED' || !confirmation)
+    return null;
   const signature = await input.owner.signTypedData(confirmation.typedData);
+  const reply = await ask(input.wiring, input.message, {
+    kernel: input.kernel,
+    confirm: { ownerApproval: signature, approval: confirmation.approval },
+  });
   return {
-    message,
-    proposal,
-    reply: await ask(input.wiring, message, input.kernel, signature),
-    ownerApproval: { intentId: confirmation.intent.intentId, signature },
+    reply,
+    ownerApproval: {
+      intentId: confirmation.intent.intentId,
+      signature,
+      ...confirmation.approval,
+    },
   };
 }
-
-export const explain = (w: FinanceWiring, txHash: Hex) =>
-  ask(w, `explain transaction ${txHash}`);

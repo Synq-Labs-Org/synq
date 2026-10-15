@@ -9,8 +9,10 @@ import {
 } from '@synq/invoices';
 import {
   intentApprovalTypedData,
+  type ApprovalTerms,
   type Decision,
   type ExecutionGrant,
+  type OwnerApproval,
   type PaymentIntent,
   type PaymentPurpose,
 } from '@synq/kernel/arc';
@@ -856,6 +858,8 @@ function chainNameOf(s: ArcWorldSnapshot): ChainName {
 /** What the owner signs (EIP-712) to confirm one exact payment intent. */
 export type OwnerConfirmation = Readonly<{
   intent: PaymentIntent;
+  /** One-use nonce and deadline issued by the Kernel; part of the signed data. */
+  approval: ApprovalTerms;
   typedData: ReturnType<typeof intentApprovalTypedData>;
   /** The mandate owner must sign; a chat "yes" is never a confirmation. */
   note: string;
@@ -911,7 +915,10 @@ export async function paymentAgentSubmit(
   desk: FinanceDesk,
   intent: PaymentIntent,
   risk: RiskRecommendation,
-  options: { requireOwnerApproval?: boolean; ownerApproval?: Hex } = {},
+  options: {
+    requireOwnerApproval?: boolean;
+    ownerApproval?: OwnerApproval;
+  } = {},
 ): Promise<KernelSubmission> {
   const kernel = desk.kernel;
   if (!kernel) return submission('NO_KERNEL', null, null, null);
@@ -932,8 +939,9 @@ export async function paymentAgentSubmit(
     return submission('DENIED', summary, null, null);
   const confirmation: OwnerConfirmation = {
     intent,
-    typedData: intentApprovalTypedData(intent),
-    note: 'Sign with the mandate owner wallet and pass the signature as `confirm.ownerApproval`; nothing is paid until then.',
+    approval: decision.approval,
+    typedData: intentApprovalTypedData(intent, decision.approval),
+    note: 'Sign with the mandate owner wallet and pass the signature as `confirm.ownerApproval` with `confirm.approval`; nothing is paid until then.',
   };
   return submission(
     options.requireOwnerApproval && !options.ownerApproval

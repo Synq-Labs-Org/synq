@@ -329,16 +329,19 @@ describe('Arc payment authority', () => {
       simulationOk: true,
       now: NOW,
     };
-    expect((await decide({ ...base, intent: overCap })).outcome).toBe(
-      'REQUIRE_OWNER_APPROVAL',
-    );
+    const asked = await decide({ ...base, intent: overCap });
+    expect(asked.outcome).toBe('REQUIRE_OWNER_APPROVAL');
+    if (asked.outcome !== 'REQUIRE_OWNER_APPROVAL') throw new Error('asked');
+    const terms = asked.approval;
+    expect(terms.deadline).toBe(NOW + 900);
+    const approve = (signature: Hex, t = terms) => ({ ...t, signature });
     // A "telegram vote" is not a signature at all.
     expect(
       (
         await decide({
           ...base,
           intent: overCap,
-          ownerApproval: '0x74656c656772616d2d766f7465' as Hex,
+          ownerApproval: approve('0x74656c656772616d2d766f7465' as Hex),
         })
       ).outcome,
     ).toBe('DENY');
@@ -347,15 +350,17 @@ describe('Arc payment authority', () => {
         await decide({
           ...base,
           intent: overCap,
-          ownerApproval: await stranger.signTypedData(
-            intentApprovalTypedData(overCap),
+          ownerApproval: approve(
+            await stranger.signTypedData(
+              intentApprovalTypedData(overCap, terms),
+            ),
           ),
         })
       ).outcome,
     ).toBe('DENY');
     // Signed for another chain (Sepolia domain): wrong domain, not accepted.
     const wrongDomain = await owner.signTypedData({
-      ...intentApprovalTypedData(overCap),
+      ...intentApprovalTypedData(overCap, terms),
       domain: {
         name: 'Synq Payment Approval',
         version: '1',
@@ -363,20 +368,55 @@ describe('Arc payment authority', () => {
       },
     });
     expect(
-      (await decide({ ...base, intent: overCap, ownerApproval: wrongDomain }))
-        .outcome,
-    ).toBe('DENY');
-    expect(
       (
         await decide({
           ...base,
           intent: overCap,
-          ownerApproval: await owner.signTypedData(
-            intentApprovalTypedData(overCap),
-          ),
+          ownerApproval: approve(wrongDomain),
         })
       ).outcome,
+    ).toBe('DENY');
+    const good = await owner.signTypedData(
+      intentApprovalTypedData(overCap, terms),
+    );
+    expect(
+      (await decide({ ...base, intent: overCap, ownerApproval: approve(good) }))
+        .outcome,
     ).toBe('ALLOW');
+    // The nonce and deadline are signed: changing either breaks the signature.
+    expect(
+      await decide({
+        ...base,
+        intent: overCap,
+        ownerApproval: approve(good, {
+          ...terms,
+          deadline: terms.deadline + 3600,
+        }),
+      }),
+    ).toMatchObject({
+      outcome: 'DENY',
+      reasons: ['owner approval signature does not match the mandate owner'],
+    });
+    // Expired, or already redeemed: refused even with the owner's signature.
+    expect(
+      await decide({
+        ...base,
+        now: terms.deadline + 1,
+        intent: overCap,
+        ownerApproval: approve(good),
+      }),
+    ).toMatchObject({ outcome: 'DENY', reasons: ['owner approval expired'] });
+    expect(
+      await decide({
+        ...base,
+        state: { ...base.state, usedApprovalNonces: [terms.nonce] },
+        intent: overCap,
+        ownerApproval: approve(good),
+      }),
+    ).toMatchObject({
+      outcome: 'DENY',
+      reasons: ['owner approval already used'],
+    });
     // A mandate signed by a group admin who is not its owner creates no authority.
     expect(
       (

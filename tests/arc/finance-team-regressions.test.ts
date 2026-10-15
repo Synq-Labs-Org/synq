@@ -118,6 +118,7 @@ describe('critic 1: only explicit imperatives move money; questions need an owne
     const forged = await superviseFinance("can I pay Sarah's invoice?", d, {
       confirm: {
         ownerApproval: await stranger.signTypedData(confirmation.typedData),
+        approval: confirmation.approval,
       },
     });
     expect(forged.payment!.status).toBe('DENIED');
@@ -128,11 +129,42 @@ describe('critic 1: only explicit imperatives move money; questions need an owne
     const confirmed = await superviseFinance("can I pay Sarah's invoice?", d, {
       confirm: {
         ownerApproval: await owner.signTypedData(confirmation.typedData),
+        approval: confirmation.approval,
       },
     });
     expect(confirmed.payment!.status).toBe('GRANTED');
     expect(confirmed.payment!.kernel!.grant!.recipient).toBe(sarahWallet);
     expect(k.calls).toHaveLength(3);
+  });
+
+  it('a chat-originated imperative never uses the standing mandate: it ends PROPOSED, no grant', async () => {
+    const { k, d } = await countedDesk([cleanInvoice]);
+    const r = await superviseFinance("Pay Sarah's invoice", d, {
+      origin: 'CHAT',
+    });
+    expect(r.intent.kind).toBe('PAY_INVOICE');
+    expect(r.payment!.status).toBe('PROPOSED');
+    expect(r.payment!.kernel!.grant).toBeNull();
+    expect(k.calls).toHaveLength(1);
+  });
+
+  it('an owner approval is one-use: the same signed confirmation cannot mint a second grant', async () => {
+    const { d } = await countedDesk([cleanInvoice]);
+    const asked = await superviseFinance("can I pay Sarah's invoice?", d);
+    const c = asked.payment!.kernel!.confirmation!;
+    const confirm = {
+      ownerApproval: await owner.signTypedData(c.typedData),
+      approval: c.approval,
+    };
+    const first = await superviseFinance("can I pay Sarah's invoice?", d, {
+      confirm,
+    });
+    expect(first.payment!.status).toBe('GRANTED');
+    const again = await superviseFinance("can I pay Sarah's invoice?", d, {
+      confirm,
+    });
+    expect(again.payment!.status).toBe('DENIED');
+    expect(again.payment!.kernel!.grant).toBeNull();
   });
 
   it('an explicit imperative under the signed contractor mandate is granted within its limits', async () => {

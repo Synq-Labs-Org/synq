@@ -1,17 +1,28 @@
 /**
  * "Synq Freelancer Finance Team": the end-to-end orchestration shared by the
  * live script (scripts/arc-freelancer-demo.ts) and its CI test
- * (tests/arc/freelancer-demo.test.ts). Everything that touches a chain, an
- * HTTP provider or a key goes through the injected ports; everything else is
- * the real product code: the Telegram adapter and channel gateway, identity
- * channel linking, the invoice service and checkout API, the CCTP transfer
- * state machine, the finance team, the Kernel and the ledger.
+ * (tests/arc/freelancer-demo.test.ts).
+ *
+ * This process is the Supervisor / model process: it holds no key. Every
+ * signature and every transaction goes through injected ports, which the
+ * live script backs with separate key-holding processes (the parties'
+ * wallets, and the restricted executor that holds the vault operator key and
+ * accepts only {grant, call}). Everything else is the real product code: the
+ * Telegram adapter and channel gateway (guest and DM paths), identity channel
+ * linking, the invoice service and checkout API, the CCTP state machine and
+ * receipt reconciliation, the finance team, the Kernel, and the ledger.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import Fastify from 'fastify';
-import type { Address, Hex, PublicClient } from 'viem';
+import {
+  keccak256,
+  stringToHex,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from 'viem';
 import { CHAINS, token } from '@synq/chain-registry/arc';
-import { moneyToDecimal, money } from '@synq/domain';
+import { moneyFromDecimal, moneyToDecimal, money } from '@synq/domain';
 import {
   ChannelGateway,
   MemoryChannelStore,
@@ -20,13 +31,14 @@ import {
   TelegramBotApi,
   signTelegramLoginForTest,
   verifyTelegramLogin,
-  type ChannelEvent,
-  type OutboundMessage,
+  type DirectReply,
+  type GatewayOutcome,
 } from '@synq/channels';
 import {
   ChannelLinkService,
   MemoryChannelLinkStore,
   channelLinkTypedData,
+  type ChannelLinkChallenge,
   type ChannelProofVerifier,
 } from '@synq/identity';
 import {
@@ -38,16 +50,21 @@ import {
   type MemoPayment,
 } from '@synq/invoices';
 import {
-  MemoryNonceFence,
   mandateTypedData,
   type AuthorityConfig,
   type ExecutionGrant,
-  type NonceFence,
   type PaymentMandate,
 } from '@synq/kernel/arc';
 import {
   Ledger,
+  NATIVE_WEI_PER_UNIT,
+  arcGasEntry,
+  dustAssetId,
   relayOutbox,
+  tagCash,
+  walletCashWei,
+  walletTag,
+  type JournalEntry,
   type LedgerStore,
   type OutboxEvent,
 } from '@synq/ledger';
@@ -77,9 +94,8 @@ import type { Blocker } from '@synq/world-model';
 import { invoiceRoutes } from '../../apps/api/src/invoice-routes.js';
 import {
   ask,
-  explain,
+  confirmPayout,
   kernelOf,
-  requestPayout,
   type FinanceBooks,
   type FinanceWiring,
   type OwnerSigner,
@@ -99,6 +115,9 @@ export type StepLabel =
   | 'MEMORY_STORE'
   | 'FAKE_ARC'
   | 'FAKE_SEPOLIA'
+  | 'SEPARATE_PROCESS'
+  | 'IN_PROCESS_FAKE'
+  | 'ETH_CALL_ONLY'
   | 'BLOCKED';
 
 export type FundingRecord = Readonly<{
@@ -106,43 +125,106 @@ export type FundingRecord = Readonly<{
   chain: string;
   hash: Hex;
   explorer: string;
+  /** Arc transfers between workspace wallets: booked in the ledger. */
+  arc: {
+    from: Address;
+    to: Address;
+    amount: bigint;
+    logIndex: number;
+    feeWei: bigint;
+  } | null;
 }>;
 
 export type GrantedPayout = Readonly<{
   hash: Hex;
   blockNumber: bigint;
   explorer: string;
+  /** Log index of the USDC Transfer payer -> recipient. */
   logIndex: number;
-  feeBaseUnits: bigint;
+  /** The account the USDC left (the governed vault). */
+  payer: Address;
+  /** The account that paid gas (the vault operator). */
+  gasPayer: Address;
+  feeWei: bigint;
 }>;
 
-export type VaultCheck = Readonly<{
+export type VaultInfo = Readonly<{
   vault: Address;
   policy: Address;
   operator: Address;
-  operatorIsAgent: boolean;
-  verifiedAllowlisted: boolean;
-  changedAllowlisted: boolean;
-  changedPayCall: { ok: boolean; reason: string | null };
-  vaultHealthy: boolean;
-  vaultProblems: string[];
+  healthy: boolean;
+  problems: readonly string[];
+  perPaymentCap: bigint;
+  windowCap: bigint;
+  windowSpent: bigint;
+  /** When the current operator window ends (unix seconds). */
+  windowEndsAt: number;
+  allowlisted: Readonly<Record<string, boolean>>;
 }>;
 
-/** Every chain/provider effect the demo needs. Live: viem + workers/execution; CI: fakes. */
+/**
+ * The restricted executor. Live: a separate process holding the vault
+ * operator key; it accepts only a Kernel grant plus the exact call.
+ */
+export interface ExecutorPort {
+  readonly label: string;
+  start(grantKey: Uint8Array): Promise<{
+    operator: Address;
+    vault: Address;
+    policy: Address;
+    pid: number | null;
+  }>;
+  /** Admit the grant, then `policy.pay(recipient, amount, ref)` from the operator. */
+  pay(input: {
+    grant: ExecutionGrant;
+    recipient: Address;
+    amount: bigint;
+    ref: Hex;
+    /** Must durably record the hash; broadcast waits for it. */
+    onHash: (h: Hex) => Promise<void>;
+  }): Promise<GrantedPayout>;
+  /** Admission only: nothing is signed. 'ADMITTED' or the refusal. */
+  admit(input: {
+    grant: ExecutionGrant;
+    recipient: Address;
+    amount: bigint;
+  }): Promise<string>;
+  stop(): Promise<void>;
+}
+
+export type MintReconciliation = Readonly<{
+  minted: bigint;
+  feeExecuted: bigint;
+  logIndex: number;
+  nonce: Hex;
+  blockNumber: bigint;
+  gasPayer: Address;
+  gasFeeWei: bigint;
+}>;
+
+/** Chain and provider effects. Live: viem + workers/execution (+ key-holding child processes). */
 export interface DemoChainPort extends WorldChainReads {
   readonly labels: { arc: StepLabel; sepolia: StepLabel };
   arcNonce(account: Address): Promise<number>;
+  /** Native (18-decimal) Arc balance in wei: the exact cash of a wallet. */
+  nativeBalance(account: Address): Promise<bigint>;
   receipt(hash: Hex): Promise<ChainReceipt | null>;
-  simulateTransfer(t: {
-    from: Address;
-    to: Address;
+  /** Who paid the gas of an Arc transaction, and how much (native wei). */
+  txGas(hash: Hex): Promise<{ payer: Address; feeWei: bigint }>;
+  vaultInfo(check: readonly Address[]): Promise<VaultInfo>;
+  /** eth_call of `policy.pay(recipient, amount, ref)` from `operator`. Never sent. */
+  vaultPayCall(input: {
+    operator: Address;
+    recipient: Address;
     amount: bigint;
-  }): Promise<boolean>;
-  /** Tops up the agent float on Arc and the client's Sepolia USDC/ETH from the operator. */
+  }): Promise<{ ok: boolean; reason: string | null }>;
   fund(input: {
     agent: Address;
     agentMin: bigint;
     agentTopUp: bigint;
+    vault: Address;
+    vaultMin: bigint;
+    vaultTopUp: bigint;
     client: Address;
     clientSepoliaUsdcMin: bigint;
   }): Promise<FundingRecord[]>;
@@ -160,69 +242,66 @@ export interface DemoChainPort extends WorldChainReads {
     attestation: Hex,
     onMintHash: (h: Hex) => Promise<void> | void,
   ): Promise<{ mintTx: Hex | null; alreadyUsed: boolean }>;
+  /** workers/execution `reconcileMint`: receipt tied to the attested message. */
   cctpReconcile(
     t: CctpTransfer,
     message: Hex,
     mintTx: Hex,
-  ): Promise<{
-    minted: bigint;
-    feeExecuted: bigint;
-    logIndex: number;
-    nonce: Hex;
-    blockNumber: bigint;
-  }>;
-  /** workers/execution `executeGrantedTransfer` from the agent wallet. */
-  executeGranted(input: {
-    grant: ExecutionGrant;
-    grantKey: Uint8Array;
-    fence: NonceFence;
-    to: Address;
-    amount: bigint;
-    onBroadcast: (h: Hex) => Promise<void> | void;
-  }): Promise<GrantedPayout>;
-  /** Read-only: does the governed vault refuse an operator payment to `changed`? */
-  vaultCheck?(input: {
-    operator: Address;
-    verified: Address;
-    changed: Address;
-    amount: bigint;
-  }): Promise<VaultCheck | null>;
+  ): Promise<MintReconciliation>;
 }
 
 /** Where reconciled invoice routes are recorded (Postgres in the script). */
 export interface RouteStore {
-  save(r: SettlementEvidence): Promise<void>;
-  list(): Promise<SettlementEvidence[]>;
+  save(workspaceId: string, r: SettlementEvidence): Promise<void>;
+  list(workspaceId: string): Promise<SettlementEvidence[]>;
 }
 export class MemoryRouteStore implements RouteStore {
-  private rows = new Map<string, SettlementEvidence>();
-  async save(r: SettlementEvidence) {
-    this.rows.set(r.destinationTx.toLowerCase(), r);
+  private rows = new Map<string, { ws: string; r: SettlementEvidence }>();
+  async save(ws: string, r: SettlementEvidence) {
+    this.rows.set(r.destinationTx.toLowerCase(), { ws, r });
   }
-  async list() {
-    return [...this.rows.values()];
+  async list(ws: string) {
+    return [...this.rows.values()].filter((x) => x.ws === ws).map((x) => x.r);
+  }
+}
+
+/** Durable record of a payout hash, written before the transaction is broadcast. */
+export interface PayoutJournal {
+  record(r: {
+    hash: Hex;
+    grantId: string;
+    workspaceId: string;
+    state: 'SIGNED';
+  }): Promise<void>;
+}
+export class MemoryPayoutJournal implements PayoutJournal {
+  readonly rows: { hash: Hex; grantId: string; state: string }[] = [];
+  async record(r: { hash: Hex; grantId: string; state: 'SIGNED' }) {
+    this.rows.push(r);
   }
 }
 
 export type DemoDeps = {
   runId: string;
   parties: {
-    /** Freelancer's EOA (testnet.key): signs link, issuance, mandate, approvals. */
+    /** Freelancer's wallet: signs link, issuance, mandate, approvals (live: its own process). */
     owner: OwnerSigner;
-    /** Operational wallet that pays only under Kernel grants (arc-agent.key). */
+    /** Vault operator, the only key the executor holds. */
     agent: Address;
-    /** Client wallet paying from Sepolia (arc-client.key). */
+    /** Client wallet paying from Sepolia. */
     client: Address;
-    /** Contractor's verified payout address (arc-contractor.key). */
+    /** Contractor's verified payout address. */
     sarah: Address;
     /** Freshly generated "new wallet" from the fraud attempt. */
     walletB: Address;
   };
   chain: DemoChainPort;
+  executor: ExecutorPort;
   stores: {
     ledger: LedgerStore;
     invoices: InvoiceStore;
     routes: RouteStore;
+    payouts: PayoutJournal;
     label: 'POSTGRES' | 'MEMORY_STORE';
   };
   reasoner?: StructuredReasoner;
@@ -280,26 +359,40 @@ const CLIENT_CHAT = '-1002024001';
 /** Local transport only: never a real bot token, never sent anywhere. */
 const LOCAL_TOKEN = '7000000001:LOCAL_INGRESS_fake_transport_token';
 const DM = String(MAYA.id);
+/** Status references are kept for this long, and the guest footer says so. */
+const STATUS_RETENTION_SECONDS = 7 * 86_400;
 const d = (b: bigint) => moneyToDecimal(money(USDC, b));
+/** Exact decimal of native wei (18 decimals). */
+const wei18 = (w: bigint) => {
+  const neg = w < 0n;
+  const a = neg ? -w : w;
+  const frac = (a % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+  return `${neg ? '-' : ''}${a / 10n ** 18n}${frac ? `.${frac}` : ''}`;
+};
 const arcTx = (h: string) => `${ARC.explorer}/tx/${h}`;
 const sepTx = (h: string) => `${SEPOLIA.explorer}/tx/${h}`;
 /** Pay-link tokens are bearer navigation links: evidence keeps only the invoice id part. */
 const redactLink = (url: string) =>
-  url.replace(/(\/pay\/[^.]+)\.[^/?#]+/, '$1.…');
+  url.replace(/(\/pay\/[^.\s]+)\.[^/?#\s]+/g, '$1.…');
 const bigJson = (v: unknown) =>
   JSON.parse(
     JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? String(x) : x)),
   ) as Record<string, unknown>;
+function must(ok: unknown, why: string): asserts ok {
+  if (!ok) throw new Error(`invariant failed: ${why}`);
+}
 
 /**
  * A capturing Telegram Bot API transport. Telegram's live transport is
  * blocked for this bot (Guest Mode off), so every Bot API call the real
  * TelegramAdapter makes is answered here and recorded; nothing reaches
- * api.telegram.org.
+ * api.telegram.org. Like Telegram, an edit with identical text answers 400
+ * "message is not modified".
  */
 export function localTelegram(now: () => number) {
   const transcript: TranscriptEntry[] = [];
   const calls: { method: string; body: Record<string, unknown> }[] = [];
+  const lastText = new Map<string, string>();
   let messageId = 500;
   let inline = 0;
   let seq = 0;
@@ -328,6 +421,7 @@ export function localTelegram(now: () => number) {
         });
       case 'sendMessage': {
         const id = ++messageId;
+        lastText.set(`${body.chat_id}:${id}`, String(body.text ?? ''));
         push({
           direction: 'OUT',
           chat: String(body.chat_id),
@@ -343,6 +437,7 @@ export function localTelegram(now: () => number) {
         const result = body.result as {
           input_message_content: { message_text: string };
         };
+        lastText.set(id, result.input_message_content.message_text);
         push({
           direction: 'OUT',
           chat: CLIENT_CHAT,
@@ -354,6 +449,20 @@ export function localTelegram(now: () => number) {
         return ok({ inline_message_id: id });
       }
       case 'editMessageText': {
+        const ref = body.inline_message_id
+          ? String(body.inline_message_id)
+          : `${body.chat_id}:${body.message_id}`;
+        if (lastText.get(ref) === String(body.text ?? ''))
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error_code: 400,
+              description:
+                'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+            }),
+            { status: 400 },
+          );
+        lastText.set(ref, String(body.text ?? ''));
         push({
           direction: 'OUT',
           chat: body.inline_message_id ? CLIENT_CHAT : String(body.chat_id),
@@ -403,54 +512,72 @@ export function testTelegramProof(now: number): DemoDeps['telegramProof'] {
 }
 
 /**
- * Onboarding's identity step, isolated so the hardened channel-link API is
- * adapted here only: Telegram proof (consumed once) → code delivered by DM →
- * the wallet signs the exact EIP-712 challenge → link record.
+ * Settles an invoice only from a reconciled mint. Throws unless the payment
+ * was APPLIED and the invoice is PAID; a replay must be a DUPLICATE.
  */
-async function linkWallet(input: {
-  workspaceId: string;
-  owner: OwnerSigner;
-  proof: DemoDeps['telegramProof'];
-  sendDm: (text: string, code: string) => Promise<void>;
-  readCode: () => string;
-  now: () => number;
-}) {
-  const service = new ChannelLinkService(new MemoryChannelLinkStore(), {
-    verifiers: { telegram: input.proof.verifier },
-    deliverCode: async ({ code }) =>
-      input.sendDm(
-        `Your Synq link code is ${code}. Reply with it here to confirm; never share it.`,
-        code,
-      ),
-    now: input.now,
-  });
-  const challenge = await service.requestLink({
-    workspaceId: input.workspaceId,
-    channel: 'telegram',
-    channelProof: input.proof.proof,
-    wallet: input.owner.address,
-  });
-  const signature = await input.owner.signTypedData(
-    channelLinkTypedData(challenge),
-  );
-  const record = await service.completeLink({
-    challengeId: challenge.challengeId,
-    channelCode: input.readCode(),
-    signature,
-  });
-  const replay = await service
-    .requestLink({
-      workspaceId: input.workspaceId,
-      channel: 'telegram',
-      channelProof: input.proof.proof,
-      wallet: input.owner.address,
-    })
-    .then(
-      () => 'ACCEPTED (unexpected)',
-      (e: Error & { code?: string; detail?: string }) =>
-        `${e.code ?? e.name}: ${e.detail ?? e.message}`,
+export async function settleInvoiceFromMint(
+  invoices: InvoiceService,
+  payment: MemoPayment,
+) {
+  const settled = await invoices.settle(payment);
+  if (settled.outcome !== 'APPLIED')
+    throw new Error(
+      `invariant failed: settle ${settled.outcome}${'reason' in settled ? ` (${settled.reason})` : ''}`,
     );
-  return { challenge, record, proofReplay: replay };
+  must(
+    settled.invoice.status === 'PAID',
+    `invoice ${settled.invoice.number} is ${settled.invoice.status}, not PAID`,
+  );
+  const replay = await invoices.settle(payment);
+  must(replay.outcome === 'DUPLICATE', `replay was ${replay.outcome}`);
+  return { settled, replay };
+}
+
+/** Per-wallet check: chain native balance deltas equal ledger wallet cash. */
+export function reconcileWallets(input: {
+  wallets: Readonly<Record<string, Address>>;
+  before: Readonly<Record<string, bigint>>;
+  after: Readonly<Record<string, bigint>>;
+  entries: readonly JournalEntry[];
+}) {
+  const cash = walletCashWei(input.entries, USDC.assetId);
+  const rows = Object.entries(input.wallets).map(([role, address]) => {
+    const chainDelta = input.after[role]! - input.before[role]!;
+    const ledgerDelta = cash.get(walletTag(address)) ?? 0n;
+    return {
+      role,
+      address,
+      chainDeltaWei: chainDelta,
+      ledgerDeltaWei: ledgerDelta,
+      chainDelta: wei18(chainDelta),
+      ledgerDelta: wei18(ledgerDelta),
+      matches: chainDelta === ledgerDelta,
+    };
+  });
+  const known = new Set(Object.values(input.wallets).map((a) => walletTag(a)));
+  const stray = [...cash.entries()]
+    .filter(([k, v]) => !known.has(k) && v !== 0n)
+    .map(([k, v]) => ({ tag: k, wei: wei18(v) }));
+  const mismatched = rows.filter((r) => !r.matches);
+  return {
+    status:
+      mismatched.length || stray.length
+        ? ('UNRECONCILED' as const)
+        : ('RECONCILED' as const),
+    unreconciled: mismatched.length + stray.length,
+    rows,
+    stray,
+    detail:
+      mismatched.length || stray.length
+        ? `mismatch: ${[
+            ...mismatched.map(
+              (r) =>
+                `${r.role} chain ${r.chainDelta} vs ledger ${r.ledgerDelta}`,
+            ),
+            ...stray.map((s) => `untracked cash ${s.tag} ${s.wei}`),
+          ].join('; ')}`
+        : `${rows.length} wallets: native balance deltas equal ledger cash to the wei`,
+  };
 }
 
 export async function runFreelancerDemo(deps: DemoDeps) {
@@ -458,57 +585,20 @@ export async function runFreelancerDemo(deps: DemoDeps) {
   const log = deps.log ?? (() => undefined);
   const steps: StepRecord[] = [];
   const workspaceId = `wsp_freelancer_${deps.runId}`;
+  const guestKey = `deal:${deps.runId}:client-chat`;
+  const dmKey = `deal:${deps.runId}:issuer-dm`;
   const tg = localTelegram(now);
   const adapter = new TelegramAdapter({
-    api: new TelegramBotApi({
-      token: LOCAL_TOKEN,
-      fetch: tg.fetch,
-    }),
+    api: new TelegramBotApi({ token: LOCAL_TOKEN, fetch: tg.fetch }),
     limiter: new OutboundLimiter({
       perChatIntervalMs: 0,
       globalIntervalMs: 0,
     }),
+    maxAttempts: 1,
     transport: 'BOT_API_POLL',
   });
   const botProfile = await adapter.init();
   let updateId = 9_000;
-  const dm = async (text: string) => {
-    const sent = await adapter.send(DM, { text });
-    return sent.messageId;
-  };
-  const userSays = (text: string): ChannelEvent[] => {
-    const id = ++updateId;
-    tg.inbound(DM, MAYA.name, text, String(id));
-    return adapter.normalize({
-      update_id: id,
-      message: {
-        message_id: id,
-        date: now(),
-        chat: { id: MAYA.id, type: 'private', first_name: MAYA.name },
-        from: { id: MAYA.id, is_bot: false, first_name: MAYA.name },
-        text,
-      },
-    });
-  };
-  const bodyOf = (events: ChannelEvent[]) => {
-    const e = events.find((x) => x.type === 'MESSAGE_RECEIVED');
-    if (!e || e.type !== 'MESSAGE_RECEIVED')
-      throw new Error('adapter did not produce a message event');
-    return e.envelope.body;
-  };
-  const statusTargets: { inlineMessageId: string | null; dm: string | null } = {
-    inlineMessageId: null,
-    dm: null,
-  };
-  const updateConversation = async (message: OutboundMessage) => {
-    if (statusTargets.inlineMessageId)
-      await adapter.edit(
-        { inlineMessageId: statusTargets.inlineMessageId },
-        message,
-      );
-    if (statusTargets.dm)
-      await adapter.edit({ chatId: DM, messageId: statusTargets.dm }, message);
-  };
 
   const step = async (
     n: number,
@@ -548,7 +638,50 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     log(`\n=== Step ${n}: ${title} SKIPPED (${why})`);
   };
 
-  // ------------------------------------------------------------ books
+  // ------------------------------------------------------------ setup
+  const config: AuthorityConfig = {
+    grantKey: randomBytes(32),
+    operator: 'arc-vault-executor',
+    grantTtlSeconds: 120,
+    riskRequiredAbove: 50_000_000n,
+  };
+  const executor = await deps.executor.start(config.grantKey);
+  const vault = await chain.vaultInfo([parties.sarah, parties.walletB]);
+  // Preflight: the payout must fit the vault's on-chain policy as it stands.
+  must(vault.healthy, `vault unhealthy: ${vault.problems.join(', ')}`);
+  must(
+    vault.operator.toLowerCase() === executor.operator.toLowerCase() &&
+      executor.operator.toLowerCase() === parties.agent.toLowerCase(),
+    'the executor key is not the vault operator',
+  );
+  must(
+    vault.allowlisted[parties.sarah.toLowerCase()] === true,
+    "Sarah's verified address is not on the vault allowlist",
+  );
+  must(
+    deps.amounts.payout <= vault.perPaymentCap,
+    `payout ${deps.amounts.payout} exceeds the vault per-payment cap ${vault.perPaymentCap}`,
+  );
+  const windowSpent = now() >= vault.windowEndsAt ? 0n : vault.windowSpent;
+  must(
+    windowSpent + deps.amounts.payout <= vault.windowCap,
+    `vault operator window has ${vault.windowCap - windowSpent} left; resets at ${vault.windowEndsAt}`,
+  );
+  const wallets: Record<string, Address> = {
+    owner: parties.owner.address,
+    agent: parties.agent,
+    vault: vault.vault,
+  };
+  const balancesOf = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        Object.entries(wallets).map(
+          async ([k, a]) => [k, await chain.nativeBalance(a)] as const,
+        ),
+      ),
+    ) as Record<string, bigint>;
+  const baseline = await balancesOf();
+
   const sarah: Vendor = {
     vendorId: 'sarah',
     workspaceId,
@@ -574,16 +707,20 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     vendorInvoices: [],
     obligations: [],
     payoutEvidence: [],
-    settlements: await deps.stores.routes.list(),
+    settlements: await deps.stores.routes.list(workspaceId),
     cctpInFlight: [],
     mandate: null,
     mandateState: { revoked: false, spends: [] },
     minimumReserve: deps.amounts.minimumReserve,
     blockers: deps.blockers,
   };
-  books.settlements = books.settlements.filter((s) =>
-    s.invoiceId.includes(workspaceId),
-  );
+  const reconcileNow = async () =>
+    reconcileWallets({
+      wallets,
+      before: baseline,
+      after: await balancesOf(),
+      entries: await deps.stores.ledger.entries(workspaceId),
+    });
   const wiring: FinanceWiring = {
     books,
     chain,
@@ -592,16 +729,18 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       list: async (ws) => (await invoices.store.list(ws)).map((r) => r.invoice),
     },
     receipts: (h) => chain.receipt(h),
+    reconcile: reconcileNow,
     budget: new MemoryFinanceBudgetLedger(),
     ...(deps.reasoner ? { reasoner: deps.reasoner } : {}),
     env: deps.env,
     now,
   };
-  const modelLabel = (reply: SupervisorReply): StepLabel[] =>
-    reply.modelCalls.length
+  const modelLabel = (replies: readonly SupervisorReply[]): StepLabel[] => {
+    const calls = replies.flatMap((r) => r.modelCalls);
+    return calls.length
       ? [
           ...new Set(
-            reply.modelCalls.map((c) =>
+            calls.map((c) =>
               c.mode === 'LIVE'
                 ? ('LIVE_MODEL' as const)
                 : ('REPLAY_MODEL' as const),
@@ -609,199 +748,115 @@ export async function runFreelancerDemo(deps: DemoDeps) {
           ),
         ]
       : ['NO_MODEL'];
+  };
   const modelCalls: unknown[] = [];
+  const bookGas = async (
+    txHash: Hex,
+    payer: Address,
+    feeWei: bigint,
+    memo: string,
+  ) => {
+    const e = arcGasEntry({
+      workspaceId,
+      chain: 'arc-testnet',
+      txHash,
+      payer,
+      feeWei,
+      at: now(),
+      memo,
+    });
+    if (e) await ledger.post(e);
+  };
 
-  // Balances first; top up the agent float and the client's Sepolia wallet.
+  // Balances first: top up the vault float, the agent's gas and the client.
   const funding = await chain.fund({
     agent: parties.agent,
-    agentMin: deps.amounts.payout * 4n,
-    agentTopUp: 500_000n,
+    agentMin: 10_000n,
+    agentTopUp: 50_000n,
+    vault: vault.vault,
+    vaultMin: deps.amounts.minimumReserve + deps.amounts.payout * 2n,
+    vaultTopUp: 20_000n,
     client: parties.client,
     clientSepoliaUsdcMin: deps.amounts.maxInvoice + 10_000n,
   });
-  for (const f of funding) log(`funded ${f.what}: ${f.explorer}`);
+  for (const f of funding) {
+    log(`funded ${f.what}: ${f.explorer}`);
+    if (!f.arc) continue;
+    // A transfer between workspace wallets: cash moves, nothing is earned.
+    await ledger.post({
+      entryId: `je_fund_${f.hash.slice(2, 18)}`,
+      workspaceId,
+      occurredAt: now(),
+      memo: `Internal transfer: ${f.what}`,
+      source: { kind: 'CHAIN_TX', ref: f.hash },
+      evidence: {
+        chainId: USDC.chainId,
+        txHash: f.hash,
+        logIndex: f.arc.logIndex,
+        recipient: f.arc.to,
+      },
+      idempotencyKey: `chain:${USDC.chainId}:${f.hash.toLowerCase()}:${f.arc.logIndex}`,
+      postings: [
+        {
+          account: 'CASH_ARC_USDC',
+          assetId: USDC.assetId,
+          amount: f.arc.amount,
+          counterpartyId: walletTag(f.arc.to),
+        },
+        {
+          account: 'CASH_ARC_USDC',
+          assetId: USDC.assetId,
+          amount: -f.arc.amount,
+          counterpartyId: walletTag(f.arc.from),
+        },
+      ],
+      reversalOf: null,
+    });
+    await bookGas(f.hash, f.arc.from, f.arc.feeWei, `Gas: ${f.what}`);
+  }
 
-  // ------------------------------------------------------------ 1 guest
-  const gateway = new ChannelGateway({
-    store: new MemoryChannelStore(),
-    adapters: [adapter],
-    webBaseUrl: 'https://synq.example',
-    explorerTxUrl: `${ARC.explorer}/tx/`,
-    now,
-    botUsernames: { telegram: BOT.username },
-    guestCooldownSeconds: 0,
-    ports: {
-      activeMember: async () => null,
-      treasury: async () => null,
-      mandates: async () => [],
-      approvals: async () => [],
-      receipts: async () => [],
-      guest: async ({ text, reference }) => {
-        // Only the guest's own text and the one replied-to message arrive here.
-        const asked = classifyIntent(text);
-        const quoted = reference ? classifyIntent(reference.text) : null;
-        const inv =
-          asked.kind === 'CREATE_INVOICE' && asked.amount
-            ? asked
-            : quoted?.kind === 'CREATE_INVOICE' && quoted.amount
-              ? quoted
-              : null;
-        return {
-          text: inv
-            ? `Draft only: an invoice to ${inv.counterparty ?? 'the client'} for ${inv.amount} ${inv.asset ?? 'USDC'}, settled in USDC on Arc testnet; the client can pay from Ethereum Sepolia through Circle CCTP. Message me privately to link your wallet and issue it; I will update this message with the invoice status.`
-            : 'Draft only: I can draft invoices, track payments into Arc and pay approved contractors. Message me privately to set up your finance workspace.',
-        };
-      },
-    },
-  });
-  await step(1, 'Guest invocation in the client chat', async (labels) => {
-    labels.push('LOCAL_INGRESS');
-    const ask1 = ++updateId;
-    const clientText =
-      'Thanks Maya! Can you send the invoice for the landing page? We pay from Ethereum Sepolia.';
-    tg.inbound(CLIENT_CHAT, ACME.name, clientText, String(ask1));
-    const guestText = `@${BOT.username} draft an invoice to Acme Corp 0.50 USDC for the landing page`;
-    const id = ++updateId;
-    tg.inbound(CLIENT_CHAT, MAYA.name, guestText, String(id));
-    const update = {
-      update_id: id,
-      guest_message: {
-        message_id: id,
-        date: now(),
-        chat: {
-          id: Number(CLIENT_CHAT),
-          type: 'supergroup',
-          title: 'Acme x Maya',
-        },
-        from: { id: MAYA.id, is_bot: false, first_name: MAYA.name },
-        text: guestText,
-        entities: [
-          { type: 'mention', offset: 0, length: BOT.username.length + 1 },
-        ],
-        guest_query_id: `gq_${deps.runId}`,
-        reply_to_message: {
-          message_id: ask1,
-          date: now() - 20,
-          from: { id: ACME.id, is_bot: false, first_name: 'Dana' },
-          text: clientText,
-        },
-      },
-    };
-    const events = adapter.normalize(update, 'BOT_API_POLL');
-    const outcome = await gateway.handle(events[0]!);
-    const answer = [...tg.transcript]
-      .reverse()
-      .find((t) => t.method === 'answerGuestQuery');
-    if (outcome.code !== 'GUEST_ANSWERED' || !answer)
-      throw new Error(`guest not answered: ${JSON.stringify(outcome)}`);
-    statusTargets.inlineMessageId = answer.messageRef;
-    const guestEvent = events[0]!;
-    return {
-      botProfile: {
-        username: botProfile.username,
-        guestQueries: botProfile.guestQueries,
-        note: 'profile from the local transport; the live @asksynqbot reports supports_guest_queries=false',
-      },
-      eventType: guestEvent.type,
-      contextReceived:
-        guestEvent.type === 'GUEST_QUERY'
-          ? {
-              text: guestEvent.envelope.body,
-              reference: guestEvent.reference
-                ? {
-                    messageId: guestEvent.reference.messageId,
-                    textSha256: guestEvent.reference.textSha256,
-                  }
-                : null,
-            }
-          : null,
-      outcome,
-      answer: answer.text,
-      inlineMessageId: answer.messageRef,
-      sendMessageCalls: tg.calls.filter((c) => c.method === 'sendMessage')
-        .length,
-    };
-  });
-
-  // ------------------------------------------------------------ 2 onboarding
-  const onboarded = await step(
-    2,
-    'Onboarding: wallet link and finance workspace',
-    async (labels) => {
-      labels.push('LOCAL_INGRESS', 'EOA_WALLET_LINK', deps.telegramProof.label);
-      bodyOf(userSays('/start finance'));
-      let code = '';
-      const linked = await linkWallet({
-        workspaceId,
-        owner: parties.owner,
-        proof: deps.telegramProof,
-        sendDm: async (text, delivered) => {
-          await dm(text);
-          code = delivered; // the user reads the code in the DM and types it back
-        },
-        readCode: () => bodyOf(userSays(code)),
-        now,
+  // ------------------------------------------------------------ chat plumbing
+  const links = new ChannelLinkService(new MemoryChannelLinkStore(), {
+    verifiers: { telegram: deps.telegramProof.verifier },
+    deliverCode: async ({ channelUserId, code }) => {
+      await gateway.post('telegram', channelUserId, {
+        text: `Your Synq link code is ${code}. Reply with it here, then confirm the link in your wallet; never share it.`,
       });
-      const user = { principalId: `prn_tg_${MAYA.id}`, displayName: MAYA.name };
-      books.identity = {
-        user,
-        workspace: {
-          workspaceId,
-          name: 'Maya Studio (test)',
-          kind: 'FREELANCER',
-        },
-        membership: {
-          ...user,
-          role: 'OWNER',
-          verified: true,
-          via: 'EIP-712 channel-link signature',
-        },
-        wallets: [
-          {
-            address: parties.owner.address,
-            chain: 'arc-testnet',
-            ownerPrincipalId: user.principalId,
-            kind: 'OWNER_EOA',
-            role: 'PAYOUT',
-            verifiedBy: `channel-link ${linked.record.linkChallengeId}`,
-          },
-          {
-            address: parties.agent,
-            chain: 'arc-testnet',
-            ownerPrincipalId: user.principalId,
-            kind: 'AGENT_EOA',
-            role: 'TREASURY',
-            verifiedBy: 'payer of the owner-signed mandate',
-          },
-        ],
-        source: 'identity:channel-link(memory store)',
-      };
-      const statusDm = await dm(
-        [
-          `Linked: Telegram user ${MAYA.id} <-> wallet ${parties.owner.address} (EIP-712 signature verified).`,
-          `Workspace ${workspaceId} created. Invoices are paid into ${parties.owner.address} on Arc testnet.`,
-          `Circle Wallets: UNAVAILABLE (no credentials), so your existing EOA is linked instead.`,
-        ].join('\n'),
-      );
-      return {
-        link: {
-          linkId: linked.record.linkId,
-          channelUserId: linked.record.channelUserId,
-          wallet: linked.record.wallet,
-          challengeId: linked.challenge.challengeId,
-          statement: linked.challenge.statement,
-          signature: linked.record.linkSignature,
-        },
-        proofReplay: linked.proofReplay,
-        workspaceId,
-        circleWallets: 'UNAVAILABLE: credentials missing (P03 blocker)',
-        dmMessage: statusDm,
-      };
+      deliveredCode = code;
     },
-  );
-  if (!onboarded) throw new Error('onboarding failed; nothing else can run');
+    now,
+  });
+  let deliveredCode = '';
+  let pendingLink = null as ChannelLinkChallenge | null;
+  let linkRecord = null as Awaited<
+    ReturnType<ChannelLinkService['completeLink']>
+  > | null;
+  let proofReplay = '';
+  const chatReplies: SupervisorReply[] = [];
+  let lastPayoutRequest = null as {
+    message: string;
+    reply: SupervisorReply;
+  } | null;
+  let issued = null as {
+    invoiceId: string;
+    payLink: string;
+    reply: SupervisorReply;
+  } | null;
+  const statusLog: { key: string; result: unknown }[] = [];
+  const updateConversation = async (
+    publicText: string,
+    privateText: string,
+  ) => {
+    statusLog.push({
+      key: guestKey,
+      result: await gateway.updateStatus(guestKey, { text: publicText }),
+    });
+    statusLog.push({
+      key: dmKey,
+      result: await gateway.updateStatus(dmKey, { text: privateText }),
+    });
+  };
 
-  // ------------------------------------------------------------ 3 invoice
   const app = Fastify();
   const payLinkKey = randomBytes(32);
   await app.register(invoiceRoutes, {
@@ -825,8 +880,329 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       unknown
     >;
   };
-  let invoiceId: string | null = null;
-  let payLink = '';
+
+  /** The personal finance desk behind the DM gateway (sender already link-checked). */
+  const financeDesk = async (text: string): Promise<DirectReply> => {
+    const reply = await ask(wiring, text, {
+      origin: 'CHAT',
+      ...(k.kernel ? { kernel: k.kernel } : {}),
+    });
+    chatReplies.push(reply);
+    modelCalls.push(...reply.modelCalls);
+    if (reply.intent.kind === 'CREATE_INVOICE' && reply.invoice?.draft) {
+      const draft = reply.invoice.draft;
+      if (draft.total > deps.amounts.maxInvoice)
+        return {
+          text: `I drafted ${draft.number} but ${d(draft.total)} USDC is above this demo's cap; nothing was issued.`,
+        };
+      await invoices.create(draft);
+      // The issuer's own wallet signs the exact issuance terms (EIP-712).
+      const signature = await parties.owner.signTypedData(
+        issueTypedData(draft),
+      );
+      const inv = (await invoices.issue(draft.invoiceId, signature)).invoice;
+      const payLink = `/v1/pay/${payLinkToken(payLinkKey, inv, now() + 86_400)}`;
+      issued = { invoiceId: inv.invoiceId, payLink, reply };
+      return {
+        text: `Invoice ${inv.number} issued: ${d(inv.total)} USDC to ${inv.payer.name}, due ${inv.dueDate}. Send the checkout link to your client privately; it can be paid on Arc, or from Ethereum Sepolia via CCTP.`,
+        buttons: [{ label: 'Checkout (private)', url: `${base}${payLink}` }],
+        trackAs: dmKey,
+      };
+    }
+    if (reply.payment) lastPayoutRequest = { message: text, reply };
+    return {
+      text:
+        reply.payment?.status === 'PROPOSED'
+          ? `${reply.answer}\nConfirm in your wallet: sign the PaymentApproval for ${reply.payment.kernel!.confirmation!.intent.intentId}. A chat reply is never a confirmation.`
+          : reply.answer,
+    };
+  };
+
+  const gateway: ChannelGateway = new ChannelGateway({
+    store: new MemoryChannelStore(),
+    adapters: [adapter],
+    webBaseUrl: 'https://synq.example',
+    explorerTxUrl: `${ARC.explorer}/tx/`,
+    now,
+    botUsernames: { telegram: BOT.username },
+    guestCooldownSeconds: 0,
+    statusUpdates: { retentionSeconds: STATUS_RETENTION_SECONDS },
+    ports: {
+      activeMember: async () => null,
+      treasury: async () => null,
+      mandates: async () => [],
+      approvals: async () => [],
+      receipts: async () => [],
+      guest: async ({ text, reference }) => {
+        // Only the guest's own text and the one replied-to message arrive here.
+        const asked = classifyIntent(text);
+        const quoted = reference ? classifyIntent(reference.text) : null;
+        const inv =
+          asked.kind === 'CREATE_INVOICE' && asked.amount
+            ? asked
+            : quoted?.kind === 'CREATE_INVOICE' && quoted.amount
+              ? quoted
+              : null;
+        return inv
+          ? {
+              text: `Draft only: an invoice to ${inv.counterparty ?? 'the client'} for ${inv.amount} ${inv.asset ?? 'USDC'}, settled in USDC on Arc testnet; the client can pay from Ethereum Sepolia through Circle CCTP. The issuer links a wallet with me privately to issue it, and sends the checkout link privately. I will update this message with the status.`,
+              trackAs: guestKey,
+            }
+          : {
+              text: 'Draft only: I can draft invoices, track payments into Arc and pay approved contractors. Message me privately to set up a finance workspace.',
+            };
+      },
+      directLink: async (channel, externalUserId) => {
+        if (channel !== 'telegram' || !books.identity) return null;
+        const wallet = await links.resolve({
+          workspaceId,
+          channel,
+          channelUserId: externalUserId,
+        });
+        return wallet
+          ? { principalId: books.identity.user.principalId, workspaceId }
+          : null;
+      },
+      directOnboarding: async ({ text }) => {
+        if (/^\/start\b/.test(text)) {
+          pendingLink = await links.requestLink({
+            workspaceId,
+            channel: 'telegram',
+            channelProof: deps.telegramProof.proof,
+            wallet: parties.owner.address,
+          });
+          proofReplay = await links
+            .requestLink({
+              workspaceId,
+              channel: 'telegram',
+              channelProof: deps.telegramProof.proof,
+              wallet: parties.owner.address,
+            })
+            .then(
+              () => 'ACCEPTED (unexpected)',
+              (e: Error & { code?: string; detail?: string }) =>
+                `${e.code ?? e.name}: ${e.detail ?? e.message}`,
+            );
+          return {
+            text: `Linking Telegram user ${MAYA.id} to wallet ${parties.owner.address} for a new finance workspace. I sent you a one-time code; reply with it, then sign the link in your wallet.`,
+          };
+        }
+        if (pendingLink && /^\d{6,10}$/.test(text.trim())) {
+          // The wallet signs the exact challenge (EIP-712) shown to it.
+          const signature = await parties.owner.signTypedData(
+            channelLinkTypedData(pendingLink),
+          );
+          linkRecord = await links.completeLink({
+            challengeId: pendingLink.challengeId,
+            channelCode: text.trim(),
+            signature,
+          });
+          const user = {
+            principalId: `prn_tg_${MAYA.id}`,
+            displayName: MAYA.name,
+          };
+          books.identity = {
+            user,
+            workspace: {
+              workspaceId,
+              name: 'Maya Studio (test)',
+              kind: 'FREELANCER',
+            },
+            membership: {
+              ...user,
+              role: 'OWNER',
+              verified: true,
+              via: 'EIP-712 channel-link signature',
+            },
+            wallets: [
+              {
+                address: parties.owner.address,
+                chain: 'arc-testnet',
+                ownerPrincipalId: user.principalId,
+                kind: 'OWNER_EOA',
+                role: 'PAYOUT',
+                verifiedBy: `channel-link ${linkRecord.linkChallengeId}`,
+              },
+              {
+                address: vault.vault,
+                chain: 'arc-testnet',
+                ownerPrincipalId: user.principalId,
+                kind: 'SAFE_VAULT',
+                role: 'TREASURY',
+                verifiedBy: `governed vault (policy ${vault.policy})`,
+              },
+              {
+                address: parties.agent,
+                chain: 'arc-testnet',
+                ownerPrincipalId: user.principalId,
+                kind: 'AGENT_EOA',
+                role: 'AGENT_OPERATIONAL',
+                verifiedBy: 'vault operator (policy-scoped)',
+              },
+            ],
+            source: 'identity:channel-link(memory store)',
+          };
+          return {
+            text: [
+              `Linked: Telegram user ${MAYA.id} <-> wallet ${parties.owner.address} (EIP-712 signature verified).`,
+              `Workspace ${workspaceId} created. Invoices are paid into ${parties.owner.address}; contractor payouts leave the governed vault ${vault.vault}.`,
+              'Circle Wallets: UNAVAILABLE (no credentials), so your existing EOA is linked instead.',
+            ].join('\n'),
+          };
+        }
+        return {
+          text: 'You have not linked a wallet yet, so I cannot act on your finances. Send /start to link one.',
+        };
+      },
+      direct: async ({ text }) => financeDesk(text),
+    },
+  });
+  const say = async (text: string): Promise<GatewayOutcome> => {
+    const id = ++updateId;
+    tg.inbound(DM, MAYA.name, text, String(id));
+    const events = adapter.normalize({
+      update_id: id,
+      message: {
+        message_id: id,
+        date: now(),
+        chat: { id: MAYA.id, type: 'private', first_name: MAYA.name },
+        from: { id: MAYA.id, is_bot: false, first_name: MAYA.name },
+        text,
+        ...(text.startsWith('/')
+          ? {
+              entities: [
+                {
+                  type: 'bot_command',
+                  offset: 0,
+                  length: text.split(' ')[0]!.length,
+                },
+              ],
+            }
+          : {}),
+      },
+    });
+    must(events.length === 1, 'adapter produced no message event');
+    return gateway.handle(events[0]!);
+  };
+  const dmNote = async (text: string) => {
+    must(await gateway.post('telegram', DM, { text }), 'DM post failed');
+  };
+  // The Kernel port exists once the owner has signed the mandate (step 6).
+  const k: { kernel: ReturnType<typeof kernelOf> | null } = { kernel: null };
+
+  // ------------------------------------------------------------ 1 guest
+  await step(1, 'Guest invocation in the client chat', async (labels) => {
+    labels.push('LOCAL_INGRESS');
+    const ask1 = ++updateId;
+    const clientText =
+      'Thanks Maya! Can you send the invoice for the landing page? We pay from Ethereum Sepolia.';
+    tg.inbound(CLIENT_CHAT, ACME.name, clientText, String(ask1));
+    const guestText = `@${BOT.username} draft an invoice to Acme Corp 0.50 USDC for the landing page`;
+    const id = ++updateId;
+    tg.inbound(CLIENT_CHAT, MAYA.name, guestText, String(id));
+    const events = adapter.normalize(
+      {
+        update_id: id,
+        guest_message: {
+          message_id: id,
+          date: now(),
+          chat: {
+            id: Number(CLIENT_CHAT),
+            type: 'supergroup',
+            title: 'Acme x Maya',
+          },
+          from: { id: MAYA.id, is_bot: false, first_name: MAYA.name },
+          text: guestText,
+          entities: [
+            { type: 'mention', offset: 0, length: BOT.username.length + 1 },
+          ],
+          guest_query_id: `gq_${deps.runId}`,
+          reply_to_message: {
+            message_id: ask1,
+            date: now() - 20,
+            from: { id: ACME.id, is_bot: false, first_name: 'Dana' },
+            text: clientText,
+          },
+        },
+      },
+      'BOT_API_POLL',
+    );
+    const outcome = await gateway.handle(events[0]!);
+    must(
+      outcome.code === 'GUEST_ANSWERED',
+      `guest not answered: ${outcome.code}`,
+    );
+    must(Boolean(outcome.messageRef), 'gateway returned no inline message id');
+    const answer = tg.transcript.find((t) => t.method === 'answerGuestQuery')!;
+    const g = events[0]!;
+    return {
+      botProfile: {
+        username: botProfile.username,
+        guestQueries: botProfile.guestQueries,
+        note: 'profile from the local transport; the live @asksynqbot reports supports_guest_queries=false',
+      },
+      eventType: g.type,
+      contextReceived:
+        g.type === 'GUEST_QUERY'
+          ? {
+              text: g.envelope.body,
+              reference: g.reference
+                ? {
+                    messageId: g.reference.messageId,
+                    textSha256: g.reference.textSha256,
+                  }
+                : null,
+            }
+          : null,
+      outcome,
+      answer: answer.text,
+      tracked: gateway.statusTargets(guestKey).map((t) => ({
+        target: t.target,
+        expiresAt: t.expiresAt,
+      })),
+      retentionSeconds: STATUS_RETENTION_SECONDS,
+      sendMessageCalls: tg.calls.filter((c) => c.method === 'sendMessage')
+        .length,
+    };
+  });
+
+  // ------------------------------------------------------------ 2 onboarding
+  const onboarded = await step(
+    2,
+    'Onboarding: wallet link and finance workspace',
+    async (labels) => {
+      labels.push('LOCAL_INGRESS', 'EOA_WALLET_LINK', deps.telegramProof.label);
+      const before = await say("what's my balance");
+      must(
+        before.code === 'DIRECT_ONBOARDING' && before.status === 'UNAUTHORIZED',
+        `an unlinked sender reached the finance desk (${before.code})`,
+      );
+      const start = await say('/start');
+      must(Boolean(deliveredCode), 'no link code was delivered');
+      const done = await say(deliveredCode);
+      must(Boolean(linkRecord), `link not completed (${done.code})`);
+      const r = linkRecord!;
+      return {
+        unlinkedRequest: before,
+        start,
+        complete: done,
+        link: {
+          linkId: r.linkId,
+          channelUserId: r.channelUserId,
+          wallet: r.wallet,
+          challengeId: r.linkChallengeId,
+          signature: r.linkSignature,
+        },
+        proofReplay,
+        workspaceId,
+        wallets: books.identity!.wallets,
+        circleWallets: 'UNAVAILABLE: credentials missing (P03 blocker)',
+      };
+    },
+  );
+  if (!onboarded) throw new Error('onboarding failed; nothing else can run');
+
+  // ------------------------------------------------------------ 3 invoice
   const invoiceOk = await step(
     3,
     'Invoice from natural language, persisted, with secure checkout',
@@ -834,61 +1210,48 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       labels.push('LOCAL_INGRESS', deps.stores.label);
       const text =
         'Please draft an invoice to Acme Corp for the landing page build, half a USDC, due in 7 days';
-      const reply = await ask(wiring, bodyOf(userSays(text)));
-      modelCalls.push(...reply.modelCalls);
-      labels.push(...modelLabel(reply));
-      const outcome = reply.invoice;
-      if (!outcome?.draft || outcome.status !== 'DRAFTED')
-        throw new Error(`invoice agent: ${reply.answer}`);
-      if (outcome.draft.total > deps.amounts.maxInvoice)
-        throw new Error(
-          `drafted total ${outcome.draft.total} exceeds the demo cap`,
-        );
-      await invoices.create(outcome.draft);
-      const signature = await parties.owner.signTypedData(
-        issueTypedData(outcome.draft),
+      const outcome = await say(text);
+      const done = issued as typeof issued;
+      must(
+        outcome.code === 'DIRECT_ANSWERED' && Boolean(done),
+        `invoice not issued (${outcome.code})`,
       );
-      const issued = (await invoices.issue(outcome.draft.invoiceId, signature))
-        .invoice;
-      invoiceId = issued.invoiceId;
-      payLink = `/v1/pay/${payLinkToken(payLinkKey, issued, now() + 86_400)}`;
-      const view = await getJson(payLink);
-      const msg = `Invoice ${issued.number} issued: ${d(issued.total)} USDC to ${issued.payer.name}, due ${issued.dueDate}. Pay on Arc, or from Ethereum Sepolia via CCTP.`;
-      statusTargets.dm = await adapter
-        .send(DM, {
-          text: msg,
-          buttons: [{ label: 'Checkout', url: `${base}${payLink}` }],
-        })
-        .then((r) => r.messageId);
-      await updateConversation({
-        text: `${msg}\nStatus: ISSUED, awaiting payment.`,
-        buttons: [{ label: 'Checkout', url: `${base}${payLink}` }],
-      });
-      const stored = (await invoices.store.get(issued.invoiceId))!;
+      labels.push(...modelLabel([done!.reply]));
+      const stored = (await invoices.store.get(done!.invoiceId))!;
+      const inv = stored.invoice;
+      must(inv.status === 'ISSUED', `invoice is ${inv.status}`);
+      const view = await getJson(done!.payLink);
+      await updateConversation(
+        `Invoice ${inv.number}: ${d(inv.total)} USDC to ${inv.payer.name}, due ${inv.dueDate}.\nStatus: ISSUED, awaiting payment. The issuer sends the checkout link privately.`,
+        `Invoice ${inv.number} issued: ${d(inv.total)} USDC to ${inv.payer.name}, due ${inv.dueDate}.\nStatus: ISSUED, awaiting payment.\nCheckout (send privately): ${base}${done!.payLink}`,
+      );
+      const outcomeInvoice = done!.reply.invoice!;
       return {
         request: text,
+        gateway: outcome,
         supervisor: {
-          intent: reply.intent,
-          handledBy: reply.handledBy,
-          answer: reply.answer,
-          termsSource: outcome.termsSource,
+          intent: done!.reply.intent,
+          handledBy: done!.reply.handledBy,
+          answer: done!.reply.answer,
+          termsSource: outcomeInvoice.termsSource,
         },
         invoice: {
-          invoiceId: issued.invoiceId,
-          number: issued.number,
-          payer: issued.payer.name,
-          total: d(issued.total),
-          dueDate: issued.dueDate,
-          status: stored.invoice.status,
+          invoiceId: inv.invoiceId,
+          number: inv.number,
+          payer: inv.payer.name,
+          total: d(inv.total),
+          dueDate: inv.dueDate,
+          status: inv.status,
           rev: stored.rev,
-          paymentRef: issued.paymentRef,
-          termsHash: issued.termsHash,
-          issuerSignature: issued.issuerSignature,
-          payoutAddress: issued.issuer.payoutAddress,
+          paymentRef: inv.paymentRef,
+          termsHash: inv.termsHash,
+          issuerSignature: inv.issuerSignature,
+          payoutAddress: inv.issuer.payoutAddress,
         },
         checkout: {
-          url: redactLink(`${base}${payLink}`),
+          url: redactLink(`${base}${done!.payLink}`),
           served: deps.checkout.listen ? 'HTTP (local port)' : 'in-process',
+          deliveredTo: 'issuer DM only (never the client group)',
           view: {
             status: view.status,
             amountDue: view.amountDue,
@@ -902,8 +1265,10 @@ export async function runFreelancerDemo(deps: DemoDeps) {
   );
 
   // ------------------------------------------------------------ 4 + 5 CCTP
-  let mintTx: Hex | null = null;
-  let cctp: CctpTransfer | null = null;
+  let mintTx = null as Hex | null;
+  let cctp = null as CctpTransfer | null;
+  const invoiceId = (issued as typeof issued)?.invoiceId ?? null;
+  const payLink = (issued as typeof issued)?.payLink ?? '';
   if (!invoiceOk || !invoiceId) {
     skip(4, 'Cross-chain payment', 'no issued invoice');
     skip(5, 'Settlement', 'no issued invoice');
@@ -916,11 +1281,9 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       'Client pays from Ethereum Sepolia via Circle CCTP V2 into Arc',
       async (labels) => {
         labels.push(chain.labels.sepolia, chain.labels.arc);
-        // The client follows the checkout view: amount due, payout address, reference.
+        // The client follows the checkout view it received privately.
         const view = await getJson(payLink);
-        const due = BigInt(
-          Math.round(Number(String(view.amountDue)) * 1_000_000),
-        );
+        const due = moneyFromDecimal(USDC, String(view.amountDue)).baseUnits;
         const fee = maxFeeFor(due, await chain.cctpMinimumFeeBps());
         const at = now();
         let t = planTransfer({
@@ -960,12 +1323,15 @@ export async function runFreelancerDemo(deps: DemoDeps) {
             burnTx: h,
           });
         });
+        if (t.state !== 'SOURCE_SUBMITTED')
+          t = advance(t, 'SOURCE_SUBMITTED', now(), 'burn hash recorded', {
+            burnTx: burn.burnTx,
+          });
         t = advance(t, 'SOURCE_CONFIRMED', now(), 'burn receipt success');
         inFlight();
         log(`burn ${sepTx(burn.burnTx)}`);
-        await updateConversation({
-          text: `Invoice payment in flight: ${d(t.amount)} USDC burned on Ethereum Sepolia by ${parties.client} (CCTP fast transfer).\nSource tx: ${sepTx(burn.burnTx)}\nStatus: AWAITING ATTESTATION. Not paid until the Arc mint is verified.`,
-        });
+        const text = `Payment in flight: ${d(t.amount)} USDC burned on Ethereum Sepolia (CCTP fast transfer).\nSource tx: ${sepTx(burn.burnTx)}\nStatus: AWAITING ATTESTATION. Not paid until the Arc mint is verified.`;
+        await updateConversation(text, text);
         const statusDuring = (await invoices.store.get(id))!.invoice.status;
         t = advance(t, 'ATTESTATION_PENDING', now(), 'polling Iris');
         attested = await chain.cctpAttestation(burn.burnTx);
@@ -989,9 +1355,25 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         );
         if (!minted.mintTx)
           throw new Error('nonce already used: reconcile, do not re-mint');
+        if (t.state !== 'DEST_SUBMITTED')
+          t = advance(t, 'DEST_SUBMITTED', now(), 'mint hash recorded', {
+            mintTx: minted.mintTx,
+          });
         mintTx = minted.mintTx;
         log(`mint ${arcTx(mintTx)}`);
+        // The relayer paid the mint's gas whatever the settlement outcome.
+        const mintGas = await chain.txGas(minted.mintTx);
+        await bookGas(
+          minted.mintTx,
+          mintGas.payer,
+          mintGas.feeWei,
+          'Gas: CCTP mint (receiveMessage, relayed by the issuer)',
+        );
         cctp = t;
+        must(
+          statusDuring === 'ISSUED',
+          `invoice was ${statusDuring} in flight`,
+        );
         return {
           plan: {
             gross: d(t.amount),
@@ -1020,10 +1402,14 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       const mint: Hex = mintTx;
       await step(
         5,
-        'Settlement only from the verified Arc mint',
+        'Settlement only from the reconciled Arc mint',
         async (labels) => {
           labels.push(chain.labels.arc, deps.stores.label);
           let t = cctp!;
+          const before = (await invoices.store.get(id))!.invoice.status;
+          // The receipt must be the transmitter call for THIS attested
+          // message, minting (from 0x0) exactly amount - fee to the payout
+          // address; anything else throws and the invoice stays ISSUED.
           const rec = await chain.cctpReconcile(t, message, mint);
           const decoded = decodeMessage(message);
           t = advance(t, 'DEST_FINAL', now(), 'mint receipt reconciled', {
@@ -1039,9 +1425,10 @@ export async function runFreelancerDemo(deps: DemoDeps) {
             recipient: decoded.burn.mintRecipient,
             amount: rec.minted,
           };
-          const before = (await invoices.store.get(id))!.invoice.status;
-          const settled = await invoices.settle(payment);
-          const replay = await invoices.settle(payment);
+          const { settled, replay } = await settleInvoiceFromMint(
+            invoices,
+            payment,
+          );
           t = advance(t, 'MATCHED', now(), 'invoice settled');
           t = advance(t, 'RECONCILED', now(), 'ledger posted');
           cctp = t;
@@ -1062,23 +1449,31 @@ export async function runFreelancerDemo(deps: DemoDeps) {
             feeBaseUnits: String(rec.feeExecuted),
             creditedBaseUnits: String(rec.minted),
           };
-          await deps.stores.routes.save(route);
-          books.settlements.push(route);
-          // Status updates go out from the ledger outbox, committed with the entry.
-          const published: OutboxEvent[] = [];
-          await relayOutbox(deps.stores.ledger, async (e) => {
-            const p = e.payload as { invoiceId?: string };
-            if (p.invoiceId !== id) return;
-            published.push(e);
-          });
-          const after = (await invoices.store.get(id))!;
-          const paidEvent = published.find(
-            (e) => e.topic === 'invoice.payment_applied',
+          await deps.stores.routes.save(workspaceId, route);
+          books.settlements = await deps.stores.routes.list(workspaceId);
+          must(
+            books.settlements.some((s) => s.destinationTx === mint),
+            'route not read back from the store',
           );
-          if (paidEvent && after.invoice.status === 'PAID')
-            await updateConversation({
-              text: `Invoice ${after.invoice.number}: PAID. ${d(rec.minted)} USDC received on Arc from ${decoded.burn.messageSender} via CCTP.\nSource (Sepolia burn): ${sepTx(t.burnTx!)}\nArc mint: ${arcTx(mint)}\nIris nonce: ${rec.nonce}`,
-            });
+          // Status updates go out from this workspace's ledger outbox only.
+          const published: OutboxEvent[] = [];
+          await relayOutbox(
+            deps.stores.ledger,
+            async (e) => void published.push(e),
+            100,
+            workspaceId,
+          );
+          const paidEvent = published.find(
+            (e) =>
+              e.topic === 'invoice.payment_applied' &&
+              (e.payload as { invoiceId?: string }).invoiceId === id,
+          );
+          must(Boolean(paidEvent), 'no invoice.payment_applied outbox event');
+          const after = (await invoices.store.get(id))!;
+          const paidText = `Invoice ${after.invoice.number}: PAID. ${d(rec.minted)} USDC received on Arc via CCTP.\nSource (Sepolia burn): ${sepTx(t.burnTx!)}\nArc mint: ${arcTx(mint)}`;
+          await updateConversation(paidText, paidText);
+          // Same status again: Telegram answers "message is not modified".
+          await updateConversation(paidText, paidText);
           const view = await getJson(payLink);
           return {
             reconciled: {
@@ -1087,6 +1482,8 @@ export async function runFreelancerDemo(deps: DemoDeps) {
               logIndex: rec.logIndex,
               block: rec.blockNumber,
               nonce: rec.nonce,
+              mintGas: wei18(rec.gasFeeWei),
+              mintGasPayer: rec.gasPayer,
             },
             statusBefore: before,
             settle: settled.outcome,
@@ -1108,6 +1505,7 @@ export async function runFreelancerDemo(deps: DemoDeps) {
               eventId: e.eventId,
               topic: e.topic,
             })),
+            statusUpdates: statusLog.slice(-4),
             checkoutAfter: { status: view.status, amountDue: view.amountDue },
             transfer: { state: t.state, history: t.history },
             route,
@@ -1128,7 +1526,7 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     owner: parties.owner.address,
     chainId: USDC.chainId,
     token: USDC.address,
-    payer: parties.agent,
+    payer: vault.vault,
     recipients: [parties.sarah],
     purposes: ['CONTRACTOR_PAYOUT'],
     perActionCap: deps.amounts.payout + deps.amounts.payout / 2n,
@@ -1141,26 +1539,23 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     mandateTypedData(mandate),
   );
   books.mandate = mandate;
-  const config: AuthorityConfig = {
-    grantKey: randomBytes(32),
-    operator: 'arc-executor',
-    grantTtlSeconds: 120,
-    riskRequiredAbove: 50_000_000n,
-  };
   const kernel = kernelOf({
     config,
     mandate,
     mandateSignature,
     books,
-    simulate: (i) =>
-      chain.simulateTransfer({
-        from: i.payer,
-        to: i.recipient,
-        amount: i.amount,
-      }),
+    // The Kernel's simulation is the exact vault call from the operator.
+    simulate: async (i) =>
+      (
+        await chain.vaultPayCall({
+          operator: parties.agent,
+          recipient: i.recipient,
+          amount: i.amount,
+        })
+      ).ok,
     now,
   });
-  const fence = new MemoryNonceFence();
+  k.kernel = kernel;
   const vendorInvoice = (
     suffix: string,
     payTo: Address,
@@ -1193,69 +1588,98 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     `Invoice from Sarah, design milestone two: homepage and pricing mockups, ${d(deps.amounts.payout)} USDC.`,
   );
   books.vendorInvoices.push(good);
-  let payout: GrantedPayout | null = null;
-  let firstGrant: ExecutionGrant | null = null;
+  let payout = null as GrantedPayout | null;
+  let firstGrant = null as ExecutionGrant | null;
   let payoutDecisionReasons: string[] = [];
   await step(
     6,
-    'Autonomous contractor payout under the owner-signed policy',
+    'Contractor payout: owner-approved, Kernel-granted, paid by the governed vault',
     async (labels) => {
-      labels.push('LOCAL_INGRESS', chain.labels.arc);
-      const policyMsg = await dm(
-        `Policy on file (you signed it, EIP-712): ${mandate.mandateId} lets the Synq agent wallet ${parties.agent} pay Sarah's verified wallet ${parties.sarah} only, for contractor payouts, up to ${d(mandate.perActionCap)} USDC each and ${d(mandate.periodBudget)} USDC per 30 days, until ${new Date(mandate.validUntil * 1000).toISOString().slice(0, 10)}.`,
+      labels.push(
+        'LOCAL_INGRESS',
+        chain.labels.arc,
+        deps.executor.label as StepLabel,
       );
-      const text = bodyOf(userSays("can I pay Sarah's invoice?"));
-      const { proposal, reply, ownerApproval } = await requestPayout({
+      await dmNote(
+        `Policy on file (you signed it, EIP-712): ${mandate.mandateId} lets the governed vault ${vault.vault} pay Sarah's verified wallet ${parties.sarah} only, for contractor payouts, up to ${d(mandate.perActionCap)} USDC each and ${d(mandate.periodBudget)} USDC per 30 days. The vault itself allows ${d(vault.perPaymentCap)} per payment and ${d(vault.windowCap)} per 24h, to allowlisted recipients only. Every payout requested in chat needs your wallet's approval.`,
+      );
+      // A chat imperative never uses the standing mandate: PROPOSED, no grant.
+      const asked = await say("Pay Sarah's invoice");
+      const proposal = lastPayoutRequest!.reply;
+      must(
+        proposal.payment?.status === 'PROPOSED' &&
+          !proposal.payment.kernel?.grant,
+        `chat imperative got ${proposal.payment?.status} without an owner signature`,
+      );
+      // The owner's wallet confirms the exact intent (outside chat).
+      const confirmed = await confirmPayout({
         wiring,
         kernel,
         owner: parties.owner,
-        counterparty: 'Sarah',
+        message: lastPayoutRequest!.message,
+        proposal,
       });
-      modelCalls.push(...proposal.modelCalls, ...reply.modelCalls);
-      labels.push(...modelLabel(proposal));
-      const proposed = proposal.payment;
-      if (proposed?.status !== 'PROPOSED' || !ownerApproval)
-        throw new Error(`no proposal to confirm: ${proposal.answer}`);
-      const confirmMsg = await dm(
-        `${proposal.answer}\nSign the PaymentApproval for ${ownerApproval.intentId} with your wallet to confirm.`,
-      );
+      must(Boolean(confirmed), 'no confirmation to sign');
+      const { reply, ownerApproval } = confirmed!;
+      modelCalls.push(...reply.modelCalls);
+      labels.push(...modelLabel([proposal, reply]));
       tg.inbound(
         DM,
         MAYA.name,
-        `[wallet signature: EIP-712 PaymentApproval ${ownerApproval.signature.slice(0, 18)}…]`,
+        `[wallet: EIP-712 PaymentApproval signed for ${ownerApproval.intentId}, nonce ${ownerApproval.nonce.slice(0, 10)}…, deadline ${ownerApproval.deadline}]`,
         String(++updateId),
       );
       const p = reply.payment;
       // The grant is read only from payment.kernel.grant (non-enumerable) and
-      // handed straight to the executor; evidence keeps its id and action hash.
+      // handed to the executor process; evidence keeps its id and action hash.
       const grant = p?.kernel?.grant;
       if (p?.status !== 'GRANTED' || !grant)
         throw new Error(`no grant: ${reply.answer}`);
       firstGrant = grant;
       payoutDecisionReasons = p.kernel!.decision!.reasons;
-      // Extra negative: the same obligation cannot be granted twice, even by
-      // the imperative path under the standing mandate.
-      const again = await ask(wiring, "Pay Sarah's invoice", kernel);
+      // Extra negative: a second, separately owner-approved request for the
+      // same obligation is refused by the obligation fence.
+      await say("Pay Sarah's invoice");
+      const second = await confirmPayout({
+        wiring,
+        kernel,
+        owner: parties.owner,
+        message: lastPayoutRequest!.message,
+        proposal: lastPayoutRequest!.reply,
+      });
       const secondGrant = {
-        status: again.payment?.status ?? null,
-        reasons: again.payment?.kernel?.decision?.reasons ?? [],
-        grantIssued: Boolean(again.payment?.kernel?.grant),
+        status: second?.reply.payment?.status ?? null,
+        reasons: second?.reply.payment?.kernel?.decision?.reasons ?? [],
+        grantIssued: Boolean(second?.reply.payment?.kernel?.grant),
       };
-      if (secondGrant.grantIssued)
-        throw new Error('a second grant was issued for the same obligation');
-      const contractorBefore = await chain.arcUsdcBalance(parties.sarah);
-      let recordedHash: Hex | null = null;
-      payout = await chain.executeGranted({
+      must(
+        !secondGrant.grantIssued,
+        'a second grant was issued for the same obligation',
+      );
+      const sarahBefore = await chain.arcUsdcBalance(parties.sarah);
+      const journal: { hash: Hex; at: number }[] = [];
+      payout = await deps.executor.pay({
         grant,
-        grantKey: config.grantKey,
-        fence,
-        to: parties.sarah,
+        recipient: parties.sarah,
         amount: deps.amounts.payout,
-        onBroadcast: (h) => {
-          recordedHash = h;
+        ref: keccak256(stringToHex(grant.intentId)),
+        onHash: async (h) => {
+          await deps.stores.payouts.record({
+            hash: h,
+            grantId: grant.grantId,
+            workspaceId,
+            state: 'SIGNED',
+          });
+          journal.push({ hash: h, at: now() });
         },
       });
-      const contractorAfter = await chain.arcUsdcBalance(parties.sarah);
+      const sarahAfter = await chain.arcUsdcBalance(parties.sarah);
+      const creditedExactly = sarahAfter - sarahBefore === deps.amounts.payout;
+      must(creditedExactly, `Sarah was credited ${sarahAfter - sarahBefore}`);
+      must(
+        journal.length === 1 && journal[0]!.hash === payout.hash,
+        'payout hash was not recorded before broadcast',
+      );
       for (const e of apEntries({
         workspaceId,
         vendor: sarah,
@@ -1265,21 +1689,22 @@ export async function runFreelancerDemo(deps: DemoDeps) {
           txHash: payout.hash,
           logIndex: payout.logIndex,
           recipient: parties.sarah,
-          feeBaseUnits: payout.feeBaseUnits,
+          feeBaseUnits: 0n,
+          payer: payout.payer,
         },
         at: now(),
       }))
-        await ledger.post(e);
+        await ledger.post(tagCash(e, payout.payer));
+      await bookGas(
+        payout.hash,
+        payout.gasPayer,
+        payout.feeWei,
+        `Gas: vault payout ${good.number} (operator)`,
+      );
       books.mandateState = {
         revoked: false,
         spends: [{ amount: deps.amounts.payout, at: now() }],
-      };
-      const apLedger: Record<string, string> = {
-        CONTRACTOR_EXPENSE: d(deps.amounts.payout),
-        ...(payout.feeBaseUnits > 0n
-          ? { NETWORK_FEES: d(payout.feeBaseUnits) }
-          : {}),
-        CASH_ARC_USDC: d(-(deps.amounts.payout + payout.feeBaseUnits)),
+        settledObligations: [good.reference!],
       };
       books.payoutEvidence.push({
         environment: 'arc-testnet',
@@ -1294,39 +1719,55 @@ export async function runFreelancerDemo(deps: DemoDeps) {
           hash: payout.hash,
           explorer: payout.explorer,
           amount: d(deps.amounts.payout),
-          apLedger,
+          apLedger: {
+            CONTRACTOR_EXPENSE: d(deps.amounts.payout),
+            NETWORK_FEES: wei18(payout.feeWei),
+            CASH_ARC_USDC: wei18(
+              -(deps.amounts.payout * NATIVE_WEI_PER_UNIT + payout.feeWei),
+            ),
+          },
         },
       });
-      await dm(
-        `Paid Sarah ${d(deps.amounts.payout)} USDC from the agent wallet under ${mandate.mandateId} (Kernel grant ${grant.grantId}).\nReceipt: ${payout.explorer}`,
+      await dmNote(
+        `Paid Sarah ${d(deps.amounts.payout)} USDC from the governed vault (operator call under Kernel grant ${grant.grantId}).\nReceipt: ${payout.explorer}`,
       );
       return {
-        policyMessage: policyMsg,
         mandate: {
           ...mandate,
           perActionCap: d(mandate.perActionCap),
           periodBudget: d(mandate.periodBudget),
           signature: mandateSignature,
         },
-        request: text,
-        proposal: {
-          intent: proposal.intent,
-          status: proposed.status,
-          answer: proposal.answer,
-          handledBy: proposal.handledBy,
+        vault: {
+          address: vault.vault,
+          policy: vault.policy,
+          operator: vault.operator,
+          perPaymentCap: d(vault.perPaymentCap),
+          windowCap: d(vault.windowCap),
+          windowSpentBefore: d(windowSpent),
+        },
+        executor: {
+          process: deps.executor.label,
+          pid: executor.pid,
+          operator: executor.operator,
+          note: 'the operator key is loaded only by the executor process; this process holds no key',
+        },
+        chatImperative: {
+          request: "Pay Sarah's invoice",
+          gateway: asked,
+          intent: proposal.intent.kind,
+          status: proposal.payment?.status,
+          grantIssued: Boolean(proposal.payment?.kernel?.grant),
+          kernel: proposal.payment?.kernel?.decision ?? null,
           world: proposal.world,
-          citations: proposal.citations,
-          modelDraft: proposed.prepared?.modelDraft ?? null,
-          paymentProposal: proposed.prepared?.proposal ?? null,
-          disagreements: proposed.disagreements,
-          kernel: proposed.kernel?.decision ?? null,
-          confirmationMessage: confirmMsg,
+          modelDraft: proposal.payment?.prepared?.modelDraft ?? null,
+          answer: proposal.answer,
         },
         ownerApproval: {
           ...ownerApproval,
           signer: parties.owner.address,
           typedData:
-            'intentApprovalTypedData(intent): Synq Payment Approval / PaymentApproval',
+            'intentApprovalTypedData(intent, {nonce, deadline}): Synq Payment Approval / PaymentApproval',
         },
         confirmed: {
           status: p.status,
@@ -1341,24 +1782,27 @@ export async function runFreelancerDemo(deps: DemoDeps) {
             grantId: grant.grantId,
             intentId: grant.intentId,
             actionHash: grant.actionHash,
+            payer: grant.payer,
             recipient: grant.recipient,
             amount: grant.amount,
             expiresAt: grant.expiresAt,
           },
         },
         secondGrantForSameObligation: secondGrant,
-        hashRecordedBeforeBroadcast: recordedHash === payout.hash,
+        hashRecordedBeforeBroadcast: journal[0],
         tx: {
           hash: payout.hash,
           block: payout.blockNumber,
           explorer: payout.explorer,
-          feeUsdc: d(payout.feeBaseUnits),
+          from: payout.gasPayer,
+          to: vault.policy,
+          call: `policy.pay(${parties.sarah}, ${deps.amounts.payout}, keccak256(intentId))`,
+          gasFee: wei18(payout.feeWei),
         },
         contractor: {
-          before: d(contractorBefore),
-          after: d(contractorAfter),
-          creditedExactly:
-            contractorAfter - contractorBefore === deps.amounts.payout,
+          before: d(sarahBefore),
+          after: d(sarahAfter),
+          creditedExactly,
         },
       };
     },
@@ -1371,17 +1815,33 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     async (labels) => {
       labels.push('LOCAL_INGRESS', chain.labels.arc);
       const out: Record<string, unknown> = {};
+      const asked = async (q: string) => {
+        const o = await say(q);
+        must(
+          o.code === 'DIRECT_ANSWERED',
+          `audit question not answered (${o.code})`,
+        );
+        return chatReplies.at(-1)!;
+      };
       if (mintTx) {
-        const r = await explain(wiring, mintTx);
+        const r = await asked(`explain transaction ${mintTx}`);
+        must(
+          r.audit?.chainCheck === 'VERIFIED',
+          'mint not re-verified on chain',
+        );
         out.invoicePayment = { answer: r.answer, audit: r.audit };
-        await dm(r.answer);
       }
       if (payout) {
-        const r = await explain(wiring, (payout as GrantedPayout).hash);
+        const r = await asked(
+          `explain transaction ${(payout as GrantedPayout).hash}`,
+        );
+        must(
+          r.audit?.chainCheck === 'VERIFIED',
+          'payout not re-verified on chain',
+        );
         out.payout = { answer: r.answer, audit: r.audit };
-        await dm(r.answer);
       }
-      const bal = await ask(wiring, "what's my balance");
+      const bal = await asked("what's my balance");
       out.balance = { answer: bal.answer, balance: bal.balance };
       if (!mintTx && !payout) throw new Error('nothing to audit');
       return out;
@@ -1390,7 +1850,7 @@ export async function runFreelancerDemo(deps: DemoDeps) {
 
   // ------------------------------------------------------------ 8 fraud
   await step(8, 'Changed-wallet payout is refused', async (labels) => {
-    labels.push('LOCAL_INGRESS', chain.labels.arc);
+    labels.push('LOCAL_INGRESS', chain.labels.arc, 'ETH_CALL_ONLY');
     const fraud = vendorInvoice(
       'm3',
       parties.walletB,
@@ -1404,59 +1864,60 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       `(forwarded vendor invoice ${fraud.number}) ${fraud.documentText}`,
       String(++updateId),
     );
-    const nonceBefore = await chain.arcNonce(parties.agent);
-    const balanceBefore = await chain.arcUsdcBalance(parties.agent);
-    bodyOf(userSays("can I pay Sarah's invoice?"));
-    const { reply, ownerApproval } = await requestPayout({
-      wiring,
-      kernel,
-      owner: parties.owner,
-      counterparty: 'Sarah',
-    });
-    if (ownerApproval)
-      throw new Error('the changed-wallet payout was offered for signature');
-    modelCalls.push(...reply.modelCalls);
-    labels.push(...modelLabel(reply));
+    const before = {
+      agentNonce: await chain.arcNonce(parties.agent),
+      agentWei: await chain.nativeBalance(parties.agent),
+      vaultWei: await chain.nativeBalance(vault.vault),
+      walletBWei: await chain.nativeBalance(parties.walletB),
+    };
+    const asked = await say("can I pay Sarah's invoice?");
+    const reply = lastPayoutRequest!.reply;
+    labels.push(...modelLabel([reply]));
     const p = reply.payment;
-    if (p?.vendorInvoiceId !== fraud.vendorInvoiceId)
-      throw new Error(
-        `expected the changed-wallet invoice, got ${p?.vendorInvoiceId}`,
-      );
-    // The executor also refuses to reuse the earlier, real grant for Wallet B.
-    let replay: string = 'NOT_ATTEMPTED';
-    if (firstGrant)
-      replay = await chain
-        .executeGranted({
+    must(
+      p?.vendorInvoiceId === fraud.vendorInvoiceId,
+      `expected the changed-wallet invoice, got ${p?.vendorInvoiceId}`,
+    );
+    must(
+      p.status === 'DENIED' && !p.kernel?.grant && !p.kernel?.confirmation,
+      `fraud payout was ${p.status}`,
+    );
+    // The executor refuses to admit the earlier, real grant for Wallet B
+    // (admission only: nothing is signed).
+    const replay = firstGrant
+      ? await deps.executor.admit({
           grant: firstGrant,
-          grantKey: config.grantKey,
-          fence,
-          to: parties.walletB,
+          recipient: parties.walletB,
           amount: deps.amounts.payout,
-          onBroadcast: () => {
-            throw new Error('must not broadcast');
-          },
         })
-        .then(
-          (r) => `EXECUTED ${r.hash} (unexpected)`,
-          (e: Error & { code?: string }) =>
-            `${e.code ?? e.name}: ${e.message}`.slice(0, 200),
-        );
-    const vault = chain.vaultCheck
-      ? await chain
-          .vaultCheck({
-            operator: parties.agent,
-            verified: parties.sarah,
-            changed: parties.walletB,
-            amount: deps.amounts.payout,
-          })
-          .catch((e: Error) => ({ error: e.message.slice(0, 200) }))
-      : null;
-    const nonceAfter = await chain.arcNonce(parties.agent);
-    const balanceAfter = await chain.arcUsdcBalance(parties.agent);
-    const denied = p.status === 'DENIED' && !p.kernel?.grant;
-    if (!denied) throw new Error(`fraud payout not denied: ${p.status}`);
-    const refusal = `Refused: Sarah's invoice ${fraud.number} asks to pay ${parties.walletB}, but her verified wallet is ${parties.sarah}. The Kernel denied it; no funds left the account.`;
-    await dm(refusal);
+      : 'NO_GRANT';
+    must(
+      replay !== 'ADMITTED' && !replay.startsWith('EXECUTED'),
+      `grant replay: ${replay}`,
+    );
+    // Contract-side: the vault refuses an operator payment to Wallet B
+    // (eth_call simulation; never broadcast).
+    const vaultCall = await chain.vaultPayCall({
+      operator: parties.agent,
+      recipient: parties.walletB,
+      amount: deps.amounts.payout,
+    });
+    must(!vaultCall.ok, 'the vault would pay Wallet B');
+    const after = {
+      agentNonce: await chain.arcNonce(parties.agent),
+      agentWei: await chain.nativeBalance(parties.agent),
+      vaultWei: await chain.nativeBalance(vault.vault),
+      walletBWei: await chain.nativeBalance(parties.walletB),
+    };
+    const unchanged =
+      after.agentNonce === before.agentNonce &&
+      after.agentWei === before.agentWei &&
+      after.vaultWei === before.vaultWei &&
+      after.walletBWei === before.walletBWei;
+    must(unchanged, 'funds or nonces moved during the refused payout');
+    await dmNote(
+      `Refused: Sarah's invoice ${fraud.number} asks to pay ${parties.walletB}, but her verified wallet is ${parties.sarah}. The Kernel denied it, the executor would not admit a grant for it, and the vault refuses that recipient. No funds left the account.`,
+    );
     books.payoutEvidence = books.payoutEvidence.map((e) => ({
       ...e,
       fraud: {
@@ -1468,14 +1929,12 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         })),
         decision: 'DENY' as const,
         auditReasons: p.kernel!.decision!.reasons,
-        agentNonceUnchanged: nonceAfter === nonceBefore,
+        agentNonceUnchanged: after.agentNonce === before.agentNonce,
       },
     }));
-    const finalAudit = payout
-      ? await explain(wiring, (payout as GrantedPayout).hash)
-      : null;
     return {
       document: fraud.documentText,
+      gateway: asked,
       supervisor: {
         intent: reply.intent,
         handledBy: reply.handledBy,
@@ -1489,27 +1948,55 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         outcome: p.kernel?.decision?.outcome ?? null,
         reasons: p.kernel?.decision?.reasons ?? [],
         grantIssued: Boolean(p.kernel?.grant),
+        confirmationOffered: Boolean(p.kernel?.confirmation),
       },
-      executorGrantReplayToWalletB: replay,
-      vault,
-      agent: {
-        nonceBefore,
-        nonceAfter,
-        usdcBefore: d(balanceBefore),
-        usdcAfter: d(balanceAfter),
-        unchanged: nonceAfter === nonceBefore && balanceAfter === balanceBefore,
+      executorAdmitWalletB: replay,
+      vaultPayToWalletB: {
+        method: 'eth_call simulation (not broadcast)',
+        reverted: !vaultCall.ok,
+        reason: vaultCall.reason,
       },
-      refusalMessage: refusal,
-      auditAfter: finalAudit?.answer ?? null,
+      balances: {
+        agentNonce: [before.agentNonce, after.agentNonce],
+        agent: [wei18(before.agentWei), wei18(after.agentWei)],
+        vault: [wei18(before.vaultWei), wei18(after.vaultWei)],
+        walletB: [wei18(before.walletBWei), wei18(after.walletBWei)],
+        unchanged,
+      },
     };
   });
+
+  // ------------------------------------------------------------ 9 books vs chain
+  let reconciliation = null as Awaited<ReturnType<typeof reconcileNow>> | null;
+  await step(
+    9,
+    'Books reconcile with the chain, wallet by wallet',
+    async (labels) => {
+      labels.push(chain.labels.arc, deps.stores.label);
+      reconciliation = await reconcileNow();
+      if (reconciliation.status !== 'RECONCILED')
+        throw new Error(`invariant failed: ${reconciliation.detail}`);
+      const snapshotSays = (await ask(wiring, "what's my balance")).balance;
+      return { ...reconciliation, snapshotAfter: snapshotSays ?? null };
+    },
+  );
+  await deps.executor.stop();
 
   // ------------------------------------------------------------ result
   const entries = await deps.stores.ledger.entries(workspaceId);
   const balances = await ledger.balances(workspaceId, USDC.assetId);
+  const dust = await ledger.balances(workspaceId, dustAssetId(USDC.assetId));
   const finalInvoice = invoiceId
     ? (await invoices.store.get(invoiceId))?.invoice
     : null;
+  const transcript = tg.transcript.map((t) => ({
+    ...t,
+    // One-time link codes (consumed in step 2) and pay-link MACs are not kept.
+    text:
+      t.direction === 'IN' && /^\d{6,10}$/.test(t.text)
+        ? '••••••'
+        : redactLink(t.text).replace(/link code is \S+/, 'link code is ••••••'),
+  }));
   return {
     runId: deps.runId,
     workspaceId,
@@ -1518,11 +2005,12 @@ export async function runFreelancerDemo(deps: DemoDeps) {
     parties: {
       owner: parties.owner.address,
       agent: parties.agent,
+      vault: vault.vault,
       client: parties.client,
       sarah: parties.sarah,
       walletB: parties.walletB,
     },
-    funding,
+    funding: funding.map((f) => bigJson(f)),
     steps,
     model: {
       provider: deps.reasoner?.provider ?? null,
@@ -1544,11 +2032,23 @@ export async function runFreelancerDemo(deps: DemoDeps) {
       : null,
     cctp: cctp ? bigJson(cctp) : null,
     payout: payout ? bigJson(payout) : null,
+    reconciliation: reconciliation ? bigJson(reconciliation) : null,
     ledger: {
       balances: Object.fromEntries(
         Object.entries(balances)
           .filter(([, v]) => v !== 0n)
           .map(([k, v]) => [k, d(v)]),
+      ),
+      dustWei: Object.fromEntries(
+        Object.entries(dust)
+          .filter(([, v]) => v !== 0n)
+          .map(([k, v]) => [k, String(v)]),
+      ),
+      walletCash: Object.fromEntries(
+        [...walletCashWei(entries, USDC.assetId)].map(([k, v]) => [
+          k,
+          wei18(v),
+        ]),
       ),
       entries: entries.map((e) => ({
         entryId: e.entryId,
@@ -1556,24 +2056,15 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         evidence: e.evidence,
         postings: e.postings.map((p) => ({
           account: p.account,
-          amount: d(p.amount),
+          asset: p.assetId === USDC.assetId ? 'USDC' : 'USDC wei dust',
+          amount: p.assetId === USDC.assetId ? d(p.amount) : String(p.amount),
           ...(p.counterpartyId ? { counterparty: p.counterpartyId } : {}),
         })),
       })),
     },
-    transcript: tg.transcript.map((t) => ({
-      ...t,
-      // One-time link codes (consumed in step 2) are not kept in evidence.
-      text:
-        t.direction === 'IN' && /^\d{6,8}$/.test(t.text)
-          ? '••••••'
-          : redactLink(t.text).replace(
-              /link code is \S+/,
-              'link code is ••••••',
-            ),
-    })),
+    transcript,
     transcriptSha256: createHash('sha256')
-      .update(JSON.stringify(tg.transcript))
+      .update(JSON.stringify(transcript))
       .digest('hex'),
   };
 }

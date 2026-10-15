@@ -86,7 +86,19 @@ export type MandateState = Readonly<{
    * under this mandate. A second grant for the same obligation is denied.
    */
   settledObligations?: readonly string[];
+  /** Owner-approval nonces already redeemed for a grant; each works once. */
+  usedApprovalNonces?: readonly Hex[];
 }>;
+
+/**
+ * Freshness terms of one owner approval: a one-use nonce and a deadline,
+ * issued by the Kernel with the REQUIRE_OWNER_APPROVAL outcome and signed by
+ * the owner inside the PaymentApproval typed data.
+ */
+export type ApprovalTerms = Readonly<{ nonce: Hex; deadline: number }>;
+export type OwnerApproval = ApprovalTerms & Readonly<{ signature: Hex }>;
+/** Default lifetime of an approval request. */
+export const APPROVAL_TTL_SECONDS = 900;
 
 export type Decision =
   | {
@@ -97,6 +109,8 @@ export type Decision =
   | {
       outcome: 'REQUIRE_OWNER_APPROVAL';
       reasons: string[];
+      /** Terms the owner signs with `intentApprovalTypedData(intent, approval)`. */
+      approval: ApprovalTerms;
     }
   | { outcome: 'DENY'; reasons: string[] };
 
@@ -307,8 +321,11 @@ export type AuthorityConfig = {
 };
 
 /**
- * Pure decision. `ownerApproval` is a fresh owner EIP-712 signature over the
- * intent (needed above the per-action cap); nothing else can lift the cap.
+ * Decision. `ownerApproval` is the owner's EIP-712 signature over the intent
+ * and the approval terms (one-use nonce, deadline) the Kernel issued with its
+ * REQUIRE_OWNER_APPROVAL outcome. It is needed above the per-action cap, or
+ * for every payment when `requireOwnerApproval` is set; nothing else lifts
+ * that requirement. An expired or already-redeemed approval is refused.
  */
 export async function decide(input: {
   config: AuthorityConfig;
@@ -319,7 +336,7 @@ export async function decide(input: {
   risk: RiskInput;
   simulationOk: boolean;
   now: number;
-  ownerApproval?: Hex;
+  ownerApproval?: OwnerApproval;
   /**
    * When true, even an in-cap intent needs `ownerApproval` (a confirmation
    * step): without it the result is REQUIRE_OWNER_APPROVAL and no grant.
@@ -375,7 +392,8 @@ export async function decide(input: {
   ];
   const overCap = i.amount > m.perActionCap;
   if (overCap || input.requireOwnerApproval) {
-    if (!input.ownerApproval)
+    const a = input.ownerApproval;
+    if (!a)
       return {
         outcome: 'REQUIRE_OWNER_APPROVAL',
         reasons: [
@@ -383,10 +401,18 @@ export async function decide(input: {
             ? `amount ${i.amount} above per-action cap ${m.perActionCap}`
             : 'owner confirmation required for this payment',
         ],
+        approval: {
+          nonce: `0x${randomBytes(32).toString('hex')}` as Hex,
+          deadline: now + APPROVAL_TTL_SECONDS,
+        },
       };
+    if (!Number.isSafeInteger(a.deadline) || now > a.deadline)
+      return deny('owner approval expired');
+    if (state.usedApprovalNonces?.some((n) => lower(n) === lower(a.nonce)))
+      return deny('owner approval already used');
     const signer = await recoverTypedDataAddress({
-      ...intentApprovalTypedData(i),
-      signature: input.ownerApproval,
+      ...intentApprovalTypedData(i, a),
+      signature: a.signature,
     }).catch(() => null);
     if (!signer || lower(signer) !== lower(m.owner))
       return deny('owner approval signature does not match the mandate owner');
@@ -399,8 +425,14 @@ export async function decide(input: {
   };
 }
 
-/** What an owner signs to approve one specific over-cap intent. */
-export function intentApprovalTypedData(i: PaymentIntent) {
+/**
+ * What an owner signs to approve one specific intent: its exact terms plus
+ * the Kernel-issued one-use nonce and deadline.
+ */
+export function intentApprovalTypedData(
+  i: PaymentIntent,
+  terms: ApprovalTerms,
+) {
   return {
     domain: { name: 'Synq Payment Approval', version: '1', chainId: i.chainId },
     types: {
@@ -412,6 +444,8 @@ export function intentApprovalTypedData(i: PaymentIntent) {
         { name: 'recipient', type: 'address' },
         { name: 'amount', type: 'uint256' },
         { name: 'obligationRef', type: 'string' },
+        { name: 'nonce', type: 'bytes32' },
+        { name: 'deadline', type: 'uint64' },
       ],
     },
     primaryType: 'PaymentApproval' as const,
@@ -423,6 +457,8 @@ export function intentApprovalTypedData(i: PaymentIntent) {
       recipient: i.recipient,
       amount: i.amount,
       obligationRef: i.obligationRef,
+      nonce: terms.nonce,
+      deadline: BigInt(terms.deadline),
     },
   };
 }
