@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import rawArc from '../../../sources/arc_registry.json' with { type: 'json' };
 import {
   AmountError,
   assetKey,
@@ -157,84 +159,7 @@ type TokenEntry = Readonly<{
   permissioned: boolean;
 }>;
 
-const TOKENS: readonly TokenEntry[] = [
-  {
-    chain: 'arc-testnet',
-    symbol: 'USDC',
-    address: '0x3600000000000000000000000000000000000000',
-    decimals: 6,
-    codeHash:
-      '0xc9987bd3af6b26a030951faa7eacc017b68343aeedf3ce5fe68f821c4b93939d',
-    permissioned: false,
-  },
-  {
-    chain: 'arc-testnet',
-    symbol: 'EURC',
-    address: '0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a',
-    decimals: 6,
-    codeHash:
-      '0x35bca78fda57cc45ed6ac8b61e4911e0a7fe1e89c05b9f187d3a8705e94013a2',
-    permissioned: false,
-  },
-  {
-    chain: 'arc-testnet',
-    symbol: 'USYC',
-    address: '0xe9185F0c5F296Ed1797AaE4238D26CCaBEadb86C',
-    decimals: 6,
-    codeHash: null,
-    permissioned: true,
-  },
-  {
-    chain: 'arc-mainnet',
-    symbol: 'USDC',
-    address: '0x3600000000000000000000000000000000000000',
-    decimals: 6,
-    codeHash: null,
-    permissioned: false,
-  },
-  {
-    chain: 'arc-mainnet',
-    symbol: 'EURC',
-    address: '0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1',
-    decimals: 6,
-    codeHash: null,
-    permissioned: false,
-  },
-  {
-    chain: 'arc-mainnet',
-    symbol: 'USYC',
-    address: '0x8a5D989Bbb96929F689B0200f435f53dA42bF490',
-    decimals: 6,
-    codeHash: null,
-    permissioned: true,
-  },
-  {
-    chain: 'eth-sepolia',
-    symbol: 'USDC',
-    address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
-    decimals: 6,
-    codeHash:
-      '0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb',
-    permissioned: false,
-  },
-  {
-    chain: 'base-sepolia',
-    symbol: 'USDC',
-    address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-    decimals: 6,
-    codeHash:
-      '0xedc5281a85c0efecd49999a1ef668390c59b88702f2d4a07029d7f5d63059d6c',
-    permissioned: false,
-  },
-  {
-    chain: 'arb-sepolia',
-    symbol: 'USDC',
-    address: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
-    decimals: 6,
-    codeHash: null,
-    permissioned: false,
-  },
-];
+// Tokens and contracts: sources/arc_registry.json (the only place addresses live).
 
 export type ContractKind =
   | 'CCTP_TOKEN_MESSENGER_V2'
@@ -257,98 +182,62 @@ type ContractEntry = Readonly<{
   proxy: boolean;
 }>;
 
-const CCTP_PROXY =
-  '0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99' as const;
-const GATEWAY_PROXY =
-  '0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187' as const;
-const cctpAndGateway = (c: ChainName, gateway: boolean): ContractEntry[] => [
-  {
-    chain: c,
-    kind: 'CCTP_TOKEN_MESSENGER_V2',
-    address: '0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA',
-    codeHash: CCTP_PROXY,
-    proxy: true,
-  },
-  {
-    chain: c,
-    kind: 'CCTP_MESSAGE_TRANSMITTER_V2',
-    address: '0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275',
-    codeHash: CCTP_PROXY,
-    proxy: true,
-  },
-  ...(gateway
-    ? [
-        {
-          chain: c,
-          kind: 'GATEWAY_WALLET',
-          address: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
-          codeHash: GATEWAY_PROXY,
-          proxy: true,
-        } as const,
-        {
-          chain: c,
-          kind: 'GATEWAY_MINTER',
-          address: '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B',
-          codeHash: GATEWAY_PROXY,
-          proxy: true,
-        } as const,
-      ]
-    : []),
-];
-
-const CONTRACTS: readonly ContractEntry[] = [
-  ...cctpAndGateway('arc-testnet', true),
-  {
-    chain: 'arc-testnet',
-    kind: 'CCTP_TOKEN_MINTER_V2',
-    address: '0xb43db544E2c27092c107639Ad201b3dEfAbcF192',
-    codeHash:
-      '0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff',
-    proxy: false,
-  },
-  {
-    chain: 'arc-testnet',
-    kind: 'MEMO',
-    address: '0x5294E9927c3306DcBaDb03fe70b92e01cCede505',
-    codeHash:
-      '0x3e5d663b3c99d70c9ff00d597ae68ce2f2e2843b2d39adae5eb78d8eb6877b95',
-    proxy: false,
-  },
-  {
-    chain: 'arc-testnet',
-    kind: 'MULTICALL3',
-    address: '0xcA11bde05977b3631167028862bE2a173976CA11',
-    codeHash:
-      '0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891',
-    proxy: false,
-  },
-  {
-    chain: 'arc-testnet',
-    kind: 'PERMIT2',
-    address: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-    codeHash:
-      '0x53681d3cf8f702f849c1504b491049c3d0a282e4595d9b297c410dcf36f0908e',
-    proxy: false,
-  },
-  {
-    chain: 'arc-testnet',
-    kind: 'ERC8004_IDENTITY_REGISTRY',
-    address: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
-    codeHash:
-      '0xd0e45b1d89fa9b6cc7e97c1f155d64180e5c232aaccf9900ef9d4fd738c02b41',
-    proxy: true,
-  },
-  {
-    chain: 'arc-testnet',
-    kind: 'ERC8183_AGENTIC_COMMERCE',
-    address: '0x0747EEf0706327138c69792bF28Cd525089e4583',
-    codeHash:
-      '0x6fbb70f32c57790a7bc472b3fd6adb3bc22e911239f1a86f77898e69f62d5d13',
-    proxy: true,
-  },
-  ...cctpAndGateway('eth-sepolia', true),
-  ...cctpAndGateway('base-sepolia', false),
-];
+const Hash = z
+  .string()
+  .regex(/^0x[0-9a-f]{64}$/) as unknown as z.ZodType<`0x${string}`>;
+const Address = z
+  .string()
+  .regex(/^0x[0-9a-fA-F]{40}$/) as unknown as z.ZodType<`0x${string}`>;
+const ChainNameSchema = z.enum([
+  'arc-testnet',
+  'arc-mainnet',
+  'eth-sepolia',
+  'base-sepolia',
+  'arb-sepolia',
+]);
+const RegistrySchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  sources: z.record(z.string(), z.string()),
+  tokens: z.array(
+    z.strictObject({
+      chain: ChainNameSchema,
+      symbol: z.enum(['USDC', 'EURC', 'USYC']),
+      address: Address,
+      decimals: z.number().int().min(0).max(36),
+      codeHash: Hash.nullable(),
+      permissioned: z.boolean(),
+    }),
+  ),
+  contracts: z.array(
+    z.strictObject({
+      chain: ChainNameSchema,
+      kind: z.enum([
+        'CCTP_TOKEN_MESSENGER_V2',
+        'CCTP_MESSAGE_TRANSMITTER_V2',
+        'CCTP_TOKEN_MINTER_V2',
+        'GATEWAY_WALLET',
+        'GATEWAY_MINTER',
+        'MEMO',
+        'MULTICALL3',
+        'PERMIT2',
+        'ERC8004_IDENTITY_REGISTRY',
+        'ERC8183_AGENTIC_COMMERCE',
+      ]),
+      address: Address,
+      codeHash: Hash.nullable(),
+      proxy: z.boolean(),
+    }),
+  ),
+});
+const REGISTRY = RegistrySchema.parse(rawArc);
+for (const t of REGISTRY.tokens)
+  if (
+    REGISTRY.tokens.filter((x) => x.chain === t.chain && x.symbol === t.symbol)
+      .length !== 1
+  )
+    throw new Error(`arc registry: duplicate ${t.symbol} on ${t.chain}`);
+const TOKENS: readonly TokenEntry[] = REGISTRY.tokens;
+const CONTRACTS: readonly ContractEntry[] = REGISTRY.contracts;
 
 export class ArcRegistryError extends AmountError {}
 

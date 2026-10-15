@@ -9,6 +9,7 @@ import {
   sameAsset,
   subMoneyNonNegative,
 } from '@synq/domain';
+import arcRegistry from '../../sources/arc_registry.json' with { type: 'json' };
 import {
   ARC_SOURCES,
   CHAINS,
@@ -33,8 +34,7 @@ describe('Arc registry and typed money', () => {
       decimals: 6,
       canonical: 'USDC',
       environment: 'ARC_TESTNET',
-      assetId:
-        'eip155:5042002/erc20:0x3600000000000000000000000000000000000000',
+      assetId: `eip155:5042002/erc20:${arcRegistry.tokens[0]!.address.toLowerCase()}`,
     });
     // Same economic asset, different network: never the same AssetRef.
     expect(sepolia.canonical).toBe(arc.canonical);
@@ -92,7 +92,7 @@ describe('Arc registry and typed money', () => {
   it('P01-04 a model cannot invent a chain or asset', () => {
     expect(
       assetFromModel({ chain: 'arc-testnet', symbol: 'USDC' }).address,
-    ).toBe('0x3600000000000000000000000000000000000000');
+    ).toBe(arcRegistry.tokens[0]!.address);
     const injected = [
       {
         chain: 'arc-testnet',
@@ -113,7 +113,7 @@ describe('Arc registry and typed money', () => {
     ).toThrow(AmountError);
     expect(() => chainById(1)).toThrow(AmountError);
     expect(
-      assetByAddress(84532, '0x036cbd53842c5426634e7929541ec2318f3dcf7e')
+      assetByAddress(84532, token('base-sepolia', 'USDC').address.toLowerCase())
         .symbol,
     ).toBe('USDC');
   });
@@ -121,7 +121,7 @@ describe('Arc registry and typed money', () => {
   it('P01-01 legacy records migrate as legacy or are rejected with a typed error', () => {
     const ausd = migrateLegacyAsset({
       chainId: 10143,
-      address: '0x534b2f3A21130d7a60830c2Df862319e593943A3',
+      address: `0x${'53'.repeat(20)}`,
       symbol: 'AUSD',
       decimals: 6,
     });
@@ -155,11 +155,18 @@ describe('Arc registry and typed money', () => {
 
   it('pins official Arc contract addresses with code hashes and proxy flags', () => {
     const tm = contract('arc-testnet', 'CCTP_TOKEN_MESSENGER_V2');
-    expect(tm.address).toBe('0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA');
+    expect(tm.address).toBe(
+      arcRegistry.contracts.find(
+        (c) =>
+          c.chain === 'arc-testnet' && c.kind === 'CCTP_TOKEN_MESSENGER_V2',
+      )!.address,
+    );
     expect(tm.proxy).toBe(true);
     expect(tm.codeHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(contract('arc-testnet', 'GATEWAY_WALLET').address).toBe(
-      '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
+      arcRegistry.contracts.find(
+        (c) => c.chain === 'arc-testnet' && c.kind === 'GATEWAY_WALLET',
+      )!.address,
     );
     expect(CHAINS['arc-testnet'].cctpDomain).toBe(26);
     expect(CHAINS['eth-sepolia'].cctpDomain).toBe(0);

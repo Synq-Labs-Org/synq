@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "connect": "https://docs.arc.io/arc/references/connect-to-arc",
+    "contracts": "https://docs.arc.io/arc/references/contract-addresses",
+    "gas": "https://docs.arc.io/arc/references/gas-and-fees",
+    "retrievedAt": "2026-10-16",
+    "codeHashes": "keccak256(eth_getCode) read from each chain's public RPC on 2026-10-16; CCTP domains from MessageTransmitterV2.localDomain()"
+  },
+  "tokens": [
+    { "chain": "arc-testnet", "symbol": "USDC", "address": "0x3600000000000000000000000000000000000000", "decimals": 6, "codeHash": "0xc9987bd3af6b26a030951faa7eacc017b68343aeedf3ce5fe68f821c4b93939d", "permissioned": false },
+    { "chain": "arc-testnet", "symbol": "EURC", "address": "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a", "decimals": 6, "codeHash": "0x35bca78fda57cc45ed6ac8b61e4911e0a7fe1e89c05b9f187d3a8705e94013a2", "permissioned": false },
+    { "chain": "arc-testnet", "symbol": "USYC", "address": "0xe9185F0c5F296Ed1797AaE4238D26CCaBEadb86C", "decimals": 6, "codeHash": null, "permissioned": true },
+    { "chain": "arc-mainnet", "symbol": "USDC", "address": "0x3600000000000000000000000000000000000000", "decimals": 6, "codeHash": null, "permissioned": false },
+    { "chain": "arc-mainnet", "symbol": "EURC", "address": "0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1", "decimals": 6, "codeHash": null, "permissioned": false },
+    { "chain": "arc-mainnet", "symbol": "USYC", "address": "0x8a5D989Bbb96929F689B0200f435f53dA42bF490", "decimals": 6, "codeHash": null, "permissioned": true },
+    { "chain": "eth-sepolia", "symbol": "USDC", "address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", "decimals": 6, "codeHash": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb", "permissioned": false },
+    { "chain": "base-sepolia", "symbol": "USDC", "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "decimals": 6, "codeHash": "0xedc5281a85c0efecd49999a1ef668390c59b88702f2d4a07029d7f5d63059d6c", "permissioned": false },
+    { "chain": "arb-sepolia", "symbol": "USDC", "address": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", "decimals": 6, "codeHash": null, "permissioned": false }
+  ],
+  "contracts": [
+    { "chain": "arc-testnet", "kind": "CCTP_TOKEN_MESSENGER_V2", "address": "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
+    { "chain": "arc-testnet", "kind": "CCTP_MESSAGE_TRANSMITTER_V2", "address": "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
+    { "chain": "arc-testnet", "kind": "CCTP_TOKEN_MINTER_V2", "address": "0xb43db544E2c27092c107639Ad201b3dEfAbcF192", "codeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff", "proxy": false },
+    { "chain": "arc-testnet", "kind": "GATEWAY_WALLET", "address": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", "codeHash": "0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187", "proxy": true },
+    { "chain": "arc-testnet", "kind": "GATEWAY_MINTER", "address": "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B", "codeHash": "0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187", "proxy": true },
+    { "chain": "arc-testnet", "kind": "MEMO", "address": "0x5294E9927c3306DcBaDb03fe70b92e01cCede505", "codeHash": "0x3e5d663b3c99d70c9ff00d597ae68ce2f2e2843b2d39adae5eb78d8eb6877b95", "proxy": false },
+    { "chain": "arc-testnet", "kind": "MULTICALL3", "address": "0xcA11bde05977b3631167028862bE2a173976CA11", "codeHash": "0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891", "proxy": false },
+    { "chain": "arc-testnet", "kind": "PERMIT2", "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3", "codeHash": "0x53681d3cf8f702f849c1504b491049c3d0a282e4595d9b297c410dcf36f0908e", "proxy": false },
+    { "chain": "arc-testnet", "kind": "ERC8004_IDENTITY_REGISTRY", "address": "0x8004A818BFB912233c491871b3d84c89A494BD9e", "codeHash": "0xd0e45b1d89fa9b6cc7e97c1f155d64180e5c232aaccf9900ef9d4fd738c02b41", "proxy": true },
+    { "chain": "arc-testnet", "kind": "ERC8183_AGENTIC_COMMERCE", "address": "0x0747EEf0706327138c69792bF28Cd525089e4583", "codeHash": "0x6fbb70f32c57790a7bc472b3fd6adb3bc22e911239f1a86f77898e69f62d5d13", "proxy": true },
+    { "chain": "eth-sepolia", "kind": "CCTP_TOKEN_MESSENGER_V2", "address": "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
+    { "chain": "eth-sepolia", "kind": "CCTP_MESSAGE_TRANSMITTER_V2", "address": "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
+    { "chain": "eth-sepolia", "kind": "GATEWAY_WALLET", "address": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9", "codeHash": "0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187", "proxy": true },
+    { "chain": "eth-sepolia", "kind": "GATEWAY_MINTER", "address": "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B", "codeHash": "0x874a21508289bf01ee9802032607ae53ba0a4f47f28143a8493921b8db102187", "proxy": true },
+    { "chain": "base-sepolia", "kind": "CCTP_TOKEN_MESSENGER_V2", "address": "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
+    { "chain": "base-sepolia", "kind": "CCTP_MESSAGE_TRANSMITTER_V2", "address": "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true }
+  ]
+}
