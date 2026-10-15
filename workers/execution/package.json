@@ -8,7 +8,8 @@
     "./abi": "./src/abi.ts",
     "./persistence": "./src/persistence.ts",
     "./journal": "./src/journal.ts",
-    "./integrity": "./src/integrity.ts"
+    "./integrity": "./src/integrity.ts",
+    "./arc": "./src/arc.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
