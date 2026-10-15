@@ -97,6 +97,12 @@ const PLANNER_FORBIDDEN_MODULES =
   /^(@synq\/(execution-worker|wallet-core|identity)(\/.*)?|.*\/(workers\/execution|contracts)(\/.*)?)$/;
 const BRAIN_ZONE =
   /^(packages\/(agent-runtime|brain|world-model)|plugins\/(qwen|kimi|openai))$/;
+// Arc v3: packages on the active Arc runtime may not reach archived Monad
+// sponsor integrations, directly or transitively. Their code and tests stay.
+const ARC_ACTIVE =
+  /^(packages\/(domain|schemas|kernel|identity|chain-registry|ledger|invoices|payables|treasury|governance|arc-execution|settlement|funding|channels|agent-runtime|offer-exchange|world-model)|plugins\/circle-[a-z-]+)$/;
+const LEGACY_MONAD =
+  /^(plugins\/(kuru|perpl|agora|aurora|chainlink-cre|layerzero)|workers\/perpl-executor)$/;
 const MODEL_SDKS =
   /^(openai|ai|langchain|@langchain\/.*|@mastra\/.*|@anthropic-ai\/.*|@openai\/.*)$/;
 
@@ -543,6 +549,23 @@ export function checkArchitecture(root) {
     );
     if (path)
       errors.push(`${zone} transitive signing authority: ${path.join(' -> ')}`);
+  }
+  function legacyPath(node, path = []) {
+    if (path.includes(node)) return null;
+    if (path.length && LEGACY_MONAD.test(node)) return [...path, node];
+    for (const dependency of graph.get(node) ?? []) {
+      const found = legacyPath(dependency, [...path, node]);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const node of graph.keys()) {
+    if (!ARC_ACTIVE.test(node)) continue;
+    const path = legacyPath(node);
+    if (path)
+      errors.push(
+        `Arc runtime reaches archived Monad integration: ${path.join(' -> ')}`,
+      );
   }
   const reported = new Set();
   function visit(node, path) {

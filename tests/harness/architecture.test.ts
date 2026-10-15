@@ -384,4 +384,46 @@ describe('dependency boundary rules', () => {
       }),
     ).toEqual([]);
   });
+
+  it('P01-03 keeps archived Monad integrations out of the Arc runtime, even transitively', () => {
+    const direct = workspace({
+      'packages/invoices/package.json': pkg('@synq/invoices'),
+      'packages/invoices/index.ts':
+        "import { kuru } from '@synq/plugin-kuru';\n",
+      'plugins/kuru/package.json': pkg('@synq/plugin-kuru'),
+      'plugins/kuru/index.ts': 'export const kuru = 1;\n',
+    });
+    expect(direct.some((e) => e.includes('archived Monad integration'))).toBe(
+      true,
+    );
+    const transitive = workspace({
+      'packages/settlement/package.json': pkg('@synq/settlement'),
+      'packages/settlement/index.ts': "import { x } from '@synq/bridge';\n",
+      'packages/bridge/package.json': pkg('@synq/bridge'),
+      'packages/bridge/index.ts':
+        "import { perpl } from '@synq/perpl-executor';\nexport const x = perpl;\n",
+      'workers/perpl-executor/package.json': pkg('@synq/perpl-executor'),
+      'workers/perpl-executor/index.ts': 'export const perpl = 1;\n',
+    });
+    expect(
+      transitive.some((e) =>
+        e.includes('settlement -> packages/bridge -> workers/perpl-executor'),
+      ),
+    ).toBe(true);
+  });
+  it('P01-06 brain packages still cannot import restricted signers', () => {
+    const errors = workspace({
+      'packages/agent-runtime/package.json': pkg('@synq/agent-runtime'),
+      'packages/agent-runtime/index.ts':
+        "import { sign } from '@synq/execution-worker';\n",
+      'workers/execution/package.json': pkg('@synq/execution-worker'),
+      'workers/execution/index.ts':
+        "import { privateKeyToAccount } from 'viem/accounts';\nexport const sign = privateKeyToAccount;\n",
+    });
+    expect(
+      errors.some(
+        (e) => e.includes('signing authority') || e.includes('Brain zone'),
+      ),
+    ).toBe(true);
+  });
 });
