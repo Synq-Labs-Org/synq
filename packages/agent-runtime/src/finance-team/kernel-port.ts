@@ -18,7 +18,31 @@ import {
  * prompt or an agent output other than the MAC'd grant itself.
  */
 export interface PaymentKernelPort {
-  decide(input: { intent: PaymentIntent; risk: RiskInput }): Promise<Decision>;
+  decide(input: {
+    intent: PaymentIntent;
+    risk: RiskInput;
+    /** Owner EIP-712 signature over `intentApprovalTypedData(intent)`. */
+    ownerApproval?: Hex;
+    /** Confirmation step: without `ownerApproval` nothing is granted. */
+    requireOwnerApproval?: boolean;
+  }): Promise<Decision>;
+}
+
+/**
+ * Atomic one-grant-per-obligation fence. `reserve` returns false when the
+ * obligation was already granted. Back it with a unique constraint in
+ * production; the default is in-memory per Kernel port.
+ */
+export interface ObligationFence {
+  reserve(obligationRef: string): Promise<boolean>;
+}
+export class MemoryObligationFence implements ObligationFence {
+  private readonly held = new Set<string>();
+  async reserve(ref: string) {
+    if (this.held.has(ref)) return false;
+    this.held.add(ref);
+    return true;
+  }
 }
 
 export function arcPaymentKernel(input: {
@@ -30,12 +54,14 @@ export function arcPaymentKernel(input: {
   simulate: (intent: PaymentIntent) => Promise<boolean>;
   now: () => number;
   ownerApproval?: (intent: PaymentIntent) => Hex | undefined;
+  obligations?: ObligationFence;
 }): PaymentKernelPort {
+  const fence = input.obligations ?? new MemoryObligationFence();
   return {
-    async decide({ intent, risk }) {
+    async decide({ intent, risk, ownerApproval, requireOwnerApproval }) {
       const simulationOk = await input.simulate(intent).catch(() => false);
-      const approval = input.ownerApproval?.(intent);
-      return decide({
+      const approval = ownerApproval ?? input.ownerApproval?.(intent);
+      const decision = await decide({
         config: input.config,
         mandate: input.mandate,
         mandateSignature: input.mandateSignature,
@@ -45,7 +71,18 @@ export function arcPaymentKernel(input: {
         simulationOk,
         now: input.now(),
         ...(approval ? { ownerApproval: approval } : {}),
+        ...(requireOwnerApproval ? { requireOwnerApproval: true } : {}),
       });
+      if (decision.outcome !== 'ALLOW') return decision;
+      // The minted grant never leaves this closure unless the obligation is new.
+      if (!(await fence.reserve(intent.obligationRef)))
+        return {
+          outcome: 'DENY',
+          reasons: [
+            `obligation ${intent.obligationRef} already has a grant; a second payment is refused`,
+          ],
+        };
+      return decision;
     },
   };
 }

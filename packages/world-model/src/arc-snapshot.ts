@@ -554,44 +554,7 @@ export async function buildArcWorldSnapshot(input: {
       freshness: 'FRESH',
     }),
   );
-  const critical: [string, FieldMeta][] = (
-    Object.entries(ARC_FIELD_POLICY) as [ArcFieldPath, FieldPolicy][]
-  )
-    .filter(([, p]) => p.critical)
-    .map(([path]) => [path, metaAt(path)]);
-  function metaAt(path: ArcFieldPath): FieldMeta {
-    const table: Partial<Record<ArcFieldPath, FieldMeta>> = {
-      'identity.user': user.meta,
-      'identity.workspace': workspace.meta,
-      'identity.memberships': memberships.meta,
-      'identity.wallets': wallets.meta,
-      'treasury.balances': balances.meta,
-      'treasury.reserves': reserves.meta,
-      'obligations.payables': payables.meta,
-      'obligations.mandates': mandates.meta,
-    };
-    return table[path]!;
-  }
-  critical.push(['treasury.availableToSpend', availableToSpend.meta]);
-  const staleCritical = critical
-    .filter(([, m]) => m.freshness !== 'FRESH')
-    .map(([path]) => path);
-  const reasons = critical
-    .filter(([, m]) => m.freshness !== 'FRESH')
-    .map(
-      ([path, m]) =>
-        `${path} is ${m.freshness} (${m.source}${m.reason ? `: ${m.reason}` : ''})`,
-    );
-  if (user.value && memberships.value.length) {
-    const own = memberships.value.find(
-      (m) => m.principalId === user.value!.principalId,
-    );
-    if (!own?.verified) {
-      staleCritical.push('identity.memberships');
-      reasons.push('current user has no verified membership in the workspace');
-    }
-  }
-  const snapshot: ArcWorldSnapshot = {
+  const draft: ArcWorldSnapshot = {
     schema: 'synq.arc.world/1',
     builtAt: now,
     primaryChain,
@@ -607,19 +570,219 @@ export async function buildArcWorldSnapshot(input: {
     capabilities: {
       providers,
       supportedChains,
+      missing: [],
+    },
+    operations: { workflows, reconciliation, blockers },
+    decision: { decisionGrade: false, staleCritical: [], reasons: [] },
+  };
+  const snapshot = evaluateArcSnapshot(draft, now);
+  for (const f of snapshotFields(snapshot)) FieldMetaSchema.parse(f.meta);
+  return snapshot;
+}
+
+const CRITICAL_PATHS = (
+  Object.entries(ARC_FIELD_POLICY) as [ArcFieldPath, FieldPolicy][]
+)
+  .filter(([, p]) => p.critical)
+  .map(([path]) => path);
+/** A snapshot older than this is never decision-grade, whatever its fields say. */
+export const MAX_DECISION_SNAPSHOT_AGE_SECONDS = Math.min(
+  ...CRITICAL_PATHS.map((p) => ARC_FIELD_POLICY[p].maxAgeSeconds),
+);
+
+function reage<T>(
+  o: Observed<T>,
+  maxAgeSeconds: number,
+  now: number,
+): Observed<T> {
+  const m = o.meta;
+  if (m.freshness === 'UNKNOWN' || m.observedAt === null) return o;
+  const aged = ageFreshness(m.observedAt, now, maxAgeSeconds);
+  const freshness = worstFreshness([m.freshness, aged]);
+  if (freshness === 'FRESH') return o;
+  return observed(
+    o.value,
+    fieldMeta({
+      provenance: m.provenance,
+      source: m.source,
+      observedAt: m.observedAt,
+      freshness,
+      reason:
+        freshness === 'STALE'
+          ? `observed ${now - m.observedAt}s ago; max ${maxAgeSeconds}s`
+          : 'observation time is in the future',
+    }),
+  );
+}
+
+/**
+ * Re-evaluates freshness and the decision at use time (`now`), from each
+ * field's observedAt. Call it whenever a snapshot is used later than it was
+ * built: freshness never improves with time, and a snapshot older than the
+ * smallest critical max-age is not decision-grade.
+ */
+export function evaluateArcSnapshot(
+  s: ArcWorldSnapshot,
+  now: number,
+): ArcWorldSnapshot {
+  const at = <T>(path: ArcFieldPath, o: Observed<T>) =>
+    reage(o, ARC_FIELD_POLICY[path].maxAgeSeconds, now);
+  const identity = {
+    user: at('identity.user', s.identity.user),
+    workspace: at('identity.workspace', s.identity.workspace),
+    memberships: at('identity.memberships', s.identity.memberships),
+    wallets: at('identity.wallets', s.identity.wallets),
+  };
+  const balances = at('treasury.balances', s.treasury.balances);
+  const reserves = at('treasury.reserves', s.treasury.reserves);
+  const derivedFreshness = worstFreshness([
+    s.treasury.availableToSpend.meta.freshness,
+    balances.meta.freshness,
+    reserves.meta.freshness,
+    identity.wallets.meta.freshness,
+  ]);
+  const availableToSpend =
+    derivedFreshness === s.treasury.availableToSpend.meta.freshness
+      ? s.treasury.availableToSpend
+      : observed(
+          s.treasury.availableToSpend.value,
+          fieldMeta({
+            provenance: s.treasury.availableToSpend.meta.provenance,
+            source: s.treasury.availableToSpend.meta.source,
+            observedAt: s.treasury.availableToSpend.meta.observedAt,
+            freshness: derivedFreshness,
+            reason: 'derived from stale input',
+          }),
+        );
+  const treasury = {
+    balances,
+    gatewayAvailable: at(
+      'treasury.gatewayAvailable',
+      s.treasury.gatewayAvailable,
+    ),
+    cctpInFlight: at('treasury.cctpInFlight', s.treasury.cctpInFlight),
+    reserves,
+    availableToSpend,
+  };
+  const obligations = {
+    receivables: at('obligations.receivables', s.obligations.receivables),
+    payables: at('obligations.payables', s.obligations.payables),
+    mandates: at('obligations.mandates', s.obligations.mandates),
+    pendingApprovals: at(
+      'obligations.pendingApprovals',
+      s.obligations.pendingApprovals,
+    ),
+  };
+  const operations = {
+    workflows: at('operations.workflows', s.operations.workflows),
+    reconciliation: at(
+      'operations.reconciliation',
+      s.operations.reconciliation,
+    ),
+    blockers: at('operations.blockers', s.operations.blockers),
+  };
+  const providers = s.capabilities.providers.map((p) => {
+    if (p.meta.provenance === 'CONFIG') return p;
+    const aged = at('capabilities.providers', p);
+    return aged.meta.freshness !== 'FRESH' && p.value.status === 'AVAILABLE'
+      ? observed(
+          {
+            ...p.value,
+            status: 'UNVERIFIED' as const,
+            reason: 'last successful health check is stale',
+          },
+          aged.meta,
+        )
+      : aged;
+  });
+  const metas: Record<string, FieldMeta> = {
+    'identity.user': identity.user.meta,
+    'identity.workspace': identity.workspace.meta,
+    'identity.memberships': identity.memberships.meta,
+    'identity.wallets': identity.wallets.meta,
+    'treasury.balances': balances.meta,
+    'treasury.reserves': reserves.meta,
+    'obligations.payables': obligations.payables.meta,
+    'obligations.mandates': obligations.mandates.meta,
+    'treasury.availableToSpend': availableToSpend.meta,
+  };
+  const staleCritical: string[] = [];
+  const reasons: string[] = [];
+  for (const [path, m] of Object.entries(metas))
+    if (m.freshness !== 'FRESH') {
+      staleCritical.push(path);
+      reasons.push(
+        `${path} is ${m.freshness} (${m.source}${m.reason ? `: ${m.reason}` : ''})`,
+      );
+    }
+  const snapshotAge = now - s.builtAt;
+  if (snapshotAge > MAX_DECISION_SNAPSHOT_AGE_SECONDS) {
+    staleCritical.push('snapshot');
+    reasons.push(
+      `snapshot built ${snapshotAge}s ago; max ${MAX_DECISION_SNAPSHOT_AGE_SECONDS}s before money can move`,
+    );
+  }
+  const user = identity.user.value;
+  if (!user) {
+    staleCritical.push('identity.user');
+    reasons.push('no current user');
+  } else if (
+    !identity.memberships.value.some(
+      (m) => m.principalId === user.principalId && m.verified,
+    )
+  ) {
+    staleCritical.push('identity.memberships');
+    reasons.push('current user has no verified membership in the workspace');
+  }
+  if (!identity.workspace.value) {
+    staleCritical.push('identity.workspace');
+    reasons.push('no current workspace');
+  }
+  return {
+    ...s,
+    identity,
+    treasury,
+    obligations,
+    operations,
+    capabilities: {
+      ...s.capabilities,
+      providers,
       missing: providers
         .filter((p) => p.value.status !== 'AVAILABLE')
         .flatMap((p) => p.value.capabilities),
     },
-    operations: { workflows, reconciliation, blockers },
     decision: {
       decisionGrade: staleCritical.length === 0,
       staleCritical: [...new Set(staleCritical)],
       reasons,
     },
   };
-  for (const f of snapshotFields(snapshot)) FieldMetaSchema.parse(f.meta);
-  return snapshot;
+}
+
+/**
+ * Confirmed primary-chain treasury USDC minus reservations and escrow, before
+ * the reserve floor. May be negative; null when unknown.
+ */
+export function cashBeforeBuffer(s: ArcWorldSnapshot): bigint | null {
+  const reserves = s.treasury.reserves.value;
+  const treasury = s.identity.wallets.value
+    .filter((w) => w.role === 'TREASURY' && w.chain === s.primaryChain)
+    .map((w) => lower(w.address));
+  if (
+    !reserves ||
+    !treasury.length ||
+    s.treasury.availableToSpend.value === null
+  )
+    return null;
+  const confirmed = s.treasury.balances.value
+    .filter(
+      (b) =>
+        b.chain === s.primaryChain &&
+        b.asset === 'USDC' &&
+        treasury.includes(lower(b.account)),
+    )
+    .reduce((a, b) => a + BigInt(b.baseUnits), 0n);
+  return confirmed - BigInt(reserves.reservations) - BigInt(reserves.escrow);
 }
 
 export type FieldCitation = Readonly<{

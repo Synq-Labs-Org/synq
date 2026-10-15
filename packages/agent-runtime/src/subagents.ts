@@ -313,8 +313,29 @@ export class SubagentManager {
       );
     });
   }
-  charge(agentId: string, cost: Partial<Usage>, label: string): void {
+  /** Usage is never negative and never non-finite: refunds are not accepted. */
+  private sanitize(
+    agentId: string,
+    cost: Partial<Usage>,
+    label: string,
+  ): Partial<Usage> {
+    const out: Partial<Usage> = {};
+    for (const k of ['tokens', 'paidMicroUsd', 'toolCalls'] as const) {
+      const v = cost[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !Number.isFinite(v))
+        this.refuse(
+          'BUDGET_EXCEEDED',
+          `${label}: non-finite ${k} usage`,
+          this.node(agentId).handle,
+        );
+      out[k] = Math.max(0, Math.ceil(v));
+    }
+    return out;
+  }
+  charge(agentId: string, rawCost: Partial<Usage>, label: string): void {
     const handle = this.node(agentId).handle;
+    const cost = this.sanitize(agentId, rawCost, label);
     if (handle.signal.aborted)
       this.refuse('CANCELLED', `${label} after cancellation`, handle);
     if (!this.canCharge(agentId, cost))
@@ -329,7 +350,8 @@ export class SubagentManager {
       n.used.toolCalls += cost.toolCalls ?? 0;
     }
   }
-  record(agentId: string, cost: Partial<Usage>): void {
+  record(agentId: string, rawCost: Partial<Usage>): void {
+    const cost = this.sanitize(agentId, rawCost, 'usage record');
     for (const n of this.chain(agentId)) {
       n.used.tokens += cost.tokens ?? 0;
       n.used.paidMicroUsd += cost.paidMicroUsd ?? 0;

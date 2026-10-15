@@ -1,7 +1,12 @@
-import type { VendorInvoice } from '@synq/payables';
+import type { Hex } from 'viem';
+import { z } from 'zod';
+import { AmountError } from '@synq/domain';
+import { InvoiceError } from '@synq/invoices';
+import { normalizeNumber, type VendorInvoice } from '@synq/payables';
 import type { AgentFinding } from '@synq/schemas';
 import {
   cite,
+  evaluateArcSnapshot,
   usdcDisplay,
   type ArcWorldSnapshot,
   type FieldCitation,
@@ -31,7 +36,8 @@ import {
   fromModelIntent,
   type FinanceIntent,
 } from './intent.js';
-import { FINANCE_TEAM_BUDGET, type FinanceRole } from './manifests.js';
+import { effectiveLimits } from './budget.js';
+import type { FinanceRole } from './manifests.js';
 import type {
   LiquidityReport,
   ReallocationProposal,
@@ -85,6 +91,8 @@ export type SupervisorReply = Readonly<{
   audit?: AuditExplanation;
   modelCalls: ModelCallRecord[];
   toolCalls: number;
+  /** Limits this run actually ran under (defaults ∩ caller ∩ session ledger). */
+  limits: BudgetLimits;
   findings: AgentFinding[];
 }>;
 
@@ -92,32 +100,54 @@ const usdc = (b: string | bigint) => `${usdcDisplay(b)} USDC`;
 const sum = (xs: readonly { baseUnits: string }[]) =>
   xs.reduce((a, x) => a + BigInt(x.baseUnits), 0n).toString();
 
-/** The open payable for a counterparty, earliest due first. */
+const normName = (n: string) =>
+  n
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * The open payable for a counterparty. The vendor must match exactly one
+ * vendor master entry by id or by normalised full name (no substrings). With
+ * `requireUnique` (payment paths) a counterparty is mandatory and exactly one
+ * open payable must remain after an optional invoice-number filter; reads
+ * fall back to the earliest due.
+ */
 export function findPayable(
   desk: FinanceDesk,
   snapshot: ArcWorldSnapshot,
   counterparty: string | null,
+  options: { invoiceNumber?: string | null; requireUnique?: boolean } = {},
 ): VendorInvoice | null {
   const open = new Set(
     snapshot.obligations.payables.value
       .filter((p) => p.status !== 'PAID')
       .map((p) => p.vendorInvoiceId),
   );
-  const who = counterparty?.toLowerCase() ?? null;
-  const vendorIds = desk.vendors
-    .filter(
-      (v) =>
-        who === null ||
-        v.name.toLowerCase().includes(who) ||
-        v.vendorId.toLowerCase() === who,
-    )
-    .map((v) => v.vendorId);
+  let candidates = desk.vendorInvoices.filter((i) =>
+    open.has(i.vendorInvoiceId),
+  );
+  if (counterparty === null) {
+    if (options.requireUnique) return null;
+  } else {
+    const who = normName(counterparty);
+    const id = counterparty.trim().toLowerCase();
+    if (!who) return null;
+    const vendors = desk.vendors.filter(
+      (v) => v.vendorId.toLowerCase() === id || normName(v.name) === who,
+    );
+    if (vendors.length !== 1) return null;
+    candidates = candidates.filter((i) => i.vendorId === vendors[0]!.vendorId);
+  }
+  const number = options.invoiceNumber;
+  if (number)
+    candidates = candidates.filter(
+      (i) => normalizeNumber(i.number) === normalizeNumber(number),
+    );
+  if (options.requireUnique && candidates.length !== 1) return null;
   return (
-    desk.vendorInvoices
-      .filter(
-        (i) => open.has(i.vendorInvoiceId) && vendorIds.includes(i.vendorId),
-      )
-      .sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0] ?? null
+    [...candidates].sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0] ?? null
   );
 }
 
@@ -129,15 +159,30 @@ export function findPayable(
 export async function superviseFinance(
   message: string,
   desk: FinanceDesk,
-  options: { runId?: string; limits?: BudgetLimits } = {},
+  options: {
+    runId?: string;
+    /** Can only tighten FINANCE_TEAM_BUDGET; never loosen it. */
+    limits?: Partial<BudgetLimits>;
+    /**
+     * The mandate owner's EIP-712 signature over the `PaymentApproval` typed
+     * data returned by an earlier PROPOSED reply. Required to turn a payment
+     * question into a grant; a chat "yes" is never a confirmation.
+     */
+    confirm?: { ownerApproval: Hex };
+  } = {},
 ): Promise<SupervisorReply> {
   const runId = options.runId ?? `fin_${desk.now}`;
-  const team = new FinanceTeam(runId, options.limits ?? FINANCE_TEAM_BUDGET);
+  const limits = effectiveLimits(
+    options.limits,
+    desk.budget?.remaining(desk.workspaceId) ?? null,
+  );
+  const team = new FinanceTeam(runId, limits);
   const sup = team.supervisor;
   const handledBy: FinanceRole[] = ['SUPERVISOR'];
   let intent = classifyIntent(message);
   let world: ArcWorldSnapshot | null = null;
   let refreshed = false;
+  let recorded = false;
   const reply = (
     status: SupervisorReply['status'],
     answer: string,
@@ -145,6 +190,15 @@ export async function superviseFinance(
     paths: string[] = [],
   ): SupervisorReply => {
     team.close();
+    if (!recorded) {
+      recorded = true;
+      const u = team.manager.usage();
+      desk.budget?.record(desk.workspaceId, {
+        toolCalls: u.toolCalls,
+        tokens: u.tokens,
+        paidMicroUsd: u.paidMicroUsd,
+      });
+    }
     return {
       runId,
       intent,
@@ -162,6 +216,7 @@ export async function superviseFinance(
       citations: world ? paths.map((p) => cite(world!, p, desk.now)) : [],
       modelCalls: [...team.modelCalls],
       toolCalls: team.manager.usage().toolCalls,
+      limits,
       findings: [...team.findings],
       ...extra,
     };
@@ -191,12 +246,23 @@ export async function superviseFinance(
         'I can check balances and receipts, draft invoices, review or pay a bill, explain payment timing and runway, and explain past payments. Which do you need?',
       );
 
-    world = await team.tool(sup, 'world.snapshot', () => desk.world());
-    const moving = intent.kind === 'PAY_INVOICE';
+    const moving = intent.kind === 'PAY_INVOICE' || intent.kind === 'PAY_CHECK';
+    if (moving && intent.classifiedBy !== 'RULES')
+      return reply(
+        'NEEDS_CLARIFICATION',
+        'I will not start a payment from a guessed intent. Say exactly which invoice to pay, for example "Pay Sarah\'s invoice INV-0042".',
+      );
+
+    // Freshness is judged at use time (desk.now), not when the snapshot was built.
+    world = evaluateArcSnapshot(
+      await team.tool(sup, 'world.snapshot', () => desk.world()),
+      desk.now,
+    );
     if (moving && !world.decision.decisionGrade && desk.refreshWorld) {
-      // P21-04: stale critical data is refreshed before any mutation path.
-      world = await team.tool(sup, 'world.snapshot', () =>
-        desk.refreshWorld!(),
+      // Stale critical data is refreshed before any payment path.
+      world = evaluateArcSnapshot(
+        await team.tool(sup, 'world.snapshot', () => desk.refreshWorld!()),
+        desk.now,
       );
       refreshed = true;
     }
@@ -334,12 +400,18 @@ export async function superviseFinance(
         team.complete(a);
         return reply('ANSWERED', audit.explanation, { audit });
       }
+      case 'PAY_CHECK':
       case 'PAY_INVOICE': {
-        const vi = findPayable(desk, s, intent.counterparty);
+        const vi = findPayable(desk, s, intent.counterparty, {
+          invoiceNumber: intent.invoiceNumber,
+          requireUnique: true,
+        });
         if (!vi)
           return reply(
             'NEEDS_CLARIFICATION',
-            `I found no open payable${intent.counterparty ? ` for ${intent.counterparty}` : ''}.`,
+            intent.counterparty
+              ? `I could not find exactly one open payable for ${intent.counterparty.slice(0, 60)}; name the vendor and invoice number.`
+              : 'Which vendor and invoice should I pay?',
             {
               payment: {
                 status: 'NOT_FOUND',
@@ -386,6 +458,16 @@ export async function superviseFinance(
             desk,
             prepared.intent,
             risk,
+            {
+              // Questions (and any confirmation) need the owner's signature;
+              // only an explicit imperative may use the mandate's standing
+              // pre-approval within its limits.
+              requireOwnerApproval:
+                intent.kind === 'PAY_CHECK' || Boolean(options.confirm),
+              ...(options.confirm
+                ? { ownerApproval: options.confirm.ownerApproval }
+                : {}),
+            },
           );
         team.complete(pay);
         const status = kernel?.status ?? prepared.status;
@@ -401,15 +483,17 @@ export async function superviseFinance(
         };
         const vendor = desk.vendors.find((v) => v.vendorId === vi.vendorId);
         const head =
-          status === 'GRANTED'
-            ? `Yes. The Kernel allowed ${usdc(vi.amount)} to ${vendor?.name ?? vi.vendorId}'s verified address and issued grant ${kernel!.grant!.grantId} (expires at ${kernel!.grant!.expiresAt}); only the restricted executor can use it, once, for that exact transfer.`
-            : status === 'DENIED'
-              ? `No. The Kernel denied this payout: ${kernel!.decision!.reasons.join('; ')}.`
-              : status === 'OWNER_APPROVAL_REQUIRED'
-                ? `This needs your signature: ${kernel!.decision!.reasons.join('; ')}.`
-                : status === 'NO_KERNEL'
-                  ? 'I prepared the payout but no Kernel is connected, so nothing can be authorized.'
-                  : `I did not prepare a payout: ${prepared.reason}.`;
+          status === 'PROPOSED'
+            ? `I can prepare this: ${usdc(vi.amount)} to ${vendor?.name.slice(0, 60) ?? vi.vendorId}'s verified address ${prepared.intent!.recipient}. Nothing is paid until the mandate owner signs the PaymentApproval confirmation.`
+            : status === 'GRANTED'
+              ? `Yes. The Kernel allowed ${usdc(vi.amount)} to ${vendor?.name.slice(0, 60) ?? vi.vendorId}'s verified address and issued grant ${kernel!.grant!.grantId} (expires at ${kernel!.grant!.expiresAt}); only the restricted executor can use it, once, for that exact transfer.`
+              : status === 'DENIED'
+                ? `No. The Kernel denied this payout: ${kernel!.decision!.reasons.join('; ')}.`
+                : status === 'OWNER_APPROVAL_REQUIRED'
+                  ? `This needs the owner's signature: ${kernel!.decision!.reasons.join('; ')}.`
+                  : status === 'NO_KERNEL'
+                    ? 'I prepared the payout but no Kernel is connected, so nothing can be authorized.'
+                    : `I did not prepare a payout: ${prepared.reason}.`;
         const answer = [
           head,
           risk.flags.length
@@ -436,6 +520,15 @@ export async function superviseFinance(
       return reply(
         'STOPPED',
         `I stopped safely: ${error.kind} (${error.message}). Nothing was signed or sent.`,
+      );
+    if (
+      error instanceof z.ZodError ||
+      error instanceof InvoiceError ||
+      error instanceof AmountError
+    )
+      return reply(
+        'STOPPED',
+        `I stopped safely: an output failed validation (${error.name}). Nothing was signed or sent.`,
       );
     team.close();
     throw error;

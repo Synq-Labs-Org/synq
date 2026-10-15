@@ -79,8 +79,13 @@ describe('finance team: Supervisor routing and fast path', () => {
         asset: 'USDC',
       },
     );
-    expect(classifyIntent("can I pay Sarah's invoice")).toMatchObject({
+    expect(classifyIntent("Pay Sarah's invoice")).toMatchObject({
       kind: 'PAY_INVOICE',
+      role: 'PAYMENT',
+      counterparty: 'Sarah',
+    });
+    expect(classifyIntent("can I pay Sarah's invoice")).toMatchObject({
+      kind: 'PAY_CHECK',
       role: 'PAYMENT',
       counterparty: 'Sarah',
     });
@@ -396,7 +401,7 @@ describe('finance team: budgets stop safely (P21-05)', () => {
 describe('finance team: Payment Agent -> Kernel (P21-01)', () => {
   it('an in-policy payout to a verified vendor gets a Kernel grant bound to that exact transfer', async () => {
     const r = await superviseFinance(
-      "can I pay Sarah's invoice",
+      "Pay Sarah's invoice",
       await desk([cleanInvoice]),
     );
     const p = r.payment!;
@@ -524,14 +529,21 @@ describe('finance team: Payment Agent -> Kernel (P21-01)', () => {
       },
     });
     const r2 = await superviseFinance(
-      "can I pay Sarah's invoice",
+      "Pay Sarah's invoice",
       await desk([cleanInvoice], { reasoner: coercive }),
     );
     expect(r2.modelCalls).toMatchObject([
       { role: 'PAYMENT', outcome: 'BLOCKED' },
     ]);
     expect(r2.findings.map((f) => f.kind)).toContain('FORBIDDEN_TOOL_CALL');
-    // Deterministic preparation still pays only the verified address, via a Kernel grant.
+    // With the model blocked, the deterministic proposal names the vendor
+    // master's verified address (never the invoice's payTo), and only the
+    // Kernel's grant can carry it to the executor.
+    expect(r2.payment!.prepared!.proposal).toMatchObject({
+      draftSource: 'DETERMINISTIC',
+      recipient: sarahWallet,
+      verifiedRecipient: sarahWallet,
+    });
     expect(r2.payment!.kernel!.grant!.recipient).toBe(sarahWallet);
   });
 });
@@ -611,7 +623,7 @@ describe('finance team: CFO timing and freshness (P21-04, P21-07)', () => {
     const stale = await desk([cleanInvoice], { balanceAge: 900 });
     const fresh = await snapshot([cleanInvoice]);
     let refreshes = 0;
-    const r = await superviseFinance("can I pay Sarah's invoice", {
+    const r = await superviseFinance("Pay Sarah's invoice", {
       ...stale,
       refreshWorld: async () => {
         refreshes++;
