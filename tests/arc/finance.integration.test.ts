@@ -11,6 +11,14 @@ import {
   migrateFinance,
   type JournalEntry,
 } from '@synq/ledger';
+import {
+  InvoiceService,
+  PostgresInvoiceStore,
+  draftInvoice,
+  issueTypedData,
+} from '@synq/invoices';
+import { PostgresVendorStore, VendorConflictError } from '@synq/payables';
+import { privateKeyToAccount } from 'viem/accounts';
 import { ensureP08Database } from '../treasury/pg.js';
 
 const URL =
@@ -126,5 +134,77 @@ describe('finance schema on Postgres', { timeout: 30_000 }, () => {
       0,
     );
     expect(seen).toEqual(['evt_pg_paid_4']);
+  });
+
+  it('P11 invoices and vendors persist with revision fencing', async () => {
+    const issuer = privateKeyToAccount(`0x${'71'.repeat(32)}`);
+    const store = new PostgresInvoiceStore(pool);
+    const svc = new InvoiceService(
+      store,
+      new Ledger(new PostgresLedgerStore(pool)),
+      () => 1_800_000_000,
+    );
+    const d = draftInvoice({
+      workspaceId: 'wsp_pg_inv',
+      number: 'INV-PG-1',
+      issuer: {
+        principalId: 'p',
+        name: 'Studio',
+        wallet: issuer.address,
+        payoutAddress: issuer.address,
+      },
+      payer: { name: 'Acme', contact: null },
+      asset: USDC,
+      lineItems: [{ description: 'Work', quantity: 2, unitPrice: 150_000n }],
+      dueDate: '2026-10-30',
+      draftedBy: 'test',
+      now: 1_800_000_000,
+    });
+    await svc.create(d);
+    const issued = (
+      await svc.issue(
+        d.invoiceId,
+        await issuer.signTypedData(issueTypedData(d)),
+      )
+    ).invoice;
+    const settled = await svc.settle({
+      chainId: USDC.chainId,
+      txHash: `0x${'5e'.repeat(32)}`,
+      logIndex: 1,
+      paymentRef: issued.paymentRef!,
+      payer: issuer.address,
+      recipient: issuer.address,
+      amount: 300_000n,
+    });
+    expect(settled).toMatchObject({
+      outcome: 'APPLIED',
+      invoice: { status: 'PAID' },
+    });
+    const fresh = await new PostgresInvoiceStore(pool).byPaymentRef(
+      issued.paymentRef!,
+    );
+    expect(fresh!.invoice.paid).toBe(300_000n);
+    expect(fresh!.invoice.total).toBe(300_000n);
+    expect(fresh!.rev).toBe(3);
+    await expect(store.save(fresh!.invoice, 1)).rejects.toThrow(
+      expect.objectContaining({ code: 'CONFLICT' }),
+    );
+    await expect(
+      store.save({ ...d, invoiceId: 'other' }, null),
+    ).rejects.toThrow(expect.objectContaining({ code: 'DUPLICATE_NUMBER' }));
+    const vendors = new PostgresVendorStore(pool);
+    const v = {
+      vendorId: 'ven_pg_1',
+      workspaceId: 'wsp_pg_inv',
+      name: 'Sarah',
+      kind: 'CONTRACTOR' as const,
+      addresses: [],
+    };
+    const r1 = await vendors.save(v, null);
+    await vendors.save({ ...v, name: 'Sarah K' }, r1);
+    await expect(vendors.save({ ...v, name: 'stale' }, r1)).rejects.toThrow(
+      VendorConflictError,
+    );
+    expect((await vendors.list('wsp_pg_inv'))[0]!.name).toBe('Sarah K');
   });
 });

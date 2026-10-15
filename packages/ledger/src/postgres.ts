@@ -51,6 +51,23 @@ export const LEDGER_MIGRATIONS: readonly {
       PRIMARY KEY (consumer, event_id));`,
     down: `DROP TABLE IF EXISTS synq_consumer_inbox; DROP TABLE IF EXISTS synq_event_outbox;`,
   },
+  {
+    version: 3,
+    up: `CREATE TABLE IF NOT EXISTS synq_invoices (
+      invoice_id text PRIMARY KEY,
+      workspace_id text NOT NULL,
+      number text NOT NULL,
+      payment_ref text UNIQUE,
+      rev int NOT NULL,
+      data jsonb NOT NULL,
+      UNIQUE (workspace_id, number));
+    CREATE TABLE IF NOT EXISTS synq_vendors (
+      vendor_id text PRIMARY KEY,
+      workspace_id text NOT NULL,
+      rev int NOT NULL,
+      data jsonb NOT NULL);`,
+    down: `DROP TABLE IF EXISTS synq_vendors; DROP TABLE IF EXISTS synq_invoices;`,
+  },
 ];
 
 const enc = (e: JournalEntry) =>

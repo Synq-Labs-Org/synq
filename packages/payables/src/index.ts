@@ -419,3 +419,89 @@ export function apEntries(input: {
     },
   ];
 }
+
+type Sql = {
+  query(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: Record<string, unknown>[] }>;
+};
+
+/** Vendor master persistence with a revision counter: a stale write never overwrites a verification. */
+export interface VendorStore {
+  get(vendorId: string): Promise<{ vendor: Vendor; rev: number } | null>;
+  save(vendor: Vendor, expectedRev: number | null): Promise<number>;
+  list(workspaceId: string): Promise<Vendor[]>;
+}
+
+export class VendorConflictError extends Error {
+  constructor(vendorId: string) {
+    super(`${vendorId} changed concurrently; reload and retry`);
+    this.name = 'VendorConflictError';
+  }
+}
+
+export class MemoryVendorStore implements VendorStore {
+  private rows = new Map<string, { vendor: Vendor; rev: number }>();
+  async get(id: string) {
+    return this.rows.get(id) ?? null;
+  }
+  async save(vendor: Vendor, expectedRev: number | null) {
+    if ((this.rows.get(vendor.vendorId)?.rev ?? null) !== expectedRev)
+      throw new VendorConflictError(vendor.vendorId);
+    const rev = (expectedRev ?? 0) + 1;
+    this.rows.set(vendor.vendorId, { vendor, rev });
+    return rev;
+  }
+  async list(workspaceId: string) {
+    return [...this.rows.values()]
+      .map((r) => r.vendor)
+      .filter((v) => v.workspaceId === workspaceId);
+  }
+}
+
+/** Uses table `synq_vendors` from the finance migrations (`migrateFinance`). */
+export class PostgresVendorStore implements VendorStore {
+  constructor(readonly sql: Sql) {}
+  async get(id: string) {
+    const r = await this.sql.query(
+      'SELECT data, rev FROM synq_vendors WHERE vendor_id=$1',
+      [id],
+    );
+    const x = r.rows[0];
+    return x
+      ? {
+          vendor: (typeof x.data === 'string'
+            ? JSON.parse(x.data)
+            : x.data) as Vendor,
+          rev: Number(x.rev),
+        }
+      : null;
+  }
+  async save(vendor: Vendor, expectedRev: number | null) {
+    const data = JSON.stringify(vendor);
+    const r =
+      expectedRev === null
+        ? await this.sql.query(
+            `INSERT INTO synq_vendors (vendor_id, workspace_id, rev, data) VALUES ($1,$2,1,$3)
+             ON CONFLICT (vendor_id) DO NOTHING RETURNING rev`,
+            [vendor.vendorId, vendor.workspaceId, data],
+          )
+        : await this.sql.query(
+            `UPDATE synq_vendors SET rev=rev+1, data=$2 WHERE vendor_id=$1 AND rev=$3 RETURNING rev`,
+            [vendor.vendorId, data, expectedRev],
+          );
+    if (!r.rows[0]) throw new VendorConflictError(vendor.vendorId);
+    return Number(r.rows[0].rev);
+  }
+  async list(workspaceId: string) {
+    const r = await this.sql.query(
+      'SELECT data FROM synq_vendors WHERE workspace_id=$1 ORDER BY vendor_id',
+      [workspaceId],
+    );
+    return r.rows.map(
+      (x) =>
+        (typeof x.data === 'string' ? JSON.parse(x.data) : x.data) as Vendor,
+    );
+  }
+}

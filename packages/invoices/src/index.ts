@@ -115,7 +115,10 @@ export class InvoiceError extends Error {
       | 'REFERENCE_MISMATCH'
       | 'WRONG_RECIPIENT'
       | 'WRONG_ASSET'
-      | 'CREDIT_TOO_LARGE',
+      | 'CREDIT_TOO_LARGE'
+      | 'CONFLICT'
+      | 'DUPLICATE_NUMBER'
+      | 'NOT_FOUND',
     message: string = code,
   ) {
     super(message);
@@ -762,3 +765,5 @@ export function creditInvoice(
     },
   };
 }
+
+export * from './service.js';
