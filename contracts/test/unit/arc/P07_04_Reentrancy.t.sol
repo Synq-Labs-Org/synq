@@ -39,21 +39,36 @@ contract ReentrantPayee {
 /// @notice Contract operator that is also its own allowlisted recipient and re-enters pay() from the token hook.
 contract ReentrantOperator {
     SynqArcVaultPolicy public policy;
+    address public payee;
     uint256 public blocked;
 
-    function setPolicy(SynqArcVaultPolicy policy_) external {
+    function arm(SynqArcVaultPolicy policy_, address payee_) external {
         policy = policy_;
+        payee = payee_;
     }
 
     function start(uint256 amount) external {
-        policy.pay(address(this), amount, bytes32("first"));
+        policy.pay(payee, amount, bytes32("first"));
     }
 
-    function onTokenReceived(address, uint256 amount) external {
-        try policy.pay(address(this), amount, bytes32("again")) {}
+    function reenter(uint256 amount) external {
+        try policy.pay(payee, amount, bytes32("again")) {}
         catch (bytes memory ret) {
             if (bytes4(ret) == SynqArcVaultPolicy.Reentrancy.selector) ++blocked;
         }
+    }
+}
+
+/// @notice Allowlisted payee whose token hook calls back into its colluding operator to re-enter pay().
+contract CollidingPayee {
+    ReentrantOperator internal immutable op;
+
+    constructor(ReentrantOperator op_) {
+        op = op_;
+    }
+
+    function onTokenReceived(address, uint256 amount) external {
+        op.reenter(amount);
     }
 }
 
@@ -122,20 +137,21 @@ contract P07_04_ReentrancyTest is ArcVaultBase {
 
     function test_P07_04_operatorHookCannotRepeatPayment() public {
         ReentrantOperator attacker = new ReentrantOperator();
-        token.setHook(address(attacker), true);
+        CollidingPayee payee = new CollidingPayee(attacker);
+        token.setHook(address(payee), true);
         address[] memory recipients = new address[](1);
-        recipients[0] = address(attacker);
-        // A vault whose operator and allowlisted recipient is the attacker contract.
+        recipients[0] = address(payee);
+        // A vault whose operator is the attacker contract and whose allowlisted payee colludes with it.
         address[] memory list = owners();
         vm.prank(creator);
         (, address account, SynqArcVaultPolicy p) =
             factory.createVault(_params(list, address(attacker), recipients), keccak256("reentrant-operator"));
-        attacker.setPolicy(p);
+        attacker.arm(p, address(payee));
         token.mint(account, 1_000e6);
 
         attacker.start(100e6);
         assertEq(attacker.blocked(), 1);
-        assertEq(token.balanceOf(address(attacker)), 100e6);
+        assertEq(token.balanceOf(address(payee)), 100e6);
         assertEq(token.balanceOf(account), 900e6);
         assertEq(p.windowSpent(), 100e6);
     }

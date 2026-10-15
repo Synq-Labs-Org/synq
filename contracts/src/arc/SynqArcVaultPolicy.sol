@@ -13,7 +13,9 @@ import {ISafeArc, IERC20Arc} from "./ISafeArc.sol";
 ///         2. Scoped operator. One operator address may pay allowlisted recipients in `token` only, up to a
 ///            per-payment and a rolling 24h cap. It has no other entry point and cannot change governance.
 ///         3. Guardian pause. The guardian can freeze outflows (owner-quorum outflows and operator payments) for at
-///            most MAX_PAUSE. It cannot move funds, change owners or block timelocked governance recovery.
+///            most MAX_PAUSE, then must wait PAUSE_COOLDOWN before pausing again. It cannot move funds, change owners
+///            or block timelocked governance recovery. The owner quorum can lift a pause or replace the guardian only
+///            through the timelock, so a stolen quorum cannot undo a pause for min(MAX_PAUSE, delay).
 ///         4. Atomic transactions. Safe gas refunds (gasPrice) and non-zero safeTxGas are rejected, so a failed inner
 ///            call always reverts the whole Safe transaction and cannot consume a queued operation.
 /// @dev Upgrade authority: none. This contract has no proxy, no admin, no DELEGATECALL and no SELFDESTRUCT; its
@@ -34,9 +36,12 @@ contract SynqArcVaultPolicy {
     uint256 public constant MAX_PAUSE = 7 days;
     /// @notice Operator spend window.
     uint256 public constant WINDOW = 1 days;
+    /// @notice After a pause ends (expiry or unpause) the guardian must wait this long before pausing again.
+    uint256 public constant PAUSE_COOLDOWN = 2 days;
 
     uint8 internal constant OP_CALL = 0;
     uint8 internal constant OP_DELEGATECALL = 1;
+    bytes4 internal constant SET_GUARD = bytes4(keccak256("setGuard(address)"));
 
     /// @notice Factory that deployed this policy and binds it to its Safe once.
     address public immutable factory;
@@ -102,6 +107,8 @@ contract SynqArcVaultPolicy {
     error ZeroAmount();
     error PaymentFailed();
     error Reentrancy();
+    error PauseCooldown(uint256 availableAt);
+    error InvalidReplacement(address guard);
 
     modifier onlySafe() {
         if (msg.sender != safe || safe == address(0)) revert NotSafe();
@@ -133,6 +140,7 @@ contract SynqArcVaultPolicy {
     ) {
         if (token_.code.length == 0) revert InvalidAddress(token_);
         if (delay_ < MIN_DELAY || delay_ > MAX_DELAY) revert InvalidDelay();
+        if (operator_ != address(0) && operator_ == guardian_) revert InvalidAddress(operator_);
         factory = msg.sender;
         token = token_;
         delay = delay_;
@@ -179,7 +187,8 @@ contract SynqArcVaultPolicy {
 
     /// @notice Whether a Safe transaction needs the governance timelock.
     /// @dev Governed: any DELEGATECALL, any call to the Safe itself, and any call to this policy except the
-    ///      instant, scope-reducing selectors (queue, cancel, setGuardian, unpause, revokeOperator, removeRecipient).
+    ///      instant, scope-reducing selectors (queue, cancel, revokeOperator, removeRecipient). Owner-initiated
+    ///      unpause and setGuardian are governed: they run after the delay, also while paused.
     function isGoverned(address to, bytes calldata data, uint8 operation) public view returns (bool) {
         if (operation != OP_CALL) return true;
         if (to == safe) return true;
@@ -214,6 +223,7 @@ contract SynqArcVaultPolicy {
             // recovery, guard or module changes) and policy calls stay available to the quorum during a pause.
             if (operation != OP_CALL && paused()) revert OutflowsPaused();
             if (to == safe && value != 0 && paused()) revert OutflowsPaused();
+            if (to == safe && data.length >= 36 && bytes4(data[:4]) == SET_GUARD) _checkReplacement(data);
             bytes32 id = operationId(to, value, data, operation);
             uint256 readyAt = eta[id];
             if (readyAt == 0) revert NotQueued(id);
@@ -239,7 +249,9 @@ contract SynqArcVaultPolicy {
     {
         if (operation > OP_DELEGATECALL) revert InvalidAddress(to);
         id = operationId(to, value, data, operation);
-        if (eta[id] != 0) revert AlreadyQueued(id);
+        uint256 previous = eta[id];
+        // An expired operation no longer blocks its id.
+        if (previous != 0 && block.timestamp <= previous + GRACE_PERIOD) revert AlreadyQueued(id);
         uint256 readyAt = block.timestamp + delay;
         eta[id] = readyAt;
         emit OperationQueued(id, to, value, operation, data, readyAt);
@@ -252,7 +264,7 @@ contract SynqArcVaultPolicy {
         emit OperationCancelled(id);
     }
 
-    /// @notice Replaces the guardian. Instant, so the owners can remove a rogue guardian during its pause.
+    /// @notice Replaces the guardian. Timelocked (runs while paused, so a rogue guardian is replaced after `delay`).
     function setGuardian(address guardian_) external onlySafe {
         if (guardian_ == operator && guardian_ != address(0)) revert InvalidAddress(guardian_);
         emit GuardianChanged(guardian, guardian_);
@@ -273,7 +285,9 @@ contract SynqArcVaultPolicy {
 
     /// @notice Sets the operator. Timelocked (scope change).
     function setOperator(address operator_) external onlySafe {
-        if (operator_ == safe || operator_ == address(this) || operator_ == guardian) revert InvalidAddress(operator_);
+        if (operator_ == safe || operator_ == address(this) || operator_ == guardian || isRecipient[operator_]) {
+            revert InvalidAddress(operator_);
+        }
         if (operator_ != address(0) && ISafeArc(safe).isOwner(operator_)) revert InvalidAddress(operator_);
         emit OperatorChanged(operator, operator_);
         operator = operator_;
@@ -282,7 +296,7 @@ contract SynqArcVaultPolicy {
     /// @notice Adds a recipient to the operator allowlist. Timelocked (scope expansion).
     function addRecipient(address recipient) external onlySafe {
         _checkRecipient(recipient);
-        if (recipient == safe) revert InvalidAddress(recipient);
+        if (recipient == safe || recipient == operator) revert InvalidAddress(recipient);
         isRecipient[recipient] = true;
         emit RecipientSet(recipient, true);
     }
@@ -296,18 +310,22 @@ contract SynqArcVaultPolicy {
 
     // ------------------------------------------------------------------ guardian
 
-    /// @notice Freezes outflows for MAX_PAUSE. Cannot move funds or touch governance.
+    /// @notice Freezes outflows for MAX_PAUSE. Cannot move funds or touch governance, cannot extend a running
+    ///         pause, and cannot pause again until PAUSE_COOLDOWN after the previous pause ended.
     function pause() external {
         if (msg.sender != guardian || guardian == address(0)) revert NotGuardian();
+        uint256 availableAt = uint256(pausedUntil) + PAUSE_COOLDOWN;
+        if (pausedUntil != 0 && block.timestamp < availableAt) revert PauseCooldown(availableAt);
         uint64 until = uint64(block.timestamp + MAX_PAUSE);
         pausedUntil = until;
         emit Paused(msg.sender, until);
     }
 
-    /// @notice Lifts the freeze (guardian or owner quorum).
+    /// @notice Lifts the freeze: the guardian at once, or the owner quorum through the timelock.
     function unpause() external {
         if (msg.sender != guardian && (msg.sender != safe || safe == address(0))) revert NotGuardian();
-        pausedUntil = 0;
+        // The cooldown runs from now.
+        if (paused()) pausedUntil = uint64(block.timestamp);
         emit Unpaused(msg.sender);
     }
 
@@ -347,16 +365,23 @@ contract SynqArcVaultPolicy {
     // ------------------------------------------------------------------ internal
 
     function _checkRecipient(address recipient) private view {
-        if (recipient == address(0) || recipient == address(this) || recipient == token) {
+        if (recipient == address(0) || recipient == address(this) || recipient == token || recipient == operator) {
             revert InvalidAddress(recipient);
         }
+    }
+
+    /// @dev A replacement guard must already be bound to this Safe, or every later Safe transaction would revert.
+    function _checkReplacement(bytes calldata data) private view {
+        address next = abi.decode(data[4:36], (address));
+        if (next == address(0)) return;
+        (bool ok, bytes memory ret) = next.staticcall(abi.encodeWithSelector(this.safe.selector));
+        if (!ok || ret.length < 32 || abi.decode(ret, (address)) != safe) revert InvalidReplacement(next);
     }
 
     function _isInstant(bytes calldata data) private pure returns (bool) {
         if (data.length < 4) return false;
         bytes4 selector = bytes4(data[:4]);
         return selector == this.queue.selector || selector == this.cancel.selector
-            || selector == this.setGuardian.selector || selector == this.unpause.selector
             || selector == this.revokeOperator.selector || selector == this.removeRecipient.selector;
     }
 }

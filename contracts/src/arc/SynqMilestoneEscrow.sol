@@ -13,8 +13,10 @@ import {IERC20Arc} from "./ISafeArc.sol";
 ///         - after `refundAfter`, anyone may trigger the refund of an unreleased, undisputed milestone;
 ///         - the arbiter, or the payee (voluntarily), may refund any unreleased milestone at any time;
 ///         - the refund always goes to the deal's original payer, which no one can change.
-///         A party may raise a dispute when the deal names an arbiter. That freezes the payer's release and the
-///         timeout refund; only the arbiter then settles each funded milestone.
+///         A party may raise a dispute when the deal names an arbiter. For DISPUTE_PERIOD that freezes the payer's
+///         release and the timeout refund, so only the arbiter settles. The raiser may withdraw it early. When it
+///         lapses, the payer's release and the timeout refund to the payer resume. Each party may raise at most one
+///         dispute per deal, so a dispute cannot be renewed to lock funds indefinitely.
 /// @dev Upgrade authority: none. No proxy, no owner, no admin, no pause, no DELEGATECALL, no SELFDESTRUCT; the
 ///      token is immutable. Every state change precedes its token transfer and every mutating entry point is
 ///      nonReentrant, so a token hook or a malicious payee cannot re-enter to claim twice.
@@ -23,6 +25,8 @@ contract SynqMilestoneEscrow {
     string public constant UPGRADE_AUTHORITY = "NON_UPGRADEABLE_NO_ADMIN";
     /// @notice Maximum milestones per deal.
     uint256 public constant MAX_MILESTONES = 32;
+    /// @notice How long a dispute freezes payer release and the timeout refund.
+    uint256 public constant DISPUTE_PERIOD = 30 days;
 
     enum Status {
         None,
@@ -40,6 +44,10 @@ contract SynqMilestoneEscrow {
         bool disputed;
         uint8 milestoneCount;
         bytes32 termsHash;
+        address disputedBy;
+        uint64 disputeDeadline;
+        bool payerDisputed;
+        bool payeeDisputed;
     }
 
     struct Milestone {
@@ -70,7 +78,8 @@ contract SynqMilestoneEscrow {
     event MilestoneReleased(uint256 indexed dealId, uint256 indexed milestone, address indexed by, uint256 amount);
     event MilestoneWithdrawn(uint256 indexed dealId, uint256 indexed milestone, address indexed payee, uint256 amount);
     event MilestoneRefunded(uint256 indexed dealId, uint256 indexed milestone, address indexed payer, uint256 amount);
-    event Disputed(uint256 indexed dealId, address indexed by);
+    event Disputed(uint256 indexed dealId, address indexed by, uint64 deadline);
+    event DisputeWithdrawn(uint256 indexed dealId, address indexed by);
 
     error InvalidDeal();
     error InvalidAmount();
@@ -81,6 +90,8 @@ contract SynqMilestoneEscrow {
     error RefundNotYetAllowed(uint64 refundAfter);
     error DealDisputed();
     error NoArbiter();
+    error DisputeAlreadyUsed();
+    error NotDisputeRaiser();
     error TransferFailed();
     error Reentrancy();
 
@@ -140,7 +151,11 @@ contract SynqMilestoneEscrow {
             refundAfter: refundAfter,
             disputed: false,
             milestoneCount: uint8(n),
-            termsHash: termsHash
+            termsHash: termsHash,
+            disputedBy: address(0),
+            disputeDeadline: 0,
+            payerDisputed: false,
+            payeeDisputed: false
         });
         totalLiability += total;
         uint256 before = IERC20Arc(token).balanceOf(address(this));
@@ -158,7 +173,7 @@ contract SynqMilestoneEscrow {
         bool byArbiter = d.arbiter != address(0) && msg.sender == d.arbiter;
         if (!byArbiter) {
             if (msg.sender != d.payer) revert NotAuthorized(msg.sender);
-            if (d.disputed) revert DealDisputed();
+            if (_disputeActive(d)) revert DealDisputed();
         }
         m.status = Status.Released;
         emit MilestoneReleased(dealId, index, msg.sender, m.amount);
@@ -185,7 +200,7 @@ contract SynqMilestoneEscrow {
         bool privileged = msg.sender == d.payee || (d.arbiter != address(0) && msg.sender == d.arbiter);
         if (!privileged) {
             if (block.timestamp < d.refundAfter) revert RefundNotYetAllowed(d.refundAfter);
-            if (d.disputed) revert DealDisputed();
+            if (_disputeActive(d)) revert DealDisputed();
         }
         m.status = Status.Refunded;
         uint256 amount = m.amount;
@@ -195,16 +210,47 @@ contract SynqMilestoneEscrow {
         emit MilestoneRefunded(dealId, index, payer, amount);
     }
 
-    /// @notice Freezes payer release and timeout refunds; the arbiter settles. Payer or payee, deal with arbiter.
+    /// @notice Freezes payer release and timeout refunds for DISPUTE_PERIOD; the arbiter settles. Payer or payee,
+    ///         once each per deal, only on a deal with an arbiter and no active dispute.
     function dispute(uint256 dealId) external {
         Deal storage d = _deal(dealId);
         if (d.arbiter == address(0)) revert NoArbiter();
-        if (msg.sender != d.payer && msg.sender != d.payee) revert NotAuthorized(msg.sender);
+        if (_disputeActive(d)) revert DealDisputed();
+        if (msg.sender == d.payer) {
+            if (d.payerDisputed) revert DisputeAlreadyUsed();
+            d.payerDisputed = true;
+        } else if (msg.sender == d.payee) {
+            if (d.payeeDisputed) revert DisputeAlreadyUsed();
+            d.payeeDisputed = true;
+        } else {
+            revert NotAuthorized(msg.sender);
+        }
+        uint64 deadline = uint64(block.timestamp + DISPUTE_PERIOD);
         d.disputed = true;
-        emit Disputed(dealId, msg.sender);
+        d.disputedBy = msg.sender;
+        d.disputeDeadline = deadline;
+        emit Disputed(dealId, msg.sender, deadline);
+    }
+
+    /// @notice The party that raised the active dispute withdraws it.
+    function withdrawDispute(uint256 dealId) external {
+        Deal storage d = _deal(dealId);
+        if (!_disputeActive(d)) revert WrongStatus(Status.None);
+        if (msg.sender != d.disputedBy) revert NotDisputeRaiser();
+        d.disputed = false;
+        emit DisputeWithdrawn(dealId, msg.sender);
+    }
+
+    /// @notice Whether a dispute currently freezes payer release and timeout refunds.
+    function disputeActive(uint256 dealId) external view returns (bool) {
+        return _disputeActive(_deals[dealId]);
     }
 
     // ------------------------------------------------------------------ internal
+
+    function _disputeActive(Deal storage d) private view returns (bool) {
+        return d.disputed && block.timestamp < d.disputeDeadline;
+    }
 
     function _deal(uint256 dealId) private view returns (Deal storage d) {
         d = _deals[dealId];

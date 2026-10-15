@@ -178,23 +178,47 @@ contract P07_07_UpgradeTimelockTest is ArcVaultBase {
         SynqArcVaultSetup helper = factory.setupHelper();
         vm.expectRevert(SynqArcVaultSetup.OnlyDelegateCall.selector);
         helper.install(address(policy));
-        // A copied initializer pushed straight through SafeProxyFactory cannot install the policy on a squatter.
+    }
+
+    /// @dev A front-runner who sees a pending createVault rebuilds its exact initializer and salt nonce and pushes
+    ///      it through SafeProxyFactory first. The setup helper refuses (the factory is not creating that proxy), so
+    ///      the squat reverts and the honest createVault still lands on the predicted addresses.
+    function test_P07_07_frontRunOfPendingCreateVaultCannotSquat() public {
+        bytes32 salt = keccak256("pending-vault");
+        bytes32 vaultId = factory.computeVaultId(creator, salt);
+        address[] memory recipients = new address[](1);
+        recipients[0] = vendor;
+        bytes memory policyInit = abi.encodePacked(
+            type(SynqArcVaultPolicy).creationCode,
+            abi.encode(address(token), DELAY, guardian, operator, recipients, PER_PAYMENT, WINDOW_CAP)
+        );
+        address predictedPolicy = vm.computeCreate2Address(vaultId, keccak256(policyInit), address(factory));
         bytes memory initializer = abi.encodeCall(
             safe.setup,
             (
                 owners(),
-                2,
-                address(helper),
-                abi.encodeWithSignature("install(address)", address(policy)),
-                fallbackHandler,
+                THRESHOLD,
+                address(factory.setupHelper()),
+                abi.encodeCall(SynqArcVaultSetup.install, (predictedPolicy)),
+                factory.fallbackHandler(),
                 address(0),
                 0,
                 payable(address(0))
             )
         );
+        address predictedSafe = factory.predictSafe(initializer, uint256(vaultId));
+        assertEq(predictedSafe.code.length, 0);
+
+        vm.prank(stranger);
         // SafeProxyFactory bubbles the failed setup (GS000 from NotFactoryCreation) as an empty revert.
         vm.expectRevert(bytes(""));
-        ISafeProxyFactoryLike(safeProxyFactory).createProxyWithNonce(safeSingleton, initializer, 7);
+        ISafeProxyFactoryLike(safeProxyFactory).createProxyWithNonce(safeSingleton, initializer, uint256(vaultId));
+        assertEq(predictedSafe.code.length, 0, "not squatted");
+
+        (address account, SynqArcVaultPolicy p) = createVault(vendor, salt);
+        assertEq(account, predictedSafe);
+        assertEq(address(p), predictedPolicy);
+        assertEq(p.safe(), account);
     }
 
     function keys(uint256 a, uint256 b, uint256 c) internal pure returns (uint256[] memory list) {

@@ -102,7 +102,7 @@ abstract contract ArcVaultBase is Test {
         safeProxyFactory = deployCode("out/SafeProxyFactory.sol/SafeProxyFactory.json");
         fallbackHandler = deployCode("out/CompatibilityFallbackHandler.sol/CompatibilityFallbackHandler.json");
         token = new HookToken();
-        factory = new SynqArcVaultFactory(safeSingleton, safeProxyFactory, fallbackHandler, address(token));
+        factory = new SynqArcVaultFactory(safeSingleton, safeProxyFactory, address(token));
         (address account, SynqArcVaultPolicy p) = createVault(vendor, keccak256("vault"));
         safe = ISafeFull(account);
         policy = p;

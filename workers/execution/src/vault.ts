@@ -3,6 +3,8 @@ import {
   encodeFunctionData,
   getAddress,
   hashTypedData,
+  keccak256,
+  toBytes,
   parseAbi,
   recoverAddress,
   type Address,
@@ -28,6 +30,9 @@ export const SAFE_ABI = parseAbi([
   'function isOwner(address owner) view returns (bool)',
   'function isModuleEnabled(address module) view returns (bool)',
   'function getStorageAt(uint256 offset, uint256 length) view returns (bytes)',
+  'function getModulesPaginated(address start, uint256 pageSize) view returns (address[] array, address next)',
+  'function domainSeparator() view returns (bytes32)',
+  'function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)',
   'function VERSION() view returns (string)',
   'function getTransactionHash(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, uint256 _nonce) view returns (bytes32)',
   'function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)',
@@ -42,6 +47,9 @@ export const VAULT_FACTORY_ABI = parseAbi([
   'struct VaultParams { address[] owners; uint256 threshold; address guardian; address operator; uint256 delay; address[] recipients; uint256 perPaymentCap; uint256 windowCap; }',
   'function createVault(VaultParams p, bytes32 salt) returns (bytes32 vaultId, address safe, address policy)',
   'function GUARD_SLOT() view returns (uint256)',
+  'function FALLBACK_HANDLER_SLOT() view returns (uint256)',
+  'function deployReplacementPolicy(address guardian, address operator, uint256 delay, address[] recipients, uint256 perPaymentCap, uint256 windowCap, bytes32 salt) returns (address)',
+  'event ReplacementPolicyDeployed(address indexed safe, address indexed policy, address guardian, address operator)',
   'function token() view returns (address)',
   'function safeSingleton() view returns (address)',
   'function safeProxyFactory() view returns (address)',
@@ -58,6 +66,9 @@ export const VAULT_POLICY_ABI = parseAbi([
   'function operator() view returns (address)',
   'function paused() view returns (bool)',
   'function pausedUntil() view returns (uint64)',
+  'function PAUSE_COOLDOWN() view returns (uint256)',
+  'function MAX_PAUSE() view returns (uint256)',
+  'function setGuardian(address guardian_)',
   'function perPaymentCap() view returns (uint256)',
   'function windowCap() view returns (uint256)',
   'function isRecipient(address) view returns (bool)',
@@ -92,6 +103,8 @@ export const VAULT_POLICY_ABI = parseAbi([
   'error ZeroAmount()',
   'error PaymentFailed()',
   'error Reentrancy()',
+  'error PauseCooldown(uint256 availableAt)',
+  'error InvalidReplacement(address guard)',
 ]);
 
 export const MILESTONE_ESCROW_ABI = parseAbi([
@@ -104,6 +117,11 @@ export const MILESTONE_ESCROW_ABI = parseAbi([
   'function withdraw(uint256 dealId, uint256 index)',
   'function refund(uint256 dealId, uint256 index)',
   'function dispute(uint256 dealId)',
+  'function withdrawDispute(uint256 dealId)',
+  'function disputeActive(uint256 dealId) view returns (bool)',
+  'function DISPUTE_PERIOD() view returns (uint256)',
+  'event Disputed(uint256 indexed dealId, address indexed by, uint64 deadline)',
+  'event DisputeWithdrawn(uint256 indexed dealId, address indexed by)',
   'event DealOpened(uint256 indexed dealId, address indexed payer, address indexed payee, address arbiter, bytes32 termsHash, uint256 total, uint64 refundAfter)',
   'event MilestoneReleased(uint256 indexed dealId, uint256 indexed milestone, address indexed by, uint256 amount)',
   'event MilestoneWithdrawn(uint256 indexed dealId, uint256 indexed milestone, address indexed payee, uint256 amount)',
@@ -117,13 +135,38 @@ export const MILESTONE_ESCROW_ABI = parseAbi([
   'error RefundNotYetAllowed(uint64 refundAfter)',
   'error DealDisputed()',
   'error NoArbiter()',
+  'error DisputeAlreadyUsed()',
+  'error NotDisputeRaiser()',
   'error TransferFailed()',
   'error Reentrancy()',
 ]);
 
 /** Safe v1.4.1 guard storage slot: keccak256("guard_manager.guard.address"). */
-export const SAFE_GUARD_SLOT =
-  0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8n;
+export const SAFE_GUARD_SLOT = BigInt(
+  keccak256(toBytes('guard_manager.guard.address')),
+);
+/** Safe v1.4.1 fallback handler slot: keccak256("fallback_manager.handler.address"). */
+export const SAFE_FALLBACK_HANDLER_SLOT = BigInt(
+  keccak256(toBytes('fallback_manager.handler.address')),
+);
+const SENTINEL = '0x0000000000000000000000000000000000000001' as Address;
+
+/**
+ * EIP-712 hash of a SafeMessage over `message` for `safe`: what a 1271
+ * validator built on Safe's message format would ask owners to sign.
+ */
+export function safeMessageHash(
+  chainId: number,
+  safe: Address,
+  message: Hex,
+): Hex {
+  return hashTypedData({
+    domain: { chainId, verifyingContract: safe },
+    types: { SafeMessage: [{ name: 'message', type: 'bytes' }] },
+    primaryType: 'SafeMessage',
+    message: { message },
+  });
+}
 
 export const OPERATION = { CALL: 0, DELEGATECALL: 1 } as const;
 
@@ -299,10 +342,34 @@ export async function simulate(
   }
 }
 
-/** Reads a deployed vault and checks the policy is installed as both module and guard. */
+const word = (w: Hex) => getAddress(`0x${w.slice(-40)}`);
+
+/**
+ * Reads a deployed vault and checks its health against the registry: SafeL2
+ * v1.4.1 singleton in slot 0, the policy installed as guard AND as the only
+ * module, the policy bound to this Safe, and the Synq fallback handler (not
+ * the stock CompatibilityFallbackHandler, whose owner-signature ERC-1271 path
+ * bypasses the guard). Anything else is reported as a problem.
+ */
 export async function readVault(chain: ArcChain, safe: Address) {
   const c = chain.client;
-  const [owners, threshold, nonce, version, guardWord] = await Promise.all([
+  const slot = (n: bigint) =>
+    c.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'getStorageAt',
+      args: [n, 1n],
+    });
+  const [
+    owners,
+    threshold,
+    nonce,
+    version,
+    guardWord,
+    handlerWord,
+    singletonWord,
+    page,
+  ] = await Promise.all([
     c.readContract({ address: safe, abi: SAFE_ABI, functionName: 'getOwners' }),
     c.readContract({
       address: safe,
@@ -311,30 +378,68 @@ export async function readVault(chain: ArcChain, safe: Address) {
     }),
     c.readContract({ address: safe, abi: SAFE_ABI, functionName: 'nonce' }),
     c.readContract({ address: safe, abi: SAFE_ABI, functionName: 'VERSION' }),
+    slot(SAFE_GUARD_SLOT),
+    slot(SAFE_FALLBACK_HANDLER_SLOT),
+    slot(0n),
     c.readContract({
       address: safe,
       abi: SAFE_ABI,
-      functionName: 'getStorageAt',
-      args: [SAFE_GUARD_SLOT, 1n],
+      functionName: 'getModulesPaginated',
+      args: [SENTINEL, 10n],
     }),
   ]);
-  const guard = getAddress(`0x${guardWord.slice(-40)}`);
-  const moduleEnabled = await c.readContract({
-    address: safe,
-    abi: SAFE_ABI,
-    functionName: 'isModuleEnabled',
-    args: [guard],
-  });
-  return { owners, threshold, nonce, version, guard, moduleEnabled };
+  const guard = word(guardWord);
+  const fallbackHandler = word(handlerWord);
+  const singleton = word(singletonWord);
+  const modules = page[0].map((m) => getAddress(m));
+  const moduleEnabled = modules.includes(guard);
+  let policySafe: Address | null = null;
+  try {
+    policySafe = getAddress(
+      await c.readContract({
+        address: guard,
+        abi: VAULT_POLICY_ABI,
+        functionName: 'safe',
+      }),
+    );
+  } catch {
+    policySafe = null;
+  }
+  const name = chain.profile.name;
+  const expected = {
+    singleton: contract(name, 'SAFE_L2_SINGLETON').address,
+    fallbackHandler: contract(name, 'SYNQ_ARC_FALLBACK_HANDLER').address,
+  };
+  const problems: string[] = [];
+  if (version !== '1.4.1') problems.push(`VERSION ${version}`);
+  if (singleton !== getAddress(expected.singleton))
+    problems.push(`singleton ${singleton}`);
+  if (fallbackHandler !== getAddress(expected.fallbackHandler))
+    problems.push(`fallbackHandler ${fallbackHandler}`);
+  if (policySafe !== getAddress(safe))
+    problems.push(`guard ${guard} not bound to this Safe`);
+  if (!moduleEnabled) problems.push('policy is not an enabled module');
+  if (modules.length !== 1 || page[1] !== SENTINEL)
+    problems.push(`unexpected modules ${modules.join(',')}`);
+  return {
+    owners,
+    threshold,
+    nonce,
+    version,
+    guard,
+    fallbackHandler,
+    singleton,
+    modules,
+    moduleEnabled,
+    policySafe,
+    healthy: problems.length === 0,
+    problems,
+  };
 }
 
 /** Verifies every Safe v1.4.1 infrastructure contract the vault factory depends on. */
 export async function verifySafeInfrastructure(chain: ArcChain) {
-  const kinds: ContractKind[] = [
-    'SAFE_L2_SINGLETON',
-    'SAFE_PROXY_FACTORY',
-    'SAFE_FALLBACK_HANDLER',
-  ];
+  const kinds: ContractKind[] = ['SAFE_L2_SINGLETON', 'SAFE_PROXY_FACTORY'];
   const out: Record<string, { address: Address; codeHash: Hex }> = {};
   for (const kind of kinds) {
     const entry = contract(chain.profile.name, kind);

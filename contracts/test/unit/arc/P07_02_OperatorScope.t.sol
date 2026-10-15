@@ -132,9 +132,15 @@ contract P07_02_OperatorScopeTest is ArcVaultBase {
     }
 
     function test_P07_02_ownerCannotBecomeOperator() public {
-        bytes memory data = abi.encodeCall(SynqArcVaultPolicy.setOperator, (vm.addr(KEY1)));
+        address owner1 = vm.addr(KEY1);
+        // The inner reason, from the policy itself.
+        vm.prank(address(safe));
+        vm.expectRevert(abi.encodeWithSelector(SynqArcVaultPolicy.InvalidAddress.selector, owner1));
+        policy.setOperator(owner1);
+        // Through the timelocked Safe path the same call fails, and the Safe reports it as GS013.
+        bytes memory data = abi.encodeCall(SynqArcVaultPolicy.setOperator, (owner1));
         quorum(address(policy), abi.encodeCall(SynqArcVaultPolicy.queue, (address(policy), 0, data, CALL)));
-        vm.warp(block.timestamp + DELAY);
+        vm.warp(vm.getBlockTimestamp() + DELAY);
         execExpectRevert(address(policy), 0, data, CALL, keys(KEY1, KEY2), bytes("GS013"));
         assertEq(policy.operator(), operator);
     }
@@ -156,17 +162,38 @@ contract P07_02_OperatorScopeTest is ArcVaultBase {
         factory.createVault(params, bytes32("x"));
     }
 
-    function testFuzz_P07_02_operatorNeverExceedsCaps(uint256[6] memory amounts) public {
+    /// @dev Every payment is predicted by a reference model (per-payment cap, 24h window from the first payment,
+    ///      reset only by a successful payment) and the exact revert is asserted; gaps cross window boundaries.
+    function testFuzz_P07_02_operatorNeverExceedsCaps(uint256[8] memory amounts, uint256[8] memory gaps) public {
+        uint256 now_ = vm.getBlockTimestamp();
+        uint256 windowStart;
+        uint256 spent;
         uint256 paid;
         for (uint256 i; i < amounts.length; ++i) {
+            now_ += bound(gaps[i], 0, 30 hours);
+            vm.warp(now_);
             uint256 amount = bound(amounts[i], 1, 2 * PER_PAYMENT);
             vm.prank(operator);
-            try policy.pay(vendor, amount, bytes32(i)) {
-                assertLe(amount, PER_PAYMENT);
-                paid += amount;
-            } catch {}
+            if (amount > PER_PAYMENT) {
+                vm.expectRevert(abi.encodeWithSelector(SynqArcVaultPolicy.CapExceeded.selector, amount, PER_PAYMENT));
+                policy.pay(vendor, amount, bytes32(i));
+                continue;
+            }
+            (uint256 ws, uint256 sp) = now_ >= windowStart + 1 days ? (now_, 0) : (windowStart, spent);
+            if (sp + amount > WINDOW_CAP) {
+                vm.expectRevert(
+                    abi.encodeWithSelector(SynqArcVaultPolicy.CapExceeded.selector, sp + amount, WINDOW_CAP)
+                );
+                policy.pay(vendor, amount, bytes32(i));
+                continue;
+            }
+            policy.pay(vendor, amount, bytes32(i));
+            (windowStart, spent) = (ws, sp + amount);
+            paid += amount;
+            assertLe(spent, WINDOW_CAP);
+            assertEq(policy.windowSpent(), spent);
+            assertEq(policy.windowStart(), windowStart);
         }
-        assertLe(paid, WINDOW_CAP);
         assertEq(token.balanceOf(vendor), paid);
         assertEq(token.balanceOf(address(safe)), FUNDING - paid);
     }
