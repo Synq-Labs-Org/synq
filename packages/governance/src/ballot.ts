@@ -10,7 +10,9 @@ import {
 import {
   delegationChain,
   delegationConcentration,
+  quarantinedWallets,
   representationError,
+  verifyDelegationRecords,
   type DelegationRecord,
 } from './delegation.js';
 import { GovernanceError, type GovernanceErrorCode } from './errors.js';
@@ -86,6 +88,42 @@ export function assertCurrentPolicy(
     );
 }
 
+const VERIFIED_VOTES = new WeakSet<object>();
+
+/**
+ * Re-verifies a vote handed back to the ballot: bound to this snapshot, cast
+ * inside its window, signed by its voter, and the voter not quarantined.
+ */
+export async function verifyAcceptedVote(
+  s: BallotSnapshot,
+  v: AcceptedVote,
+): Promise<void> {
+  if (
+    v.ballotId !== s.ballotId ||
+    v.snapshotId !== s.snapshotId ||
+    v.policyHash !== s.policyHash ||
+    v.chainId !== s.chainId ||
+    !CHOICES.includes(v.choice) ||
+    v.castAt < s.opensAt ||
+    v.castAt >= s.closesAt
+  )
+    throw new GovernanceError(
+      'BALLOT_MISMATCH',
+      `vote by ${v.voter} is not a vote on this snapshot`,
+    );
+  if (quarantinedWallets(s).has(v.voter.toLowerCase()))
+    throw new GovernanceError('NOT_ELIGIBLE', `${v.voter} is quarantined`);
+  if (VERIFIED_VOTES.has(v)) return;
+  const signer = await recoverSigner(voteTypedData(v), v.signature);
+  if (!signer || !sameAddress(signer, v.voter))
+    throw new GovernanceError(
+      'BAD_SIGNATURE',
+      `vote by ${v.voter} does not carry its signature`,
+    );
+  if (Object.isFrozen(v) && Object.isFrozen(v.onBehalfOf))
+    VERIFIED_VOTES.add(v);
+}
+
 /**
  * Admits one vote. Only a recovered wallet signature counts: a chat message,
  * button tap or unsigned claim never becomes a vote. Each `onBehalfOf` member
@@ -102,6 +140,9 @@ export async function admitVote(input: {
 }): Promise<AcceptedVote> {
   const { snapshot: s, vote: v, now } = input;
   assertCurrentPolicy(s, input.policy);
+  await verifyDelegationRecords(input.delegations, input.policy);
+  for (const a of input.accepted) await verifyAcceptedVote(s, a);
+  const blocked = quarantinedWallets(s);
   if (
     v.ballotId !== s.ballotId ||
     v.snapshotId !== s.snapshotId ||
@@ -129,6 +170,11 @@ export async function admitVote(input: {
     throw new GovernanceError('DUPLICATE_VOTE', `${voter} already voted`);
   const members = memberIndex(s);
   const represented = v.onBehalfOf.map(addr);
+  if (blocked.has(voter.toLowerCase()))
+    throw new GovernanceError(
+      'NOT_ELIGIBLE',
+      `${voter} is quarantined pending duplicate-eligibility review`,
+    );
   if (!members.has(voter.toLowerCase()) && !represented.length)
     throw new GovernanceError(
       'NOT_ELIGIBLE',
@@ -160,6 +206,7 @@ export async function admitVote(input: {
       voter,
       now,
       input.policy.maxDelegationDepth,
+      blocked,
     );
     if (why)
       throw new GovernanceError(
@@ -172,6 +219,7 @@ export async function admitVote(input: {
       member,
       now,
       input.policy.maxDelegationDepth,
+      blocked,
     );
     const closer = chain
       .slice(
@@ -185,12 +233,14 @@ export async function admitVote(input: {
         `${member} is already represented by ${closer}, a closer delegate who voted`,
       );
   }
-  return deepFreeze({
+  const accepted: AcceptedVote = deepFreeze({
     ...v,
     voter,
     onBehalfOf: represented,
     signature: input.signature as Hex,
   });
+  VERIFIED_VOTES.add(accepted);
+  return accepted;
 }
 
 type Count = { count: number; weight: bigint };
@@ -221,7 +271,7 @@ export type TallyResult = Readonly<{
   viaDelegate: number;
   quorumMet: boolean;
   approvalMet: boolean;
-  /** True only when every eligible member's weight voted YES. */
+  /** True only on a final, current-policy result where every eligible member's weight voted YES. */
   unanimous: boolean;
   participationBps: number;
   yesOfEligibleBps: number;
@@ -249,22 +299,28 @@ const pct = (b: number) => `${(b / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
  * otherwise the member abstained by not voting. Delegations revoked or expired
  * before the tally drop the represented weight back to abstention.
  */
-export function tally(input: {
+export async function tally(input: {
   snapshot: BallotSnapshot;
   policy: GovernancePolicy;
   votes: readonly AcceptedVote[];
   delegations: readonly DelegationRecord[];
   at: number;
-}): TallyResult {
+}): Promise<TallyResult> {
   const { snapshot: s, policy } = input;
   const stale = policyHash(policy) !== s.policyHash;
   const at = Math.min(input.at, s.closesAt);
   const final = input.at >= s.closesAt;
-  const byVoter = new Map(
-    input.votes
-      .filter((v) => v.snapshotId === s.snapshotId)
-      .map((v) => [v.voter.toLowerCase(), v]),
-  );
+  // Nothing handed in is trusted: delegations and votes are re-verified.
+  await verifyDelegationRecords(input.delegations, policy);
+  const byVoter = new Map<string, AcceptedVote>();
+  for (const v of input.votes) {
+    await verifyAcceptedVote(s, v);
+    const key = v.voter.toLowerCase();
+    if (byVoter.has(key))
+      throw new GovernanceError('DUPLICATE_VOTE', `${v.voter} voted twice`);
+    byVoter.set(key, v);
+  }
+  const blocked = quarantinedWallets(s);
   const zero = (): Count => ({ count: 0, weight: 0n });
   const counts: Record<Choice, Count> = {
     YES: zero(),
@@ -279,17 +335,14 @@ export function tally(input: {
     let vote = byVoter.get(key);
     if (vote) countedFor.set(key, key);
     else {
-      let chain: Address[] = [];
-      try {
-        chain = delegationChain(
-          input.delegations,
-          m.wallet,
-          at,
-          policy.maxDelegationDepth,
-        );
-      } catch {
-        chain = [];
-      }
+      // Bounded walk: stops at the first voter, never fails on what lies beyond.
+      const chain = delegationChain(
+        input.delegations,
+        m.wallet,
+        at,
+        policy.maxDelegationDepth,
+        blocked,
+      );
       const first = chain.find((w) => byVoter.has(w.toLowerCase()));
       const candidate = first && byVoter.get(first.toLowerCase());
       if (candidate?.onBehalfOf.some((w) => sameAddress(w, m.wallet))) {
@@ -319,6 +372,7 @@ export function tally(input: {
                 v.voter,
                 at,
                 policy.maxDelegationDepth,
+                blocked,
               ) ?? 'CLOSER_DELEGATE_VOTED'),
       });
     }
@@ -411,7 +465,7 @@ export function tally(input: {
     viaDelegate,
     quorumMet,
     approvalMet,
-    unanimous: yes.weight === eligible.weight,
+    unanimous: final && !stale && yes.weight === eligible.weight,
     participationBps,
     yesOfEligibleBps: bps(yes.weight, eligible.weight),
     yesOfDecisiveBps: bps(yes.weight, decisive),

@@ -13,9 +13,11 @@ import type { BallotSnapshot, GovernanceFlag } from './snapshot.js';
 
 /**
  * Revocable, expiring vote delegation signed by the delegator's wallet.
- * Delegations may chain (A → B → C) up to the policy's depth; a delegation
- * that would close a cycle is refused at registration and detected again at
- * resolution. Representation stops at the first node on the chain that votes.
+ * Delegations may chain (A → B → C). Resolution walks at most the policy's
+ * depth and stops at the first voter, at a cycle, or before a quarantined
+ * wallet. A link added far downstream therefore never removes representation
+ * that already resolves upstream. Records handed to a tally are re-verified:
+ * the delegation and any revocation must carry the delegator's signature.
  */
 export type Delegation = Readonly<{
   workspaceId: string;
@@ -35,6 +37,9 @@ export type DelegationRevocation = Readonly<{
   requestedAt: number;
 }>;
 
+/** A signature must reach the registry within this many seconds of being made. */
+export const DELEGATION_SIGNATURE_MAX_AGE = 600;
+
 export type DelegationRecord = Readonly<{
   id: Hex;
   delegation: Delegation;
@@ -45,6 +50,7 @@ export type DelegationRecord = Readonly<{
    */
   effectiveFrom: number;
   revokedAt: number | null;
+  revocation: DelegationRevocation | null;
   revocationSignature: Hex | null;
 }>;
 
@@ -96,6 +102,73 @@ export function revocationTypedData(r: DelegationRevocation) {
   };
 }
 
+const VERIFIED = new WeakSet<object>();
+
+/**
+ * Re-verifies records supplied from outside the registry: id, workspace and
+ * chain, the delegator's signature, a registration time within the signature's
+ * freshness window, and a delegator-signed revocation behind every revokedAt.
+ */
+export async function verifyDelegationRecords(
+  records: readonly DelegationRecord[],
+  policy: GovernancePolicy,
+): Promise<void> {
+  const bad = (r: DelegationRecord, why: string): never => {
+    throw new GovernanceError(
+      'DELEGATION_INVALID',
+      `delegation ${r.id}: ${why}`,
+    );
+  };
+  const ids = new Set<string>();
+  for (const r of records) {
+    if (ids.has(r.id)) bad(r, 'listed twice');
+    ids.add(r.id);
+    const d = r.delegation;
+    if (d.workspaceId !== policy.workspaceId || d.chainId !== policy.chainId)
+      bad(r, 'other workspace or chain');
+    if (VERIFIED.has(r)) continue;
+    if (delegationId(d) !== r.id) bad(r, 'id does not match its contents');
+    if (
+      r.effectiveFrom < d.issuedAt ||
+      r.effectiveFrom - d.issuedAt > DELEGATION_SIGNATURE_MAX_AGE
+    )
+      bad(r, 'registration time outside the signature window');
+    const signer = await recoverSigner(delegationTypedData(d), r.signature);
+    if (!signer || !sameAddress(signer, d.delegator))
+      throw new GovernanceError(
+        'BAD_SIGNATURE',
+        `delegation ${r.id} not signed by its delegator`,
+      );
+    if (r.revokedAt === null) {
+      if (r.revocation || r.revocationSignature)
+        bad(r, 'revocation without revokedAt');
+    } else {
+      const rev = r.revocation;
+      if (!rev || !r.revocationSignature)
+        bad(r, 'revokedAt without revocation');
+      if (
+        rev!.delegationId !== r.id ||
+        !sameAddress(rev!.delegator, d.delegator) ||
+        rev!.workspaceId !== d.workspaceId ||
+        rev!.chainId !== d.chainId ||
+        r.revokedAt < rev!.requestedAt ||
+        r.revokedAt - rev!.requestedAt > DELEGATION_SIGNATURE_MAX_AGE
+      )
+        bad(r, 'revocation does not match');
+      const revoker = await recoverSigner(
+        revocationTypedData(rev!),
+        r.revocationSignature,
+      );
+      if (!revoker || !sameAddress(revoker, d.delegator))
+        throw new GovernanceError(
+          'BAD_SIGNATURE',
+          `revocation of ${r.id} not signed by its delegator`,
+        );
+    }
+    if (Object.isFrozen(r) && Object.isFrozen(r.delegation)) VERIFIED.add(r);
+  }
+}
+
 export const isActiveAt = (r: DelegationRecord, at: number) =>
   Math.max(r.delegation.issuedAt, r.effectiveFrom) <= at &&
   at < r.delegation.expiresAt &&
@@ -105,11 +178,9 @@ function activeFrom(
   records: readonly DelegationRecord[],
   wallet: Address,
   at: number,
-): DelegationRecord | null {
-  return (
-    records.find(
-      (r) => sameAddress(r.delegation.delegator, wallet) && isActiveAt(r, at),
-    ) ?? null
+): DelegationRecord[] {
+  return records.filter(
+    (r) => sameAddress(r.delegation.delegator, wallet) && isActiveAt(r, at),
   );
 }
 
@@ -132,43 +203,50 @@ function lapsed(
   return 'NOT_DELEGATED';
 }
 
+export type ChainStop = 'END' | 'DEPTH' | 'CYCLE' | 'BLOCKED' | 'AMBIGUOUS';
+
 /**
- * The active delegation chain starting at `wallet` (excluding it), following
- * only links live at `at`. Throws DELEGATION_CYCLE if the chain revisits a
- * wallet and DELEGATION_INVALID beyond `maxDepth`.
+ * Walks live links from `wallet` (excluded from the path) for at most
+ * `maxDepth` hops. It never throws: it stops at the end of the chain, at the
+ * depth limit, before revisiting a wallet, before a blocked (quarantined)
+ * wallet, or when a wallet has more than one live outgoing delegation.
  */
-export function delegationChain(
+export function walkDelegations(
   records: readonly DelegationRecord[],
   wallet: Address,
   at: number,
   maxDepth: number,
-): Address[] {
+  blocked: ReadonlySet<string> = new Set(),
+): { path: Address[]; stop: ChainStop } {
   const path: Address[] = [];
   const seen = new Set([wallet.toLowerCase()]);
   let current = wallet;
   for (;;) {
-    const link = activeFrom(records, current, at);
-    if (!link) return path;
-    const next = addr(link.delegation.delegate);
-    if (seen.has(next.toLowerCase()))
-      throw new GovernanceError(
-        'DELEGATION_CYCLE',
-        `delegation cycle through ${[wallet, ...path, next].join(' -> ')}`,
-      );
-    if (path.length >= maxDepth)
-      throw new GovernanceError(
-        'DELEGATION_INVALID',
-        `delegation chain from ${wallet} deeper than ${maxDepth}`,
-      );
-    seen.add(next.toLowerCase());
+    const links = activeFrom(records, current, at);
+    if (!links.length) return { path, stop: 'END' };
+    if (links.length > 1) return { path, stop: 'AMBIGUOUS' };
+    if (path.length >= maxDepth) return { path, stop: 'DEPTH' };
+    const next = addr(links[0]!.delegation.delegate);
+    const key = next.toLowerCase();
+    if (seen.has(key)) return { path, stop: 'CYCLE' };
+    if (blocked.has(key)) return { path, stop: 'BLOCKED' };
+    seen.add(key);
     path.push(next);
     current = next;
   }
 }
 
+export const delegationChain = (
+  records: readonly DelegationRecord[],
+  wallet: Address,
+  at: number,
+  maxDepth: number,
+  blocked?: ReadonlySet<string>,
+): Address[] => walkDelegations(records, wallet, at, maxDepth, blocked).path;
+
 /**
- * Null when `voter` lies on `member`'s active chain at `at`; otherwise the
- * precise reason (revoked, expired, not delegated, cycle).
+ * Null when `voter` lies on `member`'s live chain at `at`; otherwise the
+ * precise reason (revoked, expired, not delegated, cycle, quarantined).
  */
 export function representationError(
   records: readonly DelegationRecord[],
@@ -176,16 +254,21 @@ export function representationError(
   voter: Address,
   at: number,
   maxDepth: number,
+  blocked?: ReadonlySet<string>,
 ): GovernanceErrorCode | null {
-  let chain: Address[];
-  try {
-    chain = delegationChain(records, member, at, maxDepth);
-  } catch (e) {
-    return e instanceof GovernanceError ? e.code : 'DELEGATION_INVALID';
-  }
-  if (chain.some((w) => sameAddress(w, voter))) return null;
-  // Report the link that broke: the last wallet the chain reached.
-  return lapsed(records, chain.at(-1) ?? member, at);
+  const { path, stop } = walkDelegations(
+    records,
+    member,
+    at,
+    maxDepth,
+    blocked,
+  );
+  if (path.some((w) => sameAddress(w, voter))) return null;
+  if (stop === 'CYCLE') return 'DELEGATION_CYCLE';
+  if (stop === 'BLOCKED') return 'NOT_ELIGIBLE';
+  if (stop === 'AMBIGUOUS') return 'DELEGATION_INVALID';
+  if (stop === 'DEPTH') return 'NOT_DELEGATED';
+  return lapsed(records, path.at(-1) ?? member, at);
 }
 
 export class DelegationRegistry {
@@ -213,7 +296,8 @@ export class DelegationRegistry {
     if (d.chainId !== this.policy.chainId) bad('wrong chain');
     if (sameAddress(d.delegator, d.delegate)) bad('self-delegation');
     if (!(d.issuedAt <= now && now < d.expiresAt)) bad('not live now');
-    if (now - d.issuedAt > 600) bad('stale delegation signature');
+    if (now - d.issuedAt > DELEGATION_SIGNATURE_MAX_AGE)
+      bad('stale delegation signature');
     if (d.expiresAt - d.issuedAt > this.policy.termSeconds)
       bad('delegations expire within one council term');
     const signer = await recoverSigner(delegationTypedData(d), signature);
@@ -224,22 +308,26 @@ export class DelegationRegistry {
       );
     const id = delegationId(d);
     if (this.records.some((r) => r.id === id)) bad('already registered');
-    if (activeFrom(this.records, d.delegator, now))
+    if (activeFrom(this.records, d.delegator, now).length)
       bad('delegator already has an active delegation; revoke it first');
-    const onward = delegationChain(
+    // Walk one hop past the limit so both a cycle and excess depth are visible.
+    const onward = walkDelegations(
       this.records,
       addr(d.delegate),
       now,
-      this.policy.maxDelegationDepth,
+      this.policy.maxDelegationDepth + 1,
     );
-    if (onward.some((w) => sameAddress(w, d.delegator)))
+    if (
+      onward.stop === 'CYCLE' ||
+      onward.path.some((w) => sameAddress(w, d.delegator))
+    )
       throw new GovernanceError(
         'DELEGATION_CYCLE',
-        `${d.delegator} -> ${[d.delegate, ...onward].join(' -> ')}`,
+        `${d.delegator} -> ${[d.delegate, ...onward.path].join(' -> ')}`,
       );
-    if (onward.length + 1 > this.policy.maxDelegationDepth)
+    if (onward.path.length + 1 > this.policy.maxDelegationDepth)
       bad(`chain deeper than ${this.policy.maxDelegationDepth}`);
-    const record = deepFreeze({
+    const record: DelegationRecord = deepFreeze({
       id,
       delegation: {
         ...d,
@@ -249,8 +337,10 @@ export class DelegationRegistry {
       signature: signature as Hex,
       effectiveFrom: now,
       revokedAt: null,
+      revocation: null,
       revocationSignature: null,
     });
+    VERIFIED.add(record);
     this.records.push(record);
     return record;
   }
@@ -271,7 +361,10 @@ export class DelegationRegistry {
       !sameAddress(r.delegator, record.delegation.delegator)
     )
       throw new GovernanceError('DELEGATION_INVALID', 'revocation mismatch');
-    if (r.requestedAt > now || now - r.requestedAt > 600)
+    if (
+      r.requestedAt > now ||
+      now - r.requestedAt > DELEGATION_SIGNATURE_MAX_AGE
+    )
       throw new GovernanceError('DELEGATION_INVALID', 'stale revocation');
     const signer = await recoverSigner(revocationTypedData(r), signature);
     if (!signer || !sameAddress(signer, record.delegation.delegator))
@@ -280,15 +373,20 @@ export class DelegationRegistry {
         'revocation not signed by the delegator',
       );
     if (record.revokedAt !== null) return record;
-    const revoked = deepFreeze({
+    const revoked: DelegationRecord = deepFreeze({
       ...record,
       revokedAt: now,
+      revocation: { ...r, delegator: addr(r.delegator) },
       revocationSignature: signature as Hex,
     });
+    VERIFIED.add(revoked);
     this.records[index] = revoked;
     return revoked;
   }
 }
+
+export const quarantinedWallets = (s: BallotSnapshot): ReadonlySet<string> =>
+  new Set(s.quarantined.map((m) => m.wallet.toLowerCase()));
 
 /**
  * Weight each final delegate would control if every live delegation were used,
@@ -301,24 +399,21 @@ export function delegationConcentration(input: {
   at: number;
 }): GovernanceFlag[] {
   const { snapshot, policy } = input;
+  const blocked = quarantinedWallets(snapshot);
   const held = new Map<string, { weight: bigint; memberIds: string[] }>();
   for (const m of snapshot.members) {
-    let terminal: Address = m.wallet;
-    try {
-      terminal =
-        delegationChain(
-          input.records,
-          m.wallet,
-          input.at,
-          policy.maxDelegationDepth,
-        ).at(-1) ?? m.wallet;
-    } catch {
-      continue; // a broken chain delegates nothing
-    }
+    const terminal =
+      delegationChain(
+        input.records,
+        m.wallet,
+        input.at,
+        policy.maxDelegationDepth,
+        blocked,
+      ).at(-1) ?? m.wallet;
     const key = terminal.toLowerCase();
     const entry = held.get(key) ?? { weight: 0n, memberIds: [] };
     entry.weight += m.weight;
-    if (terminal !== m.wallet) entry.memberIds.push(m.memberId);
+    if (!sameAddress(terminal, m.wallet)) entry.memberIds.push(m.memberId);
     held.set(key, entry);
   }
   const flags: GovernanceFlag[] = [];

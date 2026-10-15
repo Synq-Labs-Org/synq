@@ -1,10 +1,9 @@
 import { encodeAbiParameters, keccak256, type Hex } from 'viem';
 import { deepFreeze } from './common.js';
 import {
-  assertExecutable,
-  type AcceptedChallenge,
+  executeDecision,
   type CouncilDecision,
-  type CouncilTerm,
+  type CouncilStore,
 } from './council.js';
 import {
   launchReadiness,
@@ -29,18 +28,18 @@ export const policyChangeHash = (
   );
 
 /**
- * Applies a policy change. It needs an executable council decision over this
- * exact from→to diff (M-of-N, challenge window passed, unchallenged). Every
- * open snapshot taken under the old hash is stale afterwards (`resnapshot`).
- * When the launch terms change, only contributors who signed assent to the
- * new terms are bound by them; the rest keep their original terms.
+ * Applies a policy change. It needs a recorded council decision over this
+ * exact from→to diff, signed under the current policy, which executes once
+ * (M-of-N re-verified, challenge window passed, unchallenged). Every open
+ * snapshot and every other pending council decision under the old hash is
+ * void afterwards. When the launch terms change, only contributors who signed
+ * assent to the new terms are bound by them; the rest keep their original terms.
  */
-export function applyPolicyChange(input: {
+export async function applyPolicyChange(input: {
+  store: CouncilStore;
   current: GovernancePolicy;
   proposed: GovernancePolicy;
-  term: CouncilTerm;
-  decision: CouncilDecision;
-  challenges: readonly AcceptedChallenge[];
+  decision: Pick<CouncilDecision, 'digest'>;
   now: number;
   /** Required when `proposed.termsHash` differs from the current one. */
   newTerms?: LaunchTerms;
@@ -58,36 +57,37 @@ export function applyPolicyChange(input: {
       'BAD_POLICY',
       'proposed policy must be the next version',
     );
-  assertExecutable({
+  const materialTermsChange = proposed.termsHash !== current.termsHash;
+  if (
+    materialTermsChange &&
+    (!input.newTerms || launchTermsHash(input.newTerms) !== proposed.termsHash)
+  )
+    throw new GovernanceError(
+      'BAD_TERMS',
+      'a terms change must present the new launch terms',
+    );
+  const receipt = await executeDecision({
+    store: input.store,
     decision: input.decision,
-    term: input.term,
-    challenges: input.challenges,
+    policy: current,
     now: input.now,
     kind: 'POLICY_CHANGE',
     actionHash: policyChangeHash(current, proposed),
   });
-  const materialTermsChange = proposed.termsHash !== current.termsHash;
-  let contributorRights: ReturnType<typeof launchReadiness> | null = null;
-  if (materialTermsChange) {
-    if (
-      !input.newTerms ||
-      launchTermsHash(input.newTerms) !== proposed.termsHash
-    )
-      throw new GovernanceError(
-        'BAD_TERMS',
-        'a terms change must present the new launch terms',
-      );
-    contributorRights = launchReadiness({
-      terms: input.newTerms,
-      contributions: input.contributions ?? [],
-      assents: input.assents ?? [],
-    });
-  }
+  const contributorRights =
+    materialTermsChange && input.newTerms
+      ? launchReadiness({
+          terms: input.newTerms,
+          contributions: input.contributions ?? [],
+          assents: input.assents ?? [],
+        })
+      : null;
   return deepFreeze({
     policy: proposed,
     previousPolicyHash: policyHash(current),
     policyHash: policyHash(proposed),
-    /** Snapshots under the previous hash can no longer admit votes or produce results. */
+    receipt,
+    /** Snapshots and council decisions under the previous hash are void. */
     requiresResnapshot: true as const,
     materialTermsChange,
     contributorRights,

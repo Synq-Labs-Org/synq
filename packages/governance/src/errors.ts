@@ -21,7 +21,10 @@ export type GovernanceErrorCode =
   | 'CHALLENGED'
   | 'NOT_A_CHALLENGER'
   | 'BAD_TERMS'
-  | 'BAD_ASSENT';
+  | 'BAD_ASSENT'
+  | 'UNKNOWN_DECISION'
+  | 'ALREADY_EXECUTED'
+  | 'POLICY_CHANGED';
 
 export class GovernanceError extends Error {
   constructor(

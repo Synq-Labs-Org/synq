@@ -6,7 +6,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { BPS, addr, deepFreeze, isSafeTime } from './common.js';
+import { BPS, addr, canonicalJson, deepFreeze, isSafeTime } from './common.js';
 import { GovernanceError } from './errors.js';
 import { policyHash, type GovernancePolicy } from './policy.js';
 
@@ -60,7 +60,29 @@ export type BallotSnapshot = Readonly<{
   supersedes: Hex | null;
 }>;
 
-const CHANNEL_ID = /^(telegram|imessage|whatsapp):[^\s@][^\s]{0,127}$/;
+/**
+ * Canonical stable channel id, so `telegram:0777`, `Telegram:777` and
+ * `telegram:777` are one identity for duplicate detection. Handles (`@name`)
+ * are not channel ids.
+ */
+export function canonicalChannelId(raw: string): string | null {
+  const m = /^([A-Za-z]+):(\S{1,128})$/.exec(raw.trim());
+  if (!m) return null;
+  const kind = m[1]!.toLowerCase();
+  const id = m[2]!;
+  if (kind === 'telegram' || kind === 'whatsapp')
+    return /^\+?[0-9]{1,20}$/.test(id)
+      ? `${kind}:${BigInt(id.replace('+', '')).toString()}`
+      : null;
+  if (kind === 'imessage') {
+    if (/^\+[0-9]{6,15}$/.test(id))
+      return `imessage:+${BigInt(id.slice(1)).toString()}`;
+    return /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}$/.test(id)
+      ? `imessage:${id.toLowerCase()}`
+      : null;
+  }
+  return null;
+}
 
 function eligibilityHash(members: readonly EligibleMember[]): Hex {
   let h: Hex = zeroHash;
@@ -104,7 +126,7 @@ export function takeSnapshot(input: {
   opensAt?: number;
   supersedes?: Hex | null;
 }): BallotSnapshot {
-  const bad = (why: string) => {
+  const bad = (why: string): never => {
     throw new GovernanceError('BAD_SNAPSHOT', why);
   };
   const { policy, now } = input;
@@ -117,11 +139,22 @@ export function takeSnapshot(input: {
   const members = input.members.map((m) => {
     if (!m.memberId) bad('member id required');
     if (m.weight <= 0n) bad(`member ${m.memberId} has no weight`);
-    for (const c of m.channelIds)
-      if (!CHANNEL_ID.test(c))
-        bad(`member ${m.memberId}: channel id ${c} is not a stable channel id`);
-    return { ...m, wallet: addr(m.wallet), channelIds: [...m.channelIds] };
+    const channelIds = m.channelIds.map(
+      (c) =>
+        canonicalChannelId(c) ??
+        bad(`member ${m.memberId}: channel id ${c} is not a stable channel id`),
+    );
+    return {
+      memberId: m.memberId,
+      wallet: addr(m.wallet),
+      channelIds: [...new Set(channelIds)].sort(),
+      weight: m.weight,
+    };
   });
+  // Input order never influences the result (flags, quarantine, id).
+  members.sort((a, b) =>
+    a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0,
+  );
   if (new Set(members.map((m) => m.memberId)).size !== members.length)
     bad('duplicate member id');
 
@@ -183,41 +216,23 @@ export function takeSnapshot(input: {
   return deepFreeze({ snapshotId: snapshotIdOf(body), ...body });
 }
 
+/**
+ * Content address of everything in the snapshot: policy id/version/hash,
+ * members with channel ids, quarantined entries, flags, window and lineage.
+ */
 export function snapshotIdOf(s: Omit<BallotSnapshot, 'snapshotId'>): Hex {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: 'string' },
-        { type: 'bytes32' },
-        { type: 'bytes32' },
-        { type: 'bytes32' },
-        { type: 'uint256' },
-        { type: 'uint256' },
-        { type: 'uint256' },
-        { type: 'uint256' },
-        { type: 'uint256' },
-        { type: 'uint256' },
-        { type: 'bytes32' },
-      ],
-      [
-        s.ballotId,
-        s.proposalHash,
-        s.policyHash,
-        s.eligibilityHash,
-        s.eligibleWeight,
-        BigInt(s.eligibleCount),
-        BigInt(s.chainId),
-        BigInt(s.takenAt),
-        BigInt(s.opensAt),
-        BigInt(s.closesAt),
-        s.supersedes ?? zeroHash,
-      ],
-    ),
-  );
+  return keccak256(toHex(canonicalJson({ kind: 'BallotSnapshot/2', ...s })));
 }
 
-/** Recomputes the snapshot id from its frozen contents; any tampering is detected. */
-export function verifySnapshot(s: BallotSnapshot): void {
+/**
+ * Recomputes the snapshot id from its frozen contents; any tampering is
+ * detected. With the policy, the snapshot is rebuilt from its raw entries and
+ * must match exactly, so flags and quarantine cannot be hand-edited either.
+ */
+export function verifySnapshot(
+  s: BallotSnapshot,
+  policy?: GovernancePolicy,
+): void {
   const { snapshotId, ...body } = s;
   if (
     eligibilityHash(s.members) !== s.eligibilityHash ||
@@ -229,6 +244,27 @@ export function verifySnapshot(s: BallotSnapshot): void {
       'BAD_SNAPSHOT',
       'snapshot contents do not match its id',
     );
+  if (policy) {
+    let rebuilt: BallotSnapshot;
+    try {
+      rebuilt = takeSnapshot({
+        ballotId: s.ballotId,
+        proposalHash: s.proposalHash,
+        policy,
+        members: [...s.members, ...s.quarantined],
+        now: s.takenAt,
+        opensAt: s.opensAt,
+        supersedes: s.supersedes,
+      });
+    } catch {
+      throw new GovernanceError('BAD_SNAPSHOT', 'snapshot cannot be rebuilt');
+    }
+    if (rebuilt.snapshotId !== snapshotId)
+      throw new GovernanceError(
+        'BAD_SNAPSHOT',
+        'snapshot differs from a rebuild of its entries under this policy',
+      );
+  }
 }
 
 /**
