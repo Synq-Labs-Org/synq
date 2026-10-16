@@ -60,15 +60,25 @@ stack)
 config)
   # Only the keys the hosted service needs; production/real-money keys are never copied.
   env_file=${SYNQ_P11_ENV:-$HOME/.synq/p11.env}
-  pg=$( (has env && aws ssm get-parameter --name /synq/prod/env --with-decryption --query Parameter.Value --output text | sed -n 's/^POSTGRES_PASSWORD=//p') || true)
+  current=$( (has env && aws ssm get-parameter --name /synq/prod/env --with-decryption --query Parameter.Value --output text) || true)
+  kept() { sed -n "s/^$1=//p" <<<"$current"; }
+  pg=$(kept POSTGRES_PASSWORD)
   [ -n "$pg" ] || pg=$(openssl rand -hex 24)
-  # Signs the review links in shared cards; kept across runs so issued links stay valid.
-  card=$( (has env && aws ssm get-parameter --name /synq/prod/env --with-decryption --query Parameter.Value --output text | sed -n 's/^SYNQ_CARD_LINK_KEY=//p') || true)
+  # Link keys sign review/checkout links in shared cards; generated once and
+  # kept across runs so links already in chats stay valid.
+  card=$(kept SYNQ_CARD_LINK_KEY)
   [ -n "$card" ] || card=$(openssl rand -hex 32)
+  deal=$(kept SYNQ_DEALROOM_LINK_KEY)
+  [ -n "$deal" ] || deal=$(openssl rand -hex 32)
+  pay=$(kept SYNQ_PAY_LINK_KEY)
+  [ -n "$pay" ] || pay=$(openssl rand -hex 32)
   body=$(
-    printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\nSYNQ_CARD_LINK_KEY=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg" "$card"
-    grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL|DUFFEL_TEST_TOKEN|SEARCHAPI_KEY|LITHIC_API_KEY|LITHIC_ENV)=' "$env_file" | sed -E 's/^export +//'
+    printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\nSYNQ_CARD_LINK_KEY=%s\nSYNQ_DEALROOM_LINK_KEY=%s\nSYNQ_PAY_LINK_KEY=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg" "$card" "$deal" "$pay"
+    grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL|DUFFEL_TEST_TOKEN|SEARCHAPI_KEY|LITHIC_API_KEY|LITHIC_ENV|SYNQ_ARC_RPC_URL|SYNQ_ARC_VENDORS|SYNQ_ARC_OWNER|SYNQ_ARC_BUSINESS_NAME|SYNQ_ARC_FLOOR_USDC)=' "$env_file" | sed -E 's/^export +//'
     grep -q -E '^(export +)?SYNQ_MONAD_TESTNET_RPC_URL=' "$env_file" || echo 'SYNQ_MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz'
+    # Arc business features (Messages app): the governed vault's allowlisted contractor
+    # (the Arc RPC defaults to the registry's public endpoint unless SYNQ_ARC_RPC_URL is set).
+    grep -q -E '^(export +)?SYNQ_ARC_VENDORS=' "$env_file" || echo 'SYNQ_ARC_VENDORS=Sarah:0xB781505e5156E68594414D190190fE1FaeDD6780:1792105682'
   )
   grep -q '^TELEGRAM_BOT_TOKEN=' <<<"$body" || { echo "TELEGRAM_BOT_TOKEN missing in $env_file" >&2; exit 1; }
   put env "$body"

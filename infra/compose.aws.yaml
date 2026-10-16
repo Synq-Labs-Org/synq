@@ -81,6 +81,15 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       SYNQ_MONAD_TESTNET_RPC_URL: ${SYNQ_MONAD_TESTNET_RPC_URL:-}
       SYNQ_CARD_LINK_KEY: ${SYNQ_CARD_LINK_KEY:-}
+      # Arc testnet business features for the Messages app: Deal Room and
+      # invoice checkout turn on with their link keys; the rest only reads Arc.
+      SYNQ_DEALROOM_LINK_KEY: ${SYNQ_DEALROOM_LINK_KEY:-}
+      SYNQ_PAY_LINK_KEY: ${SYNQ_PAY_LINK_KEY:-}
+      SYNQ_ARC_RPC_URL: ${SYNQ_ARC_RPC_URL:-}
+      SYNQ_ARC_VENDORS: ${SYNQ_ARC_VENDORS:-}
+      SYNQ_ARC_OWNER: ${SYNQ_ARC_OWNER:-}
+      SYNQ_ARC_BUSINESS_NAME: ${SYNQ_ARC_BUSINESS_NAME:-}
+      SYNQ_ARC_FLOOR_USDC: ${SYNQ_ARC_FLOOR_USDC:-}
       # Duffel test-mode token (duffel_test_…); hotels are off without it.
       DUFFEL_TEST_TOKEN: ${DUFFEL_TEST_TOKEN:-}
       # Gifts: live product search (read only) and Lithic sandbox virtual cards.
