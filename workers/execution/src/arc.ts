@@ -26,6 +26,7 @@ import {
   type ChainProfile,
   type ContractKind,
 } from '@synq/chain-registry/arc';
+import { planNativeGas } from '@synq/plugin-circle-gas';
 
 /**
  * Arc (and Circle source-chain) value transfers for the restricted executor.
@@ -208,32 +209,20 @@ export async function prepareTransfer(
       String(error instanceof Error ? error.message : error).slice(0, 200),
     );
   }
-  const floor = profile.minMaxFeePerGasWei ?? 0n;
-  const maxPriorityFeePerGas =
-    fees.maxPriorityFeePerGas && fees.maxPriorityFeePerGas > 0n
-      ? fees.maxPriorityFeePerGas
-      : 1_000_000_000n;
-  let maxFeePerGas = fees.maxFeePerGas ?? 0n;
-  if (maxFeePerGas < floor) maxFeePerGas = floor;
-  if (maxFeePerGas < maxPriorityFeePerGas) maxFeePerGas = maxPriorityFeePerGas;
-  if (floor && maxFeePerGas < floor)
-    throw new ArcExecutionError('FEE_BELOW_FLOOR', String(maxFeePerGas));
-  const maxGasCostWei = gas * maxFeePerGas;
-  if (input.maxGasCostWei !== undefined && maxGasCostWei > input.maxGasCostWei)
-    throw new ArcExecutionError(
-      'FEE_ABOVE_CAP',
-      `${maxGasCostWei} > ${input.maxGasCostWei}`,
-    );
   // Arc: value and gas draw on one USDC balance. Elsewhere gas is native ETH.
-  const needWei =
-    profile.nativeSymbol === 'USDC' && entry.symbol === 'USDC'
-      ? usdcToArcNativeWei(input.amount) + maxGasCostWei
-      : maxGasCostWei;
-  if (nativeBalance < needWei)
-    throw new ArcExecutionError(
-      'INSUFFICIENT_GAS',
-      `native ${nativeBalance} < value+gas ${needWei}`,
-    );
+  const plan = planNativeGas({
+    profile,
+    gas,
+    fees,
+    nativeBalance,
+    valueWei:
+      profile.nativeSymbol === 'USDC' && entry.symbol === 'USDC'
+        ? usdcToArcNativeWei(input.amount)
+        : 0n,
+    maxGasCostWei: input.maxGasCostWei,
+  });
+  if (!plan.ok) throw new ArcExecutionError(plan.code, plan.message);
+  const { maxFeePerGas, maxPriorityFeePerGas, maxGasCostWei } = plan;
   return Object.freeze({
     chain: profile.name,
     chainId: profile.chainId,

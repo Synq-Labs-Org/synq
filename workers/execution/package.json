@@ -32,6 +32,7 @@
     "@synq/governance": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/plugin-circle-cctp": "workspace:*",
+    "@synq/plugin-circle-gas": "workspace:*",
     "@synq/schemas": "workspace:*",
     "viem": "2.57.4",
     "zod": "4.6.5"
