@@ -984,6 +984,7 @@ export class DealRoomService {
       throw new DealRoomError('NOT_FOUND', `milestone ${input.milestone}`);
     const key = `released:${input.milestone}`;
     if (view.transitions.some((x) => x.idempotencyKey === key)) return view;
+    this.sameEscrowDeal(view, input.execution);
     if (ms.status !== 'ACCEPTED')
       throw new DealRoomError('WRONG_STATE', `milestone is ${ms.status}`);
     const paid = input.execution.transfers.filter(
@@ -1110,6 +1111,7 @@ export class DealRoomService {
       throw new DealRoomError('NOT_FOUND', `milestone ${input.milestone}`);
     const key = `refunded:${input.milestone}`;
     if (view.transitions.some((x) => x.idempotencyKey === key)) return view;
+    this.sameEscrowDeal(view, input.execution);
     if (ms.status !== 'REFUNDING')
       throw new DealRoomError('WRONG_STATE', `milestone is ${ms.status}`);
     const back = input.execution.transfers.filter(
@@ -1166,6 +1168,7 @@ export class DealRoomService {
     const view = await this.view(input.dealId);
     const d = view.deal.dispute;
     if (!d) throw new DealRoomError('WRONG_STATE', 'no dispute attested');
+    this.sameEscrowDeal(view, input.execution);
     const out = await this.apply(view, {
       kind: 'DISPUTE_ON_CHAIN',
       key: `dispute-tx:${d.attestationId}`,
@@ -1184,6 +1187,18 @@ export class DealRoomService {
   }
 
   // ---------------------------------------------------------------- internals
+
+  /** An execution report must be about this deal's escrow deal. */
+  private sameEscrowDeal(view: DealView, exec: ExecutionRecord) {
+    if (
+      !view.deal.escrow ||
+      BigInt(view.deal.escrow.escrowDealId) !== exec.escrowDealId
+    )
+      throw new DealRoomError(
+        'FUNDING_MISMATCH',
+        `execution is for escrow deal ${exec.escrowDealId}, not this deal`,
+      );
+  }
 
   private notExpired(t: Terms) {
     if (this.now() >= t.expiresAt)

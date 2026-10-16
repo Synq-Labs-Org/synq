@@ -922,6 +922,16 @@ describe('Deal Room milestones: release, dispute, refund', () => {
         },
       ],
     };
+    // A report about another escrow deal is refused.
+    expect(
+      await code(
+        r.service.recordReleased({
+          dealId: id,
+          milestone: 0,
+          execution: { ...execution, escrowDealId: 8n },
+        }),
+      ),
+    ).toBe('FUNDING_MISMATCH');
     const after = await r.service.recordReleased({
       dealId: id,
       milestone: 0,
