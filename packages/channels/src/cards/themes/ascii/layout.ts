@@ -71,10 +71,13 @@ function header(c: CardContent): Node {
         gap: 8,
         paddingTop: 6,
       },
-      t(c.network ?? 'Network unknown', {
-        fontSize: SIZE.small,
-        color: COLOR.ink,
-      }),
+      // The chip already names Arc / Sepolia; other networks are spelled out.
+      c.network &&
+        !(c.mode?.label ?? '')
+          .toLowerCase()
+          .includes(c.network.toLowerCase().split(' ')[0]!)
+        ? t(c.network, { fontSize: SIZE.small, color: COLOR.ink })
+        : null,
       c.mode ? chip(c.mode.label, c.mode.tone) : chip('MODE UNKNOWN', 'muted'),
     ),
   );
@@ -110,7 +113,7 @@ function hero(c: CardContent): Node {
   const art = asciiArt(c.art);
   const ref = c.refs[0];
   const w = Math.ceil(ART_SIZE.cols * SIZE.art * MONO_ADVANCE);
-  const hh = ART_SIZE.rows * SIZE.art;
+  const hh = ART_SIZE.rows * SIZE.artLine;
   return h(
     {
       position: 'relative',
@@ -128,9 +131,10 @@ function hero(c: CardContent): Node {
       ...art.lines.map((l) =>
         t(l || ' ', {
           fontSize: SIZE.art,
-          lineHeight: `${SIZE.art}px`,
-          height: SIZE.art,
+          lineHeight: `${SIZE.artLine}px`,
+          height: SIZE.artLine,
           whiteSpace: 'pre',
+          fontWeight: 700,
           color: COLOR.art,
           overflow: 'visible',
         }),
@@ -225,7 +229,15 @@ function mainPanel(c: CardContent): Node {
               paddingBottom: Math.round(amountSize * 0.16),
               flexShrink: 0,
             }),
-            t(head.value, {
+            head.value.startsWith('≈')
+              ? t('≈', {
+                  fontSize: Math.round(amountSize * 0.6),
+                  color: COLOR.ink2,
+                  flexShrink: 0,
+                  paddingBottom: Math.round(amountSize * 0.12),
+                })
+              : null,
+            t(head.value.replace(/^≈\s*/, ''), {
               fontFamily: FONT.display,
               fontSize: amountSize,
               lineHeight: 1,
@@ -262,8 +274,25 @@ function rowsGroup(c: CardContent, dense: boolean): Node {
   );
 }
 
-function note(c: CardContent): Node | null {
-  if (!c.note) return null;
+/** Rough line count of a row detail (mono font), for fitting the note. */
+function detailLines(c: CardContent, dense: boolean): number {
+  return c.rows.slice(0, dense ? 4 : 3).reduce((extra, r) => {
+    if (!r.detail) return extra;
+    const width =
+      CONTENT -
+      4 * SPACE.rowX -
+      SIZE.icon -
+      (r.value ? r.value.length * SIZE.body * MONO_ADVANCE + 40 : 0);
+    const perLine = Math.max(
+      10,
+      Math.floor(width / (SIZE.detail * MONO_ADVANCE)),
+    );
+    return extra + (r.detail.length > perLine ? 1 : 0);
+  }, 0);
+}
+
+function note(c: CardContent, lines: number): Node | null {
+  if (!c.note || lines < 1) return null;
   return h(
     {
       flexDirection: 'column',
@@ -278,7 +307,7 @@ function note(c: CardContent): Node | null {
         fontSize: SIZE.detail,
         lineHeight: 1.4,
         color: COLOR.ink2,
-        maxHeight: Math.round(SIZE.detail * 1.4 * 2) + 2,
+        maxHeight: Math.round(SIZE.detail * 1.4 * lines) + 2,
         overflow: 'hidden',
       },
       c.note,
@@ -288,10 +317,14 @@ function note(c: CardContent): Node | null {
 
 function stats(c: CardContent): Node {
   const cells = [
-    { label: 'NETWORK', value: c.network ?? '—', ink: COLOR.ink },
+    {
+      label: 'NETWORK',
+      value: `${c.network ?? '—'}${c.chainId === null ? '' : ` · ${c.chainId}`}`,
+      ink: COLOR.ink,
+    },
     {
       label: 'MODE',
-      value: c.mode?.label ?? '—',
+      value: c.mode?.detail ?? '—',
       ink: c.mode?.tone === 'ok' ? COLOR.approvedInk : COLOR.ink,
     },
     ...c.stats
@@ -360,6 +393,9 @@ function footer(c: CardContent): Node {
 /** The whole card for a content description. */
 export function asciiCard(c: CardContent): Node {
   const dense = c.rows.length > 3;
+  // Wrapped row details and a fourth row take the note's room first.
+  const extra = detailLines(c, dense) + (dense ? 2 : 0);
+  const noteLines = extra >= 3 ? 0 : extra >= 1 ? 1 : 2;
   const action = c.actions.find((a) => a.primary) ?? null;
   return h(
     {
@@ -386,8 +422,8 @@ export function asciiCard(c: CardContent): Node {
       hero(c),
       mainPanel(c),
       rowsGroup(c, dense),
-      dense ? null : note(c),
-      h({ flexGrow: 1, minHeight: 12 }),
+      note(c, noteLines),
+      h({ flexGrow: 1, minHeight: 16 }),
       action
         ? button(action.label, true, CONTENT)
         : button('Read only, nothing to sign', false, CONTENT),

@@ -555,11 +555,9 @@ function flightContent(card: CardOf<'FLIGHT_COMPARISON'>): Body {
       const pick = o.optionId === card.preferredOptionId;
       return row({
         icon: 'flight',
-        title: `${o.carrier}${o.flights ? ` ${o.flights}` : ''}`,
+        title: o.carrier,
         detail: [
-          o.legs
-            .map((l) => `${route(l.origin, l.destination)} ${dayLabel(l.date)}`)
-            .join(SEP),
+          o.flights,
           o.stops ? plural(o.stops, 'stop') : 'nonstop',
           o.baggage,
           plural(o.votes, 'vote'),

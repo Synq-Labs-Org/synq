@@ -90,6 +90,8 @@ export function cardContent(
     typeLabel: TYPE_LABEL[card.type],
     network,
     mode,
+    chainId:
+      isArcCard(card) || card.type === 'GROUP_TREASURY' ? card.chainId : null,
     actions: card.actions.map((a) => ({
       label: a.label,
       primary: a === (primary ?? card.actions[0]),

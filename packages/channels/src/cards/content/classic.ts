@@ -28,6 +28,7 @@ export type Body = Omit<
   | 'typeLabel'
   | 'network'
   | 'mode'
+  | 'chainId'
   | 'actions'
   | 'issuedAt'
   | 'observedAt'

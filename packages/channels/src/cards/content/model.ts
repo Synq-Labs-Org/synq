@@ -119,8 +119,11 @@ export type CardContent = Readonly<{
   mode: Readonly<{
     id: CardExecutionMode | 'TESTNET' | 'LOCAL';
     label: string;
+    /** Longer wording for detail cells, e.g. "Live testnet state". */
+    detail: string;
     tone: Tone;
   }> | null;
+  chainId: number | null;
   /** Immutable references (shortened), e.g. terms hash, tx, case id. */
   refs: readonly Readonly<{ label: string; value: string }>[];
   art: ArtSpec;

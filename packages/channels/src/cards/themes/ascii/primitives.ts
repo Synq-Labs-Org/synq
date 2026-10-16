@@ -232,7 +232,17 @@ export function row(
         r.badge ? badge(r.badge, SIZE.small - 2) : null,
       ),
       r.detail
-        ? t(r.detail, { fontSize: SIZE.detail, color: COLOR.ink2, minWidth: 0 })
+        ? h(
+            {
+              fontSize: SIZE.detail,
+              lineHeight: 1.3,
+              color: COLOR.ink2,
+              minWidth: 0,
+              maxHeight: Math.ceil(SIZE.detail * 1.3 * 2) + 1,
+              overflow: 'hidden',
+            },
+            r.detail,
+          )
         : null,
       r.progress !== null
         ? h({ marginTop: 5 }, progress(r.progress, '100%', 9))

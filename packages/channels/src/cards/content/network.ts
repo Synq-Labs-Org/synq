@@ -33,32 +33,52 @@ export function cardNetworkLabel(chainId: number | null): string {
 
 type Mode = NonNullable<CardContent['mode']>;
 /** Short badge for every card execution mode. */
+const mode = (
+  id: Mode['id'],
+  label: string,
+  detail: string,
+  tone: Mode['tone'],
+): Mode => ({ id, label, detail, tone });
 export const CARD_MODE: Record<CardExecutionMode, Mode> = {
-  REAL_TESTNET: { id: 'REAL_TESTNET', label: 'REAL TESTNET', tone: 'ok' },
-  PROVIDER_SANDBOX: {
-    id: 'PROVIDER_SANDBOX',
-    label: 'SANDBOX',
-    tone: 'pending',
-  },
-  SIMULATION: { id: 'SIMULATION', label: 'SIMULATED', tone: 'muted' },
-  MAINNET_SIMULATION: {
-    id: 'MAINNET_SIMULATION',
-    label: 'SIMULATED',
-    tone: 'muted',
-  },
-  CANARY_READY: { id: 'CANARY_READY', label: 'NOT EXECUTED', tone: 'muted' },
-  MAINNET_READ_ONLY: {
-    id: 'MAINNET_READ_ONLY',
-    label: 'READ ONLY',
-    tone: 'muted',
-  },
-  LIVE_ARC_TESTNET: {
-    id: 'LIVE_ARC_TESTNET',
-    label: 'ARC TESTNET',
-    tone: 'ok',
-  },
-  LIVE_SEPOLIA: { id: 'LIVE_SEPOLIA', label: 'SEPOLIA', tone: 'ok' },
-  LOCAL_FIXTURE: { id: 'LOCAL_FIXTURE', label: 'LOCAL FIXTURE', tone: 'muted' },
+  REAL_TESTNET: mode('REAL_TESTNET', 'REAL TESTNET', 'Real testnet tx', 'ok'),
+  PROVIDER_SANDBOX: mode(
+    'PROVIDER_SANDBOX',
+    'SANDBOX',
+    'Provider sandbox',
+    'pending',
+  ),
+  SIMULATION: mode('SIMULATION', 'SIMULATED', 'Nothing broadcast', 'muted'),
+  MAINNET_SIMULATION: mode(
+    'MAINNET_SIMULATION',
+    'SIMULATED',
+    'Nothing broadcast',
+    'muted',
+  ),
+  CANARY_READY: mode(
+    'CANARY_READY',
+    'NOT EXECUTED',
+    'Canary-ready only',
+    'muted',
+  ),
+  MAINNET_READ_ONLY: mode(
+    'MAINNET_READ_ONLY',
+    'READ ONLY',
+    'Mainnet read only',
+    'muted',
+  ),
+  LIVE_ARC_TESTNET: mode(
+    'LIVE_ARC_TESTNET',
+    'ARC TESTNET',
+    'Live testnet state',
+    'ok',
+  ),
+  LIVE_SEPOLIA: mode('LIVE_SEPOLIA', 'SEPOLIA', 'Live testnet state', 'ok'),
+  LOCAL_FIXTURE: mode(
+    'LOCAL_FIXTURE',
+    'LOCAL FIXTURE',
+    'Nothing on any network',
+    'muted',
+  ),
 };
 
 /**
@@ -69,7 +89,7 @@ export const networkMode = (network: string | null): Mode | null =>
   network === null
     ? null
     : /testnet|sepolia/i.test(network)
-      ? { id: 'TESTNET', label: 'TESTNET', tone: 'ok' }
+      ? mode('TESTNET', 'TESTNET', 'Testnet state', 'ok')
       : /local/i.test(network)
-        ? { id: 'LOCAL', label: 'LOCAL', tone: 'muted' }
+        ? mode('LOCAL', 'LOCAL', 'Local chain', 'muted')
         : null;

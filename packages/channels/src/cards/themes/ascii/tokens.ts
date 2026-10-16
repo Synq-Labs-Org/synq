@@ -40,8 +40,9 @@ export const SIZE = {
   small: pt(10),
   amount: pt(38),
   unit: pt(16),
-  /** ASCII art: 8 px mono, one cell = 4.8 x 8 px. */
-  art: 8,
+  /** ASCII art: 9 px bold mono on an 8 px line, one cell = 5.4 x 8 px. */
+  art: 9,
+  artLine: 8,
   tagline: pt(12),
   icon: pt(13),
 } as const;
