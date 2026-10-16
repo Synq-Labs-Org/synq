@@ -183,7 +183,18 @@ export type ContractKind =
   | 'SYNQ_ARC_FALLBACK_HANDLER'
   | 'SYNQ_MILESTONE_ESCROW'
   | 'SYNQ_ARC_VAULT_SAFE'
-  | 'SYNQ_ARC_VAULT_POLICY';
+  | 'SYNQ_ARC_VAULT_POLICY'
+  | 'USYC_TELLER'
+  | 'USYC_ENTITLEMENTS'
+  | 'USYC_ORACLE'
+  | 'CIRCLE_APP_KIT_ADAPTER'
+  | 'CIRCLE_EARN_VAULT_USDC'
+  | 'CIRCLE_EARN_VAULT_MOCK_MORPHO'
+  | 'ERC4337_ENTRYPOINT_V07'
+  | 'ERC4337_ENTRYPOINT_V08'
+  | 'CIRCLE_PAYMASTER_V07'
+  | 'CIRCLE_PAYMASTER_V08'
+  | 'SIMPLE_7702_ACCOUNT';
 
 type ContractEntry = Readonly<{
   chain: ChainName;
@@ -246,6 +257,17 @@ const RegistrySchema = z.strictObject({
         'SYNQ_MILESTONE_ESCROW',
         'SYNQ_ARC_VAULT_SAFE',
         'SYNQ_ARC_VAULT_POLICY',
+        'USYC_TELLER',
+        'USYC_ENTITLEMENTS',
+        'USYC_ORACLE',
+        'CIRCLE_APP_KIT_ADAPTER',
+        'CIRCLE_EARN_VAULT_USDC',
+        'CIRCLE_EARN_VAULT_MOCK_MORPHO',
+        'ERC4337_ENTRYPOINT_V07',
+        'ERC4337_ENTRYPOINT_V08',
+        'CIRCLE_PAYMASTER_V07',
+        'CIRCLE_PAYMASTER_V08',
+        'SIMPLE_7702_ACCOUNT',
       ]),
       address: Address,
       codeHash: Hash.nullable(),

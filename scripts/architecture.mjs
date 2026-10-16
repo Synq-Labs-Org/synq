@@ -7,7 +7,7 @@ const PACKAGE_ROOTS = ['packages', 'apps', 'workers', 'plugins'];
 const SKIPPED = new Set(['node_modules', 'dist', 'generated', '.git', 'out']);
 const UI = /^apps\/web$/;
 const PLANNER =
-  /^(packages\/(agent-runtime|brain|world-model|strategy-engine)|plugins\/[^/]+)$/;
+  /^(packages\/(agent-runtime|brain|world-model|strategy-engine|strategies)|plugins\/[^/]+)$/;
 const DETERMINISTIC = /^packages\/(domain|schemas|kernel)$/;
 const SIGNER_PACKAGES = /^(workers\/execution|packages\/wallet-core)$/;
 const HUMAN_SIGNING_BOUNDARY = /^packages\/identity$/;
@@ -100,7 +100,7 @@ const BRAIN_ZONE =
 // Arc v3: packages on the active Arc runtime may not reach archived Monad
 // sponsor integrations, directly or transitively. Their code and tests stay.
 const ARC_ACTIVE =
-  /^(packages\/(domain|schemas|kernel|identity|chain-registry|ledger|invoices|payables|treasury|governance|arc-execution|settlement|funding|channels|agent-runtime|offer-exchange|world-model)|plugins\/circle-[a-z-]+)$/;
+  /^(packages\/(domain|schemas|kernel|identity|chain-registry|ledger|invoices|payables|treasury|governance|arc-execution|settlement|funding|channels|agent-runtime|offer-exchange|world-model|strategies|strategy-engine)|plugins\/(circle-[a-z-]+|usyc|arc-swap))$/;
 const LEGACY_MONAD =
   /^(plugins\/(kuru|perpl|agora|aurora|chainlink-cre|layerzero)|workers\/perpl-executor)$/;
 const MODEL_SDKS =
