@@ -100,13 +100,18 @@ describe('Ask Synq', () => {
         departureDate: '2026-12-01',
         travelers: 3,
       },
-    }).ask(fund(), 'flights to goa for 3 on dec 1', 1);
+    }).ask(fund(), 'somewhere warm for the three of us in december?', 1);
     expect(r.action).toEqual({
       kind: 'FLIGHT_SEARCH',
       origin: 'DEL',
       destination: 'GOI',
       departureDate: '2026-12-01',
+      returnDate: null,
       travelers: 3,
+      originLabel: 'Delhi',
+      destinationLabel: 'Goa',
+      cabin: null,
+      autoRun: false,
     });
     const bad = await assistant('not json').ask(fund(), 'hi', 1);
     expect(bad.action).toBeNull();
@@ -116,11 +121,12 @@ describe('Ask Synq', () => {
     const ok = await assistant({
       reply: 'Let me look.',
       action: { kind: 'GIFT_SEARCH', query: ' car  gifts ', maxPrice: '50' },
-    }).ask(fund(), 'find a gift related to cars', 1);
+    }).ask(fund(), 'what should we get Ben for his birthday?', 1);
     expect(ok.action).toEqual({
       kind: 'GIFT_SEARCH',
       query: 'car gifts',
       maxPrice: '50',
+      autoRun: false,
     });
     for (const [state, maxPrice] of [
       ['ACTIVE', '900'],
