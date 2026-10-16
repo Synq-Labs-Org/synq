@@ -88,6 +88,31 @@ export type BrainContextMessage = {
   textSha256: string;
   sentAt: number;
 };
+export type DealDraftRequest = {
+  origin: 'ENROLLED_CONTEXT' | 'GUEST_INVOCATION';
+  channel: ChannelId;
+  externalGroupId: string;
+  /** Linked group (enrolled chats only). */
+  groupId: string | null;
+  invoker: { externalUserId: string; principalId: string | null };
+  request: string;
+  invocation: { messageId: string; text: string; sentAt: number } | null;
+  /** Enrolled: consented, unexpired memory of current members. */
+  context: readonly BrainContextMessage[];
+  /** Guest: the one message the invoker replied to. */
+  reference: {
+    messageId: string;
+    externalUserId: string | null;
+    timestamp: number | null;
+    text: string;
+    textSha256: string;
+  } | null;
+  runId: string;
+};
+export type DealDraftReply =
+  | { status: 'DRAFTED'; dealId: string; summary: string; url: string }
+  | { status: 'REFUSED'; reason: string };
+
 export type GuestReplyInput = {
   text: string;
   reference: {
@@ -133,6 +158,14 @@ export interface ChannelPorts {
   guest?(
     input: GuestReplyInput,
   ): Promise<{ text: string; trackAs?: string | null }>;
+  /**
+   * Deal Room draft. `context` holds only messages Synq was permitted to read
+   * for this invocation: an enrolled chat's consented memory plus the
+   * invoking message, or for a guest invocation the trigger and the one
+   * replied-to message. The port drafts (never signs or funds) and returns a
+   * link where each party reviews and signs in their own wallet.
+   */
+  deal?(input: DealDraftRequest): Promise<DealDraftReply>;
   /**
    * Personal finance in a direct message. The gateway resolves the sender's
    * stable channel id to a linked principal first (identity channel link);
@@ -241,6 +274,8 @@ export type CardLinkOutcome =
         | 'PROPOSAL_NOT_FOUND';
     };
 
+const DEAL_REQUEST =
+  /^\/?deal\b|\b(draft|make|create|write up)\b[^.\n]{0,20}\b(deal|agreement|contract)\b/i;
 const APPROVAL_WORDS =
   /^(yes|yep|yeah|y|ok|okay|approve|approved|i approve|confirm|confirmed|lgtm|do it|go|\+1|👍|✅)[.! ]*$/i;
 const hashCode = (code: string) =>
@@ -554,12 +589,17 @@ export class ChannelGateway {
     )
       return this.result('DUPLICATE', 'GUEST_ALREADY_ANSWERED');
     this.lastBrain.set(key, now);
-    const { text, trackAs } = await this.guestText(event);
+    const dealt = await this.guestDeal(event);
+    const { text, trackAs } = dealt ?? (await this.guestText(event));
     let inlineMessageId: string;
     try {
       ({ inlineMessageId } = await adapter.answerGuest(event.guestQueryId, {
         text,
-        buttons: [{ label: 'Open Synq', url: this.web('/') }],
+        buttons: [
+          dealt?.url
+            ? { label: 'Review and sign', url: dealt.url }
+            : { label: 'Open Synq', url: this.web('/') },
+        ],
       }));
     } catch (error) {
       await this.handle({
@@ -642,6 +682,68 @@ export class ChannelGateway {
       }
     }
     return out;
+  }
+
+  /**
+   * "@Synq draft a deal" as a guest: drafted from the trigger and the one
+   * replied-to message only. Returns null when this is not a deal request.
+   */
+  private async guestDeal(
+    event: Extract<ChannelEvent, { type: 'GUEST_QUERY' }>,
+  ): Promise<{ text: string; trackAs: null; url: string | null } | null> {
+    const port = this.options.ports.deal;
+    const asked = stripMention(event.envelope.body);
+    if (!port || !DEAL_REQUEST.test(asked)) return null;
+    const e = event.envelope;
+    const scope = event.reference
+      ? 'I read only your message and the one you replied to'
+      : 'I read only your message';
+    let reply: DealDraftReply;
+    try {
+      reply = await port({
+        origin: 'GUEST_INVOCATION',
+        channel: e.channel,
+        externalGroupId: e.externalGroupId,
+        groupId: null,
+        invoker: { externalUserId: e.externalUserId!, principalId: null },
+        request: asked.slice(0, 1000),
+        invocation: e.messageId
+          ? { messageId: e.messageId, text: e.body, sentAt: e.timestamp }
+          : null,
+        context: [],
+        reference: event.reference
+          ? {
+              messageId: event.reference.messageId,
+              externalUserId: event.reference.externalUserId,
+              timestamp: event.reference.timestamp,
+              text: event.reference.text,
+              textSha256: event.reference.textSha256,
+            }
+          : null,
+        runId: `guestdeal_${createHash('sha256').update(event.guestQueryId).digest('hex').slice(0, 16)}`,
+      });
+    } catch {
+      reply = {
+        status: 'REFUSED',
+        reason: 'the Deal Room could not draft this right now',
+      };
+    }
+    if (reply.status !== 'DRAFTED')
+      return {
+        text: `No deal drafted: ${reply.reason.slice(0, 500)}. ${scope}, and I keep nothing.`,
+        trackAs: null,
+        url: null,
+      };
+    return {
+      text: [
+        `Deal draft ${reply.dealId} (version 1)`,
+        reply.summary.slice(0, 1500),
+        `${scope}; every term cites one of them. I keep only this draft: those messages' ids and hashes and the quoted terms, not this chat's history.`,
+        'Nothing is agreed yet: each party signs the exact version in their own wallet. Chat never signs or funds.',
+      ].join('\n'),
+      trackAs: null,
+      url: reply.url,
+    };
   }
 
   private async guestText(
@@ -815,6 +917,8 @@ export class ChannelGateway {
         return this.status(envelope, group);
       case 'send':
         return this.send(envelope, group, parsed.args);
+      case 'deal':
+        return this.deal(envelope, group, principalId, parsed.args);
       case 'propose':
         if (!parsed.args)
           return this.replyOutcome(
@@ -1601,6 +1705,115 @@ export class ChannelGateway {
     });
   }
 
+  /** Consented, unexpired memory of members still in the group; never the invoking message. */
+  private async consentedContext(
+    envelope: Envelope,
+    group: GroupLink,
+    now: number,
+  ): Promise<BrainContextMessage[]> {
+    const stored = this.options.context
+      ? (
+          await this.options.context
+            .contextFor({
+              channel: envelope.channel,
+              externalGroupId: envelope.externalGroupId,
+              groupId: group.groupId,
+              now,
+            })
+            .catch(() => [])
+        ).filter((m) => m.messageId !== envelope.messageId)
+      : [];
+    const stillMember = new Map<string, boolean>();
+    for (const m of stored)
+      if (!stillMember.has(m.principalId))
+        stillMember.set(
+          m.principalId,
+          (await this.options.ports
+            .activeMember(group.groupId, m.principalId)
+            .catch(() => null)) !== null,
+        );
+    return stored
+      .filter((m) => stillMember.get(m.principalId))
+      .map((m) => ({
+        messageId: m.messageId,
+        principalId: m.principalId,
+        text: m.text,
+        textSha256: m.textSha256,
+        sentAt: m.sentAt,
+      }));
+  }
+
+  /**
+   * `/deal`: a Deal Room draft from the messages Synq may read in this chat.
+   * The reply is a deal card with a link; nothing is agreed in chat.
+   */
+  private async deal(
+    envelope: Envelope,
+    group: GroupLink,
+    principalId: string,
+    args: string,
+  ) {
+    const port = this.options.ports.deal;
+    if (!port)
+      return this.replyOutcome(envelope, 'REFUSED', 'DEAL_ROOM_UNAVAILABLE', {
+        text: 'The Deal Room is not configured in this deployment.',
+      });
+    const now = this.options.now();
+    if (
+      !(await this.options.store.claimNotification(
+        envelope.channel,
+        envelope.externalGroupId,
+        `effect:deal:${envelope.eventId}`,
+        now,
+      ))
+    )
+      return this.result('IGNORED', 'DEAL_ALREADY_RUN_FOR_EVENT');
+    const context = await this.consentedContext(envelope, group, now);
+    let reply: DealDraftReply;
+    try {
+      reply = await port({
+        origin: 'ENROLLED_CONTEXT',
+        channel: envelope.channel,
+        externalGroupId: envelope.externalGroupId,
+        groupId: group.groupId,
+        invoker: { externalUserId: envelope.externalUserId!, principalId },
+        request: args.slice(0, 1000),
+        invocation: envelope.messageId
+          ? {
+              messageId: envelope.messageId,
+              text: envelope.body,
+              sentAt: envelope.timestamp,
+            }
+          : null,
+        context,
+        reference: null,
+        runId: `deal_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`,
+      });
+    } catch {
+      reply = {
+        status: 'REFUSED',
+        reason: 'The Deal Room could not draft this right now.',
+      };
+    }
+    return this.dealReply(envelope, reply, context.length + 1);
+  }
+
+  private dealReply(envelope: Envelope, reply: DealDraftReply, read: number) {
+    if (reply.status !== 'DRAFTED')
+      return this.replyOutcome(envelope, 'REFUSED', 'DEAL_NOT_DRAFTED', {
+        text: `No deal drafted: ${reply.reason.slice(0, 500)}`,
+      });
+    return this.replyOutcome(envelope, 'HANDLED', 'DEAL_DRAFTED', {
+      text: [
+        `Deal draft ${reply.dealId} (version 1)`,
+        reply.summary.slice(0, 1500),
+        `Drafted only from the ${read} message${read === 1 ? '' : 's'} Synq was permitted to read here; every term cites its message.`,
+        'Nothing is agreed yet: each party reviews and signs the exact version in their own wallet. A chat reply never signs or funds anything.',
+      ].join('\n'),
+      buttons: [{ label: 'Review and sign', url: reply.url }],
+    });
+  }
+
   private async brain(
     envelope: Envelope,
     group: GroupLink,
@@ -1631,37 +1844,8 @@ export class ChannelGateway {
       ))
     )
       return this.result('IGNORED', 'BRAIN_ALREADY_RUN_FOR_EVENT');
-    const stored = this.options.context
-      ? (
-          await this.options.context
-            .contextFor({
-              channel: envelope.channel,
-              externalGroupId: envelope.externalGroupId,
-              groupId: group.groupId,
-              now,
-            })
-            .catch(() => [])
-        ).filter((m) => m.messageId !== envelope.messageId)
-      : [];
     // Only members still in the group contribute context.
-    const stillMember = new Map<string, boolean>();
-    for (const m of stored)
-      if (!stillMember.has(m.principalId))
-        stillMember.set(
-          m.principalId,
-          (await this.options.ports
-            .activeMember(group.groupId, m.principalId)
-            .catch(() => null)) !== null,
-        );
-    const context = stored
-      .filter((m) => stillMember.get(m.principalId))
-      .map((m) => ({
-        messageId: m.messageId,
-        principalId: m.principalId,
-        text: m.text,
-        textSha256: m.textSha256,
-        sentAt: m.sentAt,
-      }));
+    const context = await this.consentedContext(envelope, group, now);
     let reply: BrainReply;
     try {
       reply = await brain({
