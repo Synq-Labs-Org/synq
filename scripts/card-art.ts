@@ -208,9 +208,10 @@ const moon = (cx: number, cy: number, r: number) => oval(cx, cy, r, r, 0.38);
 function torii(cx: number, base: number, w: number, h: number): Shape[] {
   const p = w * 0.36;
   const top = base - h;
+  const post = Math.max(14, w * 0.07);
   return [
-    ...solid(rectPts(cx - p - 7, top, 14, h), 0),
-    ...solid(rectPts(cx + p - 7, top, 14, h), 0),
+    ...solid(rectPts(cx - p - post / 2, top, post, h), 0.25),
+    ...solid(rectPts(cx + p - post / 2, top, post, h), 0.25),
     ...solid(rectPts(cx - w / 2 + 12, top + 26, w - 24, 11), 0),
     ...solid(rectPts(cx - 5, top + 4, 10, 22), 0),
     ...solid(
@@ -591,32 +592,36 @@ const scenes: Record<string, () => Scene> = {
   ],
   approval: () => {
     const r = seeded(11);
+    const cluster = (x: number, y: number): Shape[] => [
+      blossom(x, y, 7),
+      dots([[x, y]], r() > 0.6 ? 3 : 2),
+    ];
+    const branchL = bezier([0, 132], [150, 60], [300, 84], 30);
+    const branchR = bezier([840, 40], [700, 50], [610, 110], 30);
+    const along = (b: Pt[], n: number, dy: number) =>
+      Array.from({ length: n }, (_, k) => {
+        const p = b[Math.round(((k + 0.5) / n) * (b.length - 1))]!;
+        return [p[0] + (r() - 0.5) * 30, p[1] + dy + (r() - 0.5) * 34] as Pt;
+      });
     return [
       dots(
-        Array.from({ length: 50 }, () => [r() * 840, 60 + r() * 270] as Pt),
-        0,
+        Array.from({ length: 46 }, () => [r() * 840, 90 + r() * 230] as Pt),
+        1,
       ),
       dotted([
-        [420, 300],
-        [580, 160],
-        [760, 300],
+        [460, 300],
+        [610, 150],
+        [800, 300],
       ]),
-      ...torii(330, 306, 230, 176),
+      ...torii(400, 306, 300, 190),
       stroke(
-        bezier([0, 34], [170, 26], [300, 92]),
-        bezier([120, 30], [160, 70], [196, 116]),
-        bezier([60, 30], [70, 70], [40, 120]),
+        branchL,
+        bezier([150, 72], [190, 110], [210, 150], 12),
+        branchR,
+        bezier([700, 52], [690, 100], [660, 150], 12),
       ),
-      ...Array.from({ length: 18 }, (_, i) =>
-        blossom(16 + ((i * 47) % 300), 20 + ((i * 29) % 110), 6),
-      ),
-      stroke(
-        bezier([840, 54], [700, 64], [600, 24]),
-        bezier([760, 58], [740, 100], [700, 130]),
-      ),
-      ...Array.from({ length: 10 }, (_, i) =>
-        blossom(610 + ((i * 41) % 210), 16 + ((i * 23) % 110), 6),
-      ),
+      ...along(branchL, 12, 0).flatMap(([x, y]) => cluster(x, y)),
+      ...along(branchR, 10, 0).flatMap(([x, y]) => cluster(x, y)),
       ground(306),
     ];
   },
@@ -715,7 +720,7 @@ const scenes: Record<string, () => Scene> = {
     ),
   ],
   receipt: () => receipt(false),
-  invoice: () => receipt(true),
+  stamped: () => receipt(true),
   deal: () => [
     stars(17),
     ...solid(

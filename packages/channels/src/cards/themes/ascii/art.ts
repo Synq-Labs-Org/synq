@@ -37,8 +37,15 @@ export const WORDMARK_KANA = 'シンク';
 export const ART_SIZE = { cols: ART_COLS, rows: ART_ROWS } as const;
 
 export function asciiArt(spec: ArtSpec): AsciiArt {
+  // State variants: a cleared hold, and a paid stamp only once settled.
   const key =
-    spec.slot === 'risk' && spec.tone === 'ok' ? 'risk_clear' : spec.slot;
+    spec.slot === 'risk' && spec.tone === 'ok'
+      ? 'risk_clear'
+      : spec.slot === 'invoice' || spec.slot === 'receipt'
+        ? spec.tone === 'ok'
+          ? 'stamped'
+          : 'receipt'
+        : spec.slot;
   return {
     lines: ART_DATA[key] ?? ART_DATA[spec.slot] ?? [],
     tagline: TAGLINE[spec.slot],
