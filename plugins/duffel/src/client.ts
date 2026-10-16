@@ -102,13 +102,13 @@ export class DuffelClient {
           ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])
           : AbortSignal.timeout(this.timeoutMs),
       });
-    } catch (error) {
+    } catch {
       throw new DuffelError(
         mutation ? 'AMBIGUOUS' : 'DEFINITIVE',
         null,
         'TRANSPORT',
         null,
-        error instanceof Error ? error.message : String(error),
+        'transport failure; reconcile before retry',
       );
     }
     const requestId = res.headers.get('x-request-id');
@@ -128,10 +128,21 @@ export class DuffelClient {
     const first = Array.isArray(parsed.errors)
       ? (parsed.errors[0] as Json | undefined)
       : undefined;
-    const code = String(first?.code ?? first?.type ?? 'unknown');
-    const message = String(
-      first?.message ?? (Object.keys(parsed).length ? '' : text),
-    ).slice(0, 160);
+    const candidate = String(first?.code ?? first?.type ?? 'unknown');
+    const code = new Set([
+      'unsupported_version',
+      'rate_unavailable',
+      'internal_server_error',
+      'not_found',
+      'order_expired',
+      'validation_error',
+      'invalid_access_token',
+      'invalid_offer',
+      'offer_expired',
+    ]).has(candidate)
+      ? candidate
+      : 'PROVIDER_ERROR';
+    const message = 'provider request rejected; sensitive details omitted';
     const kind: DuffelErrorKind =
       res.status === 401 || res.status === 403
         ? 'AUTH'

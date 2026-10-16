@@ -835,3 +835,45 @@ describe('BookingWorkflow (Temporal, Duffel test-mode double)', () => {
     expect(BigInt(free.pendingRefunds)).toBeGreaterThan(0n);
   });
 });
+
+it('COM-01: provider PII in an exception never enters Temporal history', async () => {
+  const pii = 'passport P12345678, shipping 17 Cedar Street';
+  const w = world({
+    wrapPorts: (ports) => ({
+      ...ports,
+      'duffel-stays': {
+        ...ports['duffel-stays']!,
+        book: async () => {
+          throw new Error(pii);
+        },
+      },
+    }),
+  });
+  const intent = stayIntent('pii-error');
+  const out = await run(
+    w,
+    {
+      bookingId: 'pii-error',
+      intent,
+      candidates: await stayCandidates(w, intent),
+      approvedMax: usd(40000),
+      reconcileAttempts: 1,
+    },
+    async (h) => {
+      await waitFor(h.state, 'RESERVED');
+      await approve(h, 'alice');
+      await approve(h, 'bob');
+    },
+  );
+  expect(out.state).toBe('UNKNOWN_PROVIDER_OUTCOME');
+  const handle = env.client.workflow.getHandle(
+    `booking-pii-error-${process.pid}`,
+  );
+  const history = await handle.fetchHistory();
+  const text = JSON.stringify(history, (_key, v) =>
+    v instanceof Uint8Array ? Buffer.from(v).toString('utf8') : v,
+  );
+  expect(text).not.toContain('P12345678');
+  expect(text).not.toContain('17 Cedar Street');
+  expect((await w.reservations.get('bk-pii-error'))?.state).toBe('HELD');
+});

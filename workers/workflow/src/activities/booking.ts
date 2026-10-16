@@ -320,12 +320,21 @@ export function createBookingActivities(
       const offer = EconomicOfferSchema.parse(input.offer);
       const port = deps.ports[offer.fulfillmentProviderId];
       if (!port) return { status: 'FAILED', reason: 'no booking port' };
-      const prior = await port.find({
-        offer,
-        idempotencyKey: input.idempotencyKey,
-      });
-      if (prior && prior.status !== 'FAILED' && prior.status !== 'UNKNOWN')
-        return prior;
+      let prior;
+      try {
+        prior = await port.find({
+          offer,
+          idempotencyKey: input.idempotencyKey,
+        });
+      } catch {
+        return { status: 'UNKNOWN', reason: 'PROVIDER_LOOKUP_UNAVAILABLE' };
+      }
+      if (prior?.status === 'UNKNOWN')
+        return {
+          status: 'UNKNOWN',
+          reason: 'PROVIDER_RECONCILIATION_REQUIRED',
+        };
+      if (prior && prior.status !== 'FAILED') return prior;
       try {
         assertExecutable(offer, now, 900);
         const landed = landedTotal(offer, input.grant.execution.maxAmount);
@@ -371,16 +380,32 @@ export function createBookingActivities(
           };
         orderId = order.providerOrderId;
       }
-      const travelers = await deps.travelers.resolve({
-        groupId: input.grant.groupId,
-        refs: input.travelerRefs,
-        purpose: `booking:${input.bookingId}`,
-      });
-      const out = await port.book({
-        offer,
-        travelers,
-        idempotencyKey: input.idempotencyKey,
-      });
+      let out;
+      try {
+        const travelers = await deps.travelers.resolve({
+          groupId: input.grant.groupId,
+          refs: input.travelerRefs,
+          purpose: `booking:${input.bookingId}`,
+        });
+        out = await port.book({
+          offer,
+          travelers,
+          idempotencyKey: input.idempotencyKey,
+        });
+      } catch {
+        out = {
+          status: 'UNKNOWN' as const,
+          reason: 'PROVIDER_BOOKING_OUTCOME_UNKNOWN',
+        };
+      }
+      if (out.status === 'FAILED' || out.status === 'UNKNOWN')
+        out = {
+          ...out,
+          reason:
+            out.status === 'FAILED'
+              ? 'PROVIDER_BOOKING_FAILED'
+              : 'PROVIDER_RECONCILIATION_REQUIRED',
+        };
       if (orderId && deps.fabric) {
         if (out.status === 'FAILED')
           await deps.fabric.transition(orderId, 'FAILED', {
@@ -417,14 +442,17 @@ export function createBookingActivities(
           if (o)
             await deps.fabric.markFailed(
               o.providerOrderId,
-              clean(found.reason),
+              'PROVIDER_RECONCILIATION_REQUIRED',
             );
         }
         if (found.status === 'FAILED' || found.status === 'UNKNOWN')
-          return { status: 'UNKNOWN', reason: clean(found.reason) };
+          return {
+            status: 'UNKNOWN',
+            reason: 'PROVIDER_RECONCILIATION_REQUIRED',
+          };
         return found;
-      } catch (e) {
-        return { status: 'UNKNOWN', reason: clean((e as Error).message) };
+      } catch {
+        return { status: 'UNKNOWN', reason: 'PROVIDER_LOOKUP_UNAVAILABLE' };
       }
     },
 
@@ -566,7 +594,16 @@ export function createBookingActivities(
       const port = deps.ports[offer.fulfillmentProviderId];
       if (!port)
         return { confirmed: false, refund: null, reason: 'no booking port' };
-      const c = await port.cancel({ offer, providerRef });
+      let c;
+      try {
+        c = await port.cancel({ offer, providerRef });
+      } catch {
+        return {
+          confirmed: false,
+          refund: null,
+          reason: 'PROVIDER_CANCELLATION_OUTCOME_UNKNOWN',
+        };
+      }
       if (c.confirmed && c.refund) {
         const reservation = await deps.reservations.get(reservationId);
         if (reservation && BigInt(reservation.captured) > 0n) {
@@ -595,7 +632,10 @@ export function createBookingActivities(
             });
         }
       }
-      return { ...c, reason: c.reason ? clean(c.reason) : null };
+      return {
+        ...c,
+        reason: c.reason ? 'PROVIDER_CANCELLATION_DETAILS_REDACTED' : null,
+      };
     },
   };
 }

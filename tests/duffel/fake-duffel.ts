@@ -20,6 +20,9 @@ export class FakeDuffel {
   readonly faults = new Map<string, Fault>();
   private seq = 0;
   quotePrice = '240.00';
+  /** Hold window for `type: hold` orders (seconds). */
+  holdSeconds = 3 * 86_400;
+  readonly payments: string[] = [];
   offerPrice = '312.40';
   constructor(readonly now: () => number = () => 1_780_000_000) {}
 
@@ -280,17 +283,44 @@ export class FakeDuffel {
       const f = this.fault('order');
       if (f?.kind === 'HTTP_500_BEFORE_COMMIT')
         return this.reply(500, { errors: [{ code: 'internal_server_error' }] });
+      const hold = body?.type === 'hold';
+      const iso = (s: number) => new Date(s * 1000).toISOString();
       const order: Json = {
         id: this.id('ord'),
         booking_reference: `ZZ${this.seq}`,
-        total_amount: (body?.payments as Json[])[0]!.amount,
+        total_amount: hold
+          ? this.offerPrice
+          : (body?.payments as Json[])[0]!.amount,
         total_currency: 'GBP',
         cancelled_at: null,
         metadata: body?.metadata ?? null,
+        payment_status: hold
+          ? {
+              awaiting_payment: true,
+              payment_required_by: iso(this.now() + this.holdSeconds),
+              price_guarantee_expires_at: iso(
+                this.now() + this.holdSeconds / 2,
+              ),
+            }
+          : {
+              awaiting_payment: false,
+              payment_required_by: null,
+              price_guarantee_expires_at: null,
+            },
       };
       this.orders.set(String(order.id), order);
       if (f?.kind === 'TIMEOUT_AFTER_COMMIT') throw new Error('ETIMEDOUT');
       return ok(order);
+    }
+    if (init.method === 'POST' && p === '/air/payments') {
+      const o = this.orders.get(String(body?.order_id));
+      if (!o) return this.reply(404, { errors: [{ code: 'not_found' }] });
+      const ps = o.payment_status as Json;
+      if (Date.parse(String(ps.payment_required_by)) / 1000 <= this.now())
+        return this.reply(422, { errors: [{ code: 'order_expired' }] });
+      o.payment_status = { ...ps, awaiting_payment: false };
+      this.payments.push(String(body?.order_id));
+      return ok({ id: this.id('pay'), amount: (body?.payment as Json).amount });
     }
     if (init.method === 'GET' && p === '/air/orders')
       return ok([...this.orders.values()], {});

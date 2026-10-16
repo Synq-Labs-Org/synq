@@ -1,4 +1,9 @@
 import {
+  attemptFingerprint,
+  MemoryDuffelAttempts,
+  type DuffelAttemptStore,
+} from './attempts.js';
+import {
   providerMoney,
   toDecimal,
   type EconomicOffer,
@@ -77,6 +82,12 @@ function stayCharged(booking: Json): Money | null {
 
 function stayOutcome(b: Json): BookingOutcome {
   const status = str(b.status) ?? 'unknown';
+  if (!str(b.id) || !['confirmed', 'cancelled'].includes(status))
+    return {
+      status: 'UNKNOWN',
+      detail: 'stay not confirmed by provider',
+      requestId: null,
+    };
   const common = {
     providerRef: String(b.id),
     reference: str(b.reference) ?? null,
@@ -89,6 +100,12 @@ function stayOutcome(b: Json): BookingOutcome {
 }
 
 function orderOutcome(o: Json): BookingOutcome {
+  if (!str(o.id) || obj(o.payment_status).awaiting_payment === true)
+    return {
+      status: 'UNKNOWN',
+      detail: 'order not confirmed paid by provider',
+      requestId: null,
+    };
   const common = {
     providerRef: String(o.id),
     reference: str(o.booking_reference) ?? null,
@@ -112,7 +129,29 @@ export class DuffelBookingExecutor {
   constructor(
     private readonly client: DuffelClient,
     private readonly maxPages = 5,
+    private readonly attempts: DuffelAttemptStore = new MemoryDuffelAttempts(),
   ) {}
+
+  async acquireAttempt(key: string, binding: unknown): Promise<boolean> {
+    if (this.client.evidence === 'PROVIDER_SANDBOX' && !this.attempts.durable)
+      throw new DuffelError(
+        'DEFINITIVE',
+        null,
+        'DURABLE_STORE_REQUIRED',
+        null,
+        'booking writes require a persistent attempt fence',
+      );
+    const status = await this.attempts.claim(key, attemptFingerprint(binding));
+    if (status === 'CONFLICT')
+      throw new DuffelError(
+        'DEFINITIVE',
+        null,
+        'IDEMPOTENCY_CONFLICT',
+        null,
+        'booking key has different terms',
+      );
+    return status === 'NEW';
+  }
 
   private async findByKey(path: string, key: string): Promise<Json | null> {
     let after: string | undefined;
@@ -147,6 +186,11 @@ export class DuffelBookingExecutor {
     return o ? orderOutcome(o) : null;
   }
 
+  async findHeldOrder(key: string): Promise<HeldOrderState | null> {
+    const o = await this.findByKey('/air/orders', key);
+    return o ? heldState(o) : null;
+  }
+
   async bookStay(input: {
     quoteId: string;
     guests: TravelerPii[];
@@ -154,8 +198,18 @@ export class DuffelBookingExecutor {
   }): Promise<BookingOutcome> {
     const lead = input.guests[0];
     if (!lead) return { status: 'FAILED', code: 'NO_GUESTS', requestId: null };
+    const fresh = await this.acquireAttempt(`stay:${input.idempotencyKey}`, {
+      quoteId: input.quoteId,
+      travelers: input.guests,
+    });
     const existing = await this.findStayBooking(input.idempotencyKey);
     if (existing) return existing;
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior attempt requires provider reconciliation',
+        requestId: null,
+      };
     try {
       const r = await this.client.request<Json>('POST', '/stays/bookings', {
         quote_id: input.quoteId,
@@ -187,8 +241,27 @@ export class DuffelBookingExecutor {
       !input.passengers.length
     )
       return { status: 'FAILED', code: 'PASSENGER_MISMATCH', requestId: null };
+    if (
+      input.amount.amount !==
+        providerMoney(input.amountDecimal, input.amount.currency).amount ||
+      BigInt(input.amount.amount) <= 0n
+    )
+      return { status: 'FAILED', code: 'AMOUNT_MISMATCH', requestId: null };
+    const fresh = await this.acquireAttempt(`order:${input.idempotencyKey}`, {
+      type: 'instant',
+      offerId: input.offerId,
+      passengerIds: input.passengerIds,
+      travelers: input.passengers,
+      amount: input.amount,
+    });
     const existing = await this.findFlightOrder(input.idempotencyKey);
     if (existing) return existing;
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior attempt requires provider reconciliation',
+        requestId: null,
+      };
     try {
       const r = await this.client.request<Json>('POST', '/air/orders', {
         type: 'instant',
@@ -207,7 +280,7 @@ export class DuffelBookingExecutor {
           {
             type: 'balance',
             currency: input.amount.currency,
-            amount: input.amountDecimal,
+            amount: toDecimal(input.amount),
           },
         ],
         metadata: { [IDEMPOTENCY_METADATA_KEY]: input.idempotencyKey },
@@ -287,6 +360,210 @@ export class DuffelBookingExecutor {
           : null,
       refundTo: str(r.data.refund_to) ?? null,
     };
+  }
+}
+
+/** An unpaid Duffel hold order: seats held until `paymentRequiredBy`. */
+export type HeldOrderState = {
+  orderId: string;
+  reference: string | null;
+  total: Money;
+  awaitingPayment: boolean;
+  cancelled: boolean;
+  /** Epoch seconds; null when the provider gave no deadline. */
+  paymentRequiredBy: number | null;
+  priceGuaranteeExpiresAt: number | null;
+};
+
+export type HoldOutcome =
+  | ({ status: 'HELD' } & HeldOrderState)
+  | Extract<BookingOutcome, { status: 'FAILED' | 'UNKNOWN' }>;
+
+export type HoldPaymentDecision =
+  | { action: 'PAY'; amount: Money }
+  /** The hold lapsed (or is about to): never pay; release the reservation and re-quote. */
+  | { action: 'EXPIRED'; reason: string }
+  /** The fare is no longer the approved one: a fresh approval is required first. */
+  | { action: 'REAPPROVE'; reason: string; current: Money };
+
+const epoch = (v: unknown) => {
+  const s = str(v);
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+};
+
+function heldState(o: Json): HeldOrderState {
+  const ps = obj(o.payment_status);
+  return {
+    orderId: String(o.id),
+    reference: str(o.booking_reference) ?? null,
+    total: providerMoney(
+      String(o.total_amount),
+      str(o.total_currency) ?? 'USD',
+    ),
+    awaitingPayment: ps.awaiting_payment === true,
+    cancelled: !!o.cancelled_at,
+    paymentRequiredBy: epoch(ps.payment_required_by),
+    priceGuaranteeExpiresAt: epoch(ps.price_guarantee_expires_at),
+  };
+}
+
+/**
+ * Whether a held order may be paid now. A lapsed (or nearly lapsed) hold is
+ * never paid; a total that differs from the approved fare needs a fresh
+ * approval. `current` must be re-read from the provider just before paying.
+ */
+export function holdPaymentDecision(input: {
+  hold: Pick<
+    HeldOrderState,
+    'paymentRequiredBy' | 'cancelled' | 'awaitingPayment'
+  >;
+  current: Money;
+  approved: Money;
+  now: number;
+  safetySeconds?: number;
+}): HoldPaymentDecision {
+  const { hold, current, approved } = input;
+  if (
+    !Number.isSafeInteger(input.now) ||
+    !Number.isSafeInteger(input.safetySeconds ?? 120) ||
+    (input.safetySeconds ?? 120) < 0 ||
+    !Number.isSafeInteger(hold.paymentRequiredBy)
+  )
+    return { action: 'EXPIRED', reason: 'invalid hold time' };
+  if (hold.cancelled || !hold.awaitingPayment)
+    return { action: 'EXPIRED', reason: 'hold is no longer awaiting payment' };
+  if (hold.paymentRequiredBy === null)
+    return {
+      action: 'EXPIRED',
+      reason: 'hold has no payment deadline; re-quote',
+    };
+  if (input.now + (input.safetySeconds ?? 120) >= hold.paymentRequiredBy)
+    return {
+      action: 'EXPIRED',
+      reason: 'hold payment deadline passed or too close',
+    };
+  if (
+    current.currency !== approved.currency ||
+    current.decimals !== approved.decimals ||
+    current.amount !== approved.amount
+  )
+    return {
+      action: 'REAPPROVE',
+      reason: `held fare ${current.amount} ${current.currency} differs from approved ${approved.amount} ${approved.currency}`,
+      current,
+    };
+  return { action: 'PAY', amount: current };
+}
+
+export class DuffelHoldExecutor {
+  constructor(
+    private readonly client: DuffelClient,
+    private readonly orders: DuffelBookingExecutor,
+  ) {}
+
+  /** Creates (once per idempotency key) an unpaid hold order; no payment is sent. */
+  async holdFlight(input: {
+    offerId: string;
+    passengerIds: string[];
+    passengers: TravelerPii[];
+    idempotencyKey: string;
+  }): Promise<HoldOutcome> {
+    if (
+      input.passengers.length !== input.passengerIds.length ||
+      !input.passengers.length
+    )
+      return { status: 'FAILED', code: 'PASSENGER_MISMATCH', requestId: null };
+    const fresh = await this.orders.acquireAttempt(
+      `order:${input.idempotencyKey}`,
+      {
+        type: 'hold',
+        offerId: input.offerId,
+        passengerIds: input.passengerIds,
+        travelers: input.passengers,
+      },
+    );
+    const prior = await this.orders.findHeldOrder(input.idempotencyKey);
+    if (prior) return { status: 'HELD', ...prior };
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior hold attempt requires reconciliation',
+        requestId: null,
+      };
+    try {
+      const r = await this.client.request<Json>('POST', '/air/orders', {
+        type: 'hold',
+        selected_offers: [input.offerId],
+        passengers: input.passengers.map((p, i) => ({
+          id: input.passengerIds[i],
+          given_name: p.givenName,
+          family_name: p.familyName,
+          born_on: p.bornOn,
+          email: p.email,
+          phone_number: p.phone,
+          title: p.title ?? 'mr',
+          gender: p.gender ?? 'm',
+        })),
+        metadata: { [IDEMPOTENCY_METADATA_KEY]: input.idempotencyKey },
+      });
+      return { status: 'HELD', ...heldState(r.data) };
+    } catch (error) {
+      const f = failure(error);
+      return f.status === 'FAILED' || f.status === 'UNKNOWN'
+        ? f
+        : {
+            status: 'UNKNOWN',
+            detail: 'unexpected hold outcome',
+            requestId: null,
+          };
+    }
+  }
+
+  async status(orderId: string): Promise<HeldOrderState> {
+    const r = await this.client.request<Json>(
+      'GET',
+      `/air/orders/${encodeURIComponent(orderId)}`,
+    );
+    return heldState(r.data);
+  }
+
+  /** Pays a hold only if it is still open and still at the approved fare. */
+  async payHeld(input: {
+    orderId: string;
+    approved: Money;
+    now: number;
+  }): Promise<{ decision: HoldPaymentDecision; paymentId: string | null }> {
+    const st = await this.status(input.orderId);
+    const decision = holdPaymentDecision({
+      hold: st,
+      current: st.total,
+      approved: input.approved,
+      now: input.now,
+    });
+    if (decision.action !== 'PAY') return { decision, paymentId: null };
+    const fresh = await this.orders.acquireAttempt(
+      `payment:${input.orderId}`,
+      input.approved,
+    );
+    if (!fresh)
+      return {
+        decision: {
+          action: 'EXPIRED',
+          reason: 'prior payment attempt requires reconciliation',
+        },
+        paymentId: null,
+      };
+    const r = await this.client.request<Json>('POST', '/air/payments', {
+      order_id: input.orderId,
+      payment: {
+        type: 'balance',
+        currency: decision.amount.currency,
+        amount: toDecimal(decision.amount),
+      },
+    });
+    return { decision, paymentId: str(r.data.id) ?? null };
   }
 }
 

@@ -264,6 +264,8 @@ export class LithicSandboxClient {
     duration: 'TRANSACTION' | 'MONTHLY' | 'ANNUALLY' | 'FOREVER';
     memo: string;
     idempotencyKey: string;
+    /** SINGLE_USE closes after one authorization; MERCHANT_LOCKED binds to the first merchant. */
+    type?: 'VIRTUAL' | 'SINGLE_USE' | 'MERCHANT_LOCKED';
   }): Promise<{ card: LithicCard; secret: CardSecret | null }> {
     if (!Number.isInteger(input.spendLimitCents) || input.spendLimitCents <= 0)
       throw new LithicError(0, 'spend limit must be positive cents');
@@ -274,7 +276,7 @@ export class LithicSandboxClient {
         'POST',
         '/cards',
         {
-          type: 'VIRTUAL',
+          type: input.type ?? 'VIRTUAL',
           memo: input.memo,
           spend_limit: input.spendLimitCents,
           spend_limit_duration: input.duration,

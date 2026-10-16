@@ -10,3 +10,4 @@ export * from './lithic.js';
 export * from './reloadly.js';
 export * from './bitrefill.js';
 export * from './fabric-capabilities.js';
+export * from './journey.js';

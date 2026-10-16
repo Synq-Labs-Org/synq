@@ -44,6 +44,21 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 export const ECONOMIC_GRANT_KEY_ENV = 'SYNQ_ECONOMIC_GRANT_KEY';
 
+/**
+ * The only traveler fields the booking worker decrypts. Passport data stays
+ * sealed: Duffel test orders do not need it, and nothing decrypted here is
+ * ever placed in workflow state, receipts, logs or model context.
+ */
+export const BOOKING_TRAVELER_FIELDS = [
+  'givenName',
+  'familyName',
+  'bornOn',
+  'email',
+  'phone',
+  'title',
+  'gender',
+] as const;
+
 export type CommerceIdentityPorts = {
   ledger: ApprovalLedger;
   directory: MembershipDirectory;
@@ -297,15 +312,7 @@ export async function openCommerceRuntime(options: {
               ref,
               kind: 'TRAVELER',
               purpose,
-              fields: [
-                'givenName',
-                'familyName',
-                'bornOn',
-                'email',
-                'phone',
-                'title',
-                'gender',
-              ],
+              fields: BOOKING_TRAVELER_FIELDS,
             }),
           ),
         );

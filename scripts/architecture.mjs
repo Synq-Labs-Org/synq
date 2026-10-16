@@ -500,13 +500,15 @@ export function checkArchitecture(root) {
         if (
           BRAIN_ZONE.test(pkg.dir) &&
           (PLANNER_FORBIDDEN_MODULES.test(specifier) ||
+            // Traveler, shipping and gift-code plaintext never reaches a model prompt.
+            /^@synq\/profile-vault(\/.*)?$/.test(specifier) ||
             (target !== null &&
               /^(workers\/execution|packages\/(identity|wallet-core)|contracts)$/.test(
                 target,
               )))
         )
           errors.push(
-            `${name}: Brain zone imports signer, identity or execution-secret module ${specifier}`,
+            `${name}: Brain zone imports signer, identity, ProfileVault or execution-secret module ${specifier}`,
           );
         if (
           deterministic &&
