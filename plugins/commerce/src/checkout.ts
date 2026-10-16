@@ -123,7 +123,16 @@ export type Considered = {
  * is simulated; nothing is ever reported as placed unless a sandbox placed it.
  */
 export class CommerceExecutionRouter {
-  constructor(private readonly routes: readonly CheckoutRoute[]) {}
+  /**
+   * `fallback: 'HANDOFF'` (the live journey) never simulates: a merchant the
+   * account is not entitled to order from, or a route without sandbox access,
+   * ends in a transparent human handoff. The default keeps the fixture
+   * behaviour of labelling the best supported route SIMULATED.
+   */
+  constructor(
+    private readonly routes: readonly CheckoutRoute[],
+    private readonly options: { fallback?: 'SIMULATE' | 'HANDOFF' } = {},
+  ) {}
 
   decide(
     offer: EconomicOffer,
@@ -168,6 +177,12 @@ export class CommerceExecutionRouter {
       );
       supported ??= route;
     }
+    if (supported && this.options.fallback === 'HANDOFF')
+      return {
+        kind: 'HANDOFF',
+        considered,
+        reason: `no entitled, executable checkout for this merchant (${supported.providerId}: ${supported.capability.status}); a human completes the purchase`,
+      };
     if (supported)
       return {
         kind: 'SIMULATE',

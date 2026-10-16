@@ -174,12 +174,13 @@ export function settlementFabricCapabilities(
       economicEffect: 'TESTNET_TOKENS',
       cancel: { supported: false },
       refund: { supported: false },
-      // Staging Amazon orders fail upstream (Crossmint staging cannot reach the Amazon Business API).
+      // Crossmint WorldStore (headless physical checkout) is deprecated and refuses
+      // every order (HTTP 400, re-verified 2026-10-16); Agent Checkouts has no staging.
       health: observed[CROSSMINT]?.health ?? 'DOWN',
       partnerGated: false,
       statusReason:
         observed[CROSSMINT]?.reason ??
-        'BLOCKED_EXTERNAL: Crossmint staging Amazon lookup returns upstream 403',
+        'BLOCKED_EXTERNAL: Crossmint WorldStore is deprecated and accepts no orders (HTTP 400); Agent Checkouts has no staging',
       sourceRefs: [
         'https://docs.crossmint.com/api-reference/headless/create-order',
       ],

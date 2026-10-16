@@ -166,13 +166,29 @@ export function rankCandidates(
   }));
 }
 
+/**
+ * Identity of what is actually sold under a listing ref: a used or
+ * different-variant offer on the same ASIN/listing is a different offer and
+ * must never be merged into (and replace) the exact one.
+ */
+function offerIdentity(o: EconomicOffer): string {
+  if (o.subject.kind !== 'PRODUCT') return '';
+  const s = o.subject;
+  const variant = Object.entries(s.variant)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${String(v).toLowerCase()}`)
+    .join(',');
+  return `${s.condition}|${variant}|${(s.seller ?? '').toLowerCase()}|${s.quantity}`;
+}
+
 /** Merges the same fulfillable offer seen by several discovery sources, keeping every source. */
 export function dedupeOffers(
   offers: readonly EconomicOffer[],
 ): EconomicOffer[] {
   const byKey = new Map<string, EconomicOffer>();
   for (const o of offers) {
-    const key = `${o.fulfillmentProviderId}|${o.providerRef}`;
+    const key = `${o.fulfillmentProviderId}|${o.providerRef}|${offerIdentity(o)}`;
     const prior = byKey.get(key);
     if (!prior) {
       byKey.set(key, o);
