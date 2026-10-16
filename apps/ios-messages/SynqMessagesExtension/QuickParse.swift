@@ -600,6 +600,11 @@ enum TripFormat {
         return "\(format(a, "MMM d")) – \(format(b, "MMM d"))"
     }
 
+    /// "Dec 12, 10:24" (UTC) for a Unix time in seconds.
+    static func stamp(_ seconds: Int) -> String {
+        format(Date(timeIntervalSince1970: TimeInterval(seconds)), "MMM d, HH:mm")
+    }
+
     static func travellers(_ n: Int) -> String { n == 1 ? "1 traveller" : "\(n) travellers" }
 
     /// "DEL → GOI · Dec 1–5 · 3 travellers"

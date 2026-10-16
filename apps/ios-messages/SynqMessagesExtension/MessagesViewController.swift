@@ -17,6 +17,8 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         case legacy
     }
 
+    /// The one place the look is chosen: every screen and card reads it from the environment.
+    private let theme: any SynqTheme = SynqThemes.all[0]
     private let config = SynqConfig.fromBundle()
     private lazy var model = FundModel(client: FundClient(host: config.webHost))
     private let book = FundBook()
@@ -28,6 +30,11 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
     private var errorText: String?
 
     // MARK: Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        SynqFonts.register()
+    }
 
     override func willBecomeActive(with conversation: MSConversation) {
         super.willBecomeActive(with: conversation)
@@ -52,11 +59,10 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         render()
     }
 
-    /// Height of the live layout bubble in the transcript: the landscape holo card
-    /// in its dark scene, capped so a bubble never dominates the conversation.
+    /// Height of the live layout bubble in the transcript: the card with its art
+    /// strip, capped so a bubble never dominates the conversation.
     override func contentSizeThatFits(_ size: CGSize) -> CGSize {
-        CGSize(width: size.width,
-               height: min(mode == .legacy ? 168 : HoloBubbleScene.height(forWidth: size.width), size.height))
+        CGSize(width: size.width, height: min(SynqCardBubble.height(forWidth: size.width), size.height))
     }
 
     /// Stable per-device identifier for a conversation; the extension cannot read
@@ -145,9 +151,10 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         }
         view = AnyView(view
             .environment(\.synqCompact, presentationStyle == .compact)
+            .environment(\.synqTheme, theme)
             .preferredColorScheme(.dark))
         let controller = UIHostingController(rootView: view)
-        controller.view.backgroundColor = UIColor(red: 0.02, green: 0.02, blue: 0.035, alpha: 1)
+        controller.view.backgroundColor = UIColor(theme.colors.background)
         hosted?.willMove(toParent: nil)
         hosted?.view.removeFromSuperview()
         hosted?.removeFromParent()
