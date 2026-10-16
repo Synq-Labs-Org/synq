@@ -6,3 +6,4 @@ export * from './specialists.js';
 export * from './awareness.js';
 
 export * from './registration.js';
+export * from './cards.js';

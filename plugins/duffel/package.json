@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@synq/offer-exchange": "workspace:*",
+    "@synq/schemas": "workspace:*",
     "zod": "4.6.5"
   }
 }

@@ -17,6 +17,7 @@ import {
   type ChatContextService,
 } from './context.js';
 import {
+  InteractiveCardSchema,
   ReviewPathSchema,
   type CardResolution,
   type InteractiveCard,
@@ -116,7 +117,14 @@ export type DealDraftRequest = {
   runId: string;
 };
 export type DealDraftReply =
-  | { status: 'DRAFTED'; dealId: string; summary: string; url: string }
+  | {
+      status: 'DRAFTED';
+      dealId: string;
+      summary: string;
+      url: string;
+      /** Optional DEAL_PROPOSAL card; sent as the reply's image when valid. */
+      card?: InteractiveCard;
+    }
   | { status: 'REFUSED'; reason: string };
 
 export type GuestReplyInput = {
@@ -223,6 +231,10 @@ export type TeamRequest = {
 export type DirectReply = {
   text: string;
   buttons?: OutboundMessage['buttons'];
+  /** Card image for the reply itself (Telegram sends it as the photo). */
+  card?: InteractiveCard;
+  /** Further cards posted after the reply, each as its own card message. */
+  followUps?: InteractiveCard[];
   /** Track the posted reply under this key so `updateStatus` can edit it. */
   trackAs?: string | null;
 };
@@ -952,10 +964,23 @@ export class ChannelGateway {
         runId: `team_${envelope.channel}_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`,
         origin: 'CHAT',
       });
-      return this.replyOutcome(envelope, 'HANDLED', 'TEAM_ANSWERED', {
-        text: reply.text,
-        ...(reply.buttons ? { buttons: reply.buttons } : {}),
-      });
+      const outcome = await this.replyOutcome(
+        envelope,
+        'HANDLED',
+        'TEAM_ANSWERED',
+        {
+          text: reply.text,
+          ...(reply.buttons ? { buttons: reply.buttons } : {}),
+          ...(reply.card ? { card: reply.card } : {}),
+        },
+      );
+      for (const card of reply.followUps ?? [])
+        await this.post(
+          envelope.channel,
+          envelope.externalGroupId,
+          this.cardMessage(envelope.channel, card),
+        );
+      return outcome;
     }
     if (parsed.kind === 'TEXT')
       return this.brain(
@@ -1056,8 +1081,15 @@ export class ChannelGateway {
       const sent = await adapter.send(envelope.externalGroupId, {
         text: reply.text,
         ...(reply.buttons ? { buttons: reply.buttons } : {}),
+        ...(reply.card ? { card: reply.card } : {}),
         replyTo: envelope.messageId,
       });
+      for (const card of reply.followUps ?? [])
+        await this.post(
+          envelope.channel,
+          envelope.externalGroupId,
+          this.cardMessage(envelope.channel, card),
+        );
       if (reply.trackAs)
         this.track(
           reply.trackAs,
@@ -1089,8 +1121,19 @@ export class ChannelGateway {
   private async teamReply(input: TeamRequest): Promise<DirectReply> {
     try {
       const view = await this.options.ports.team!(input);
+      // Agent recommendation goes with the answer; a risk hold follows it.
+      const cards = (view.cards ?? [])
+        .map((c) => validCard(c, 'AGENT_RECOMMENDATION', 'RISK_HOLD'))
+        .flatMap((c) => ('card' in c ? [c.card] : []))
+        .slice(0, 2);
+      const main =
+        cards.find((c) => c.type === 'AGENT_RECOMMENDATION') ?? cards[0];
       return {
         text: renderTeamReply(view),
+        ...(main ? { card: main } : {}),
+        ...(cards.length > 1
+          ? { followUps: cards.filter((c) => c !== main) }
+          : {}),
         ...(view.approval
           ? {
               buttons: [
@@ -1919,6 +1962,7 @@ export class ChannelGateway {
         'Nothing is agreed yet: each party reviews and signs the exact version in their own wallet. A chat reply never signs or funds anything.',
       ].join('\n'),
       buttons: [{ label: 'Review and sign', url: reply.url }],
+      ...validCard(reply.card, 'DEAL_PROPOSAL'),
     });
   }
 
@@ -2150,6 +2194,18 @@ export class ChannelGateway {
       return false;
     }
   }
+}
+
+/** A port-supplied card, only when it parses as the expected canonical type. */
+function validCard(
+  card: unknown,
+  ...types: InteractiveCard['type'][]
+): { card: InteractiveCard } | Record<string, never> {
+  if (card === undefined) return {};
+  const parsed = InteractiveCardSchema.safeParse(card);
+  return parsed.success && types.includes(parsed.data.type)
+    ? { card: parsed.data }
+    : {};
 }
 
 function reviewPath(a: ApprovalSummary) {

@@ -106,7 +106,12 @@ async function handle(reply: FastifyReply, run: () => Promise<unknown>) {
 export function registerFundRoutes(
   app: FastifyInstance,
   funds: FundService,
-  extras: { assistant?: FundAssistant; trips?: TripService } = {},
+  extras: {
+    assistant?: FundAssistant;
+    trips?: TripService;
+    /** Origin for card links; defaults to the request's own origin. */
+    webBaseUrl?: string;
+  } = {},
 ) {
   const fundIdOf = (request: { params: unknown }) =>
     FundId.parse((request.params as { fundId: string }).fundId);
@@ -147,6 +152,23 @@ export function registerFundRoutes(
           (request.params as { tripId: string }).tripId,
         );
         return trips.get(fundIdOf(request), q.k, tripId, q.v ?? null);
+      }),
+    );
+    // Read-only: the flight trip as a FLIGHT_COMPARISON card for chat surfaces.
+    app.get('/v1/funds/:fundId/trips/:tripId/card', (request, reply) =>
+      handle(reply, async () => {
+        const q = ReadQuery.parse(request.query);
+        const tripId = TripId.parse(
+          (request.params as { tripId: string }).tripId,
+        );
+        return {
+          card: await trips.card(
+            fundIdOf(request),
+            q.k,
+            tripId,
+            extras.webBaseUrl ?? `${request.protocol}://${request.host}`,
+          ),
+        };
       }),
     );
     app.post('/v1/funds/:fundId/trips/:tripId/votes', (request, reply) =>

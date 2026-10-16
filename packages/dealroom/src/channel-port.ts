@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { StructuredReasoner } from '@synq/agent-runtime';
+import type { CardExecutionMode, CardOf } from '@synq/schemas';
+import { dealProposalCard } from './cards.js';
 import { decimalOf } from './draft.js';
 import {
   contextFromEnrolled,
@@ -46,7 +48,14 @@ export type ChatDealRequest = Readonly<{
 }>;
 
 export type ChatDealReply =
-  | { status: 'DRAFTED'; dealId: string; summary: string; url: string }
+  | {
+      status: 'DRAFTED';
+      dealId: string;
+      summary: string;
+      url: string;
+      /** The drafted version as a card (when `cards` is configured). */
+      card?: CardOf<'DEAL_PROPOSAL'>;
+    }
   | { status: 'REFUSED'; reason: string };
 
 /** Resolves a chat participant to a verified party (wallet-linked), or null. */
@@ -118,6 +127,12 @@ export function dealDraftPort(deps: {
   now: () => number;
   linkTtlSeconds?: number;
   reasoner: StructuredReasoner | null;
+  /**
+   * Reply with a DEAL_PROPOSAL card. `executionMode` is this deployment's
+   * evidence label (LIVE_ARC_TESTNET against Arc testnet, LOCAL_FIXTURE in
+   * local runs); the card's only action is the review link.
+   */
+  cards?: { executionMode: CardExecutionMode; groupLabel?: string };
 }) {
   return async (input: ChatDealRequest): Promise<ChatDealReply> => {
     const refuse = (reason: string): ChatDealReply => ({
@@ -214,19 +229,41 @@ export function dealDraftPort(deps: {
           : []),
       ].join('\n');
       const id = view.deal.dealId;
+      const url = `${deps.webBaseUrl.replace(/\/$/, '')}/deal/${id}?t=${dealLinkToken(
+        deps.linkKey,
+        id,
+        {
+          expiresAt:
+            deps.now() + (deps.linkTtlSeconds ?? DEAL_LINK_TTL_SECONDS),
+          epoch: view.deal.linkEpoch ?? 0,
+        },
+      )}`;
       return {
         status: 'DRAFTED',
         dealId: id,
         summary,
-        url: `${deps.webBaseUrl.replace(/\/$/, '')}/deal/${id}?t=${dealLinkToken(
-          deps.linkKey,
-          id,
-          {
-            expiresAt:
-              deps.now() + (deps.linkTtlSeconds ?? DEAL_LINK_TTL_SECONDS),
-            epoch: view.deal.linkEpoch ?? 0,
-          },
-        )}`,
+        url,
+        ...(deps.cards
+          ? {
+              card: dealProposalCard(view, {
+                groupId: input.groupId ?? deps.workspaceId,
+                groupLabel: deps.cards.groupLabel ?? 'Deal Room',
+                issuedAt: deps.now(),
+                executionMode: deps.cards.executionMode,
+                actions:
+                  url.length <= 2048
+                    ? [
+                        {
+                          kind: 'REVIEW_APPROVE',
+                          label: 'Review and sign',
+                          url,
+                          style: 'PRIMARY',
+                        },
+                      ]
+                    : [],
+              }),
+            }
+          : {}),
       };
     } catch (e) {
       if (e instanceof DealRoomError) return refuse(e.message);

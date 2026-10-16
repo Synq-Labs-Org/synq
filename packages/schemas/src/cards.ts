@@ -601,3 +601,45 @@ export const CardResolutionSchema = z.discriminatedUnion('status', [
   }),
 ]);
 export type CardResolution = z.output<typeof CardResolutionSchema>;
+
+/** What a source package needs, besides its own domain object, to build an Arc-era card. */
+export type ArcCardContext = Readonly<{
+  /** Group or workspace the card belongs to. */
+  groupId: string;
+  groupLabel: string;
+  /** Unix seconds the card is built (defaults to `observedAt`). */
+  issuedAt?: number;
+  /** Execution evidence label of the deployment that produced the facts. */
+  executionMode: CardExecutionMode;
+  /** Authenticated-page links only; a card action never approves. */
+  actions?: readonly CardAction[];
+}>;
+
+/** Clips free text to a card line (whitespace collapsed, ellipsis when cut). */
+export function cardLine(text: string, max: number): string {
+  const s = text.replace(/\s+/g, ' ').trim();
+  return s.length <= max ? s || '-' : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+/** A card reference id from any id (characters outside the card id alphabet become `_`). */
+export function cardRef(id: string): string {
+  const s = id.replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 128);
+  return /^[a-zA-Z0-9]/.test(s) ? s : `r${s.slice(0, 127)}`;
+}
+
+/** Common fields of an Arc-era card; `parts` fix its id. */
+export function arcCardBase(
+  ctx: ArcCardContext,
+  observedAt: number,
+  ...parts: (string | number | bigint)[]
+) {
+  return {
+    schema: CARD_SCHEMA,
+    cardId: cardIdOf(...parts),
+    groupId: cardRef(ctx.groupId),
+    groupLabel: cardLine(ctx.groupLabel, 120),
+    issuedAt: Math.max(ctx.issuedAt ?? observedAt, observedAt),
+    observedAt,
+    executionMode: ctx.executionMode,
+    actions: [...(ctx.actions ?? [])].slice(0, 4),
+  };
+}
