@@ -80,6 +80,7 @@ import { DurableKernel } from './kernel-runtime.js';
 import { indexedContributions } from '@synq/read-model';
 import { registerLithicWebhook } from './lithic-webhook.js';
 import { registerInvoiceCheckout } from './invoice-routes.js';
+import { registerDealRoom } from './deal-routes.js';
 
 export async function registerProductionSend(input: {
   app: FastifyInstance;
@@ -339,6 +340,8 @@ export async function startV1Server(env: NodeJS.ProcessEnv = process.env) {
   await registerLithicWebhook({ app, pool, env });
   // Arc invoice checkout: HMAC pay links, settlement only from Arc receipts.
   await registerInvoiceCheckout({ app, pool, env });
+  // Deal Room review and EIP-712 signing (view-only HMAC links).
+  await registerDealRoom({ app, pool, env });
   if (readModel && intents) {
     const kernel = intents instanceof DurableKernel ? intents.kernel : intents;
     const network = profileConfiguration(config.SYNQ_PROFILE).network;

@@ -1,0 +1,23 @@
+{
+  "name": "@synq/dealroom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./postgres": "./src/postgres.ts",
+    "./typed-data": "./src/typed-data.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/domain": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/ledger": "workspace:*",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
+  }
+}

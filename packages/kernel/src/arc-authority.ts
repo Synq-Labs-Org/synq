@@ -33,7 +33,19 @@ export const PAYMENT_PURPOSES = [
   /** A surplus distribution from a revenue split to an owner-chosen payee. */
   'OWNER_DISTRIBUTION',
 ] as const;
-export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+/**
+ * Milestone-escrow purposes. Kept apart from PAYMENT_PURPOSES so agent
+ * proposal schemas built from that list cannot name them: escrow intents are
+ * built only from a mutually signed Deal Room agreement (`./arc-escrow`).
+ */
+export const ESCROW_PURPOSES = [
+  'ESCROW_FUNDING',
+  'ESCROW_RELEASE',
+  'ESCROW_REFUND',
+] as const;
+export type PaymentPurpose =
+  | (typeof PAYMENT_PURPOSES)[number]
+  | (typeof ESCROW_PURPOSES)[number];
 
 export type PaymentMandate = Readonly<{
   mandateId: string;
@@ -493,6 +505,8 @@ function issueGrant(
 }
 
 export interface NonceFence {
+  /** Explicit revocation also prevents a resumable operation signing later steps. */
+  revoke?(nonce: Hex): Promise<boolean>;
   /** Atomically marks the nonce used; false when it already was. */
   consume(nonce: Hex): Promise<boolean>;
   /**

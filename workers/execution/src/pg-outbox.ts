@@ -201,6 +201,23 @@ export class PostgresGrantFence implements NonceFence {
     return consumeGrantRow(this.pool, grant, at);
   }
 
+  async revoke(nonce: Hex) {
+    return withTransaction(this.pool, async (c) => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+        `escrow-nonce:${nonce.toLowerCase()}`,
+      ]);
+      const r = await c.query(
+        'INSERT INTO synq_revoked_grants VALUES ($1) ON CONFLICT DO NOTHING RETURNING nonce',
+        [nonce.toLowerCase()],
+      );
+      await c.query(
+        'INSERT INTO synq_consumed_grants (grant_id,nonce,consumed_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+        [`revoked:${nonce.toLowerCase()}`, nonce.toLowerCase(), this.clock()],
+      );
+      return r.rows.length > 0;
+    });
+  }
+
   async consumed(grantId: string) {
     const r = await this.pool.query(
       'SELECT consumed_at FROM synq_consumed_grants WHERE grant_id=$1',

@@ -19,7 +19,9 @@
     "./council-payout": "./src/council-payout.ts",
     "./cctp-saga": "./src/cctp-saga.ts",
     "./pg-cctp-gateway": "./src/pg-cctp-gateway.ts",
-    "./vault-outbox": "./src/vault-outbox.ts"
+    "./vault-outbox": "./src/vault-outbox.ts",
+    "./escrow": "./src/escrow.ts",
+    "./pg-escrow": "./src/pg-escrow.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

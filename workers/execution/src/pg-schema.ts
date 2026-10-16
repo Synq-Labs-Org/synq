@@ -128,6 +128,23 @@ export const EXECUTION_MIGRATIONS: readonly Migration[] = [
       FOR EACH ROW EXECUTE FUNCTION synq_execution_no_delete();`,
     down: `DROP TABLE IF EXISTS synq_gateway_burn_intents; DROP TABLE IF EXISTS synq_gateway_deposits; DROP TABLE IF EXISTS synq_gateway_accounts;`,
   },
+  {
+    version: 5,
+    up: `CREATE TABLE synq_revoked_grants (nonce text PRIMARY KEY);
+    CREATE TRIGGER synq_revoked_grants_keep BEFORE UPDATE OR DELETE ON synq_revoked_grants FOR EACH ROW EXECUTE FUNCTION synq_execution_no_delete();
+    CREATE TABLE synq_escrow_admissions (
+      grant_id text PRIMARY KEY REFERENCES synq_consumed_grants(grant_id),
+      grant_data jsonb NOT NULL);
+    CREATE TABLE synq_escrow_signed_calls (
+      call_key text PRIMARY KEY, chain_id int NOT NULL, from_address text NOT NULL,
+      tx_nonce bigint NOT NULL, hash text NOT NULL UNIQUE, data jsonb NOT NULL,
+      UNIQUE (chain_id, from_address, tx_nonce));
+    CREATE TABLE synq_escrow_broadcasts (hash text PRIMARY KEY, data jsonb NOT NULL);
+    CREATE TRIGGER synq_escrow_admissions_keep BEFORE UPDATE OR DELETE ON synq_escrow_admissions FOR EACH ROW EXECUTE FUNCTION synq_execution_no_delete();
+    CREATE TRIGGER synq_escrow_signed_calls_keep BEFORE UPDATE OR DELETE ON synq_escrow_signed_calls FOR EACH ROW EXECUTE FUNCTION synq_execution_no_delete();
+    CREATE TRIGGER synq_escrow_broadcasts_keep BEFORE UPDATE OR DELETE ON synq_escrow_broadcasts FOR EACH ROW EXECUTE FUNCTION synq_execution_no_delete();`,
+    down: `DROP TABLE synq_escrow_broadcasts; DROP TABLE synq_escrow_signed_calls; DROP TABLE synq_escrow_admissions; DROP TABLE synq_revoked_grants;`,
+  },
 ];
 
 export const migrateExecution = (pool: SqlPool, target?: number) =>
