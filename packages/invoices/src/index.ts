@@ -53,6 +53,13 @@ export type InvoicePayment = Readonly<{
   payer: Address;
   amount: bigint;
   at: number;
+  /**
+   * How the payment was booked when applied: the part that settled the
+   * receivable and the excess owed back as a refund. Recorded so the exact
+   * ledger entry can be re-posted after a crash (absent on older records).
+   */
+  toReceivable?: bigint;
+  toRefund?: bigint;
 }>;
 
 export type Invoice = Readonly<{
@@ -629,30 +636,45 @@ export function applyPayment(
   const remaining = i.total - i.credited - paid;
   const status: InvoiceStatus =
     remaining > 0n ? 'PARTIALLY_PAID' : remaining === 0n ? 'PAID' : 'OVERPAID';
+  const record: InvoicePayment = {
+    key,
+    txHash: p.txHash,
+    logIndex: p.logIndex,
+    payer: p.payer,
+    amount: p.amount,
+    at: now,
+    toReceivable: toAr,
+    toRefund: excess,
+  };
   const invoice: Invoice = Object.freeze({
     ...i,
     status,
     paid,
-    payments: [
-      ...i.payments,
-      {
-        key,
-        txHash: p.txHash,
-        logIndex: p.logIndex,
-        payer: p.payer,
-        amount: p.amount,
-        at: now,
-      },
-    ],
+    payments: [...i.payments, record],
   });
+  return { invoice, applied: true, entry: paymentEntry(i, record)! };
+}
+
+/**
+ * The journal entry of one applied payment, rebuilt from its record: cash to
+ * the payout wallet, the receivable part against AR, any excess as a refund
+ * liability (never revenue). Null for records that predate the stored split.
+ */
+export function paymentEntry(
+  i: Invoice,
+  rec: InvoicePayment,
+): JournalEntry | null {
+  if (rec.toReceivable === undefined || rec.toRefund === undefined) return null;
   const asset = i.asset.assetId;
+  const toAr = rec.toReceivable;
+  const excess = rec.toRefund;
   const postings = [
     {
       account: 'CASH_ARC_USDC' as const,
       assetId: asset,
-      amount: p.amount,
+      amount: rec.amount,
       // Cash is booked to the wallet that received it (per-wallet reconciliation).
-      counterpartyId: walletTag(p.recipient),
+      counterpartyId: walletTag(i.issuer.payoutAddress),
       documentRef: i.invoiceId,
     },
     ...(toAr > 0n
@@ -672,31 +694,27 @@ export function applyPayment(
             account: 'REFUND_LIABILITY' as const,
             assetId: asset,
             amount: -excess,
-            counterpartyId: `payer:${p.payer.toLowerCase()}`,
+            counterpartyId: `payer:${rec.payer.toLowerCase()}`,
             documentRef: i.invoiceId,
           },
         ]
       : []),
   ];
   return {
-    invoice,
-    applied: true,
-    entry: {
-      entryId: `je_${i.invoiceId}_${p.txHash.slice(2, 14)}_${p.logIndex}`,
-      workspaceId: i.workspaceId,
-      occurredAt: now,
-      memo: `Payment for ${i.number}${excess > 0n ? ` (overpaid by ${excess} units: refund owed)` : ''}`,
-      source: { kind: 'CHAIN_TX', ref: i.invoiceId },
-      evidence: {
-        chainId: p.chainId,
-        txHash: p.txHash,
-        logIndex: p.logIndex,
-        recipient: p.recipient,
-      },
-      idempotencyKey: key,
-      postings,
-      reversalOf: null,
+    entryId: `je_${i.invoiceId}_${rec.txHash.slice(2, 14)}_${rec.logIndex}`,
+    workspaceId: i.workspaceId,
+    occurredAt: rec.at,
+    memo: `Payment for ${i.number}${excess > 0n ? ` (overpaid by ${excess} units: refund owed)` : ''}`,
+    source: { kind: 'CHAIN_TX', ref: i.invoiceId },
+    evidence: {
+      chainId: i.asset.chainId,
+      txHash: rec.txHash,
+      logIndex: rec.logIndex,
+      recipient: i.issuer.payoutAddress,
     },
+    idempotencyKey: rec.key,
+    postings,
+    reversalOf: null,
   };
 }
 

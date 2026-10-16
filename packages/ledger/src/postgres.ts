@@ -1,8 +1,9 @@
-import type {
-  ConsumerInbox,
-  JournalEntry,
-  LedgerStore,
-  OutboxEvent,
+import {
+  LedgerError,
+  type ConsumerInbox,
+  type JournalEntry,
+  type LedgerStore,
+  type OutboxEvent,
 } from './index.js';
 
 type Sql = {
@@ -118,7 +119,7 @@ export class PostgresLedgerStore implements LedgerStore {
     const r = await this.sql.query(
       `WITH entry AS (
          INSERT INTO synq_ledger_entries (entry_id, workspace_id, idempotency_key, occurred_at, reversal_of, data)
-         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (idempotency_key) DO NOTHING RETURNING entry_id),
+         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING entry_id),
        ev AS (
          INSERT INTO synq_event_outbox (event_id, entry_id, topic, payload)
          SELECT x.event_id, entry.entry_id, x.topic, x.payload
@@ -146,11 +147,19 @@ export class PostgresLedgerStore implements LedgerStore {
       ],
     );
     if (r.rows[0]) return { entry: e, created: true };
+    // No arbiter on purpose: two writers racing the same idempotent entry
+    // collide on the entry id as well as the key, and an arbiter-only clause
+    // turns the loser's entry-id collision into an error instead of a replay.
     const existing = await this.sql.query(
       'SELECT data FROM synq_ledger_entries WHERE idempotency_key=$1',
       [e.idempotencyKey],
     );
-    return { entry: dec(existing.rows[0]!.data), created: false };
+    if (!existing.rows[0])
+      throw new LedgerError(
+        'IDEMPOTENCY_CONFLICT',
+        `entry id ${e.entryId} already holds another idempotency key`,
+      );
+    return { entry: dec(existing.rows[0].data), created: false };
   }
   async get(id: string) {
     const r = await this.sql.query(

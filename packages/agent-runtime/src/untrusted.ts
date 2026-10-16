@@ -32,7 +32,8 @@ const SIGNALS: [string, RegExp][] = [
   ],
   [
     'TOOL_COERCION',
-    /\b(call|invoke|use)\b[^.\n]{0,20}\b(sign|signer|sendTransaction|signTransaction|tool)\b/i,
+    // A dotted namespace (wallet.sendTransaction) must not hide the tool name.
+    /\b(call|invoke|use)\b[^.\n]{0,20}?(?:[A-Za-z_][\w-]*\.)*\b(sign|signer|sendTransaction|signTransaction|tool)\b/i,
   ],
 ];
 export function injectionSignals(text: string): string[] {

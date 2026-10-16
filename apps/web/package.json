@@ -13,7 +13,7 @@
     "@category-labs/mera": "0.2.0",
     "@synq/identity": "workspace:*",
     "@synq/schemas": "workspace:*",
-    "next": "16.3.6",
+    "next": "16.3.8",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "viem": "2.57.4",
