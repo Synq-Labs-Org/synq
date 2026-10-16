@@ -117,3 +117,9 @@ The integrated team gate passed **1,659 unit tests** (19 skipped). Its targeted 
 - Review links expose terms to their bearer. The escrow arbiter is a hot-key role. Credential-dependent, production and mainnet paths remain unproven.
 
 No mainnet canary, public publication, push or hackathon submission is authorized by running these proofs. The remaining workstream reviews, cross-channel cards, broader security/performance coverage, pilot mapping and submission handoff are incomplete.
+
+## External tester preparation
+
+The checkout supports a fresh signed invoice per tester. With the same Postgres database and stable `SYNQ_PAY_LINK_KEY` as the API, run `node --import tsx scripts/arc-tester-invoice.ts --tester tester01 --base-url https://synqlabs.world --amount-base-units 1000`. It issues invoice terms and a six-hour link; it sends no transaction and does not deploy the site. Public deployment remains unapproved and unverified.
+
+After consented testers pay from their own wallets, `node --import tsx scripts/arc-tester-tally.ts` reads matching Memo receipts and reports distinct external payer wallets separately from controlled roles. Wallet counts do not establish distinct humans, businesses or consent. The current local kit smoke paid nothing and establishes zero external traction. `node --import tsx scripts/arc-demo-preflight.ts` reads RPC health, test-wallet balances and the vault operator window without signing or broadcasting.
