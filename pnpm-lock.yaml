@@ -124,6 +124,9 @@ importers:
       '@synq/plugin-qwen':
         specifier: workspace:*
         version: link:plugins/qwen
+      '@synq/plugin-risk':
+        specifier: workspace:*
+        version: link:plugins/risk
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:packages/plugin-sdk
@@ -423,9 +426,15 @@ importers:
       '@synq/ledger':
         specifier: workspace:*
         version: link:../ledger
+      '@synq/offer-exchange':
+        specifier: workspace:*
+        version: link:../offer-exchange
       '@synq/payables':
         specifier: workspace:*
         version: link:../payables
+      '@synq/plugin-risk':
+        specifier: workspace:*
+        version: link:../../plugins/risk
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -909,6 +918,18 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  plugins/risk:
+    dependencies:
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
       zod:
         specifier: 4.6.5
         version: 4.6.5

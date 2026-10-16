@@ -10,3 +10,4 @@ export * from './capabilities.js';
 export * from './context.js';
 export * from './cards/index.js';
 export * from './imessage/index.js';
+export * from './team.js';

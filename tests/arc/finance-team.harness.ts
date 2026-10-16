@@ -301,6 +301,7 @@ export function readers(
       'ledger:reconciliation',
     ),
     blockers: fresh([], 'CONFIG', 'reports:blockers'),
+    pendingOutcomes: fresh([], 'POSTGRES', 'payout-journal:unconfirmed'),
   };
 }
 

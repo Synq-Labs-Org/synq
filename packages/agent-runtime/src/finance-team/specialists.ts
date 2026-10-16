@@ -918,6 +918,11 @@ export async function paymentAgentSubmit(
   options: {
     requireOwnerApproval?: boolean;
     ownerApproval?: OwnerApproval;
+    /**
+     * False when a risk dependency (e.g. counterparty screening) could not
+     * answer: the Kernel then fails closed for high-value payments.
+     */
+    riskAvailable?: boolean;
   } = {},
 ): Promise<KernelSubmission> {
   const kernel = desk.kernel;
@@ -925,7 +930,7 @@ export async function paymentAgentSubmit(
   const decision = await team.tool(agent, 'payment.submitToKernel', () =>
     kernel.decide({
       intent,
-      risk: { flags: risk.flags, available: true },
+      risk: { flags: risk.flags, available: options.riskAvailable ?? true },
       ...(options.requireOwnerApproval ? { requireOwnerApproval: true } : {}),
       ...(options.ownerApproval
         ? { ownerApproval: options.ownerApproval }

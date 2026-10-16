@@ -22,6 +22,12 @@ import {
   type InteractiveCard,
 } from '@synq/schemas';
 import { CardLinkIssuer } from './cards/links.js';
+import {
+  parseTeamAsk,
+  renderTeamReply,
+  type TeamPersona,
+  type TeamReplyView,
+} from './team.js';
 import { InteractiveCardService, approvalProposalId } from './cards/service.js';
 import {
   CHAT_NEVER_APPROVES,
@@ -143,6 +149,12 @@ export interface ChannelPorts {
     externalUserId: string,
   ): Promise<{ principalId: string; workspaceId: string } | null>;
   direct?(input: DirectRequest): Promise<DirectReply>;
+  /**
+   * Synq's specialist team as labelled personas of this one bot ("ask your
+   * CFO and Risk Agent …"). It proposes only: a payout still needs the
+   * owner's EIP-712 approval, which never comes from chat.
+   */
+  team?(input: TeamRequest): Promise<TeamReplyView>;
   /** DM from a sender with no link yet: onboarding only (start, link code). */
   directOnboarding?(input: {
     channel: ChannelId;
@@ -158,6 +170,17 @@ export type DirectRequest = {
   principalId: string;
   workspaceId: string;
   text: string;
+  runId: string;
+  /** Set by the gateway: a chat message never carries owner approval. */
+  origin: 'CHAT';
+};
+export type TeamRequest = {
+  channel: ChannelId;
+  /** The group id (group chats) or the sender's linked workspace (DMs). */
+  workspaceId: string;
+  principalId: string;
+  text: string;
+  personas: TeamPersona[];
   runId: string;
   /** Set by the gateway: a chat message never carries owner approval. */
   origin: 'CHAT';
@@ -795,6 +818,25 @@ export class ChannelGateway {
     const access = await this.access(envelope);
     if ('refusal' in access) return access.refusal;
     const { group, memberId, principalId } = access;
+    const ask =
+      parsed.kind === 'TEXT' && this.options.ports.team
+        ? parseTeamAsk(stripMention(parsed.text))
+        : null;
+    if (ask) {
+      const reply = await this.teamReply({
+        channel: envelope.channel,
+        workspaceId: group.groupId,
+        principalId,
+        text: stripMention(parsed.kind === 'TEXT' ? parsed.text : ''),
+        personas: ask.personas,
+        runId: `team_${envelope.channel}_${createHash('sha256').update(envelope.eventId).digest('hex').slice(0, 16)}`,
+        origin: 'CHAT',
+      });
+      return this.replyOutcome(envelope, 'HANDLED', 'TEAM_ANSWERED', {
+        text: reply.text,
+        ...(reply.buttons ? { buttons: reply.buttons } : {}),
+      });
+    }
     if (parsed.kind === 'TEXT')
       return this.brain(
         envelope,
@@ -851,7 +893,19 @@ export class ChannelGateway {
     );
     let reply: DirectReply;
     let code: string;
-    if (linked) {
+    const ask = parseTeamAsk(text);
+    if (linked && ask && ports.team) {
+      reply = await this.teamReply({
+        channel: envelope.channel,
+        workspaceId: linked.workspaceId,
+        principalId: linked.principalId,
+        text,
+        personas: ask.personas,
+        runId,
+        origin: 'CHAT',
+      });
+      code = 'TEAM_ANSWERED';
+    } else if (linked) {
       reply = await ports.direct!({
         channel: envelope.channel,
         externalUserId: userId,
@@ -906,6 +960,30 @@ export class ChannelGateway {
         at: this.options.now(),
       }).catch(() => undefined);
       return this.result('REFUSED', 'DIRECT_REPLY_FAILED', 0, 1);
+    }
+  }
+
+  /** Runs the team port and renders one labelled message (never an approval). */
+  private async teamReply(input: TeamRequest): Promise<DirectReply> {
+    try {
+      const view = await this.options.ports.team!(input);
+      return {
+        text: renderTeamReply(view),
+        ...(view.approval
+          ? {
+              buttons: [
+                {
+                  label: view.approval.label.slice(0, 40),
+                  url: this.web(view.approval.reviewPath),
+                },
+              ],
+            }
+          : {}),
+      };
+    } catch {
+      return {
+        text: 'The team could not answer right now. Nothing was proposed or paid.',
+      };
     }
   }
 
