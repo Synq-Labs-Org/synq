@@ -250,6 +250,16 @@ export function describeApy(q: ApyQuote): string {
 }
 
 /**
+ * Withdrawal terms shown before any deposit. Synq does not promise when a
+ * withdrawal can be made: it is bounded by the vault's free liquidity and the
+ * provider's `maxWithdrawable` at that moment (`assertWithdrawable`).
+ */
+export function describeWithdrawal(vault: EarnVault): string {
+  const liquidity = vault.risk.reportedLiquidity;
+  return `Withdrawals are not guaranteed to be instant: each one is limited by the vault's available liquidity (${liquidity === null ? 'not reported' : `reported ${liquidity} USDC`}) and the provider's maximum withdrawable amount at that time, so funds may not be withdrawable on demand`;
+}
+
+/**
  * Port for the cash floor (P15-07). `@synq/allocations` implements it from due
  * payroll, rent and other reserved obligations; the integrator wires it.
  */
@@ -292,6 +302,8 @@ export type YieldDecision =
       vault: Address;
       amount: Money;
       apy: ApyQuote;
+      /** Disclosed with the decision, before anything is signed. */
+      withdrawalTerms: string;
       justification: string;
     }>
   | Readonly<{ decision: 'REJECT'; reason: YieldRejection; detail: string }>;
@@ -355,7 +367,8 @@ export async function decideYieldDeposit(input: {
     vault: vault.address,
     amount,
     apy: vault.apy,
-    justification: `${vault.name}: ${describeApy(vault.apy)}`,
+    withdrawalTerms: describeWithdrawal(vault),
+    justification: `${vault.name}: ${describeApy(vault.apy)}. ${describeWithdrawal(vault)}`,
   };
 }
 
