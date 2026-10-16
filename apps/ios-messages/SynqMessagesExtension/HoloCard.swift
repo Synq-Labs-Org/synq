@@ -1066,7 +1066,9 @@ struct HoloStage<Content: View>: View {
         if let phase = mode.phase {
             content(HoloLight(x: 0.28 + phase * 0.3, y: 0.2, phase: phase))
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion && !dragging)) { tl in
+            // Transcript bubbles shimmer at a lower rate than the interactive hero.
+            TimelineView(.animation(minimumInterval: interactive ? 1.0 / 30 : 1.0 / 12,
+                                    paused: reduceMotion && !dragging)) { tl in
                 let t = tl.date.timeIntervalSinceReferenceDate
                 let idle = reduceMotion ? 0.35 : (t / 9).truncatingRemainder(dividingBy: 1)
                 let sway = reduceMotion ? 0 : sin(t / 2.2) * 0.12
