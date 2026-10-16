@@ -151,7 +151,7 @@ struct StartFundView: View {
             }
             .padding(.top, Theme.s2)
         }
-        .padding(.horizontal, Theme.s5)
+        .padding(.horizontal, Theme.s4)
         .padding(.vertical, Theme.s3)
         .synqScroll()
     }
@@ -289,7 +289,7 @@ struct FundHomeView: View {
             NoteText(text: "Tapping a card never approves anything. Payments are approved with passkeys on the Synq page.")
                 .padding(.top, Theme.s2)
         }
-        .padding(.horizontal, Theme.s5)
+        .padding(.horizontal, Theme.s4)
         .padding(.vertical, Theme.s3)
         .synqScroll()
     }
@@ -508,15 +508,21 @@ struct ChipScroller<Content: View>: View {
     @Environment(\.synqRenderMode) private var mode
 
     var body: some View {
+        // Bleeds to the screen edges, with the content inset to the page gutter.
         if mode.isStill {
             HStack(spacing: Theme.s2) { content() }
                 .fixedSize()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.s4)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .clipped()
+                .padding(.horizontal, -Theme.s4)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.s2) { content() }.padding(.vertical, 4)
+                HStack(spacing: Theme.s2) { content() }
+                    .padding(.horizontal, Theme.s4)
+                    .padding(.vertical, 4)
             }
+            .padding(.horizontal, -Theme.s4)
         }
     }
 }
@@ -883,7 +889,8 @@ struct QuickActions: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: Theme.s2) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: Theme.s2), count: 4),
+                  spacing: Theme.s2) {
             tile("Send", "arrow.up.right", Theme.blue, enabled: canSend, action: onSend)
             tile("Flight", "airplane", Theme.teal, enabled: true, action: onFlight)
             tile("Gift", "gift.fill", Theme.pink, enabled: true, action: onGift)
@@ -899,7 +906,8 @@ struct QuickActions: View {
                     .font(.synq(.caption, .semibold))
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 2)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, compact ? Theme.s2 : Theme.s3)

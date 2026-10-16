@@ -70,7 +70,7 @@ struct TripDetailView: View {
                 NoteText(text: trip.label)
                 if let error = model.error { NoteText(text: error, tone: .failed) }
             }
-            .padding(.horizontal, Theme.s5)
+            .padding(.horizontal, Theme.s4)
             .padding(.vertical, Theme.s3)
             .synqScroll()
         }
@@ -396,7 +396,7 @@ struct ProposalDetailView: View {
                         .buttonStyle(.glass)
                 }
             }
-            .padding(.horizontal, Theme.s5)
+            .padding(.horizontal, Theme.s4)
             .padding(.vertical, Theme.s3)
             .synqScroll()
         }

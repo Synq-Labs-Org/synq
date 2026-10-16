@@ -242,7 +242,7 @@ struct SynqScroll: ViewModifier {
         if mode.isStill {
             // Ideal height, clipped at the bottom like a screen that scrolls on.
             content.fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .clipped()
         } else {
             ScrollView(showsIndicators: false) { content }

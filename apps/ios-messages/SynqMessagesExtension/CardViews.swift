@@ -80,7 +80,8 @@ struct ExpandedCardView: View {
                 }
                 NoteText(text: "Tapping a card never approves anything. You approve on the Synq page with your passkey.")
             }
-            .padding(Theme.s5)
+            .padding(.horizontal, Theme.s4)
+            .padding(.vertical, Theme.s5)
             .synqScroll()
         }
     }

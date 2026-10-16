@@ -23,7 +23,8 @@ struct SheetScaffold<Content: View>: View {
                 .padding(.top, Theme.s2)
                 content()
             }
-            .padding(Theme.s5)
+            .padding(.horizontal, Theme.s4)
+            .padding(.vertical, Theme.s5)
             .synqScroll()
         }
         .presentationDetents([.large])
