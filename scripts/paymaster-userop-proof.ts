@@ -177,18 +177,43 @@ out.wrongEntryPoint = refusal(() =>
   }),
 );
 
-// 2. P16-06: what an ETH-less Sepolia EOA is told before a CCTP send.
+// 2. P16-06: what an ETH-less Sepolia EOA (the agent wallet, which holds no
+//    Sepolia ETH) is told before a CCTP send. Sepolia's base fee is often a
+//    few wei; the message prices gas at no less than 1 gwei so it never
+//    understates what a wallet should hold.
+const agentEoa = privateKeyToAccount(readKey(`${home}/arc-agent.key`)).address;
 const fees = await client.estimateFeesPerGas();
-const ethNow = await client.getBalance({ address: smartOwner.address });
-out.ethlessEoaMessage = sourceGasRequirement({
-  chain: CHAIN,
-  wallet: smartOwner.address,
-  walletKind: 'EOA',
-  nativeBalance: ethNow,
-  // approve (~60k) + depositForBurn (~180k) at the current max fee
-  estimatedGasWei: 240_000n * (fees.maxFeePerGas ?? 0n),
-  action: 'send USDC to Arc via CCTP',
-});
+const gasPrice = await client.getGasPrice();
+const ONE_GWEI = 1_000_000_000n;
+const feePerGas = [fees.maxFeePerGas ?? 0n, gasPrice, ONE_GWEI].reduce(
+  (a, b) => (a > b ? a : b),
+);
+out.ethlessEoaMessage = {
+  feePerGasUsed: feePerGas,
+  networkMaxFeePerGas: fees.maxFeePerGas,
+  ...sourceGasRequirement({
+    chain: CHAIN,
+    wallet: agentEoa,
+    walletKind: 'EOA',
+    nativeBalance: await client.getBalance({ address: agentEoa }),
+    // approve (~60k) + depositForBurn (~180k)
+    estimatedGasWei: 240_000n * feePerGas,
+    action: 'send USDC to Arc via CCTP',
+  }),
+};
+if (process.argv.includes('--message-only')) {
+  const prior = JSON.parse(
+    readFileSync(join(dir, 'paymaster-userop-proof.json'), 'utf8'),
+  );
+  prior.ethlessEoaMessage = j(out.ethlessEoaMessage);
+  prior.ethlessEoaMessageAt = new Date().toISOString();
+  writeFileSync(
+    join(dir, 'paymaster-userop-proof.json'),
+    JSON.stringify(prior, null, 2),
+  );
+  console.log(prior.ethlessEoaMessage);
+  process.exit(0);
+}
 
 // 3. Fund the fresh account with USDC only (owner-signed ERC-20 transfer).
 const usdcBal = (a: Address) =>
