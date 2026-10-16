@@ -290,6 +290,177 @@ export class DuffelBookingExecutor {
   }
 }
 
+/** An unpaid Duffel hold order: seats held until `paymentRequiredBy`. */
+export type HeldOrderState = {
+  orderId: string;
+  reference: string | null;
+  total: Money;
+  awaitingPayment: boolean;
+  cancelled: boolean;
+  /** Epoch seconds; null when the provider gave no deadline. */
+  paymentRequiredBy: number | null;
+  priceGuaranteeExpiresAt: number | null;
+};
+
+export type HoldOutcome =
+  | ({ status: 'HELD' } & HeldOrderState)
+  | Extract<BookingOutcome, { status: 'FAILED' | 'UNKNOWN' }>;
+
+export type HoldPaymentDecision =
+  | { action: 'PAY'; amount: Money }
+  /** The hold lapsed (or is about to): never pay; release the reservation and re-quote. */
+  | { action: 'EXPIRED'; reason: string }
+  /** The fare is no longer the approved one: a fresh approval is required first. */
+  | { action: 'REAPPROVE'; reason: string; current: Money };
+
+const epoch = (v: unknown) => {
+  const s = str(v);
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+};
+
+function heldState(o: Json): HeldOrderState {
+  const ps = obj(o.payment_status);
+  return {
+    orderId: String(o.id),
+    reference: str(o.booking_reference) ?? null,
+    total: providerMoney(
+      String(o.total_amount),
+      str(o.total_currency) ?? 'USD',
+    ),
+    awaitingPayment: ps.awaiting_payment === true,
+    cancelled: !!o.cancelled_at,
+    paymentRequiredBy: epoch(ps.payment_required_by),
+    priceGuaranteeExpiresAt: epoch(ps.price_guarantee_expires_at),
+  };
+}
+
+/**
+ * Whether a held order may be paid now. A lapsed (or nearly lapsed) hold is
+ * never paid; a total that differs from the approved fare needs a fresh
+ * approval. `current` must be re-read from the provider just before paying.
+ */
+export function holdPaymentDecision(input: {
+  hold: Pick<
+    HeldOrderState,
+    'paymentRequiredBy' | 'cancelled' | 'awaitingPayment'
+  >;
+  current: Money;
+  approved: Money;
+  now: number;
+  safetySeconds?: number;
+}): HoldPaymentDecision {
+  const { hold, current, approved } = input;
+  if (hold.cancelled || !hold.awaitingPayment)
+    return { action: 'EXPIRED', reason: 'hold is no longer awaiting payment' };
+  if (hold.paymentRequiredBy === null)
+    return {
+      action: 'EXPIRED',
+      reason: 'hold has no payment deadline; re-quote',
+    };
+  if (input.now + (input.safetySeconds ?? 120) >= hold.paymentRequiredBy)
+    return {
+      action: 'EXPIRED',
+      reason: 'hold payment deadline passed or too close',
+    };
+  if (
+    current.currency !== approved.currency ||
+    current.decimals !== approved.decimals ||
+    current.amount !== approved.amount
+  )
+    return {
+      action: 'REAPPROVE',
+      reason: `held fare ${current.amount} ${current.currency} differs from approved ${approved.amount} ${approved.currency}`,
+      current,
+    };
+  return { action: 'PAY', amount: current };
+}
+
+export class DuffelHoldExecutor {
+  constructor(
+    private readonly client: DuffelClient,
+    private readonly orders: DuffelBookingExecutor,
+  ) {}
+
+  /** Creates (once per idempotency key) an unpaid hold order; no payment is sent. */
+  async holdFlight(input: {
+    offerId: string;
+    passengerIds: string[];
+    passengers: TravelerPii[];
+    idempotencyKey: string;
+  }): Promise<HoldOutcome> {
+    if (
+      input.passengers.length !== input.passengerIds.length ||
+      !input.passengers.length
+    )
+      return { status: 'FAILED', code: 'PASSENGER_MISMATCH', requestId: null };
+    const prior = await this.orders.findFlightOrder(input.idempotencyKey);
+    if (prior && prior.status !== 'FAILED' && prior.status !== 'UNKNOWN')
+      return { status: 'HELD', ...(await this.status(prior.providerRef)) };
+    try {
+      const r = await this.client.request<Json>('POST', '/air/orders', {
+        type: 'hold',
+        selected_offers: [input.offerId],
+        passengers: input.passengers.map((p, i) => ({
+          id: input.passengerIds[i],
+          given_name: p.givenName,
+          family_name: p.familyName,
+          born_on: p.bornOn,
+          email: p.email,
+          phone_number: p.phone,
+          title: p.title ?? 'mr',
+          gender: p.gender ?? 'm',
+        })),
+        metadata: { [IDEMPOTENCY_METADATA_KEY]: input.idempotencyKey },
+      });
+      return { status: 'HELD', ...heldState(r.data) };
+    } catch (error) {
+      const f = failure(error);
+      return f.status === 'FAILED' || f.status === 'UNKNOWN'
+        ? f
+        : {
+            status: 'UNKNOWN',
+            detail: 'unexpected hold outcome',
+            requestId: null,
+          };
+    }
+  }
+
+  async status(orderId: string): Promise<HeldOrderState> {
+    const r = await this.client.request<Json>(
+      'GET',
+      `/air/orders/${encodeURIComponent(orderId)}`,
+    );
+    return heldState(r.data);
+  }
+
+  /** Pays a hold only if it is still open and still at the approved fare. */
+  async payHeld(input: {
+    orderId: string;
+    approved: Money;
+    now: number;
+  }): Promise<{ decision: HoldPaymentDecision; paymentId: string | null }> {
+    const st = await this.status(input.orderId);
+    const decision = holdPaymentDecision({
+      hold: st,
+      current: st.total,
+      approved: input.approved,
+      now: input.now,
+    });
+    if (decision.action !== 'PAY') return { decision, paymentId: null };
+    const r = await this.client.request<Json>('POST', '/air/payments', {
+      order_id: input.orderId,
+      payment: {
+        type: 'balance',
+        currency: decision.amount.currency,
+        amount: toDecimal(decision.amount),
+      },
+    });
+    return { decision, paymentId: str(r.data.id) ?? null };
+  }
+}
+
 function toPort(o: BookingOutcome): ProviderBookingOutcome {
   if (o.status === 'FAILED') return { status: 'FAILED', reason: o.code };
   if (o.status === 'UNKNOWN') return { status: 'UNKNOWN', reason: o.detail };
