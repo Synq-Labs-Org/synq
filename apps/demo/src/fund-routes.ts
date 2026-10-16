@@ -37,7 +37,13 @@ const TripBody = z.strictObject({
   origin: z.string().min(3).max(3),
   destination: z.string().min(3).max(3),
   departureDate: z.string().max(10),
+  /** Optional return leg (YYYY-MM-DD, after departureDate); null/absent = one way. */
+  returnDate: z.string().max(10).nullable().optional(),
   travelers: z.number().int(),
+  cabin: z
+    .enum(['economy', 'premium_economy', 'business', 'first'])
+    .nullable()
+    .optional(),
 });
 const GiftBody = z.strictObject({
   key: Key,

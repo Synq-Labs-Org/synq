@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { SendRecord } from '@synq/funding';
 import { FundError, type FundView } from './fund-service.js';
+import type { Cabin } from './fund-intents.js';
 
 /**
  * Group picks for a fund: flights (Duffel test mode) and gifts (live product
@@ -39,13 +40,16 @@ export type Trip = {
   tripId: string;
   fundId: string;
   kind: 'FLIGHT' | 'GIFT';
-  /** e.g. "DEL → GOI · 2026-12-05" or "Gift: car gifts" */
+  /** e.g. "DEL → GOI · 2026-12-05" (one way), "DEL → GOI · 2026-12-01, back 2026-12-05" or "Gift: car gifts" */
   title: string;
   // FLIGHT
   origin?: string;
   destination?: string;
   departureDate?: string;
+  /** Return leg date for a round trip; absent/null for one way. */
+  returnDate?: string | null;
   travelers?: number;
+  cabin?: Cabin;
   // GIFT
   query?: string;
   maxPrice?: string;
@@ -95,11 +99,14 @@ export type TripPorts = {
   now(): number;
   /** Authorizes the fund key and returns the fund's current view. */
   fund(fundId: string, key: string): Promise<FundView>;
+  /** One-way, or a return trip (two slices) when `returnDate` is set. */
   search(input: {
     origin: string;
     destination: string;
     departureDate: string;
+    returnDate: string | null;
     travelers: number;
+    cabin: Cabin;
   }): Promise<TripOption[]>;
   /** Re-quotes the option and books it; never charges more than `maxTotal`. */
   book(input: {
@@ -126,6 +133,17 @@ export type TripPorts = {
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const IATA = /^[A-Z]{3}$/;
+const CABINS: readonly Cabin[] = [
+  'economy',
+  'premium_economy',
+  'business',
+  'first',
+];
+const MAX_TRAVELERS = 4;
+const realDay = (day: string) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+};
 const lower = (s: string) => s.toLowerCase();
 
 export class TripService {
@@ -181,44 +199,64 @@ export class TripService {
       origin: string;
       destination: string;
       departureDate: string;
+      returnDate?: string | null;
       travelers: number;
+      cabin?: Cabin | null;
     },
   ): Promise<TripView> {
     const fund = await this.ports.fund(fundId, input.key);
     if (fund.state !== 'ACTIVE') throw new FundError('WRONG_STATE', 409);
     const origin = input.origin.trim().toUpperCase();
     const destination = input.destination.trim().toUpperCase();
-    const today = new Date(this.ports.now() * 1000).toISOString().slice(0, 10);
+    const returnDate = input.returnDate ?? null;
+    const cabin = input.cabin ?? 'economy';
+    const now = this.ports.now();
+    const today = new Date(now * 1000).toISOString().slice(0, 10);
+    const horizon = new Date((now + 366 * 86_400) * 1000)
+      .toISOString()
+      .slice(0, 10);
     if (
       !IATA.test(origin) ||
       !IATA.test(destination) ||
       origin === destination ||
       !DAY.test(input.departureDate) ||
+      !realDay(input.departureDate) ||
       input.departureDate <= today ||
+      input.departureDate > horizon ||
+      // A return leg must come after the departure.
+      (returnDate !== null &&
+        (!DAY.test(returnDate) ||
+          !realDay(returnDate) ||
+          returnDate <= input.departureDate ||
+          returnDate > horizon)) ||
+      !CABINS.includes(cabin) ||
       !Number.isInteger(input.travelers) ||
       input.travelers < 1 ||
-      input.travelers > 4
+      input.travelers > MAX_TRAVELERS
     )
       throw new FundError('INVALID_REQUEST', 400, 'trip');
-    const now = this.ports.now();
     if ((await this.store.createdSince(fundId, now - 86_400)) >= 10)
       throw new FundError('RATE_LIMITED', 429);
     const options = await this.ports.search({
       origin,
       destination,
       departureDate: input.departureDate,
+      returnDate,
       travelers: input.travelers,
+      cabin,
     });
     const trip: Trip = {
       schemaVersion: 1,
       tripId: `trp_${randomBytes(8).toString('hex')}`,
       fundId,
       kind: 'FLIGHT',
-      title: `${origin} → ${destination} · ${input.departureDate}`,
+      title: `${origin} → ${destination} · ${input.departureDate}${returnDate ? `, back ${returnDate}` : ''}`,
       origin,
       destination,
       departureDate: input.departureDate,
+      returnDate,
       travelers: input.travelers,
+      cabin,
       createdAt: now,
       updatedAt: now,
       options,
@@ -229,7 +267,7 @@ export class TripService {
       booking: null,
       error: options.length
         ? null
-        : 'No bookable test flights on that route and date.',
+        : `No bookable test flights on that route and ${returnDate ? 'those dates' : 'date'}.`,
     };
     await this.store.create(trip);
     this.ports.log(

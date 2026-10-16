@@ -20,11 +20,14 @@ import {
   type HttpFetch,
 } from '@synq/plugin-duffel';
 import type { TripOption, TripPorts } from './fund-trips.js';
+import type { Cabin } from './fund-intents.js';
 
 /**
  * Duffel flights in TEST MODE for fund trips. Test mode can only issue orders on
  * Duffel Airways (ZZ), so only those offers are shown; passengers are synthetic
- * test travellers and no real ticket or charge is ever made.
+ * test travellers and no real ticket or charge is ever made. A return trip is
+ * one offer request with two slices (out and back), priced and booked as one
+ * order.
  */
 const TEST_TRAVELERS = ['Ada', 'Ben', 'Cy', 'Dee'].map((givenName, i) => ({
   givenName,
@@ -67,11 +70,33 @@ export function duffelTripPorts(
     travelCapabilities({ DUFFEL_TEST_TOKEN: token }),
   );
 
-  const intentFor = (input: {
+  type Leg = { origin: string; destination: string; departureDate: string };
+  const legsOf = (input: {
     origin: string;
     destination: string;
     departureDate: string;
+    returnDate: string | null;
+  }): Leg[] => [
+    {
+      origin: input.origin,
+      destination: input.destination,
+      departureDate: input.departureDate,
+    },
+    ...(input.returnDate
+      ? [
+          {
+            origin: input.destination,
+            destination: input.origin,
+            departureDate: input.returnDate,
+          },
+        ]
+      : []),
+  ];
+
+  const intentFor = (input: {
+    legs: Leg[];
     travelers: number;
+    cabin: Cabin;
   }): EconomicIntent =>
     EconomicIntentSchema.parse({
       id: `flight-${now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -80,15 +105,9 @@ export function duffelTripPorts(
       objective: 'Group fund flight (Duffel test mode)',
       subject: {
         kind: 'FLIGHT',
-        segments: [
-          {
-            origin: input.origin,
-            destination: input.destination,
-            departureDate: input.departureDate,
-          },
-        ],
+        segments: input.legs,
         adults: input.travelers,
-        cabin: 'economy',
+        cabin: input.cabin,
         checkedBags: 0,
       },
       hardConstraints: [],
@@ -121,18 +140,28 @@ export function duffelTripPorts(
     intent: EconomicIntent,
     offer: EconomicOffer,
   ): TripOption => {
+    // One subject segment per slice: the outbound, then the return when present.
     const f = flightOf(offer);
-    const first = f.segments[0]!;
-    const last = f.segments.at(-1)!;
     const total = landedTotal(offer, BUDGET);
-    const stops = f.segments.length - 1;
+    const flights = f.segments
+      .map((s) => (s.flightNumber ? `ZZ ${s.flightNumber}` : null))
+      .filter(Boolean);
+    const legs = f.segments.map(
+      (s) => `${s.origin} → ${s.destination} ${s.departureDate}`,
+    );
     return {
       optionId: createHash('sha256')
         .update(offer.offerId)
         .digest('hex')
         .slice(0, 12),
-      title: `Duffel Airways${first.flightNumber ? ` ZZ ${first.flightNumber}` : ''}`,
-      detail: `${first.origin} → ${last.destination} · ${stops ? `${stops} stop${stops > 1 ? 's' : ''}` : 'nonstop'} · ${f.cabin}`,
+      title: `Duffel Airways${flights.length ? ` ${flights.join(' / ')}` : ''}`,
+      detail: [
+        ...legs,
+        offer.stops
+          ? `${offer.stops} stop${offer.stops > 1 ? 's' : ''}`
+          : 'nonstop',
+        f.cabin.replace('_', ' '),
+      ].join(' · '),
       total: toDecimal(total),
       currency: total.currency,
       refundable: offer.cancellation.refundable,
@@ -163,16 +192,18 @@ export function duffelTripPorts(
     let intent = stored.intent;
     let quote = await attempt(stored.offer, intent);
     if (quote.status !== 'EXECUTABLE') {
-      // Offers expire while the group approves: search the same route again
-      // and take the cheapest Duffel Airways offer within what was paid.
-      const segment = flightOf(stored.offer).segments[0]!;
+      // Offers expire while the group approves: search the same route (both
+      // legs for a return trip) again and take the cheapest Duffel Airways
+      // offer within what was paid.
+      const wanted = stored.intent.subject as FlightSubject;
       intent = intentFor({
-        origin: segment.origin,
-        destination: (stored.intent.subject as FlightSubject).segments[0]!
-          .destination,
-        departureDate: (stored.intent.subject as FlightSubject).segments[0]!
-          .departureDate,
-        travelers: (stored.intent.subject as FlightSubject).adults,
+        legs: wanted.segments.map((s) => ({
+          origin: s.origin,
+          destination: s.destination,
+          departureDate: s.departureDate,
+        })),
+        travelers: wanted.adults,
+        cabin: wanted.cabin,
       });
       const again = (await ranked(intent))[0];
       if (!again)
@@ -217,7 +248,11 @@ export function duffelTripPorts(
 
   return {
     search: async (input) => {
-      const intent = intentFor(input);
+      const intent = intentFor({
+        legs: legsOf(input),
+        travelers: input.travelers,
+        cabin: input.cabin,
+      });
       return (await ranked(intent))
         .slice(0, 3)
         .map((offer) => optionOf(intent, offer));
