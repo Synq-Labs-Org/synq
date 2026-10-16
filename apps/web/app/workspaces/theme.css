@@ -1,0 +1,60 @@
+.workspace-shell[data-theme='ascii'] {
+  --workspace-bg: #000;
+  --workspace-ink: #f2f2f2;
+  --workspace-muted: #a0a0a0;
+  --workspace-line: #3a3a3a;
+  --workspace-font: 'Courier New', monospace;
+  --workspace-space: 16px;
+  --workspace-radius: 6px;
+}
+.workspace-shell {
+  background: var(--workspace-bg);
+  color: var(--workspace-ink);
+  font-family: var(--workspace-font);
+  padding: var(--workspace-space);
+}
+.workspace-shell section {
+  margin: var(--workspace-space) 0;
+  padding: var(--workspace-space);
+  border: 1px solid var(--workspace-line);
+  border-radius: var(--workspace-radius);
+}
+.workspace-shell h1,
+.workspace-shell h2 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.workspace-shell h2 {
+  font-size: 1rem;
+}
+.workspace-shell button,
+.workspace-shell select,
+.workspace-shell input {
+  font: inherit;
+  color: var(--workspace-ink);
+  background: var(--workspace-bg);
+  border: 1px solid var(--workspace-line);
+  border-radius: var(--workspace-radius);
+  padding: 12px;
+  max-width: 100%;
+}
+.workspace-shell button {
+  display: block;
+  text-align: left;
+}
+.workspace-shell button:focus-visible,
+.workspace-shell input:focus-visible,
+.workspace-shell select:focus-visible {
+  outline: 2px solid var(--workspace-ink);
+  outline-offset: 2px;
+}
+.workspace-shell a {
+  color: var(--workspace-ink);
+  text-decoration: underline;
+}
+.workspace-network {
+  color: var(--workspace-muted);
+}
+.workspace-secret {
+  overflow-wrap: anywhere;
+}

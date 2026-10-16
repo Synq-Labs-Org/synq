@@ -504,6 +504,14 @@ struct FundClient {
 
     // Pages on the Synq site where the passkey ceremonies happen.
 
+    func workspacePage() -> URL {
+        var c = URLComponents()
+        c.scheme = "https"
+        c.host = host
+        c.path = "/workspaces"
+        return c.url!
+    }
+
     func fundPage(_ fundId: String, key: String) -> URL {
         FundLink.invite(fundId: fundId, key: key).url(host: host)
     }

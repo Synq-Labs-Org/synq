@@ -96,6 +96,7 @@ export async function registerChannels(input: {
   approvals: ChannelApprovalSource;
   executed?: ChannelExecutionSource;
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
+  workspaceOnboarding?: boolean;
   brain?: ChannelPorts['brain'];
   mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
   log: ChannelLog;
@@ -227,6 +228,7 @@ export async function registerChannels(input: {
         : {}),
     }),
     webBaseUrl,
+    workspaceOnboarding: input.workspaceOnboarding,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,
     now,
     ...(env.SYNQ_CHANNEL_CARDS === '1' ? { cards: { links: cardLinks } } : {}),

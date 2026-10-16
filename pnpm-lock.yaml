@@ -190,6 +190,9 @@ importers:
       '@synq/workflow-worker':
         specifier: workspace:*
         version: link:workers/workflow
+      '@synq/workspaces':
+        specifier: workspace:*
+        version: link:packages/workspaces
       '@synq/world-model':
         specifier: workspace:*
         version: link:packages/world-model
@@ -406,6 +409,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
       '@synq/world-model':
         specifier: workspace:*
         version: link:../../packages/world-model
@@ -433,6 +439,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
       next:
         specifier: 16.3.8
         version: 16.3.8(@playwright/test@1.63.0)(@types/node@22.19.7)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -867,6 +876,18 @@ importers:
       viem:
         specifier: 2.57.4
         version: 2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5)
+
+  packages/workspaces:
+    dependencies:
+      pg:
+        specifier: 8.18.0
+        version: 8.18.0
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/world-model:
     dependencies:

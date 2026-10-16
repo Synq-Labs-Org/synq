@@ -19,7 +19,7 @@ const config: NextConfig = {
   distDir: 'dist',
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@synq/identity', '@synq/schemas'],
+  transpilePackages: ['@synq/identity', '@synq/schemas', '@synq/workspaces'],
   webpack(webpackConfig: {
     resolve: { extensionAlias?: Record<string, string[]> };
   }) {
@@ -30,7 +30,10 @@ const config: NextConfig = {
     return webpackConfig;
   },
   async rewrites() {
-    return [{ source: '/api/v1/:path*', destination: `${api}/v1/:path*` }];
+    return [
+      { source: '/api/v1/:path*', destination: `${api}/v1/:path*` },
+      { source: '/api/v2/:path*', destination: `${api}/v2/:path*` },
+    ];
   },
   async headers() {
     return [

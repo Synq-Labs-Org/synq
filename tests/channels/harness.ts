@@ -54,6 +54,7 @@ export function fixture(
     requireChatAdmin?: boolean;
     pendingLinkTtlSeconds?: number;
     cards?: boolean;
+    workspaceOnboarding?: boolean;
   } = {},
 ) {
   const clock = { t: now };
@@ -107,6 +108,7 @@ export function fixture(
     ports,
     adapters: [adapter],
     webBaseUrl: 'https://synq.example',
+    workspaceOnboarding: options.workspaceOnboarding,
     explorerTxUrl: 'https://testnet.monadexplorer.com/tx/',
     now: () => clock.t,
     botUsernames: { telegram: 'synq_bot' },

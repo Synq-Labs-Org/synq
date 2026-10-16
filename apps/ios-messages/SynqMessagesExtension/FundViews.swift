@@ -168,6 +168,12 @@ struct StartFundView: View {
             SynqWordmarkBar(network: networkTitle(SynqNetwork.fundBackend))
             SynqHeroArt(slot: .home)
             SynqStack {
+                SynqPanel(label: "Arc testnet workspace") {
+                    Text("Create or join with your own wallet. Vault activation is not available yet.")
+                        .synqType(.body, .secondary)
+                    SynqButton(title: "Start a workspace", trailingIcon: .forward,
+                               action: { actions.open(model.client.workspacePage()) })
+                }
                 SynqPanel(label: "New group fund") {
                     Text(plan.name.isEmpty ? "Start a group fund" : plan.name).synqType(.headline).lineLimit(1)
                     Text("Pool money with this chat. Everyone joins with a passkey, and every payment needs two approvals.")
@@ -196,6 +202,8 @@ struct StartFundView: View {
         VStack(alignment: .leading, spacing: theme.space.m) {
             SynqWordmarkBar(network: networkTitle(SynqNetwork.fundBackend), compact: true)
             SynqStack(spacing: \.m) {
+                SynqButton(title: "Start an Arc workspace", trailingIcon: .forward,
+                           action: { actions.open(model.client.workspacePage()) })
                 Text("Start a group fund · everyone joins with a passkey").synqType(.caption, .secondary)
                 SynqCommandField(text: $text, placeholder: "Name it, or tell Synq the plan…", busy: model.busy,
                                  onSubmit: start, onFocus: actions.expand)

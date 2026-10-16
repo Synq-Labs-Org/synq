@@ -1,0 +1,15 @@
+{
+  "name": "@synq/workspaces",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts": "./src/contracts.ts"
+  },
+  "dependencies": {
+    "pg": "8.18.0",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
+  }
+}

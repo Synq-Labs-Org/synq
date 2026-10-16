@@ -267,6 +267,8 @@ export type ChannelGatewayOptions = {
   ports: ChannelPorts;
   adapters: readonly ChannelAdapter[];
   webBaseUrl: string;
+  /** Public sign-in entry only; it conveys no channel proof or financial authority. */
+  workspaceOnboarding?: boolean;
   explorerTxUrl: string;
   now: () => number;
   botUsernames?: Partial<Record<ChannelId, string>>;
@@ -903,6 +905,14 @@ export class ChannelGateway {
         text: HELP_TEXT,
       });
     if (
+      this.options.workspaceOnboarding &&
+      envelope.chatKind === 'DIRECT' &&
+      parsed.kind === 'COMMAND' &&
+      parsed.name === 'start' &&
+      !parsed.args
+    )
+      return this.workspaceOnboarding(envelope);
+    if (
       envelope.chatKind === 'DIRECT' &&
       parsed.kind === 'COMMAND' &&
       parsed.name === 'start' &&
@@ -1385,6 +1395,15 @@ export class ChannelGateway {
     });
   }
 
+  private async workspaceOnboarding(
+    envelope: Envelope,
+  ): Promise<GatewayOutcome> {
+    return this.replyOutcome(envelope, 'HANDLED', 'WORKSPACE_ONBOARDING', {
+      text: 'Create or join an Arc testnet workspace on the secure Synq page. Connect your own wallet and sign in. This link does not bind the chat or approve money. Vault activation is not available yet.',
+      buttons: [{ label: 'Start a workspace', url: this.web('/workspaces') }],
+    });
+  }
+
   private async link(envelope: Envelope): Promise<GatewayOutcome> {
     const store = this.options.store;
     const group = await store.groupLink(
@@ -1410,6 +1429,8 @@ export class ChannelGateway {
         });
       }
     }
+    if (this.options.workspaceOnboarding)
+      return this.workspaceOnboarding(envelope);
     const adapter = this.adapters.get(envelope.channel);
     const nonce = randomBytes(24).toString('base64url');
     const url = adapter?.deepLink?.(nonce) ?? null;

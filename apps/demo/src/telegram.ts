@@ -106,6 +106,8 @@ import {
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
 import { registerBusinessRoutes } from './business-routes.js';
+import { registerWorkspaceRoutes } from './workspace-routes.js';
+import { PostgresWorkspaceStore } from '@synq/workspaces';
 import {
   ArcBusiness,
   liveArcReads,
@@ -494,6 +496,15 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     });
     await setup.close();
     const app = newApi();
+    if (process.env.SYNQ_WORKSPACES_ENABLED === '1') {
+      if (!process.env.SYNQ_ORIGIN) throw new Error('SYNQ_ORIGIN_REQUIRED');
+      const workspaces = new PostgresWorkspaceStore(
+        pool,
+        process.env.SYNQ_ORIGIN,
+      );
+      await workspaces.migrate();
+      registerWorkspaceRoutes(app, workspaces);
+    }
     const readModel = {
       reader,
       snapshots: reader,
@@ -929,6 +940,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     log(`brain: ${evidence.brain}`);
     const channels = await registerChannels({
       app,
+      workspaceOnboarding: process.env.SYNQ_WORKSPACES_ENABLED === '1',
       env: {
         TELEGRAM_BOT_TOKEN: token,
         SYNQ_TELEGRAM_MODE: 'poll',
