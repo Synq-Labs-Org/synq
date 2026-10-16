@@ -340,6 +340,12 @@ importers:
       '@category-labs/mera':
         specifier: 0.2.0
         version: 0.2.0(viem@2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5))
+      '@synq/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@synq/allocations':
+        specifier: workspace:*
+        version: link:../../packages/allocations
       '@synq/api':
         specifier: workspace:*
         version: link:../api
@@ -349,6 +355,9 @@ importers:
       '@synq/channels':
         specifier: workspace:*
         version: link:../../packages/channels
+      '@synq/dealroom':
+        specifier: workspace:*
+        version: link:../../packages/dealroom
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -361,21 +370,36 @@ importers:
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../../packages/invoices
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
       '@synq/offer-exchange':
         specifier: workspace:*
         version: link:../../packages/offer-exchange
+      '@synq/payables':
+        specifier: workspace:*
+        version: link:../../packages/payables
+      '@synq/plugin-circle-earn':
+        specifier: workspace:*
+        version: link:../../plugins/circle-earn
       '@synq/plugin-commerce':
         specifier: workspace:*
         version: link:../../plugins/commerce
       '@synq/plugin-duffel':
         specifier: workspace:*
         version: link:../../plugins/duffel
+      '@synq/plugin-risk':
+        specifier: workspace:*
+        version: link:../../plugins/risk
       '@synq/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      '@synq/plugin-usyc':
+        specifier: workspace:*
+        version: link:../../plugins/usyc
       '@synq/read-model':
         specifier: workspace:*
         version: link:../../packages/read-model

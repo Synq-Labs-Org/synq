@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import {
   createWalletClient,
+  getAddress,
+  isAddress,
   http,
   keccak256,
   stringToHex,
@@ -67,6 +69,8 @@ import { confirmationOf } from '@synq/api/send-routes';
 import { registerProductionSend } from '@synq/api/v1-server';
 import { productionSendPorts } from '@synq/api/send-runtime';
 import { registerChannels } from '@synq/api/channel-server';
+import { registerDealRoom } from '@synq/api/deal-routes';
+import { registerInvoiceCheckout } from '@synq/api/invoice-routes';
 import {
   MandateProposalService,
   PostgresMandateProposalStore,
@@ -101,6 +105,13 @@ import {
 } from './testnet-chain.js';
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
+import { registerBusinessRoutes } from './business-routes.js';
+import {
+  ArcBusiness,
+  liveArcReads,
+  parseVendors,
+  usdcUnits,
+} from './arc-business.js';
 import { FundAssistant } from './fund-assistant.js';
 import { todayIn } from './fund-intents.js';
 import { PostgresTripStore, TripService } from './fund-trips.js';
@@ -751,6 +762,89 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       assistant,
       ...(trips ? { trips } : {}),
     });
+    // Arc business features for the Messages app. Deal Room and invoices turn
+    // on with their link keys; the rest only reads Arc testnet.
+    if (process.env.SYNQ_ARC_BUSINESS !== '0') {
+      const off = (feature: string) => (e: unknown) => {
+        log(`${feature}: off (${(e as Error).message.slice(0, 160)})`);
+        return null;
+      };
+      // Compose passes unset values as empty strings; treat them as unset.
+      const arcEnv = Object.fromEntries(
+        Object.entries(process.env).filter(([, v]) => v !== ''),
+      );
+      const dealRoom = await registerDealRoom({
+        app,
+        pool,
+        env: arcEnv,
+      }).catch(off('deal room'));
+      const checkout = await registerInvoiceCheckout({
+        app,
+        pool,
+        env: arcEnv,
+      }).catch(off('invoices'));
+      const owner = process.env.SYNQ_ARC_OWNER;
+      const floorFrom = (v: string | undefined) => {
+        try {
+          return v ? { operatingFloor: usdcUnits(v) } : {};
+        } catch {
+          log(
+            'business: SYNQ_ARC_FLOOR_USDC is not a USDC amount; default floor',
+          );
+          return {};
+        }
+      };
+      const business = new ArcBusiness({
+        name: process.env.SYNQ_ARC_BUSINESS_NAME || 'Synq demo business',
+        reads: liveArcReads(
+          process.env.SYNQ_ARC_RPC_URL || process.env.SYNQ_ARC_TESTNET_RPC_URL,
+        ),
+        vendors: parseVendors(process.env.SYNQ_ARC_VENDORS),
+        ...(owner && isAddress(owner) ? { owner: getAddress(owner) } : {}),
+        ...floorFrom(process.env.SYNQ_ARC_FLOOR_USDC),
+        now: clock.now,
+        webBaseUrl: process.env.SYNQ_WEB_BASE_URL ?? 'http://localhost:3000',
+        reasoner: fundReasoner?.structured ?? null,
+        env: process.env,
+        offReasons: {
+          ...(process.env.SYNQ_DEALROOM_LINK_KEY && !dealRoom
+            ? {
+                deals:
+                  'Deal Room could not start on this server (see the bot log).',
+              }
+            : {}),
+          ...(process.env.SYNQ_PAY_LINK_KEY && !checkout
+            ? {
+                invoices:
+                  'Invoices could not start on this server (see the bot log).',
+              }
+            : {}),
+        },
+        ...(dealRoom
+          ? {
+              deals: {
+                service: dealRoom.service,
+                linkKey: Buffer.from(
+                  process.env.SYNQ_DEALROOM_LINK_KEY!,
+                  'hex',
+                ),
+              },
+            }
+          : {}),
+        ...(checkout
+          ? {
+              invoices: {
+                service: checkout.invoices,
+                payLinkKey: Buffer.from(process.env.SYNQ_PAY_LINK_KEY!, 'hex'),
+              },
+            }
+          : {}),
+      });
+      registerBusinessRoutes(app, funds, business);
+      log(
+        `business (Arc testnet): deals ${dealRoom ? 'on' : 'off'}, invoices ${checkout ? 'on' : 'off'}, contractors ${parseVendors(process.env.SYNQ_ARC_VENDORS).length}, council read-only`,
+      );
+    }
     /** Operator-local view of what the bot sent (not evidence; may hold link codes). */
     const outbox: {
       chatId: string;

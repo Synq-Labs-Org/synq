@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Address, PublicClient } from 'viem';
@@ -6,7 +7,9 @@ import { CHAINS } from '@synq/chain-registry/arc';
 import {
   InvoiceError,
   amountDue,
+  issueTypedData,
   payCall,
+  payLinkToken,
   paymentsInTx,
   scanMemoPayments,
   verifyPayLink,
@@ -23,6 +26,95 @@ export type InvoiceRouteDeps = {
 };
 
 const dec = (i: Invoice, v: bigint) => moneyToDecimal(money(i.asset, v));
+
+/** Lifetime of an issuer's signing link and of a checkout link. */
+export const ISSUE_LINK_TTL_SECONDS = 7 * 86_400;
+export const PAY_LINK_TTL_SECONDS = 30 * 86_400;
+
+const issueMac = (key: Uint8Array, invoiceId: string, expiresAt: number) =>
+  createHmac('sha256', key)
+    .update(`synq-invoice-issue:${invoiceId}:${expiresAt}`)
+    .digest('base64url')
+    .slice(0, 32);
+
+/**
+ * HMAC navigation token for the issuer's signing page: `<expiresAt>.<mac>`.
+ * It only lets the page show the draft; issuing still needs the issuer
+ * wallet's EIP-712 signature over the exact terms.
+ */
+export function issueLinkToken(
+  key: Uint8Array,
+  invoiceId: string,
+  expiresAt: number,
+): string {
+  return `${expiresAt}.${issueMac(key, invoiceId, expiresAt)}`;
+}
+
+export function verifyIssueLink(
+  key: Uint8Array,
+  invoiceId: string,
+  token: string,
+  now: number,
+): boolean {
+  const m = /^([0-9]{1,12})\.([A-Za-z0-9_-]{32})$/.exec(String(token));
+  if (!m) return false;
+  const expiresAt = Number(m[1]);
+  const want = Buffer.from(issueMac(key, invoiceId, expiresAt));
+  const got = Buffer.from(m[2]!);
+  return (
+    want.length === got.length && timingSafeEqual(want, got) && now < expiresAt
+  );
+}
+
+/** Checkout path for an issued invoice; null while it is a draft or void. */
+export function payPathFor(key: Uint8Array, i: Invoice): string | null {
+  if (!i.paymentRef || i.status === 'DRAFT' || i.status === 'VOID') return null;
+  return `/pay/${payLinkToken(key, i, (i.issuedAt ?? 0) + PAY_LINK_TTL_SECONDS)}`;
+}
+
+/** bigint -> decimal string, so typed data survives JSON for eth_signTypedData_v4. */
+const jsonSafe = (v: unknown): unknown =>
+  JSON.parse(
+    JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? x.toString() : x)),
+  );
+
+/** What the issuer sees before signing: the draft and the exact typed data. */
+export function issueView(i: Invoice, payLinkKey: Uint8Array) {
+  const chain = Object.values(CHAINS).find(
+    (c) => c.chainId === i.asset.chainId,
+  )!;
+  return {
+    invoiceId: i.invoiceId,
+    number: i.number,
+    version: i.version,
+    status: i.status,
+    issuer: i.issuer.name,
+    issuerWallet: i.issuer.wallet,
+    payTo: i.issuer.payoutAddress,
+    payer: i.payer.name,
+    dueDate: i.dueDate,
+    memo: i.memo,
+    lineItems: i.lineItems.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      unitPrice: dec(i, l.unitPrice),
+    })),
+    asset: {
+      symbol: i.asset.symbol,
+      address: i.asset.address,
+      decimals: i.asset.decimals,
+    },
+    total: dec(i, i.total),
+    chain: {
+      chainId: chain.chainId,
+      name: chain.name,
+      rpcUrl: chain.rpcUrls[0]!,
+      explorer: chain.explorer,
+    },
+    issueTypedData: i.status === 'DRAFT' ? jsonSafe(issueTypedData(i)) : null,
+    payPath: payPathFor(payLinkKey, i),
+  };
+}
 
 /** What a payer sees: terms, amount due and the exact Memo call to sign. */
 export function checkoutView(i: Invoice, memoContract: Address) {
@@ -103,6 +195,54 @@ export async function invoiceRoutes(
       const i = await load(token);
       if (!i) return reply.code(404).send({ error: 'NOT_FOUND' });
       return checkoutView(i, deps.memoContract);
+    } catch (e) {
+      const f = fail(e);
+      return reply.code(f.status).send(f.body);
+    }
+  });
+
+  const IssueToken = z.object({ t: z.string().min(10).max(80) });
+  const InvoiceId = z.string().regex(/^inv_[0-9a-f]{20}$/);
+  /** Unknown, expired and forged issue links all look the same: 404. */
+  const draftFor = async (params: unknown, query: unknown) => {
+    const id = InvoiceId.safeParse((params as { id?: string }).id);
+    const t = IssueToken.safeParse(query);
+    if (!id.success || !t.success) return null;
+    const cur = await deps.invoices.store.get(id.data);
+    if (
+      !cur ||
+      !verifyIssueLink(deps.payLinkKey, id.data, t.data.t, deps.now())
+    )
+      return null;
+    return cur.invoice;
+  };
+
+  app.get('/v1/invoices/:id/issue', async (req, reply) => {
+    const i = await draftFor(req.params, req.query);
+    if (!i) return reply.code(404).send({ error: 'NOT_FOUND' });
+    reply.header('cache-control', 'no-store');
+    return issueView(i, deps.payLinkKey);
+  });
+
+  // Issuing: the issuer wallet's EIP-712 signature over the exact terms; the
+  // service recovers it and refuses any other signer.
+  app.post('/v1/invoices/:id/issue', async (req, reply) => {
+    const i = await draftFor(req.params, req.query);
+    if (!i) return reply.code(404).send({ error: 'NOT_FOUND' });
+    const body = z
+      .object({ signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/) })
+      .safeParse(req.body);
+    if (!body.success)
+      return reply
+        .code(400)
+        .send({ error: 'BAD_REQUEST', message: 'invalid input' });
+    try {
+      const issued = await deps.invoices.issue(
+        i.invoiceId,
+        body.data.signature as `0x${string}`,
+      );
+      reply.header('cache-control', 'no-store');
+      return issueView(issued.invoice, deps.payLinkKey);
     } catch (e) {
       const f = fail(e);
       return reply.code(f.status).send(f.body);
