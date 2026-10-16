@@ -72,6 +72,25 @@ describe('critic C-01: a truncating or lagging RPC never makes the cursor skip l
     );
   });
 
+  it('a fallback provider is verified before its first batch even between periodic code checks', async () => {
+    const { chain, api } = forkableChain();
+    api.mineEmpty(3);
+    const failed = {
+      ...chain,
+      logs: async () => {
+        throw new Error('offline');
+      },
+    };
+    const wrong = { ...chain, chainId: async () => 1 };
+    const ix = new ArcChainIndexer(
+      [failed, wrong],
+      new MemoryArcIndexStore(),
+      cfg(),
+    );
+    await expect(ix.step()).rejects.toMatchObject({ code: 'PROVIDER_FAILED' });
+    await expect(ix.step()).rejects.toMatchObject({ code: 'WRONG_CHAIN' });
+  });
+
   it('logs outside [from, to] are dropped and counted, never stored', async () => {
     const { chain, api } = forkableChain();
     for (let i = 1; i <= 6; i++)
@@ -93,7 +112,11 @@ describe('critic C-02: a reorg below every recorded block halts deterministicall
     api.mineEmpty(6);
     const counted = boundedReads(chain);
     const store = new MemoryArcIndexStore();
-    const ix = new ArcChainIndexer(counted.chain, store, cfg({ startBlock: 3n }));
+    const ix = new ArcChainIndexer(
+      counted.chain,
+      store,
+      cfg({ startBlock: 3n }),
+    );
     await ix.step();
     api.reorg(2, [[], [], [], [], [], []], 'fork'); // below the start anchor
     await expect(ix.step()).rejects.toMatchObject({ code: 'DEEP_REORG' });

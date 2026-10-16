@@ -283,61 +283,77 @@ describe('Supervisor on the durable budget ledger', { timeout: 60_000 }, () => {
   });
 });
 
-describe('critic C-03: a run that throws never strands its budget', { timeout: 60_000 }, () => {
-  it('a supervisor run whose reader throws a plain Error settles its reservation; healthy runs still fit', async () => {
-    const { desk, cleanInvoice } = await import('../arc/finance-team.harness.js');
-    const { superviseFinance } = await import('@synq/agent-runtime');
-    const ws = `wsp_${runId()}`;
-    const { FINANCE_TEAM_BUDGET } = await import('@synq/agent-runtime');
-    // Caps worth exactly two full runs.
-    const caps = {
-      toolCalls: FINANCE_TEAM_BUDGET.maxToolCalls * 2,
-      tokens: FINANCE_TEAM_BUDGET.maxLlmTokens * 2,
-      paidMicroUsd: FINANCE_TEAM_BUDGET.maxPaidMicroUsd * 2,
-    };
-    const ledger = () =>
-      new PostgresFinanceBudgetLedger(pool, caps, { now: () => 1_800_000_000 });
-    for (let i = 0; i < 3; i++) {
-      const broken = {
-        ...(await desk([cleanInvoice], {
-          budget: ledger(),
-          world: async () => {
-            throw new Error('rpc temporarily unavailable');
-          },
-        })),
+describe(
+  'critic C-03: a run that throws never strands its budget',
+  { timeout: 60_000 },
+  () => {
+    it('a supervisor run whose reader throws a plain Error settles its reservation; healthy runs still fit', async () => {
+      const { desk, cleanInvoice } =
+        await import('../arc/finance-team.harness.js');
+      const { superviseFinance } = await import('@synq/agent-runtime');
+      const ws = `wsp_${runId()}`;
+      const { FINANCE_TEAM_BUDGET } = await import('@synq/agent-runtime');
+      // Caps worth exactly two full runs.
+      const caps = {
+        toolCalls: FINANCE_TEAM_BUDGET.maxToolCalls * 2,
+        tokens: FINANCE_TEAM_BUDGET.maxLlmTokens * 2,
+        paidMicroUsd: FINANCE_TEAM_BUDGET.maxPaidMicroUsd * 2,
+      };
+      const ledger = () =>
+        new PostgresFinanceBudgetLedger(pool, caps, {
+          now: () => 1_800_000_000,
+        });
+      for (let i = 0; i < 3; i++) {
+        const broken = {
+          ...(await desk([cleanInvoice], {
+            budget: ledger(),
+            world: async () => {
+              throw new Error('rpc temporarily unavailable');
+            },
+          })),
+          workspaceId: ws,
+        };
+        await expect(
+          superviseFinance("what's my cash", broken),
+        ).rejects.toThrow(/temporarily unavailable/);
+      }
+      const open = await pool.query(
+        'SELECT count(*)::int AS n FROM synq_finance_budget_reservations WHERE workspace_id=$1 AND settled_at IS NULL',
+        [ws],
+      );
+      expect(open.rows[0]!.n).toBe(0);
+      const healthy = {
+        ...(await desk([cleanInvoice], { budget: ledger() })),
         workspaceId: ws,
       };
-      await expect(superviseFinance("what's my cash", broken)).rejects.toThrow(
-        /temporarily unavailable/,
+      expect((await superviseFinance("what's my cash", healthy)).status).toBe(
+        'ANSWERED',
       );
-    }
-    const open = await pool.query(
-      'SELECT count(*)::int AS n FROM synq_finance_budget_reservations WHERE workspace_id=$1 AND settled_at IS NULL',
-      [ws],
-    );
-    expect(open.rows[0]!.n).toBe(0);
-    const healthy = { ...(await desk([cleanInvoice], { budget: ledger() })), workspaceId: ws };
-    expect((await superviseFinance("what's my cash", healthy)).status).toBe('ANSWERED');
-  });
+    });
 
-  it("a dead process's hold expires after the hold TTL, not at the end of the window", async () => {
-    const ws = `wsp_${runId()}`;
-    let t = 1_800_000_000 - (1_800_000_000 % 86_400) + 100;
-    const l = () =>
-      new PostgresFinanceBudgetLedger(pool, caps, {
-        now: () => t,
-        holdTtlSeconds: 900,
+    it("a dead process's hold expires after the hold TTL, not at the end of the window", async () => {
+      const ws = `wsp_${runId()}`;
+      let t = 1_800_000_000 - (1_800_000_000 % 86_400) + 100;
+      const l = () =>
+        new PostgresFinanceBudgetLedger(pool, caps, {
+          now: () => t,
+          holdTtlSeconds: 900,
+        });
+      await l().reserve(ws, caps, 'run_dead'); // the process dies here
+      expect(await l().remaining(ws)).toEqual({
+        toolCalls: 0,
+        tokens: 0,
+        paidMicroUsd: 0,
       });
-    await l().reserve(ws, caps, 'run_dead'); // the process dies here
-    expect(await l().remaining(ws)).toEqual({ toolCalls: 0, tokens: 0, paidMicroUsd: 0 });
-    t += 899;
-    expect((await l().remaining(ws)).toolCalls).toBe(0);
-    t += 2;
-    expect(await l().remaining(ws)).toEqual(caps);
-    const expired = await pool.query(
-      'SELECT expired FROM synq_finance_budget_reservations WHERE workspace_id=$1',
-      [ws],
-    );
-    expect(expired.rows).toEqual([{ expired: true }]);
-  });
-});
+      t += 899;
+      expect((await l().remaining(ws)).toolCalls).toBe(0);
+      t += 2;
+      expect(await l().remaining(ws)).toEqual(caps);
+      const expired = await pool.query(
+        'SELECT expired FROM synq_finance_budget_reservations WHERE workspace_id=$1',
+        [ws],
+      );
+      expect(expired.rows).toEqual([{ expired: true }]);
+    });
+  },
+);

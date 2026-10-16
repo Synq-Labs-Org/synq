@@ -107,9 +107,7 @@ export function arcProviderClients(): PublicClient[] {
 export function arcFallbackClient(): PublicClient {
   const urls = arcRpcUrls();
   return createPublicClient({
-    transport: fallback(
-      urls.map(httpFor),
-    ),
+    transport: fallback(urls.map(httpFor)),
   }) as PublicClient;
 }
 
@@ -234,7 +232,10 @@ export async function runArcIndexer(o: ArcIndexerOptions) {
           log({ kind: 'effect', ...d, ...(recovered ? { recovered } : {}) });
       } catch (e) {
         // The event stays pending and is retried on the next pass.
-        log({ kind: 'effect-retry', message: String((e as Error).message).slice(0, 200) });
+        log({
+          kind: 'effect-retry',
+          message: String((e as Error).message).slice(0, 200),
+        });
       }
     };
     // Effects left pending by a crash run first.

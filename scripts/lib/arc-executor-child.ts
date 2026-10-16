@@ -34,6 +34,7 @@ import {
   type NonceFence,
 } from '@synq/kernel/arc';
 import { PostgresGrantFence } from '@synq/execution-worker/pg-outbox';
+import { executorFenceMode, type ExecutorFenceMode } from './executor-fence.js';
 import { connectChain, verifyContract } from '@synq/execution-worker/arc';
 import { sendCall } from '@synq/execution-worker/cctp';
 import { VAULT_POLICY_ABI, simulate } from '@synq/execution-worker/vault';
@@ -64,6 +65,16 @@ export type ExecutorMessage =
   | { type: 'result'; id: number; ok: false; error: string };
 
 const send = (m: ExecutorMessage) => process.send!(m);
+// Decided before the key is read: without a durable grant fence the executor
+// refuses to run unless the dev-only in-memory fence was asked for explicitly.
+let fenceMode: ExecutorFenceMode;
+try {
+  fenceMode = executorFenceMode();
+} catch (e) {
+  process.stderr.write(`${(e as Error).message}\n`);
+  process.exit(78);
+}
+if (fenceMode.mode === 'DEV_MEMORY') process.stderr.write(`${fenceMode.warning}\n`);
 const key = readFileSync(
   join(process.env.HOME!, '.synq', 'arc-agent.key'),
   'utf8',
@@ -75,16 +86,13 @@ const usdc = token('arc-testnet', 'USDC');
 const policy = contract('arc-testnet', 'SYNQ_ARC_VAULT_POLICY')
   .address as Address;
 const vault = contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE').address as Address;
-// With SYNQ_EXECUTION_DATABASE_URL, consumed grants are durable across
-// executor restarts (unique grant id and nonce); otherwise per-process only.
-const fence: NonceFence = process.env.SYNQ_EXECUTION_DATABASE_URL
-  ? new PostgresGrantFence(
-      new pg.Pool({
-        connectionString: process.env.SYNQ_EXECUTION_DATABASE_URL,
-        max: 2,
-      }),
-    )
-  : new MemoryNonceFence();
+// Consumed grants are durable across executor restarts (unique grant id and nonce).
+const fence: NonceFence =
+  fenceMode.mode === 'POSTGRES'
+    ? new PostgresGrantFence(
+        new pg.Pool({ connectionString: fenceMode.url, max: 2 }),
+      )
+    : new MemoryNonceFence();
 const fenceReady =
   fence instanceof PostgresGrantFence ? fence.migrate() : Promise.resolve();
 const acks = new Map<number, () => void>();

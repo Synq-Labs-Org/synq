@@ -22,6 +22,7 @@ import { migrateFinance, PostgresLedgerStore } from '@synq/ledger';
 import { PostgresInvoiceStore, type Invoice } from '@synq/invoices';
 import {
   arcFallbackClient,
+  arcProviderClients,
   runArcIndexer,
 } from '../apps/api/src/arc-indexer.js';
 

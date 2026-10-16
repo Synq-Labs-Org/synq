@@ -242,7 +242,11 @@ async function superviseFinanceRun(
     writes.push(
       Promise.resolve(
         reservation && desk.budget.settle
-          ? desk.budget.settle(desk.workspaceId, reservation.reservationId, used)
+          ? desk.budget.settle(
+              desk.workspaceId,
+              reservation.reservationId,
+              used,
+            )
           : desk.budget.record(desk.workspaceId, used),
       ),
     );

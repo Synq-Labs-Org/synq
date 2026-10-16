@@ -32,6 +32,8 @@ import {
 } from '@synq/world-model';
 import {
   MemoryObligationFence,
+  type ApprovalNonceFence,
+  type ObligationFence,
   arcPaymentKernel,
   superviseFinance,
   type FinanceBudgetLedger,
@@ -293,6 +295,11 @@ export function kernelOf(input: {
   books: FinanceBooks;
   simulate: (intent: PaymentIntent) => Promise<boolean>;
   now: () => number;
+  /** Durable fences (Postgres) when the caller has a database; otherwise in-memory. */
+  fences?: {
+    obligations: ObligationFence;
+    approvals: ApprovalNonceFence | null;
+  };
 }) {
   return arcPaymentKernel({
     config: input.config,
@@ -301,7 +308,8 @@ export function kernelOf(input: {
     state: () => input.books.mandateState,
     simulate: input.simulate,
     now: input.now,
-    obligations: new MemoryObligationFence(),
+    obligations: input.fences?.obligations ?? new MemoryObligationFence(),
+    ...(input.fences?.approvals ? { approvals: input.fences.approvals } : {}),
   });
 }
 

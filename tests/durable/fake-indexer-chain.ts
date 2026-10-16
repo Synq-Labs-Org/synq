@@ -216,8 +216,7 @@ export function boundedReads(inner: IndexerChain, max = 2_000) {
     chain: {
       ...inner,
       block: async (n: bigint) => {
-        if (++reads > max)
-          throw new Error(`GAVE_UP_AFTER_${max}_BLOCK_READS`);
+        if (++reads > max) throw new Error(`GAVE_UP_AFTER_${max}_BLOCK_READS`);
         return inner.block(n);
       },
     } as IndexerChain,

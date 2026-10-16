@@ -130,6 +130,9 @@ export class PostgresOutboxStore implements OutboxStore {
     at: number,
   ): Promise<'CREATED' | 'KEY_EXISTS' | 'GRANT_REPLAYED'> {
     return withTransaction(this.pool, async (c) => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        r.key,
+      ]);
       const existing = await c.query(
         'SELECT 1 FROM synq_arc_payout_outbox WHERE key=$1',
         [r.key],

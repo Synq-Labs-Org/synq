@@ -514,3 +514,83 @@ describe('Gateway buckets on Postgres', { timeout: 60_000 }, () => {
     });
   });
 });
+
+describe('Gateway critic regressions', () => {
+  async function ready() {
+    const a = new PostgresGatewayLedger(pool);
+    const acct = `gw_${runId()}`;
+    const salt = keccak256(stringToHex(acct));
+    await a.open(acct, 1000n, 1);
+    await a.deposit(acct, { chainId: 11155111, txHash: salt, amount: 100n }, 2);
+    await a.observeAvailable(acct, 100n, 3);
+    await a.reserve(
+      acct,
+      { salt, value: 40n, intent: {}, signature: '0x01' },
+      4,
+    );
+    return { a, acct, salt };
+  }
+  it('C-08: ignores an observation fetched before a settle', async () => {
+    const { a, acct, salt } = await ready();
+    await a.deposit(
+      acct,
+      { chainId: 11155111, txHash: keccak256(salt), amount: 50n },
+      5,
+    );
+    await a.submitOnce(
+      salt,
+      async () => ({ attestation: '0xaa', signature: '0xbb' }),
+      () => 6,
+    );
+    await a.settle(salt, keccak256(salt), 8);
+    await a.observeAvailable(acct, 100n, 7);
+    expect(await a.buckets(acct)).toEqual({
+      sourceFree: 850n,
+      pending: 50n,
+      available: 60n,
+      reserved: 0n,
+    });
+  });
+  it('C-09: a failed submit stays held until a trusted reader confirms expiry; release is once only', async () => {
+    const { a, acct, salt } = await ready();
+    await expect(
+      a.submitOnce(
+        salt,
+        async () => {
+          throw new Error('timeout');
+        },
+        () => 5,
+      ),
+    ).rejects.toThrow('timeout');
+    expect(
+      await a.reconcileSubmission(
+        salt,
+        async () => ({ outcome: 'UNKNOWN' }),
+        () => 7,
+      ),
+    ).toBe('NEEDS_REVIEW');
+    expect((await a.buckets(acct)).reserved).toBe(40n);
+    await expect(
+      a.reconcileSubmission(
+        salt,
+        async () => ({ outcome: 'EXPIRED', salt, expiresAt: 10 }),
+        () => 7,
+      ),
+    ).rejects.toMatchObject({ code: 'WRONG_STATE' });
+    const expired = async () => ({
+      outcome: 'EXPIRED' as const,
+      salt,
+      expiresAt: 6,
+    });
+    const results = await Promise.all([
+      a.reconcileSubmission(salt, expired, () => 7),
+      a.reconcileSubmission(salt, expired, () => 7),
+    ]);
+    expect(results.filter((x) => x === 'RELEASED')).toHaveLength(1);
+    expect(await a.buckets(acct)).toMatchObject({
+      available: 100n,
+      reserved: 0n,
+    });
+    expect((await a.intent(salt))!.state).toBe('RELEASED');
+  });
+});

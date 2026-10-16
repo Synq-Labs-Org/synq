@@ -28,6 +28,7 @@ import { sendCall } from './cctp.js';
 import {
   OPERATION,
   SAFE_ABI,
+  SAFE_GUARD_SLOT,
   VAULT_POLICY_ABI,
   encodeExecTransaction,
   packSignatures,
@@ -59,7 +60,8 @@ export async function readCustody(
   const c = chain.client;
   const blockNumber = await c.getBlockNumber();
   const at = { blockNumber } as const;
-  const [threshold, owners] = await Promise.all([
+  const sentinel = '0x0000000000000000000000000000000000000001' as Address;
+  const [threshold, owners, page, guardWord] = await Promise.all([
     c.readContract({
       address: safe,
       abi: SAFE_ABI,
@@ -70,6 +72,20 @@ export async function readCustody(
       address: safe,
       abi: SAFE_ABI,
       functionName: 'getOwners',
+      ...at,
+    }),
+    c.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'getModulesPaginated',
+      args: [sentinel, 100n],
+      ...at,
+    }),
+    c.readContract({
+      address: safe,
+      abi: SAFE_ABI,
+      functionName: 'getStorageAt',
+      args: [SAFE_GUARD_SLOT, 1n],
       ...at,
     }),
   ]);
@@ -105,6 +121,10 @@ export async function readCustody(
     threshold: Number(threshold),
     owners: owners.map((o) => getAddress(o)),
     operator,
+    modules: page[0].map(getAddress),
+    modulesComplete: page[1].toLowerCase() === sentinel,
+    guard: getAddress(`0x${guardWord.slice(-40)}`),
+    expectedPolicy: policy ? getAddress(policy) : null,
     blockNumber,
   });
 }

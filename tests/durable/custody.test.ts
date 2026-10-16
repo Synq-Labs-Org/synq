@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import {
   keccak256,
+  pad,
   toHex,
   type Address,
   type Hex,
@@ -101,7 +102,12 @@ const sign = (who: PrivateKeyAccount[], a: CouncilAction) =>
   Promise.all(who.map((s) => s.signTypedData(councilActionTypedData(a))));
 
 /** A vault as the chain reports it, plus a mempool that records broadcasts. */
-function fakeVault(owners: readonly Address[], threshold: number) {
+function fakeVault(
+  owners: readonly Address[],
+  threshold: number,
+  modules: readonly Address[] = [POLICY],
+  guard: Address = POLICY,
+) {
   const sent: Hex[] = [];
   const client = {
     getChainId: async () => CHAIN,
@@ -110,6 +116,11 @@ function fakeVault(owners: readonly Address[], threshold: number) {
       ({
         getThreshold: BigInt(threshold),
         getOwners: owners,
+        getModulesPaginated: [
+          modules,
+          '0x0000000000000000000000000000000000000001',
+        ],
+        getStorageAt: pad(guard),
         nonce: 3n,
         operator: '0x00000000000000000000000000000000000000a9',
         perPaymentCap: 10_000n,
@@ -169,6 +180,34 @@ async function expectCode(p: Promise<unknown>, code: string) {
 }
 
 describe('governance-to-custody binding (ADR-002)', () => {
+  it('critic C-06: matching seats do not bind a Safe with extra modules or the wrong guard', async () => {
+    for (const [modules, guard] of [
+      [[POLICY, recipient], POLICY],
+      [[POLICY], recipient],
+      [[], POLICY],
+    ] as const) {
+      const v = fakeVault(
+        seats.map((s) => s.address),
+        5,
+        modules,
+        guard,
+      );
+      const chain = await connectChain('arc-testnet', undefined, v.client);
+      const custody = await readCustody(chain, SAFE, POLICY);
+      expect(councilCustodyBinding(term, policy, custody).status).toBe(
+        'UNBOUND',
+      );
+    }
+    const v = fakeVault(
+      seats.map((s) => s.address),
+      5,
+    );
+    const chain = await connectChain('arc-testnet', undefined, v.client);
+    const custody = await readCustody(chain, SAFE, POLICY);
+    expect(
+      advertisedMoneyPolicy(custody, { term, policy }).councilNote,
+    ).toMatch(/except operator payments up to caps/);
+  });
   it('the live-shaped 2-of-3 vault cannot advertise or act on a 5-of-7 council money policy', async () => {
     const v = fakeVault(
       vaultKeys.map((k) => k.address),

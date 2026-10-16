@@ -180,6 +180,7 @@ export const FATAL_INDEXER_ERRORS: readonly ArcIndexerError['code'][] = [
 
 export class ArcChainIndexer {
   private batches = 0;
+  private verified = new Set<IndexerChain>();
   private current = 0;
   readonly providers: readonly IndexerChain[];
   /** Logs a provider returned outside the requested range (dropped). */
@@ -189,7 +190,9 @@ export class ArcChainIndexer {
     readonly store: ArcIndexStore,
     readonly cfg: ArcIndexerConfig,
   ) {
-    this.providers = Array.isArray(chain) ? [...chain] : [chain as IndexerChain];
+    this.providers = Array.isArray(chain)
+      ? [...chain]
+      : [chain as IndexerChain];
     if (!this.providers.length) throw new Error('no indexer providers');
   }
 
@@ -284,8 +287,13 @@ export class ArcChainIndexer {
 
   private async stepOn(p: IndexerChain, limitTo?: bigint): Promise<StepResult> {
     const { stream } = this.cfg;
-    if (this.batches++ % (this.cfg.codeCheckEvery ?? 50) === 0)
+    if (
+      !this.verified.has(p) ||
+      this.batches++ % (this.cfg.codeCheckEvery ?? 50) === 0
+    ) {
       await this.verify();
+      this.verified.add(p);
+    }
     let cursor = await this.store.cursor(stream);
     let rolledBackTo: bigint | null = null;
     let removed = 0;
@@ -316,8 +324,7 @@ export class ArcChainIndexer {
     const first = await p.block(from);
     // The first commit also records the block before the start (the anchor),
     // so a reorg at the start block has a fork point to return to.
-    const anchor =
-      !cursor && from > 0n ? await p.block(from - 1n) : null;
+    const anchor = !cursor && from > 0n ? await p.block(from - 1n) : null;
     if (anchor && first.parentHash !== anchor.hash)
       throw new ArcIndexerError(
         'PROVIDER_INCOMPLETE',
@@ -390,7 +397,11 @@ export class ArcChainIndexer {
       data: Record<string, string>,
     ) => {
       // Never trust the provider to honour the range.
-      if (l.blockNumber === null || l.blockNumber < from || l.blockNumber > to) {
+      if (
+        l.blockNumber === null ||
+        l.blockNumber < from ||
+        l.blockNumber > to
+      ) {
         this.droppedOutOfRange++;
         return;
       }

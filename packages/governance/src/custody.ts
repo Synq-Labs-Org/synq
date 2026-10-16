@@ -31,6 +31,10 @@ export type SafeCustody = Readonly<{
   safe: Address;
   threshold: number;
   owners: readonly Address[];
+  modules: readonly Address[];
+  modulesComplete: boolean;
+  guard: Address;
+  expectedPolicy: Address | null;
   /** The policy module's operator path, when the vault has one. */
   operator: OperatorAllowance | null;
   /** Block the facts were read at (provenance). */
@@ -53,6 +57,16 @@ export function councilCustodyBinding(
   custody: SafeCustody,
 ): CustodyBinding {
   const reasons: string[] = [];
+  if (
+    !custody.expectedPolicy ||
+    !custody.modulesComplete ||
+    custody.modules.length !== 1 ||
+    !sameAddress(custody.modules[0]!, custody.expectedPolicy) ||
+    !sameAddress(custody.guard, custody.expectedPolicy)
+  )
+    reasons.push(
+      'Safe modules and guard must match the expected policy exactly',
+    );
   if (custody.chainId !== term.chainId || custody.chainId !== policy.chainId)
     reasons.push(
       `vault is on chain ${custody.chainId}, council on ${term.chainId}`,
@@ -134,7 +148,7 @@ export function advertisedMoneyPolicy(
     council: binding?.status === 'BOUND' ? 'BOUND' : 'PROPOSALS_ONLY',
     councilNote:
       binding?.status === 'BOUND'
-        ? `council ${council!.term.threshold}-of-${council!.term.seats.length} is enforced by the Safe`
+        ? `council ${council!.term.threshold}-of-${council!.term.seats.length} is enforced by the Safe${op && !op.paused ? '; except operator payments up to caps' : ''}`
         : council
           ? `council ${council.term.threshold}-of-${council.term.seats.length} approves proposals only; it does not control vault custody (${(binding as { reasons: readonly string[] }).reasons.join('; ')})`
           : 'no council',

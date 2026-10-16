@@ -212,11 +212,12 @@ export class PostgresGatewayLedger {
   async observeAvailable(accountId: string, total: bigint, at: number) {
     await withTransaction(this.pool, async (c) => {
       const r = await c.query(
-        'SELECT pending, available, reserved FROM synq_gateway_accounts WHERE account_id=$1 FOR UPDATE',
+        'SELECT pending, available, reserved, updated_at FROM synq_gateway_accounts WHERE account_id=$1 FOR UPDATE',
         [accountId],
       );
       const x = r.rows[0];
       if (!x) throw new GatewayLedgerError('UNKNOWN_ACCOUNT', accountId);
+      if (at <= Number(x.updated_at)) return;
       const newly =
         total - BigInt(x.available as string) - BigInt(x.reserved as string);
       if (newly <= 0n) return;
@@ -344,6 +345,60 @@ export class PostgresGatewayLedger {
       attestation,
     });
     return { outcome: 'ATTESTED', attestation };
+  }
+
+  /** Reconcile an ambiguous submit through a trusted Gateway reader, never resend. */
+  async reconcileSubmission(
+    salt: Hex,
+    lookup: (salt: Hex) => Promise<
+      | {
+          outcome: 'ATTESTED';
+          attestation: { attestation: Hex; signature: Hex };
+        }
+      | { outcome: 'EXPIRED'; salt: Hex; expiresAt: number }
+      | { outcome: 'UNKNOWN' }
+    >,
+    now: () => number,
+  ) {
+    const proof = await lookup(salt);
+    if (proof.outcome === 'UNKNOWN') return 'NEEDS_REVIEW' as const;
+    if (proof.outcome === 'ATTESTED') {
+      await this.transition(salt, 'SUBMITTED', 'ATTESTED', now(), {
+        attestation: proof.attestation,
+      });
+      return (await this.intent(salt))?.state ?? 'NEEDS_REVIEW';
+    }
+    const at = now();
+    if (
+      proof.salt.toLowerCase() !== salt.toLowerCase() ||
+      !Number.isSafeInteger(proof.expiresAt) ||
+      proof.expiresAt >= at
+    )
+      throw new GatewayLedgerError(
+        'WRONG_STATE',
+        'expiry proof does not cover this salt',
+      );
+    const current = await this.intent(salt);
+    if (!current) throw new GatewayLedgerError('WRONG_STATE', 'unknown salt');
+    return withTransaction(this.pool, async (c) => {
+      // Same account-first lock order as reserve/observe.
+      await c.query(
+        'SELECT account_id FROM synq_gateway_accounts WHERE account_id=$1 FOR UPDATE',
+        [current.accountId],
+      );
+      const r = await c.query(
+        `UPDATE synq_gateway_burn_intents SET state='RELEASED', updated_at=$2
+         WHERE salt=$1 AND state='SUBMITTED' RETURNING account_id, value`,
+        [salt.toLowerCase(), at],
+      );
+      const x = r.rows[0];
+      if (!x) return 'NEEDS_REVIEW' as const;
+      await c.query(
+        `UPDATE synq_gateway_accounts SET reserved=reserved-$2, available=available+$2, updated_at=$3 WHERE account_id=$1`,
+        [x.account_id, x.value, at],
+      );
+      return 'RELEASED' as const;
+    });
   }
 
   /** Destination mint reconciled: the reservation is consumed once. */

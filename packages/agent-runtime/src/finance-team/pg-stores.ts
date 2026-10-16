@@ -113,7 +113,11 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
   constructor(
     readonly pool: SqlPool,
     readonly caps: FinanceUsage = DEFAULT_SESSION_BUDGET,
-    opts: { windowSeconds?: number; holdTtlSeconds?: number; now?: () => number } = {},
+    opts: {
+      windowSeconds?: number;
+      holdTtlSeconds?: number;
+      now?: () => number;
+    } = {},
   ) {
     this.windowSeconds = opts.windowSeconds ?? 86_400;
     this.holdTtlSeconds = opts.holdTtlSeconds ?? 900;

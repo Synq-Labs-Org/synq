@@ -359,10 +359,40 @@ describe('durable execution state on Postgres', { timeout: 60_000 }, () => {
     const chain = await connectChain('arc-testnet', undefined, arc.client);
     const s = countingSigner(payerKey);
     const g = await grantFor(runId());
+    // Delay after the initial missing-row read: all old unlocked callers
+    // then reach consumption together, while a key lock serializes them.
+    const delayedPool = new Proxy(pool, {
+      get(target, prop) {
+        if (prop === 'connect')
+          return async () => {
+            const client = await target.connect();
+            return new Proxy(client, {
+              get(c, key) {
+                if (key === 'query')
+                  return async (...args: unknown[]) => {
+                    const result = await (
+                      c.query as (...args: unknown[]) => Promise<unknown>
+                    )(...args);
+                    if (
+                      typeof args[0] === 'string' &&
+                      args[0].startsWith('SELECT 1 FROM synq_arc_payout_outbox')
+                    )
+                      await new Promise((resolve) => setTimeout(resolve, 40));
+                    return result;
+                  };
+                const value = Reflect.get(c, key);
+                return typeof value === 'function' ? value.bind(c) : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     const results = await Promise.allSettled(
       [1, 2, 3, 4].map(() =>
         payGrantOnce({
-          store: new PostgresOutboxStore(pool),
+          store: new PostgresOutboxStore(delayedPool),
           fence: new PostgresGrantFence(pool),
           grant: g,
           grantKey: config.grantKey,
@@ -378,6 +408,7 @@ describe('durable execution state on Postgres', { timeout: 60_000 }, () => {
     expect(
       results.filter((r) => r.status === 'fulfilled' && r.value.signedNow),
     ).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toEqual([]);
     // A different grant whose nonce was burned by the plain fence is refused.
     const g2 = await grantFor(runId());
     expect(await new PostgresGrantFence(pool).consume(g2.nonce)).toBe(true);

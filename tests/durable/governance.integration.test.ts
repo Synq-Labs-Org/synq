@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type pg from 'pg';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
@@ -42,6 +43,7 @@ const CHAIN = USDC.chainId;
 const NOW = 1_790_000_000;
 const DAY = 86_400;
 let pool: pg.Pool;
+const macKey = randomBytes(32);
 
 const policyFor = (workspaceId: string): GovernancePolicy => ({
   policyId: 'pol_m2',
@@ -294,10 +296,12 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
       new DurableDelegationRegistry(
         policy,
         new PostgresDelegationLogStore(pool),
+        { macKey },
       ).register(d1, s1, NOW),
       new DurableDelegationRegistry(
         policy,
         new PostgresDelegationLogStore(pool),
+        { macKey },
       ).register(d2, s2, NOW),
     ]);
     // Alice may hold one active delegation: exactly one registration lands.
@@ -311,6 +315,7 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
     const live = await new DurableDelegationRegistry(
       policy,
       new PostgresDelegationLogStore(pool),
+      { macKey },
     ).list();
     expect(live.map((r) => r.id)).toEqual([winner.id]);
     // Revoke, "crash", restart: the revocation is still in force.
@@ -324,6 +329,7 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
     await new DurableDelegationRegistry(
       policy,
       new PostgresDelegationLogStore(pool),
+      { macKey },
     ).revoke(
       revocation,
       await alice.signTypedData(revocationTypedData(revocation)),
@@ -332,6 +338,7 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
     const after = await new DurableDelegationRegistry(
       policy,
       new PostgresDelegationLogStore(pool),
+      { macKey },
     ).list();
     expect(after[0]!.revokedAt).toBe(NOW + 100);
     expect(delegationId(winner.delegation)).toBe(winner.id);
@@ -346,6 +353,7 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
     const reg = new DurableDelegationRegistry(
       policy,
       new PostgresDelegationLogStore(pool),
+      { macKey },
     );
     const mk = (
       from: PrivateKeyAccount,
@@ -406,6 +414,7 @@ describe('governance state on Postgres', { timeout: 60_000 }, () => {
       new DurableDelegationRegistry(
         policy,
         new PostgresDelegationLogStore(pool),
+        { macKey },
       ).list(),
     ).rejects.toMatchObject({ code: 'STORE_TAMPERED' });
     await expect(reg.list()).rejects.toMatchObject({ code: 'STORE_TAMPERED' });
