@@ -168,6 +168,20 @@ func sampleModel(_ view: FundView?, trips: [TripView] = [], admin: Bool = false)
                         adminKey: admin ? "admin" : nil, conversations: [], lastUsed: Date())
     model.view = view
     model.trips = trips
+    model.business.capabilities = Samples.capabilities()
+    model.business.checked = true
+    return model
+}
+
+/// A business model for the sheets, with the features the server would report.
+@MainActor
+func businessModel(off: String? = nil, _ fill: (BusinessModel) -> Void = { _ in }) -> BusinessModel {
+    let model = sampleModel(Samples.activeFund).business
+    if let off {
+        model.capabilities = nil
+        model.offServer = off
+    }
+    fill(model)
     return model
 }
 
@@ -398,6 +412,78 @@ struct Render {
                                                             onShareUpdate: {}))
             png(Transcript { LiveBubble { TranscriptCardView(link: link, status: status) } },
                 width: phone.width, height: 420, scale: 3, to: bubble("transcript-review-card.png"))
+        }
+        // Arc business screens.
+        func sheet(_ name: String, height: CGFloat = phone.height, scale: CGFloat = 3, _ kind: BusinessFeatureKind,
+                   _ prefill: BusinessSheet? = nil, off: String? = nil, _ fill: (BusinessModel) -> Void = { _ in }) {
+            let m = businessModel(off: off, fill)
+            shot(name, height: height, scale: scale,
+                 BusinessScreen(business: m, sheet: prefill ?? BusinessSheet(kind: kind), actions: .none, onClose: {}))
+        }
+        let offHome = sampleModel(Samples.activeFund, trips: [Samples.trip("VOTING")])
+        offHome.business.capabilities = nil
+        offHome.business.offServer = BusinessAvailability.notOnServer
+        shot("screen-home-business-off.png", height: 1500, scale: 2, fund(offHome))
+        sheet("screen-deal.png", .deals, BusinessSheet(kind: .deals, text: Samples.dealText))
+        sheet("screen-deal-drafted.png", .deals) { $0.deal = Samples.deal }
+        sheet("screen-deal-drafted-full.png", height: 1250, scale: 2, .deals) { $0.deal = Samples.deal }
+        sheet("screen-invoice.png", .invoices, BusinessSheet(kind: .invoices, payer: "Priya", amount: "120", note: "Logo")) {
+            $0.capabilities = Samples.capabilities(true)
+        }
+        sheet("screen-invoice-draft.png", .invoices) { $0.invoice = Samples.invoice("DRAFT") }
+        sheet("screen-invoice-issued.png", .invoices) { $0.invoice = Samples.invoice("ISSUED") }
+        sheet("screen-invoice-not-enabled.png", .invoices) {
+            var f = Samples.capabilities().features
+            f["invoices"] = BusinessFeature(enabled: false, reason: "Invoices need SYNQ_PAY_LINK_KEY on the server.")
+            $0.capabilities = BusinessCapabilities(network: "Arc testnet", chainId: 5042002, business: "Synq demo business", features: f)
+        }
+        sheet("screen-team.png", .team) {
+            $0.team = Samples.team
+            $0.teamQuestion = "Ask CFO and Risk whether to pay Sarah"
+        }
+        sheet("screen-team-full.png", height: 1500, scale: 2, .team) {
+            $0.team = Samples.team
+            $0.teamQuestion = "Ask CFO and Risk whether to pay Sarah"
+        }
+        sheet("screen-team-ask.png", .team)
+        sheet("screen-split.png", .splits, BusinessSheet(kind: .splits, amount: "1500")) { $0.split = Samples.split }
+        sheet("screen-split-full.png", height: 1500, scale: 2, .splits, BusinessSheet(kind: .splits, amount: "1500")) {
+            $0.split = Samples.split
+        }
+        sheet("screen-treasury.png", .treasury) { $0.treasury = Samples.treasury }
+        sheet("screen-treasury-full.png", height: 1400, scale: 2, .treasury) { $0.treasury = Samples.treasury }
+        let contractor = businessModel {
+            $0.vendors = Samples.vendors
+            $0.team = Samples.team
+            $0.teamQuestion = "Should we pay Sarah 0.002 USDC?"
+        }
+        shot("screen-contractor.png", ContractorSheet(business: contractor, sheet: BusinessSheet(kind: .contractors, amount: "0.002"),
+                                                      actions: .none, onClose: {}, selected: Samples.vendors[0]))
+        shot("screen-contractor-full.png", height: 1800, scale: 2,
+             ContractorSheet(business: contractor, sheet: BusinessSheet(kind: .contractors, amount: "0.002"),
+                             actions: .none, onClose: {}, selected: Samples.vendors[0]))
+        sheet("screen-business-not-enabled.png", .deals, off: BusinessAvailability.notOnServer)
+
+        // The shared invoice card (INVOICE style) in the transcript and expanded.
+        if let url = InvoiceLink.messageURL(for: Samples.invoice("ISSUED"), allowedHost: "synq.example"),
+           let link = InvoiceLink(url: url, allowedHost: "synq.example") {
+            let paid = CheckoutStatus(number: "SYNQ-0F3A9C", status: "PAID", payer: "Priya", total: "120.00",
+                                      amountDue: "0", dueDate: "2026-10-30", asset: .init(symbol: "USDC"))
+            png(Transcript {
+                TextBubble(text: "Sending the invoice for the logo", mine: true)
+                LiveBubble(mine: true) { InvoiceBubble(link: link, status: nil) }
+                TextBubble(text: "Paid ✓", sender: "Priya")
+                LiveBubble(mine: true) { InvoiceBubble(link: link, status: paid) }
+            }, width: phone.width, height: 860, scale: 3, to: bubble("transcript-invoice.png"))
+            png(ZStack {
+                theme.colors.background
+                cardRow("Invoice · issued / partial / paid", [
+                    invoiceCard(number: "SYNQ-0F3A9C", payer: "Priya", amount: "120.00", symbol: "USDC", status: "ISSUED"),
+                    invoiceCard(number: "SYNQ-0F3A9C", payer: "Priya", amount: "70.00", symbol: "USDC", status: "PARTIALLY_PAID"),
+                    invoiceCard(number: "SYNQ-0F3A9C", payer: "Priya", amount: "120.00", symbol: "USDC", status: "PAID"),
+                ])
+            }, width: 1100, height: 330, scale: 2, to: card("cards-invoice.png"))
+            shot("screen-invoice-card.png", InvoiceLinkView(link: link, status: nil, error: nil, onCheckout: {}, onRefresh: {}))
         }
         print("wrote \(out.path) with theme \(theme.id)")
     }

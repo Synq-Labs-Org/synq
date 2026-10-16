@@ -19,6 +19,9 @@
 		5E00000000000000000000B0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A0 /* Theme.swift */; };
 		5E00000000000000000000B2 /* FundCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A2 /* FundCards.swift */; };
 		5E00000000000000000000B3 /* QuickParse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A3 /* QuickParse.swift */; };
+		5E00000000000000000000F6 /* BusinessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F5 /* BusinessViews.swift */; };
+		5E00000000000000000000F4 /* BusinessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F3 /* BusinessModel.swift */; };
+		5E00000000000000000000F2 /* Business.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F1 /* Business.swift */; };
 		5E00000000000000000000B4 /* FundModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A4 /* FundModel.swift */; };
 		5E00000000000000000000B5 /* DetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A5 /* DetailViews.swift */; };
 		5E00000000000000000000B6 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A6 /* Sheets.swift */; };
@@ -77,6 +80,9 @@
 		5E00000000000000000000A0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A2 /* FundCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundCards.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A3 /* QuickParse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickParse.swift; sourceTree = "<group>"; };
+		5E00000000000000000000F5 /* BusinessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessViews.swift; sourceTree = "<group>"; };
+		5E00000000000000000000F3 /* BusinessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessModel.swift; sourceTree = "<group>"; };
+		5E00000000000000000000F1 /* Business.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Business.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A4 /* FundModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundModel.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A5 /* DetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViews.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A6 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
@@ -146,6 +152,9 @@
 				5E00000000000000000000A0 /* Theme.swift */,
 				5E00000000000000000000A2 /* FundCards.swift */,
 				5E00000000000000000000A3 /* QuickParse.swift */,
+				5E00000000000000000000F5 /* BusinessViews.swift */,
+				5E00000000000000000000F3 /* BusinessModel.swift */,
+				5E00000000000000000000F1 /* Business.swift */,
 				5E00000000000000000000A4 /* FundModel.swift */,
 				5E00000000000000000000A5 /* DetailViews.swift */,
 				5E00000000000000000000A6 /* Sheets.swift */,
@@ -286,6 +295,9 @@
 				5E00000000000000000000B0 /* Theme.swift in Sources */,
 				5E00000000000000000000B2 /* FundCards.swift in Sources */,
 				5E00000000000000000000B3 /* QuickParse.swift in Sources */,
+				5E00000000000000000000F6 /* BusinessViews.swift in Sources */,
+				5E00000000000000000000F4 /* BusinessModel.swift in Sources */,
+				5E00000000000000000000F2 /* Business.swift in Sources */,
 				5E00000000000000000000B4 /* FundModel.swift in Sources */,
 				5E00000000000000000000B5 /* DetailViews.swift in Sources */,
 				5E00000000000000000000B6 /* Sheets.swift in Sources */,

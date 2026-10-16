@@ -6,6 +6,8 @@ struct FundActions {
     var insertInvite: (FundRef, FundView?) -> Void
     var insertProposal: (FundRef, FundProposal) -> Void
     var insertTrip: (FundRef, TripView) -> Void
+    /// Shares an issued invoice's checkout link as an INVOICE card.
+    var insertInvoice: (BusinessInvoice) -> Void = { _ in }
     /// Opens the Synq page (passkey ceremonies) in the in-app browser.
     var open: (URL) -> Void
     var expand: () -> Void
@@ -79,12 +81,15 @@ final class FundModel: ObservableObject {
 
     let client: FundClient
     let book: FundBook
+    /// The Arc business features, scoped by the same fund id and key.
+    let business: BusinessModel
     var conversation: String?
     private var polling: Task<Void, Never>?
 
     init(client: FundClient, book: FundBook = FundBook()) {
         self.client = client
         self.book = book
+        business = BusinessModel(client: BusinessClient(host: client.host))
     }
 
     var network: String { view?.networkLabel ?? SynqNetwork.fundBackend }
@@ -100,6 +105,7 @@ final class FundModel: ObservableObject {
         selectedProposal = proposal
         selectedTrip = trip
         error = nil
+        business.show(ref)
         refresh()
     }
 
@@ -224,6 +230,14 @@ final class FundModel: ObservableObject {
     func submit(_ text: String) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let ref, !prompt.isEmpty, !asking else { return }
+        // Business instructions open their screen on the device; Ask Synq never sees them.
+        if let command = BusinessParser.parse(prompt) {
+            note = nil
+            error = nil
+            Haptics.tap()
+            business.route(command)
+            return
+        }
         asking = true
         note = nil
         error = nil

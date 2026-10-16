@@ -56,6 +56,7 @@ struct FundScreen: View {
                       }, onCancel: { model.giftSheet = nil })
             .environment(\.synqTheme, theme)
         }
+        .businessSheets(model.business, actions: actions)
     }
 
     /// A trip shows under Flights or Gifts; a payment under Group.
@@ -269,6 +270,7 @@ struct FundHomeView: View {
                         active(ref, view)
                     } else {
                         FundStatePanel(model: model, actions: actions, ref: ref, view: view)
+                        BusinessSection(business: model.business, actions: actions)
                     }
                 } else if model.error == nil {
                     SynqSpinner(size: 22).frame(maxWidth: .infinity)
@@ -283,16 +285,13 @@ struct FundHomeView: View {
 
     @ViewBuilder
     private func active(_ ref: FundRef, _ v: FundView) -> some View {
-        FundSummaryPanel(view: v, onInvite: { actions.insertInvite(ref, v) }, onOpen: { onTab(.group) })
         CommandActivity(model: model, onPerform: perform)
+        BusinessSection(business: model.business, actions: actions)
+        FundSummaryPanel(view: v, onInvite: { actions.insertInvite(ref, v) }, onOpen: { onTab(.group) })
         SynqGroup {
-            SynqRow(icon: .flight, title: "Book a flight", subtitle: "Find & approve together") { onTab(.trips) }
-            SynqRow(icon: .gift, title: "Send a gift", subtitle: "Split with the group", divider: true) { onTab(.gifts) }
-            SynqRow(icon: .send, title: "Send payment", subtitle: "Approve with passkeys", divider: true) {
-                open { model.sendSheet = SendPrefill() }
+            SynqRow(icon: .grid, title: "More", subtitle: "Flights, gifts, payments") {
+                onTab(.ask)
             }
-            .disabled(v.recipients.isEmpty)
-            SynqRow(icon: .grid, title: "More", subtitle: "Ask Synq, trips, test money", divider: true) { onTab(.ask) }
         }
         if !v.proposals.isEmpty {
             SynqSectionLabel(text: "Payments", trailing: "\(v.proposals.count)")
@@ -357,6 +356,7 @@ struct FundHomeView: View {
                         SearchingPanel(progress: s, compact: true)
                     } else {
                         ChipScroller {
+                            BusinessChips(business: model.business, actions: actions)
                             SynqChip(title: "Flight", icon: .flight) { open { model.planSheet = PlanPrefill() } }
                             SynqChip(title: "Gift", icon: .gift) { open { model.giftSheet = GiftPrefill() } }
                             SynqChip(title: "Send", icon: .send) { open { model.sendSheet = SendPrefill() } }
@@ -529,14 +529,23 @@ struct AskView: View {
             SynqHeroArt(slot: .agent)
             SynqStack {
                 if model.view?.state == "ACTIVE" {
-                    SynqCommandField(text: $command, placeholder: "Ask or tell Synq… e.g. book a flight from Delhi to Goa Dec 1–5 for 3",
+                    SynqCommandField(text: $command, placeholder: "Ask or tell Synq… e.g. invoice Priya 120 for the logo",
                                      busy: model.asking || model.searching != nil, onSubmit: submit, onFocus: actions.expand)
                     CommandActivity(model: model, onPerform: perform)
                     if command.isEmpty && model.note == nil && model.searching == nil && !model.asking {
                         suggestions
                     }
+                    SynqSectionLabel(text: "Group fund", trailing: networkTitle(model.network))
                     SynqGroup {
-                        SynqRow(icon: .money, title: "Add test money", subtitle: "Testnet AUSD for this fund", trailing: .arrow) {
+                        SynqRow(icon: .flight, title: "Book a flight", subtitle: "Find & approve together") { onTab(.trips) }
+                        SynqRow(icon: .gift, title: "Send a gift", subtitle: "Split with the group", divider: true) { onTab(.gifts) }
+                        SynqRow(icon: .send, title: "Send payment", subtitle: "Approve with passkeys", divider: true) {
+                            actions.expand()
+                            model.sendSheet = SendPrefill()
+                        }
+                        .disabled(model.view?.recipients.isEmpty ?? true)
+                        SynqRow(icon: .money, title: "Add test money", subtitle: "Testnet AUSD for this fund", trailing: .arrow,
+                                divider: true) {
                             model.requestTestFunds()
                         }
                         .disabled(!(model.view?.canRequestTestFunds ?? false) || model.busy)
@@ -558,6 +567,10 @@ struct AskView: View {
     private var suggestions: some View {
         let first = model.view?.recipients.first?.name ?? "Priya"
         let ideas: [(SynqIcon, String, String)] = [
+            (.deal, "Draft a deal with Sarah", "Draft a deal: logo for Sarah, 300 USDC total, 150 when concepts are delivered, 150 for the final files"),
+            (.receipt, "Invoice Priya 120 for the logo", "Invoice Priya 120 for the logo"),
+            (.team, "Ask CFO and Risk whether to pay Sarah", "Ask CFO and Risk whether to pay Sarah"),
+            (.split, "Split 1500", "Split 1500"),
             (.flight, "Flights Delhi → Goa Dec 1–5 for 3", "Book a flight from Delhi to Goa Dec 1–5 for 3"),
             (.gift, "Gift under $40", "Find a gift for car lovers under $40"),
             (.send, "Send 5 to \(first)", "Send 5 to \(first)"),
