@@ -190,7 +190,12 @@ export function widenings(current: DcaPolicy, next: DcaPolicy): string[] {
     next.spike.skipIf24hChangeAboveBps > current.spike.skipIf24hChangeAboveBps
   )
     out.push('spike');
-  if (next.dip.multiplierBps > current.dip.multiplierBps) out.push('dip');
+  if (
+    next.dip.multiplierBps > current.dip.multiplierBps ||
+    (next.dip.multiplierBps > 10000 &&
+      next.dip.triggerBelowTrailingBps < current.dip.triggerBelowTrailingBps)
+  )
+    out.push('dip');
   if (current.pause.paused && !next.pause.paused) out.push('paused');
   return out;
 }

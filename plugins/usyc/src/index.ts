@@ -97,6 +97,8 @@ export type UsycEntitlement = Readonly<{
   explanation: string;
 }>;
 
+const checkedEntitlements = new WeakSet<object>();
+
 async function pinnedCode(r: UsycReader, address: Address, pinned: Hex | null) {
   const code = await r.getCode({ address });
   if (!code || code === '0x')
@@ -169,7 +171,7 @@ export async function checkUsycEntitlement(
       ]),
     ])) as [boolean, boolean, Hex, Hex];
   const eligible = canCall === true;
-  return Object.freeze({
+  const result: UsycEntitlement = Object.freeze({
     status: eligible ? 'ELIGIBLE' : 'INELIGIBLE',
     wallet,
     action,
@@ -186,6 +188,8 @@ export async function checkUsycEntitlement(
       ? `Wallet is entitled to Teller.${action} on Arc testnet.`
       : `INELIGIBLE: wallet ${wallet} is not allowlisted for USYC Teller.${action}. USYC is a permissioned fund for eligible institutions; Arc testnet access requires Circle to allowlist the address. Synq will not attempt or simulate this investment.`,
   });
+  checkedEntitlements.add(result);
+  return result;
 }
 
 export const ENTITLEMENT_MAX_AGE_MS = 60_000;
@@ -197,6 +201,11 @@ export function assertUsycAllowed(
   action: TellerAction,
   now: number,
 ) {
+  if (!checkedEntitlements.has(e))
+    throw new UsycError(
+      'BINDING_MISMATCH',
+      'entitlement must come from a fresh verified chain read',
+    );
   if (!isAddressEqual(e.wallet, wallet) || e.action !== action)
     throw new UsycError(
       'WRONG_WALLET',

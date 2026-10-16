@@ -260,17 +260,15 @@ export function accountUserOp(input: {
     abi: USER_OPERATION_EVENT_ABI,
     logs: input.logs as Log[],
     strict: true,
-  }).filter(
-    (l) =>
-      isAddressEqual(l.address, route.entryPoint.address) &&
-      l.args.userOpHash === input.userOpHash,
-  );
+  }).filter((l) => isAddressEqual(l.address, route.entryPoint.address));
   if (ops.length !== 1)
     throw new PaymasterError(
       'ACCOUNTING',
       `expected one UserOperationEvent, found ${ops.length}`,
     );
   const op = ops[0]!;
+  if (op.args.userOpHash.toLowerCase() !== input.userOpHash.toLowerCase())
+    throw new PaymasterError('ACCOUNTING', 'wrong UserOperation hash');
   if (
     !isAddressEqual(op.args.sender, sender) ||
     !isAddressEqual(op.args.paymaster, pm)
@@ -293,22 +291,26 @@ export function accountUserOp(input: {
   const transferAmount = sum(sender, recipient);
   if (refunded > pulled)
     throw new PaymasterError('ACCOUNTING', 'refund exceeds prefund');
-  let sponsored: UserOpAccounting['sponsored'] = null;
-  try {
-    const ev = parseEventLogs({
-      abi: USER_OPERATION_SPONSORED_ABI,
-      logs: input.logs as Log[],
-      strict: true,
-    }).filter((l) => isAddressEqual(l.address, pm));
-    if (ev.length === 1)
-      sponsored = {
-        actualTokenNeeded: ev[0]!.args.actualTokenNeeded,
-        feeTokenAmount: ev[0]!.args.feeTokenAmount,
-        nativeTokenPrice: ev[0]!.args.nativeTokenPrice,
-      };
-  } catch {
-    sponsored = null;
-  }
+  const ev = parseEventLogs({
+    abi: USER_OPERATION_SPONSORED_ABI,
+    logs: input.logs as Log[],
+    strict: true,
+  }).filter((l) => isAddressEqual(l.address, pm));
+  if (
+    ev.length !== 1 ||
+    ev[0]!.args.userOpHash.toLowerCase() !== input.userOpHash.toLowerCase() ||
+    !isAddressEqual(ev[0]!.args.sender, sender) ||
+    !isAddressEqual(ev[0]!.args.token, usdc)
+  )
+    throw new PaymasterError(
+      'ACCOUNTING',
+      'missing or mismatched sponsorship event',
+    );
+  const sponsored: UserOpAccounting['sponsored'] = {
+    actualTokenNeeded: ev[0]!.args.actualTokenNeeded,
+    feeTokenAmount: ev[0]!.args.feeTokenAmount,
+    nativeTokenPrice: ev[0]!.args.nativeTokenPrice,
+  };
   const paymasterFee = pulled - refunded;
   if (sponsored && sponsored.actualTokenNeeded !== paymasterFee)
     throw new PaymasterError(

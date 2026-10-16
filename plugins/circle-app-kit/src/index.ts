@@ -1,5 +1,6 @@
 import {
   decodeFunctionData,
+  decodeAbiParameters,
   erc20Abi,
   getAddress,
   isAddressEqual,
@@ -10,6 +11,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import { SINGLE_SWAP_ABI } from './instruction-abi.js';
 import { contract } from '@synq/chain-registry/arc';
 
 /**
@@ -214,10 +216,7 @@ export function verifyAllowance(
   if ((tx.value ?? 0n) !== 0n) throw new KitTxGuardError('VALUE_NOT_ZERO');
   const data = tx.data ?? '0x';
   const selector = data.length >= 10 ? slice(data, 0, 4) : '0x';
-  if (
-    selector !== SELECTORS.approve &&
-    selector !== SELECTORS.increaseAllowance
-  )
+  if (selector !== SELECTORS.approve)
     throw new KitTxGuardError(
       'SELECTOR_NOT_ALLOWED',
       `allowance selector ${selector}`,
@@ -268,40 +267,155 @@ export function verifyExecute(
       'RECIPIENT_MISMATCH',
       `${step.tokenOut} has no beneficiary`,
     );
-  let pulled = 0n;
-  for (const i of d.tokenInputs) {
-    if (!isAddressEqual(i.token, step.tokenIn))
-      throw new KitTxGuardError('TOKEN_NOT_ALLOWED', `input ${i.token}`);
-    pulled += i.amount;
-  }
-  if (pulled > step.maxAmountIn)
+  if (
+    d.tokenInputs.length !== 1 ||
+    d.tokenInputs[0]!.permitType !== 0 ||
+    d.tokenInputs[0]!.permitCalldata !== '0x'
+  )
     throw new KitTxGuardError(
-      'AMOUNT_EXCEEDS_PLAN',
-      `pulls ${pulled} > ${step.maxAmountIn}`,
+      'MALFORMED',
+      'one allowance-only token input required',
     );
-  let minOut = 0n;
-  let feeIn = 0n;
-  let approvedTotal = 0n;
+  const input = d.tokenInputs[0]!;
+  if (!isAddressEqual(input.token, step.tokenIn))
+    throw new KitTxGuardError('TOKEN_NOT_ALLOWED', 'input token');
+  const pulled = input.amount;
+  if (pulled <= 0n || pulled > step.maxAmountIn)
+    throw new KitTxGuardError('AMOUNT_EXCEEDS_PLAN', 'input amount');
+  const minOuts = d.tokens.map((t) => lower(t.token));
+  if (
+    new Set(minOuts).size !== minOuts.length ||
+    d.tokens.length !== allowed.size ||
+    [...allowed].some((a) => !minOuts.includes(a))
+  )
+    throw new KitTxGuardError('TOKEN_NOT_ALLOWED', 'output token set differs');
+  const feeTarget = contract(
+    'arc-testnet',
+    'CIRCLE_APP_KIT_FEE_COLLECTOR',
+  ).address;
+  const swapTarget = contract(
+    'arc-testnet',
+    'CIRCLE_APP_KIT_SWAP_ROUTER',
+  ).address;
+  const swapExecutor = contract(
+    'arc-testnet',
+    'CIRCLE_APP_KIT_SWAP_EXECUTOR',
+  ).address;
+  const vaults = [
+    'CIRCLE_EARN_VAULT_USDC',
+    'CIRCLE_EARN_VAULT_MOCK_MORPHO',
+  ] as const;
+  const depositVault = vaults
+    .map((k) => contract('arc-testnet', k).address)
+    .find((a) => isAddressEqual(a, step.tokenOut));
+  const redeemVault = vaults
+    .map((k) => contract('arc-testnet', k).address)
+    .find((a) => isAddressEqual(a, step.tokenIn));
+  let minOut = 0n,
+    feeIn = 0n,
+    approvedTotal = 0n,
+    mainCalls = 0,
+    feeCalls = 0;
   for (const ins of d.instructions) {
     if (ins.value !== 0n) throw new KitTxGuardError('VALUE_NOT_ZERO');
+    if (!isAddressEqual(ins.tokenIn, step.tokenIn))
+      throw new KitTxGuardError('TOKEN_NOT_ALLOWED', 'instruction input');
     approvedTotal += ins.amountToApprove;
     if (isAddressEqual(ins.tokenOut, zeroAddress)) {
-      // A fee instruction: spends tokenIn, produces nothing, promises nothing.
-      if (!isAddressEqual(ins.tokenIn, step.tokenIn) || ins.minTokenOut !== 0n)
+      if (
+        ++feeCalls > 1 ||
+        !isAddressEqual(ins.target, feeTarget) ||
+        slice(ins.data, 0, 4) !== '0x7ebc46f0' ||
+        ins.data.length !== 266 ||
+        ins.minTokenOut !== 0n
+      )
         throw new KitTxGuardError(
-          'TOKEN_NOT_ALLOWED',
-          `fee instruction ${ins.tokenIn} -> ${ins.tokenOut}`,
+          'TARGET_NOT_ALLOWED',
+          'unexpected fee instruction',
         );
-      feeIn += ins.amountToApprove;
+      const [feeToken, , feeAmount] = decodeAbiParameters(
+        [
+          { type: 'address' },
+          { type: 'address' },
+          { type: 'uint256' },
+          { type: 'bytes32' },
+        ],
+        slice(ins.data, 4),
+      );
+      if (
+        !isAddressEqual(feeToken, step.tokenIn) ||
+        feeAmount !== ins.amountToApprove
+      )
+        throw new KitTxGuardError(
+          'AMOUNT_EXCEEDS_PLAN',
+          'fee calldata differs from metadata',
+        );
+      feeIn += feeAmount;
       continue;
     }
-    if (!allowed.has(lower(ins.tokenIn)) || !allowed.has(lower(ins.tokenOut)))
+    if (++mainCalls > 1 || !isAddressEqual(ins.tokenOut, step.tokenOut))
       throw new KitTxGuardError(
         'TOKEN_NOT_ALLOWED',
-        `${ins.tokenIn} -> ${ins.tokenOut}`,
+        'one main instruction required',
       );
-    if (isAddressEqual(ins.tokenOut, step.tokenOut)) minOut += ins.minTokenOut;
+    if (depositVault) {
+      if (!isAddressEqual(ins.target, depositVault))
+        throw new KitTxGuardError('TARGET_NOT_ALLOWED', 'deposit target');
+      const { functionName, args } = decodeFunctionData({
+        abi: parseAbi([
+          'function deposit(uint256 assets,address receiver) returns (uint256)',
+        ]),
+        data: ins.data,
+      });
+      if (
+        functionName !== 'deposit' ||
+        args[0] !== ins.amountToApprove ||
+        !isAddressEqual(args[1], step.adapter)
+      )
+        throw new KitTxGuardError('RECIPIENT_MISMATCH', 'deposit economics');
+    } else if (redeemVault) {
+      if (!isAddressEqual(ins.target, redeemVault))
+        throw new KitTxGuardError('TARGET_NOT_ALLOWED', 'redeem target');
+      const { args } = decodeFunctionData({
+        abi: parseAbi([
+          'function redeem(uint256 shares,address receiver,address owner) returns (uint256)',
+        ]),
+        data: ins.data,
+      });
+      if (
+        args[0] !== ins.amountToApprove ||
+        !isAddressEqual(args[1], step.adapter) ||
+        !isAddressEqual(args[2], step.adapter)
+      )
+        throw new KitTxGuardError('RECIPIENT_MISMATCH', 'redeem economics');
+    } else {
+      if (!isAddressEqual(ins.target, swapTarget))
+        throw new KitTxGuardError('TARGET_NOT_ALLOWED', 'swap target');
+      const { args } = decodeFunctionData({
+        abi: SINGLE_SWAP_ABI,
+        data: ins.data,
+      });
+      const route = args[5];
+      if (
+        !isAddressEqual(args[3], step.adapter) ||
+        args[4] < ins.minTokenOut ||
+        !isAddressEqual(route.callTo, swapExecutor) ||
+        !isAddressEqual(route.approveTo, swapExecutor) ||
+        !isAddressEqual(route.sendingAssetId, step.tokenIn) ||
+        !isAddressEqual(route.receivingAssetId, step.tokenOut) ||
+        route.fromAmount !== ins.amountToApprove ||
+        !route.requiresDeposit ||
+        slice(route.callData, 0, 4) !== '0x46ec278a'
+      )
+        throw new KitTxGuardError('MALFORMED', 'swap route differs from plan');
+    }
+    minOut += ins.minTokenOut;
   }
+  if (mainCalls !== 1 || approvedTotal !== pulled)
+    throw new KitTxGuardError(
+      'AMOUNT_EXCEEDS_PLAN',
+      'instruction inputs do not equal pulled amount',
+    );
   if (feeIn > step.maxFeeIn)
     throw new KitTxGuardError(
       'AMOUNT_EXCEEDS_PLAN',

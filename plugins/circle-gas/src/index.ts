@@ -261,6 +261,7 @@ export type SponsorshipDecision =
   | Readonly<{
       sponsored: false;
       reason:
+        | 'INVALID_INPUT'
         | 'NOT_CIRCLE_WALLET'
         | 'NOT_SMART_ACCOUNT'
         | 'UNSUPPORTED_CHAIN'
@@ -301,6 +302,15 @@ export function decideSponsorship(input: {
     usage,
     userMessage: `Gas sponsorship is not available (${why}). This transaction needs network fees paid by the wallet.`,
   });
+  if (
+    input.estimatedFeeWei <= 0n ||
+    input.usage.spentWei < 0n ||
+    input.policy.dailyLimitWei < 0n ||
+    !Number.isSafeInteger(input.now) ||
+    !Number.isSafeInteger(input.usage.dayStartUtc) ||
+    input.now < input.usage.dayStartUtc
+  )
+    return deny('INVALID_INPUT', 'invalid fee, usage, policy or clock');
   if (!input.circleWallet)
     return deny(
       'NOT_CIRCLE_WALLET',

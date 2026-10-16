@@ -14,17 +14,33 @@ import {
   encodeFunctionData,
   erc20Abi,
   numberToHex,
+  keccak256,
   type Address,
   type Hex,
   type PublicClient,
 } from 'viem';
 import type { PrivateKeyAccount } from 'viem/accounts';
-import type { ChainProfile } from '@synq/chain-registry/arc';
-import { KitTxGuard, KitTxGuardError } from '@synq/plugin-circle-app-kit';
+import {
+  contract,
+  token,
+  usdcToArcNativeWei,
+  type ChainProfile,
+} from '@synq/chain-registry/arc';
+import {
+  decodeAdapterExecute,
+  KitTxGuard,
+  KitTxGuardError,
+} from '@synq/plugin-circle-app-kit';
 import { planNativeGas } from '@synq/plugin-circle-gas';
 
 type Req = { method: string; params?: readonly unknown[] };
-type RpcTx = { from: Address; to?: Address; data?: Hex; value?: Hex; gas?: Hex };
+type RpcTx = {
+  from: Address;
+  to?: Address;
+  data?: Hex;
+  value?: Hex;
+  gas?: Hex;
+};
 
 export function guardedArcWallet(input: {
   profile: ChainProfile;
@@ -35,6 +51,12 @@ export function guardedArcWallet(input: {
   guard: () => KitTxGuard;
   log?: (msg: string) => void;
 }) {
+  if (
+    input.profile.name !== 'arc-testnet' ||
+    input.profile.chainId !== 5042002 ||
+    !input.profile.mutationEnabled
+  )
+    throw new Error('App Kit wallet is Arc testnet only');
   const chainIdHex = numberToHex(input.profile.chainId);
   const sent: Hex[] = [];
   const refused: { to?: Address; data?: Hex; code: string }[] = [];
@@ -66,7 +88,9 @@ export function guardedArcWallet(input: {
         case 'wallet_switchEthereumChain': {
           const want = (params[0] as { chainId?: string } | undefined)?.chainId;
           if (want?.toLowerCase() !== chainIdHex)
-            throw Object.assign(new Error(`only ${chainIdHex}`), { code: 4902 });
+            throw Object.assign(new Error(`only ${chainIdHex}`), {
+              code: 4902,
+            });
           return null;
         }
         case 'eth_signTypedData_v4':
@@ -100,6 +124,45 @@ export function guardedArcWallet(input: {
             refused.push({ to: tx.to, data: tx.data, code: e.code });
             throw Object.assign(e, { code: 4001 });
           }
+          if ((await input.client.getChainId()) !== input.profile.chainId)
+            throw new Error('RPC chain changed');
+          let tokenValue = 0n;
+          if (record.step === 'EXECUTE') {
+            const d = decodeAdapterExecute(tx.data!);
+            const usdc = token('arc-testnet', 'USDC');
+            tokenValue = d.tokenInputs
+              .filter(
+                (i) => i.token.toLowerCase() === usdc.address.toLowerCase(),
+              )
+              .reduce(
+                (n, i) =>
+                  n + usdcToArcNativeWei({ asset: usdc, baseUnits: i.amount }),
+                0n,
+              );
+            for (const kind of [
+              'CIRCLE_APP_KIT_ADAPTER',
+              'CIRCLE_APP_KIT_FEE_COLLECTOR',
+              'CIRCLE_APP_KIT_SWAP_ROUTER',
+              'CIRCLE_APP_KIT_SWAP_EXECUTOR',
+              'CIRCLE_EARN_VAULT_USDC',
+              'CIRCLE_EARN_VAULT_MOCK_MORPHO',
+            ] as const) {
+              const pin = contract('arc-testnet', kind);
+              if (
+                kind === 'CIRCLE_APP_KIT_ADAPTER' ||
+                kind === 'CIRCLE_APP_KIT_SWAP_EXECUTOR' ||
+                d.instructions.some(
+                  (i) => i.target.toLowerCase() === pin.address.toLowerCase(),
+                )
+              ) {
+                const code = await input.client.getCode({
+                  address: pin.address,
+                });
+                if (!code || keccak256(code) !== pin.codeHash)
+                  throw new Error('App Kit instruction code hash changed');
+              }
+            }
+          }
           const [nonce, fees, nativeBalance] = await Promise.all([
             input.client.getTransactionCount({
               address: input.signer.address,
@@ -122,7 +185,7 @@ export function guardedArcWallet(input: {
             gas,
             fees,
             nativeBalance,
-            valueWei: value,
+            valueWei: value + tokenValue,
           });
           if (!plan.ok) throw new Error(`${plan.code}: ${plan.message}`);
           const raw = await input.signer.signTransaction({
@@ -142,6 +205,30 @@ export function guardedArcWallet(input: {
           return hash;
         }
         default:
+          if (
+            ![
+              'eth_call',
+              'eth_getBalance',
+              'eth_getTransactionCount',
+              'eth_estimateGas',
+              'eth_getBlockByNumber',
+              'eth_getBlockByHash',
+              'eth_getTransactionReceipt',
+              'eth_getTransactionByHash',
+              'eth_getCode',
+              'eth_getLogs',
+              'eth_gasPrice',
+              'eth_feeHistory',
+              'eth_maxPriorityFeePerGas',
+              'eth_blockNumber',
+              'net_version',
+              'web3_clientVersion',
+            ].includes(method)
+          )
+            throw Object.assign(
+              new Error(`unsupported kit RPC method ${method}`),
+              { code: 4200 },
+            );
           return forward(method, params);
       }
     },
@@ -162,10 +249,17 @@ export async function revokeAllowance(
     args: [spender, 0n],
   });
   const [nonce, fees, nativeBalance, estimate] = await Promise.all([
-    chain.client.getTransactionCount({ address: signer.address, blockTag: 'pending' }),
+    chain.client.getTransactionCount({
+      address: signer.address,
+      blockTag: 'pending',
+    }),
     chain.client.estimateFeesPerGas(),
     chain.client.getBalance({ address: signer.address }),
-    chain.client.estimateGas({ account: signer.address, to: tokenAddress, data }),
+    chain.client.estimateGas({
+      account: signer.address,
+      to: tokenAddress,
+      data,
+    }),
   ]);
   const plan = planNativeGas({
     profile: chain.profile,
@@ -188,5 +282,9 @@ export async function revokeAllowance(
     }),
   });
   const r = await chain.client.waitForTransactionReceipt({ hash });
-  return { hash, status: r.status, explorer: `${chain.profile.explorer}/tx/${hash}` };
+  return {
+    hash,
+    status: r.status,
+    explorer: `${chain.profile.explorer}/tx/${hash}`,
+  };
 }
