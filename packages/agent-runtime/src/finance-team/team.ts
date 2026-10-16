@@ -56,6 +56,19 @@ export type ModelCallRecord = Readonly<{
   outcome: 'ACCEPTED' | 'PARSE_REJECTED' | 'BLOCKED' | 'PROVIDER_ERROR';
 }>;
 
+/**
+ * External capability gate (agent-team `CapabilityGuard`). When attached,
+ * every spawn is also a delegation the gate must accept and every tool call
+ * is authorized by the gate before it runs; a refusal throws.
+ */
+export interface ToolGate {
+  delegate(input: { parentId: string; childId: string; role: string }): unknown;
+  authorize(agentId: string, tool: string): unknown;
+  complete(agentId: string): void;
+  signal?(agentId: string): AbortSignal;
+  assertLive?(agentId: string, tool: string): void;
+}
+
 /** Reservation charged before each model call; trued up with real usage after. */
 export const MODEL_CALL_TOKEN_RESERVATION = 4_000;
 /** Conservative paid-API estimate used for the per-run budget. */
@@ -74,6 +87,7 @@ export class FinanceTeam {
   readonly modelCalls: ModelCallRecord[] = [];
   private readonly harness = new MastraRoleHarness();
   private readonly agents = new Map<string, FinanceAgent>();
+  private gate: ToolGate | null = null;
 
   constructor(
     readonly runId: string,
@@ -95,6 +109,16 @@ export class FinanceTeam {
     this.agents.set(this.supervisor.handle.agentId, this.supervisor);
   }
 
+  /** Attach the external guard before the first spawn. */
+  attachGate(gate: ToolGate): void {
+    if (this.gate)
+      throw new AgentRuntimeError(
+        'CAPABILITY_ESCALATION',
+        'gate already attached',
+      );
+    this.gate = gate;
+  }
+
   get findings(): readonly AgentFinding[] {
     return this.manager.findings;
   }
@@ -113,6 +137,19 @@ export class FinanceTeam {
     const handle = this.manager.spawn(parent.handle.agentId, role, runtime, {
       ...manifest.budget,
     });
+    if (this.gate)
+      try {
+        this.gate.delegate({
+          parentId: parent.handle.agentId,
+          childId: handle.agentId,
+          role,
+        });
+      } catch (error) {
+        this.manager.cancel(handle.agentId, 'gate refused the delegation');
+        if (error instanceof AgentRuntimeError)
+          this.manager.finding(error.kind, error.message, handle, 'HIGH');
+        throw error;
+      }
     const agent: FinanceAgent = Object.freeze({
       handle,
       role,
@@ -136,10 +173,21 @@ export class FinanceTeam {
         agent,
         `${agent.role} lacks ${spec.capability} for ${tool} (capability intersection)`,
       );
+    if (this.gate)
+      try {
+        this.gate.authorize(agent.handle.agentId, tool);
+      } catch (error) {
+        if (error instanceof AgentRuntimeError)
+          this.manager.finding(error.kind, error.message, agent.handle, 'HIGH');
+        throw error;
+      }
     this.manager.charge(agent.handle.agentId, { toolCalls: 1 }, tool);
     this.toolLog.push({ agentId: agent.handle.agentId, tool });
     const out = run();
-    if (!isThenable(out)) return out;
+    if (!isThenable(out)) {
+      this.gate?.assertLive?.(agent.handle.agentId, tool);
+      return out;
+    }
     return this.withinDeadline(agent, tool, out) as T;
   }
 
@@ -153,7 +201,10 @@ export class FinanceTeam {
     tool: FinanceTool,
     work: PromiseLike<R>,
   ): Promise<R> {
-    const signal = agent.handle.signal;
+    const external = this.gate?.signal?.(agent.handle.agentId);
+    const signal = external
+      ? AbortSignal.any([agent.handle.signal, external])
+      : agent.handle.signal;
     const cancelled = () =>
       new AgentRuntimeError(
         'CANCELLED',
@@ -168,6 +219,7 @@ export class FinanceTeam {
     try {
       const value = await Promise.race([Promise.resolve(work), aborted]);
       if (signal.aborted) throw cancelled();
+      this.gate?.assertLive?.(agent.handle.agentId, tool);
       return value;
     } catch (error) {
       if (error instanceof AgentRuntimeError && error.kind === 'CANCELLED')
@@ -316,6 +368,7 @@ export class FinanceTeam {
 
   complete(agent: FinanceAgent): void {
     this.manager.complete(agent.handle.agentId);
+    this.gate?.complete(agent.handle.agentId);
   }
 
   close(): void {

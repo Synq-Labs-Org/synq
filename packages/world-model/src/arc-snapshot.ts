@@ -144,10 +144,19 @@ export type Blocker = Readonly<{
   detail: string;
   ref: string | null;
 }>;
+export type ProviderCondition =
+  | 'OK'
+  | 'SDK_MISSING'
+  | 'NEEDS_CREDENTIALS'
+  | 'UNCHECKED'
+  | 'UNHEALTHY'
+  | 'STALE_CHECK';
 export type ProviderStatus = Readonly<{
   providerId: string;
   label: string;
   status: 'AVAILABLE' | 'UNVERIFIED' | 'UNAVAILABLE';
+  /** Why the status is what it is (credentials, health, staleness). */
+  condition: ProviderCondition;
   sdkInstalled: boolean;
   credentialsPresent: boolean;
   /** Names only, never values. */
@@ -155,6 +164,44 @@ export type ProviderStatus = Readonly<{
   capabilities: readonly string[];
   reason: string;
 }>;
+/**
+ * A financial action whose outcome is not yet confirmed (a broadcast payout
+ * without a receipt, a CCTP burn without a mint, an x402 payment without a
+ * settlement response). Retrying it could pay twice.
+ */
+export type PendingOutcome = Readonly<{
+  ref: string;
+  kind: 'ARC_PAYOUT' | 'CCTP' | 'GATEWAY' | 'X402' | 'BOOKING' | 'PURCHASE';
+  /** Tool whose retry is unsafe; null = every financial tool. */
+  tool: string | null;
+  amountBaseUnits: string | null;
+  since: number;
+  detail: string;
+}>;
+/** How a team tool depends on providers and people (agent-runtime supplies these). */
+export type ToolBinding = Readonly<{
+  tool: string;
+  providerId: string | null;
+  needsHuman: boolean;
+  financial: boolean;
+}>;
+export type ToolStatus =
+  | 'AVAILABLE'
+  | 'UNVERIFIED'
+  | 'UNAVAILABLE'
+  | 'NEEDS_CREDENTIALS'
+  | 'UNHEALTHY'
+  | 'NEEDS_HUMAN'
+  | 'PENDING_OUTCOME';
+export type ToolAvailability = Readonly<{
+  tool: string;
+  providerId: string | null;
+  status: ToolStatus;
+  /** Names only, never values. */
+  missingCredentials: readonly string[];
+  reason: string;
+}>;
+
 export type SupportedChain = Readonly<{
   chain: ChainName;
   chainId: number;
@@ -179,6 +226,7 @@ export type ArcWorldReaders = Partial<{
   workflows: Reader<ActiveWorkflow[]>;
   reconciliation: Reader<Reconciliation>;
   blockers: Reader<Blocker[]>;
+  pendingOutcomes: Reader<PendingOutcome[]>;
 }>;
 
 export type ProviderProbe = Readonly<{
@@ -244,6 +292,7 @@ export const ARC_FIELD_POLICY = {
   'operations.workflows': { maxAgeSeconds: 300, critical: false },
   'operations.reconciliation': { maxAgeSeconds: 900, critical: false },
   'operations.blockers': { maxAgeSeconds: 3_600, critical: false },
+  'operations.pendingOutcomes': { maxAgeSeconds: 300, critical: false },
   'capabilities.providers': { maxAgeSeconds: 300, critical: false },
 } as const satisfies Record<string, FieldPolicy>;
 export type ArcFieldPath = keyof typeof ARC_FIELD_POLICY;
@@ -276,11 +325,16 @@ export type ArcWorldSnapshot = Readonly<{
     providers: Observed<ProviderStatus>[];
     supportedChains: Observed<SupportedChain[]>;
     missing: string[];
+    /** Team tools the caller bound to providers (input). */
+    toolBindings: readonly ToolBinding[];
+    /** Derived at use time: what each tool can do right now, and why not. */
+    tools: ToolAvailability[];
   };
   operations: {
     workflows: Observed<ActiveWorkflow[]>;
     reconciliation: Observed<Reconciliation | null>;
     blockers: Observed<Blocker[]>;
+    pendingOutcomes: Observed<PendingOutcome[]>;
   };
   decision: {
     decisionGrade: boolean;
@@ -357,7 +411,12 @@ async function probeProvider(
     });
   if (!probe.sdkInstalled)
     return observed(
-      { ...base, status: 'UNAVAILABLE', reason: 'SDK not installed' },
+      {
+        ...base,
+        status: 'UNAVAILABLE',
+        condition: 'SDK_MISSING',
+        reason: 'SDK not installed',
+      },
       configMeta('SDK not installed'),
     );
   if (missing.length)
@@ -365,6 +424,7 @@ async function probeProvider(
       {
         ...base,
         status: 'UNAVAILABLE',
+        condition: 'NEEDS_CREDENTIALS',
         reason: `credentials missing: ${missing.join(', ')}${probe.blockerRef ? ` (see ${probe.blockerRef})` : ''}`,
       },
       configMeta('credentials missing'),
@@ -374,6 +434,7 @@ async function probeProvider(
       {
         ...base,
         status: 'UNVERIFIED',
+        condition: 'UNCHECKED',
         reason: 'installed and configured but never health-checked',
       },
       configMeta('no health check'),
@@ -394,6 +455,11 @@ async function probeProvider(
       {
         ...base,
         status,
+        condition: !r.ok
+          ? 'UNHEALTHY'
+          : freshness === 'FRESH'
+            ? 'OK'
+            : 'STALE_CHECK',
         reason: r.ok
           ? freshness === 'FRESH'
             ? r.detail.slice(0, 200)
@@ -412,6 +478,7 @@ async function probeProvider(
       {
         ...base,
         status: 'UNAVAILABLE',
+        condition: 'UNHEALTHY',
         reason: `health check threw ${errorCode(error)}`,
       },
       fieldMeta({
@@ -482,6 +549,8 @@ export async function buildArcWorldSnapshot(input: {
   env: Readonly<Record<string, string | undefined>>;
   now: number;
   primaryChain?: ChainName;
+  /** Team tools to report availability for (see `ToolBinding`). */
+  tools?: readonly ToolBinding[];
 }): Promise<ArcWorldSnapshot> {
   const { readers: r, now } = input;
   const primaryChain = input.primaryChain ?? 'arc-testnet';
@@ -501,6 +570,7 @@ export async function buildArcWorldSnapshot(input: {
     workflows,
     reconciliation,
     blockerReading,
+    pendingOutcomes,
     providers,
   ] = await Promise.all([
     read('identity.user', r.user, null, now),
@@ -518,6 +588,7 @@ export async function buildArcWorldSnapshot(input: {
     read('operations.workflows', r.workflows, [], now),
     read('operations.reconciliation', r.reconciliation, null, now),
     read('operations.blockers', r.blockers, [], now),
+    read('operations.pendingOutcomes', r.pendingOutcomes, [], now),
     Promise.all(input.providers.map((p) => probeProvider(p, input.env, now))),
   ]);
   const availableToSpend = deriveAvailable(
@@ -571,8 +642,10 @@ export async function buildArcWorldSnapshot(input: {
       providers,
       supportedChains,
       missing: [],
+      toolBindings: [...(input.tools ?? [])],
+      tools: [],
     },
-    operations: { workflows, reconciliation, blockers },
+    operations: { workflows, reconciliation, blockers, pendingOutcomes },
     decision: { decisionGrade: false, staleCritical: [], reasons: [] },
   };
   const snapshot = evaluateArcSnapshot(draft, now);
@@ -680,6 +753,10 @@ export function evaluateArcSnapshot(
       s.operations.reconciliation,
     ),
     blockers: at('operations.blockers', s.operations.blockers),
+    pendingOutcomes: at(
+      'operations.pendingOutcomes',
+      s.operations.pendingOutcomes,
+    ),
   };
   const providers = s.capabilities.providers.map((p) => {
     if (p.meta.provenance === 'CONFIG') return p;
@@ -689,6 +766,7 @@ export function evaluateArcSnapshot(
           {
             ...p.value,
             status: 'UNVERIFIED' as const,
+            condition: 'STALE_CHECK' as const,
             reason: 'last successful health check is stale',
           },
           aged.meta,
@@ -750,6 +828,11 @@ export function evaluateArcSnapshot(
       missing: providers
         .filter((p) => p.value.status !== 'AVAILABLE')
         .flatMap((p) => p.value.capabilities),
+      tools: toolAvailability(
+        s.capabilities.toolBindings,
+        providers.map((p) => p.value),
+        operations.pendingOutcomes,
+      ),
     },
     decision: {
       decisionGrade: staleCritical.length === 0,
@@ -757,6 +840,90 @@ export function evaluateArcSnapshot(
       reasons,
     },
   };
+}
+
+/**
+ * What each bound tool can do right now. Provider problems come first
+ * (missing SDK, missing credentials, failed or stale health check); then an
+ * unconfirmed financial outcome blocks retrying a financial tool; then a
+ * tool that needs a human says so. Unknown pending-outcome state is never
+ * read as "nothing pending".
+ */
+export function toolAvailability(
+  bindings: readonly ToolBinding[],
+  providers: readonly ProviderStatus[],
+  pending: Observed<PendingOutcome[]>,
+): ToolAvailability[] {
+  return bindings.map((b) => {
+    const base = { tool: b.tool, providerId: b.providerId };
+    const p = b.providerId
+      ? providers.find((x) => x.providerId === b.providerId)
+      : null;
+    if (b.providerId && !p)
+      return {
+        ...base,
+        status: 'UNAVAILABLE',
+        missingCredentials: [],
+        reason: `${b.providerId} is not configured in this deployment`,
+      };
+    if (p && p.status !== 'AVAILABLE') {
+      const status: ToolStatus =
+        p.condition === 'NEEDS_CREDENTIALS'
+          ? 'NEEDS_CREDENTIALS'
+          : p.condition === 'UNHEALTHY'
+            ? 'UNHEALTHY'
+            : p.condition === 'SDK_MISSING'
+              ? 'UNAVAILABLE'
+              : 'UNVERIFIED';
+      return {
+        ...base,
+        status,
+        missingCredentials: [...p.missingCredentials],
+        reason: `${p.label}: ${p.reason}`,
+      };
+    }
+    if (b.financial) {
+      if (
+        pending.meta.freshness === 'UNKNOWN' ||
+        pending.meta.freshness === 'STALE' ||
+        pending.meta.observedAt === null
+      )
+        return {
+          ...base,
+          status: 'UNVERIFIED',
+          missingCredentials: [],
+          reason: 'pending financial outcomes are unknown; not safe to retry',
+        };
+      const hit = pending.value.filter(
+        (o) => o.tool === null || o.tool === b.tool,
+      );
+      if (hit.length)
+        return {
+          ...base,
+          status: 'PENDING_OUTCOME',
+          missingCredentials: [],
+          reason:
+            `unconfirmed: ${hit.map((o) => `${o.kind} ${o.ref}`).join(', ')}`.slice(
+              0,
+              300,
+            ),
+        };
+    }
+    if (b.needsHuman)
+      return {
+        ...base,
+        status: 'NEEDS_HUMAN',
+        missingCredentials: [],
+        reason:
+          'needs the owner (wallet signature or review) before it takes effect',
+      };
+    return {
+      ...base,
+      status: 'AVAILABLE',
+      missingCredentials: [],
+      reason: p ? p.reason : 'deterministic, in-process',
+    };
+  });
 }
 
 /**

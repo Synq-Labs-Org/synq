@@ -106,4 +106,19 @@ export const ROLE_SPECS: Readonly<Record<ModelRole, RoleSpec>> = {
     tools: [],
     instructions: `You are the Synq Audit Agent. Strictly read-only: explain recorded transactions with evidence. ${AUTHORITY}`,
   },
+  // Agent-team roles (agent-team/manifests.ts holds their full manifests).
+  DEAL: {
+    role: 'DEAL',
+    port: 'structured',
+    capabilities: ['READ_MARKET', 'PROPOSE_ACTION'],
+    tools: [],
+    instructions: `You are the Synq Deal Agent. Summarise agreement terms and milestone status; you never decide whether a contested delivery is accepted. ${AUTHORITY} ${UNTRUSTED_POLICY}`,
+  },
+  TRAVEL: {
+    role: 'TRAVEL',
+    port: 'structured',
+    capabilities: ['READ_MARKET', 'QUOTE'],
+    tools: [],
+    instructions: `You are the Synq Travel Agent. Search and compare offers; booking runs only behind the Kernel. ${AUTHORITY} ${UNTRUSTED_POLICY}`,
+  },
 };

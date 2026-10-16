@@ -13,7 +13,9 @@ import type { ExecutorPort } from './freelancer-demo.js';
  * operator key. This side only forwards {grant, call} and records the
  * payout hash it reports before broadcast.
  */
-export function liveExecutor(): ExecutorPort {
+export function liveExecutor(
+  payoutMode: 'VAULT' | 'WALLET' = 'VAULT',
+): ExecutorPort {
   let child: ChildProcess | null = null;
   let seq = 0;
   const request = async (
@@ -56,6 +58,7 @@ export function liveExecutor(): ExecutorPort {
       });
       child.send({
         type: 'init',
+        payoutMode,
         grantKey: Buffer.from(grantKey).toString('hex'),
       } satisfies ExecutorRequest);
       const r = await ready;

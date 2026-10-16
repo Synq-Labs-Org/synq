@@ -11,3 +11,4 @@ export * from './brain.js';
 export * from './provider-helpers.js';
 export * from './role-review.js';
 export * from './finance-team/index.js';
+export * from './agent-team/index.js';
