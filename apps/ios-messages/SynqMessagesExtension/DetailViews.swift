@@ -15,15 +15,21 @@ struct FlightsView: View {
     private var flights: [TripView] { model.trips.filter { !$0.isGift } }
     private var live: Bool { model.view?.state == "ACTIVE" }
 
+    /// Starts from the group's latest flight search, if there is one.
+    private var lastSearch: FlightDraft {
+        guard let t = flights.first else { return FlightDraft(travelers: model.view?.members.count) }
+        return FlightDraft(origin: t.origin, destination: t.destination, originLabel: t.originLabel,
+                           destinationLabel: t.destinationLabel, departureDate: t.departureDate,
+                           returnDate: t.returnDate, travelers: t.travelers)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: "Flights", onBack: { onTab(.home) })
             SynqHeroArt(slot: .flights)
             SynqStack {
                 SynqDisplay(line: "Let's find it for the group.")
-                FlightSearchForm(prefill: FlightDraft(origin: "DEL", destination: "GOI", originLabel: "Delhi",
-                                                      destinationLabel: "Goa", departureDate: nil, returnDate: nil,
-                                                      travelers: model.view?.members.count),
+                FlightSearchForm(prefill: lastSearch,
                                  busy: model.searching != nil, onSearch: { model.runFlight($0) })
                     .disabled(!live)
                 if !live { SynqNote(text: "Flights open once the fund is live.") }
@@ -420,7 +426,7 @@ struct OptionCard: View {
                     Text("\(rank)").synqType(.amountMedium, highlighted ? .primary : .tertiary)
                         .frame(width: 22, alignment: .leading)
                         .accessibilityLabel("Rank \(rank)")
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: theme.space.xxs) {
                         Text(option.title).synqType(.bodyStrong).lineLimit(2)
                         if trip.isGift { Text(option.detail).synqType(.caption, .secondary).lineLimit(1) }
                     }
@@ -443,7 +449,7 @@ struct OptionCard: View {
                         SynqChip(title: "\(option.votes)", icon: mine ? .voted : .vote, selected: mine, action: onVote)
                             .accessibilityLabel("\(mine ? "Your vote. " : "Vote. ")\(option.votes) votes")
                     } else {
-                        HStack(spacing: 4) {
+                        HStack(spacing: theme.space.xs) {
                             SynqIconView(icon: .voted, size: 12, ink: .tertiary)
                             Text("\(option.votes)").synqType(.caption, .tertiary)
                         }
@@ -462,13 +468,13 @@ struct LegView: View {
     var body: some View {
         HStack(spacing: theme.space.m) {
             SynqIconView(icon: leg.label == "Return" ? .flightLand : .flight, size: 13, ink: .secondary).frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: theme.space.xxs) {
                 Text(leg.label).synqType(.sectionLabel, .tertiary)
                 Text(leg.day).synqType(.caption, .secondary)
             }
             .frame(width: 86, alignment: .leading)
             endpoint(leg.from, leg.depart)
-            VStack(spacing: 2) {
+            VStack(spacing: theme.space.xxs) {
                 SynqRule()
                 if !leg.note.isEmpty { Text(leg.note).synqType(.caption, .tertiary).lineLimit(1).minimumScaleFactor(0.8) }
             }
@@ -523,7 +529,7 @@ struct ProposalDetailView: View {
                     } else {
                         HStack(spacing: theme.space.m) {
                             ForEach(proposal.approvals.names, id: \.self) { n in
-                                VStack(spacing: 4) {
+                                VStack(spacing: theme.space.xs) {
                                     SynqAvatar(id: n, name: n, status: .approved, size: 40)
                                     Text(n).synqType(.caption)
                                 }

@@ -177,7 +177,7 @@ struct StartFundView: View {
                     examples
                 }
                 SynqButton(title: model.busy ? "Starting…" : "Start \(plan.name.isEmpty ? "fund" : "“\(plan.name)”") & invite chat",
-                           trailingIcon: .send, busy: model.busy, action: start)
+                           trailingIcon: .forward, busy: model.busy, action: start)
                     .disabled(!canStart)
                 if let error = model.error { SynqNote(text: error, error: true) }
                 HStack {
@@ -198,7 +198,7 @@ struct StartFundView: View {
                 Text("Start a group fund · everyone joins with a passkey").synqType(.caption, .secondary)
                 SynqCommandField(text: $text, placeholder: "Name it, or tell Synq the plan…", busy: model.busy,
                                  onSubmit: start, onFocus: actions.expand)
-                SynqButton(title: model.busy ? "Starting…" : "Start & invite chat", trailingIcon: .send,
+                SynqButton(title: model.busy ? "Starting…" : "Start & invite chat", trailingIcon: .forward,
                            busy: model.busy, action: start)
                     .disabled(!canStart)
                 if let error = model.error { SynqNote(text: error, error: true) }
@@ -338,7 +338,7 @@ struct FundHomeView: View {
             SynqStack(spacing: \.m) {
                 if let v = model.view {
                     HStack(alignment: .center, spacing: theme.space.m) {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: theme.space.xxs) {
                             Text(v.name).synqType(.bodyStrong).lineLimit(1)
                             if let t = v.treasury {
                                 SynqAmount(amount: cardAmount(t.balance), unit: t.symbol, large: false)
@@ -367,7 +367,7 @@ struct FundHomeView: View {
                     }
                 } else if let ref = model.ref {
                     SynqButton(title: model.view?.state == "SETUP" ? "Activate with passkey" : "Join with passkey",
-                               icon: .passkey, trailingIcon: .back, kind: .primary) {
+                               icon: .passkey, trailingIcon: .forward, kind: .primary) {
                         actions.open(model.client.fundPage(ref.fundId, key: ref.key))
                     }
                 }
@@ -390,7 +390,7 @@ struct FundSummaryPanel: View {
 
     var body: some View {
         SynqPanel(label: "Group fund") {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: theme.space.xs) {
                 Text(view.name).synqType(.headline).lineLimit(1)
                 Text(subtitle).synqType(.caption, .secondary)
             }
@@ -468,16 +468,16 @@ struct FundStatePanel: View {
         }
         switch view.state {
         case "FORMING":
-            SynqButton(title: "Join with passkey", icon: .passkey, trailingIcon: .back, kind: .primary) {
+            SynqButton(title: "Join with passkey", icon: .passkey, trailingIcon: .forward, kind: .primary) {
                 actions.open(model.client.fundPage(ref.fundId, key: ref.key))
             }
             if ref.adminKey != nil {
                 SynqButton(title: model.busy ? "Launching…" : "Launch fund · \(view.members.count) joined",
-                           trailingIcon: .send, busy: model.busy) { model.launch() }
+                           trailingIcon: .forward, busy: model.busy) { model.launch() }
                     .disabled(model.busy || view.members.count < view.minMembers)
             }
         case "SETUP":
-            SynqButton(title: "Activate with passkey", icon: .passkey, trailingIcon: .back, kind: .primary) {
+            SynqButton(title: "Activate with passkey", icon: .passkey, trailingIcon: .forward, kind: .primary) {
                 actions.open(model.client.fundPage(ref.fundId, key: ref.key))
             }
         case "LAUNCHING":
@@ -622,7 +622,7 @@ struct SearchingPanel: View {
         SynqPanel(label: progress.kind == .flight ? "Searching flights" : "Searching gifts") {
             HStack(spacing: theme.space.m) {
                 SynqIconView(icon: progress.kind == .flight ? .flight : .gift, size: 20)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: theme.space.xxs) {
                     Text(progress.headline).synqType(compact ? .bodyStrong : .amountMedium).lineLimit(1)
                     Text(progress.detail).synqType(.caption, .secondary).lineLimit(1)
                 }
@@ -782,7 +782,7 @@ struct MemberGrid: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: theme.space.s), count: 4), spacing: theme.space.m) {
             ForEach(view.members) { m in
                 let (status, line) = standing(m)
-                VStack(spacing: 4) {
+                VStack(spacing: theme.space.xs) {
                     SynqAvatar(id: m.principalId, name: m.name, status: status, size: 50)
                     Text(m.name).synqType(.caption).lineLimit(1)
                     Text(line).synqType(.caption, .secondary).lineLimit(1)
@@ -819,7 +819,7 @@ struct PaymentList: View {
                     } label: {
                         HStack(alignment: .top, spacing: theme.space.m) {
                             SynqIconView(icon: icon(p), size: 20).frame(width: 28).padding(.top, 2)
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: theme.space.xxs) {
                                 Text(title(p)).synqType(.bodyStrong).lineLimit(1)
                                 SynqAmount(amount: cardAmount(p.amount), unit: p.symbol, large: false)
                                 Text("to \(p.recipient)\(p.sender.map { " · by \($0)" } ?? "")").synqType(.caption, .secondary).lineLimit(1)

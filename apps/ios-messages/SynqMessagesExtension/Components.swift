@@ -912,7 +912,7 @@ struct SynqAvatar: View {
             Circle().fill(theme.colors.background)
             if theme.looks.avatar == .pixel {
                 PixelFace(seed: id.hashValueStable, ink: theme.colors.inkPrimary, dim: theme.colors.inkSecondary)
-                    .padding(size * 0.1)
+                    .padding(size * 0.06)
                     .clipShape(Circle())
             } else {
                 Text(String(name.prefix(1)).uppercased()).font(.system(size: size * 0.4, weight: .bold, design: .rounded))
@@ -935,7 +935,7 @@ struct SynqAvatar: View {
     private func mark(_ icon: SynqIcon) -> some View {
         let d = max(14, size * 0.36)
         return ZStack {
-            Circle().fill(icon == .check ? theme.colors.inkPrimary : theme.colors.background)
+            Circle().fill(icon == .check ? theme.colors.accent : theme.colors.background)
             Circle().strokeBorder(theme.colors.inkPrimary, lineWidth: theme.lines.hairline)
             SynqIconView(icon: icon, size: d * 0.55, ink: icon == .check ? .onAccent : .primary)
         }
@@ -944,63 +944,88 @@ struct SynqAvatar: View {
     }
 }
 
-/// A 1-bit pixel portrait generated from a seed: hair, eyes, brows, mouth, collar.
+/// A 1-bit pixel portrait generated from a seed: head, hair, eyes, mouth, shoulders.
 struct PixelFace: View {
     let seed: Int
     let ink: Color
     let dim: Color
 
-    static let n = 20
+    static let n = 24
 
-    /// 0 empty, 1 ink, 2 dim (dither), computed once per seed.
+    /// 0 empty, 1 ink, 2 dim (dither).
     static func grid(_ seed: Int) -> [[UInt8]] {
         var s = UInt64(truncatingIfNeeded: seed) &* 0x9E3779B97F4A7C15 | 1
         func r(_ k: Int) -> Int {
             s = s &* 6364136223846793005 &+ 1442695040888963407
             return Int((s >> 33) % UInt64(k))
         }
+        let n = Self.n
         var g = [[UInt8]](repeating: [UInt8](repeating: 0, count: n), count: n)
-        let hair = r(5), glasses = r(4) == 0, beard = r(5) == 0, wide = r(2)
-        let cx = 9.5, faceW = 4.6 + Double(wide) * 0.6, top = 4.0, chin = 15.0
-        func inFace(_ x: Double, _ y: Double) -> Bool {
-            let dy = (y - (top + chin) / 2) / ((chin - top) / 2)
-            let w = faceW * (dy < 0 ? 1 : sqrt(max(0, 1 - dy * dy * 0.55)))
-            return y >= top && y <= chin && abs(x - cx) <= w * (abs(dy) <= 1 ? sqrt(max(0, 1 - pow(max(0, -dy), 4) * 0.5)) : 0)
+        let hair = r(6), glasses = r(4) == 0, beard = r(5) == 0, smile = r(3), brows = r(2) == 0
+        let cx = 11.5, cy = 10.5, rx = 4.6 + Double(r(3)) * 0.35, ry = 5.8
+        func inHead(_ x: Double, _ y: Double, grow: Double = 0) -> Bool {
+            let dx = (x - cx) / (rx + grow), dy = (y - cy) / (ry + grow)
+            return dx * dx + dy * dy <= 1
         }
+        func set(_ x: Int, _ y: Int, _ v: UInt8) { if x >= 0 && x < n && y >= 0 && y < n { g[y][x] = v } }
         for y in 0..<n {
             for x in 0..<n {
                 let fx = Double(x) + 0.5, fy = Double(y) + 0.5
-                let face = inFace(fx, fy)
-                // Face outline.
-                if face && (!inFace(fx - 1, fy) || !inFace(fx + 1, fy) || !inFace(fx, fy + 1)) { g[y][x] = 1 }
-                // Hair.
-                let hairTop = fy < top + 3.2 && abs(fx - cx) < faceW + 1.2 && fy > top - 2.4 + pow((fx - cx) / (faceW + 1.4), 2) * 2.4
-                switch hair {
-                case 0: if hairTop { g[y][x] = (x + y) % 2 == 0 ? 1 : 2 }                 // short, dithered
-                case 1: if hairTop || (!face && fy < 14 && fy > top && abs(fx - cx) < faceW + 1.6) { g[y][x] = 1 }  // long
-                case 2: if hairTop { g[y][x] = 1 }; if hypot(fx - cx, fy - 1.6) < 1.8 { g[y][x] = 1 }     // bun
-                case 3: if hairTop && (x * 3 + y) % 3 != 0 { g[y][x] = 1 }                // curly
-                default: if fy < top + 1.4 && abs(fx - cx) < faceW && fy > top - 0.6 { g[y][x] = 2 }  // cropped
+                // Shoulders with a V collar, dithered shirt.
+                if fy > 18.6 {
+                    let half = 6.5 + (fy - 18.6) * 1.6
+                    if abs(fx - cx) < half {
+                        let edge = abs(fx - cx) > half - 1 || fy < 19.6
+                        let collar = abs(fx - cx) < (fy - 17.8) * 0.7 && fy < 22
+                        g[y][x] = collar ? (abs(abs(fx - cx) - (fy - 17.8) * 0.7) < 0.9 ? 1 : 0) : (edge ? 1 : ((x + y) % 2 == 0 ? 2 : 0))
+                    }
                 }
-                // Shoulders and collar.
-                if fy > 16.2 && abs(fx - cx) < 3 + (fy - 16) * 3 {
-                    g[y][x] = abs(fx - cx) < (fy - 15.6) * 0.9 ? 0 : ((x + y) % 2 == 0 ? 1 : 2)
+                // Neck.
+                if fy > 15.5 && fy < 19 && abs(fx - cx) < 2.2 && abs(fx - cx) > 1.2 { g[y][x] = 1 }
+                // Head outline.
+                if inHead(fx, fy) && (!inHead(fx - 1, fy) || !inHead(fx + 1, fy) || !inHead(fx, fy - 1) || !inHead(fx, fy + 1)) {
+                    g[y][x] = 1
+                }
+                // Hair.
+                let top = inHead(fx, fy, grow: 1.0) && fy < cy - ry * 0.32 + (hair == 1 ? (fx - cx) * 0.35 : 0)
+                switch hair {
+                case 0, 1: if top { g[y][x] = 1 }
+                case 2:    // long
+                    if top || (inHead(fx, fy, grow: 1.6) && !inHead(fx, fy) && fy < 17.5) { g[y][x] = 1 }
+                case 3:    // bun
+                    if top || hypot(fx - cx, fy - 2.6) < 2.1 { g[y][x] = 1 }
+                case 4:    // curly
+                    if inHead(fx, fy, grow: 1.7) && fy < cy - ry * 0.2 && (inHead(fx, fy, grow: 0.6) ? fy < cy - ry * 0.4 : true) {
+                        g[y][x] = (x + 2 * y) % 3 == 0 ? 0 : 1
+                    }
+                default:   // cropped
+                    if top { g[y][x] = (x + y) % 2 == 0 ? 1 : 2 }
                 }
             }
         }
-        let ey = 9, el = 7, er = 12
-        g[ey][el] = 1; g[ey][er] = 1
-        if r(2) == 0 { g[ey - 2][el - 1] = 1; g[ey - 2][el] = 1; g[ey - 2][er] = 1; g[ey - 2][er + 1] = 1 }
+        let ey = Int(cy + 0.5), el = Int(cx - 2.2), er = Int(cx + 2.8)
+        for e in [el, er] { set(e, ey, 1) }
+        if brows { for e in [el, er] { set(e - 1, ey - 2, 1); set(e, ey - 2, 1) } }
         if glasses {
-            for x in (el - 1)...(el + 1) { g[ey - 1][x] = 1; g[ey + 1][x] = 1 }
-            for x in (er - 1)...(er + 1) { g[ey - 1][x] = 1; g[ey + 1][x] = 1 }
-            g[ey][el - 1] = 1; g[ey][el + 1] = 1; g[ey][er - 1] = 1; g[ey][er + 1] = 1; g[ey][9] = 1; g[ey][10] = 1
+            for e in [el, er] {
+                for x in (e - 1)...(e + 1) { set(x, ey - 1, 1); set(x, ey + 1, 1) }
+                set(e - 1, ey, 1); set(e + 1, ey, 1)
+            }
+            set(Int(cx), ey, 1); set(Int(cx) + 1, ey, 1)
         }
-        g[11][10] = 2
-        let smile = r(3)
-        for x in 8...11 { g[13][x] = 1 }
-        if smile == 0 { g[12][7] = 1; g[12][12] = 1 }
-        if beard { for y in 13...15 { for x in 7...12 where (x + y) % 2 == 0 && g[y][x] == 0 { g[y][x] = 2 } } }
+        set(Int(cx + 0.5), ey + 2, 2)
+        let my = ey + 4
+        for x in (Int(cx) - 1)...(Int(cx) + 2) { set(x, my, 1) }
+        if smile == 0 { set(Int(cx) - 2, my - 1, 1); set(Int(cx) + 3, my - 1, 1) }
+        if beard {
+            for y in (my - 1)...(my + 2) {
+                for x in (Int(cx) - 3)...(Int(cx) + 4) where g[y][x] == 0 && inHead(Double(x) + 0.5, Double(y) + 0.5) && (x + y) % 2 == 0 {
+                    g[y][x] = 2
+                }
+            }
+        }
+        // Ears.
+        set(Int(cx - rx - 0.5), Int(cy + 0.5), 1); set(Int(cx + rx + 0.5), Int(cy + 0.5), 1)
         return g
     }
 
@@ -1010,7 +1035,7 @@ struct PixelFace: View {
             let p = size.width / CGFloat(Self.n)
             for y in 0..<Self.n {
                 for x in 0..<Self.n where g[y][x] != 0 {
-                    ctx.fill(Path(CGRect(x: CGFloat(x) * p, y: CGFloat(y) * p, width: p * 0.92, height: p * 0.92)),
+                    ctx.fill(Path(CGRect(x: CGFloat(x) * p, y: CGFloat(y) * p, width: p * 0.9, height: p * 0.9)),
                              with: .color(g[y][x] == 1 ? ink : dim))
                 }
             }

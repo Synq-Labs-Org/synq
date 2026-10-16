@@ -94,7 +94,7 @@ struct SendSheet: View {
             HStack(spacing: theme.space.l) {
                 if let r = recipient {
                     SynqAvatar(id: r.recipientId, name: r.name, size: 54)
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: theme.space.xxs) {
                         Text("To").synqType(.caption, .secondary)
                         Text(r.name).synqType(.headline).lineLimit(1)
                         Text("Fund recipient · \(shortId(r.recipientId))").synqType(.mono, .tertiary).lineLimit(1)

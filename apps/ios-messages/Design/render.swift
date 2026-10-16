@@ -145,13 +145,6 @@ struct SynqAppIcon: View {
         let ascii = AsciiTheme()
         ZStack {
             Color.black
-            VStack(spacing: 0) {
-                Spacer()
-                AsciiArtView(art: AsciiArtwork.piece(.home, .strip), ink: ascii.colors.inkPrimary,
-                             dim: ascii.colors.inkSecondary, family: ascii.type.artFamily)
-                    .frame(width: w * 1.1)
-                    .opacity(0.55)
-            }
             RoundedRectangle(cornerRadius: h * 0.12, style: .continuous)
                 .fill(Color.black)
                 .frame(width: h * 0.52, height: h * 0.52)

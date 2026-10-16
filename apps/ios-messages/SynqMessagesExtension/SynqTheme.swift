@@ -99,6 +99,7 @@ struct SynqTypography {
 }
 
 struct SynqSpacing {
+    var xxs: CGFloat = 2
     var xs: CGFloat = 4
     var s: CGFloat = 8
     var m: CGFloat = 12

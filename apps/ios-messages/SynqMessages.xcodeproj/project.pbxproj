@@ -16,14 +16,25 @@
 		5E0000000000000000000036 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5E0000000000000000000037 /* Fund.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000028 /* Fund.swift */; };
 		5E0000000000000000000038 /* FundViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000029 /* FundViews.swift */; };
-		5E0000000000000000000039 /* Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E000000000000000000002A /* Chrome.swift */; };
 		5E00000000000000000000B0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A0 /* Theme.swift */; };
-		5E00000000000000000000B1 /* HoloCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A1 /* HoloCard.swift */; };
 		5E00000000000000000000B2 /* FundCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A2 /* FundCards.swift */; };
 		5E00000000000000000000B3 /* QuickParse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A3 /* QuickParse.swift */; };
 		5E00000000000000000000B4 /* FundModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A4 /* FundModel.swift */; };
 		5E00000000000000000000B5 /* DetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A5 /* DetailViews.swift */; };
 		5E00000000000000000000B6 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A6 /* Sheets.swift */; };
+		5E00000000000000000000B7 /* SynqTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A7 /* SynqTheme.swift */; };
+		5E00000000000000000000B8 /* AsciiTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A8 /* AsciiTheme.swift */; };
+		5E00000000000000000000B9 /* AsciiArtData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A9 /* AsciiArtData.swift */; };
+		5E00000000000000000000BA /* HoloTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AA /* HoloTheme.swift */; };
+		5E00000000000000000000BB /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AB /* Components.swift */; };
+		5E00000000000000000000D0 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */; };
+		5E00000000000000000000D1 /* JetBrainsMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */; };
+		5E00000000000000000000D2 /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */; };
+		5E00000000000000000000D3 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C3 /* DepartureMono-Regular.otf */; };
+		5E00000000000000000000D4 /* NotoSansJP-Synq.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */; };
+		5E00000000000000000000D5 /* OFL-JetBrainsMono.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */; };
+		5E00000000000000000000D6 /* OFL-DepartureMono.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C6 /* OFL-DepartureMono.txt */; };
+		5E00000000000000000000D7 /* OFL-NotoSansJP.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C7 /* OFL-NotoSansJP.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,14 +74,25 @@
 		5E0000000000000000000027 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5E0000000000000000000028 /* Fund.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fund.swift; sourceTree = "<group>"; };
 		5E0000000000000000000029 /* FundViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundViews.swift; sourceTree = "<group>"; };
-		5E000000000000000000002A /* Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chrome.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A1 /* HoloCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloCard.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A2 /* FundCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundCards.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A3 /* QuickParse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickParse.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A4 /* FundModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundModel.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A5 /* DetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViews.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A6 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A7 /* SynqTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynqTheme.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A8 /* AsciiTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiTheme.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A9 /* AsciiArtData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiArtData.swift; sourceTree = "<group>"; };
+		5E00000000000000000000AA /* HoloTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloTheme.swift; sourceTree = "<group>"; };
+		5E00000000000000000000AB /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Regular.ttf; sourceTree = "<group>"; };
+		5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Medium.ttf; sourceTree = "<group>"; };
+		5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Bold.ttf; sourceTree = "<group>"; };
+		5E00000000000000000000C3 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = DepartureMono-Regular.otf; sourceTree = "<group>"; };
+		5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NotoSansJP-Synq.ttf; sourceTree = "<group>"; };
+		5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-JetBrainsMono.txt; sourceTree = "<group>"; };
+		5E00000000000000000000C6 /* OFL-DepartureMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-DepartureMono.txt; sourceTree = "<group>"; };
+		5E00000000000000000000C7 /* OFL-NotoSansJP.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-NotoSansJP.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,19 +141,36 @@
 				5E0000000000000000000022 /* CardLink.swift */,
 				5E0000000000000000000023 /* CardViews.swift */,
 				5E0000000000000000000024 /* CardStatusClient.swift */,
-				5E000000000000000000002A /* Chrome.swift */,
 				5E0000000000000000000029 /* FundViews.swift */,
 				5E0000000000000000000028 /* Fund.swift */,
 				5E00000000000000000000A0 /* Theme.swift */,
-				5E00000000000000000000A1 /* HoloCard.swift */,
 				5E00000000000000000000A2 /* FundCards.swift */,
 				5E00000000000000000000A3 /* QuickParse.swift */,
 				5E00000000000000000000A4 /* FundModel.swift */,
 				5E00000000000000000000A5 /* DetailViews.swift */,
 				5E00000000000000000000A6 /* Sheets.swift */,
+				5E00000000000000000000A7 /* SynqTheme.swift */,
+				5E00000000000000000000A8 /* AsciiTheme.swift */,
+				5E00000000000000000000A9 /* AsciiArtData.swift */,
+				5E00000000000000000000AA /* HoloTheme.swift */,
+				5E00000000000000000000AB /* Components.swift */,
+				5E00000000000000000000C8 /* Fonts */,
 				5E0000000000000000000025 /* Info.plist */,
 			);
 			path = SynqMessagesExtension;
+			sourceTree = "<group>";
+		};
+		5E00000000000000000000C8 /* Fonts */ = {isa = PBXGroup; children = (
+				5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */,
+				5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */,
+				5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */,
+				5E00000000000000000000C3 /* DepartureMono-Regular.otf */,
+				5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */,
+				5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */,
+				5E00000000000000000000C6 /* OFL-DepartureMono.txt */,
+				5E00000000000000000000C7 /* OFL-NotoSansJP.txt */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -221,6 +260,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5E00000000000000000000D0 /* JetBrainsMono-Regular.ttf in Resources */,
+				5E00000000000000000000D1 /* JetBrainsMono-Medium.ttf in Resources */,
+				5E00000000000000000000D2 /* JetBrainsMono-Bold.ttf in Resources */,
+				5E00000000000000000000D3 /* DepartureMono-Regular.otf in Resources */,
+				5E00000000000000000000D4 /* NotoSansJP-Synq.ttf in Resources */,
+				5E00000000000000000000D5 /* OFL-JetBrainsMono.txt in Resources */,
+				5E00000000000000000000D6 /* OFL-DepartureMono.txt in Resources */,
+				5E00000000000000000000D7 /* OFL-NotoSansJP.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -236,14 +283,17 @@
 				5E0000000000000000000032 /* CardLink.swift in Sources */,
 				5E0000000000000000000033 /* CardViews.swift in Sources */,
 				5E0000000000000000000034 /* CardStatusClient.swift in Sources */,
-				5E0000000000000000000039 /* Chrome.swift in Sources */,
 				5E00000000000000000000B0 /* Theme.swift in Sources */,
-				5E00000000000000000000B1 /* HoloCard.swift in Sources */,
 				5E00000000000000000000B2 /* FundCards.swift in Sources */,
 				5E00000000000000000000B3 /* QuickParse.swift in Sources */,
 				5E00000000000000000000B4 /* FundModel.swift in Sources */,
 				5E00000000000000000000B5 /* DetailViews.swift in Sources */,
 				5E00000000000000000000B6 /* Sheets.swift in Sources */,
+				5E00000000000000000000B7 /* SynqTheme.swift in Sources */,
+				5E00000000000000000000B8 /* AsciiTheme.swift in Sources */,
+				5E00000000000000000000B9 /* AsciiArtData.swift in Sources */,
+				5E00000000000000000000BA /* HoloTheme.swift in Sources */,
+				5E00000000000000000000BB /* Components.swift in Sources */,
 				5E0000000000000000000038 /* FundViews.swift in Sources */,
 				5E0000000000000000000037 /* Fund.swift in Sources */,
 			);

@@ -14,4 +14,11 @@ swiftc -O SynqMessagesExtension/SynqCard.swift SynqMessagesExtension/CardLink.sw
   Checks/main.swift Checks/ParserChecks.swift -o "$out"
 "$out" Checks/native-card-fixture.json
 rm -f "$out"
+# Screens style only through the themed components (see THEMING.md): no colours,
+# fonts, radii, raw symbols, bracket glyphs or art outside the theme layer.
+screens="SynqMessagesExtension/FundViews.swift SynqMessagesExtension/DetailViews.swift SynqMessagesExtension/Sheets.swift SynqMessagesExtension/CardViews.swift SynqMessagesExtension/FundCards.swift"
+if grep -nE 'Color[.(]|\.font\(|cornerRadius|RoundedRectangle|Capsule\(|Image\(systemName|\.foregroundStyle\(|\.system\(|AsciiArt|"\[|\]"|"\{|\}"' $screens; then
+  echo "theming: screens must use SynqTheme components, not raw styling" >&2
+  exit 1
+fi
 plutil -lint SynqMessages/Info.plist SynqMessagesExtension/Info.plist SynqMessages.xcodeproj/project.pbxproj

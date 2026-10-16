@@ -56,9 +56,9 @@ struct AsciiTheme: SynqTheme {
 
     let copy = SynqFlavor(
         wordmark: "SYNQ", wordmarkSub: "シンク",
-        taglines: [.home: "旅を共に", .fund: "一緒に、もっと遠くへ", .send: "小さな支払いが、\n大きな思い出に。",
-                   .gift: "贈り物を、みんなで", .receipt: "記録は、ここに", .deal: "話し合って、決める",
-                   .risk: "安心して、進む", .agent: "みんなで考える", .flights: "空の旅"],
+        taglines: [.home: "旅を共に", .fund: "一緒に、\nもっと遠くへ", .send: "小さな支払いが、\n大きな思い出に。",
+                   .gift: "贈り物を、\nみんなで", .receipt: "記録は、\nここに", .deal: "話し合って、\n決める",
+                   .risk: "安心して、\n進む", .agent: "みんなで\n考える"],
         tabs: [.home: "ホーム", .trips: "旅行", .gifts: "ギフト", .group: "グループ", .ask: "S"],
         centreTab: "S", seeAll: "すべて見る", flightsHeadline: "どこへ行きますか？",
         places: [
@@ -95,9 +95,8 @@ struct AsciiTheme: SynqTheme {
     /// Where the vertical tagline sits beside each hero.
     static func placement(_ slot: SynqArtSlot) -> (alignment: Alignment, top: CGFloat) {
         switch slot {
-        case .send: return (.topLeading, 36)
-        case .fund: return (.topTrailing, 58)
-        case .flights: return (.topLeading, 200)   // flights shows a headline instead
+        case .send: return (.topLeading, 20)
+        case .fund: return (.topTrailing, 52)
         default: return (.topTrailing, 8)
         }
     }
@@ -180,7 +179,7 @@ struct AsciiHeroBand: View {
         AsciiArtView(art: art, ink: ink, dim: dim, family: artFamily)
             .overlay(alignment: placement.alignment) {
                 if let tagline {
-                    VerticalText(text: tagline, font: taglineFont.font, ink: ink)
+                    VerticalText(text: tagline, font: taglineFont.font, size: taglineFont.size, ink: ink)
                         .padding(.top, placement.top)
                         .padding(.horizontal, 14)
                 }
@@ -193,6 +192,7 @@ struct AsciiHeroBand: View {
 struct VerticalText: View {
     let text: String
     let font: Font
+    let size: CGFloat
     let ink: Color
 
     /// Vertical presentation forms for punctuation.
@@ -208,9 +208,9 @@ struct VerticalText: View {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             ForEach(Array(text.split(separator: "\n").reversed().enumerated()), id: \.offset) { _, column in
-                VStack(spacing: 1) {
+                VStack(spacing: 0) {
                     ForEach(Array(column.enumerated()), id: \.offset) { _, c in
-                        Text(Self.vertical(c)).font(font).foregroundStyle(ink)
+                        Text(Self.vertical(c)).font(font).foregroundStyle(ink).frame(height: size * 1.12)
                     }
                 }
             }
