@@ -75,6 +75,8 @@ export type TeamToolSpec = Readonly<{
   needsHuman: boolean;
   /** The tool's outcome concerns money (a pending outcome makes it unsafe to retry). */
   financial: boolean;
+  /** Reaches arbitrary network hosts: every call must name its host. */
+  network?: boolean;
 }>;
 
 const finance = (t: FinanceTool, scope: Scope): TeamToolSpec => ({
@@ -177,6 +179,7 @@ export const TEAM_TOOLS = {
     provider: null,
     needsHuman: false,
     financial: false,
+    network: true,
   },
   'research.x402Purchase': {
     effect: 'PAID_READ',
@@ -184,6 +187,7 @@ export const TEAM_TOOLS = {
     provider: 'X402_RESEARCH',
     needsHuman: false,
     financial: true,
+    network: true,
   },
   'wallets.circleTransfer': {
     effect: 'PROPOSE',

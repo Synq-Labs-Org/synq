@@ -155,6 +155,8 @@ export interface ChannelPorts {
    * owner's EIP-712 approval, which never comes from chat.
    */
   team?(input: TeamRequest): Promise<TeamReplyView>;
+  /** Canonical treasury workspace for a group; use the same id in the DM link. */
+  teamWorkspace?(groupId: string): Promise<string | null>;
   /** DM from a sender with no link yet: onboarding only (start, link code). */
   directOnboarding?(input: {
     channel: ChannelId;
@@ -176,7 +178,7 @@ export type DirectRequest = {
 };
 export type TeamRequest = {
   channel: ChannelId;
-  /** The group id (group chats) or the sender's linked workspace (DMs). */
+  /** Canonical treasury workspace, resolved through verified links in both groups and DMs. */
   workspaceId: string;
   principalId: string;
   text: string;
@@ -823,9 +825,21 @@ export class ChannelGateway {
         ? parseTeamAsk(stripMention(parsed.text))
         : null;
     if (ask) {
+      const workspaceId = await this.options.ports.teamWorkspace?.(
+        group.groupId,
+      );
+      if (!workspaceId)
+        return this.replyOutcome(
+          envelope,
+          'REFUSED',
+          'TEAM_WORKSPACE_UNBOUND',
+          {
+            text: 'This group needs a verified treasury workspace binding before using the finance team.',
+          },
+        );
       const reply = await this.teamReply({
         channel: envelope.channel,
-        workspaceId: group.groupId,
+        workspaceId,
         principalId,
         text: stripMention(parsed.kind === 'TEXT' ? parsed.text : ''),
         personas: ask.personas,

@@ -713,7 +713,7 @@ describe('P21-06 Risk cannot spend, Audit is read-only, Deal does not decide dis
         }),
       ),
     ).toBe('BUDGET_EXCEEDED');
-    expect(seen).toHaveLength(3);
+    expect(seen).toHaveLength(2);
   });
 });
 

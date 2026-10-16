@@ -26,6 +26,8 @@ const lower = (a: string) => a.toLowerCase();
 
 /** A newly verified destination is only trusted after this cooling period. */
 export const DESTINATION_COOLING_SECONDS = 24 * 3600;
+/** No policy (signed or not) may lower the cooling period below this. */
+export const DESTINATION_COOLING_FLOOR_SECONDS = 3600;
 
 /**
  * P20-02: a payout destination that differs from the vendor's verified
@@ -62,7 +64,13 @@ export function destinationRule(input: {
         detail: `requested ${input.requested} differs from ${input.vendorName}'s verified ${current.address}${match ? ` (record status ${match.status})` : ' (never seen before)'}; new verification required before any payout`,
       },
     ];
-  const cooling = input.coolingSeconds ?? DESTINATION_COOLING_SECONDS;
+  // Callers pass an owner-signed policy value; it is still clamped to the floor.
+  const cooling = Math.max(
+    DESTINATION_COOLING_FLOOR_SECONDS,
+    Number.isFinite(input.coolingSeconds)
+      ? Math.floor(input.coolingSeconds!)
+      : DESTINATION_COOLING_SECONDS,
+  );
   if (input.now - current.at < cooling)
     return [
       {

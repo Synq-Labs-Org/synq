@@ -123,6 +123,7 @@ export async function teamDesk(
     vendorInvoices: [...base.vendorInvoices, smallInvoice],
     obligations: teamObligations,
     screening,
+    vendorProvenance: 'POSTGRES',
     cases: new RiskCaseService(store, () => NOW),
     highValueAt: 50_000_000n,
     store,

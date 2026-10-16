@@ -111,12 +111,25 @@ export async function compareOffers(input: {
   const { value } = await input.guard.run(input.agentId, search, {}, (signal) =>
     input.port.search(input.intent, signal),
   );
-  const best = [...value.offers].sort((a, b) =>
-    BigInt(a.amount) < BigInt(b.amount) ? -1 : 1,
+  const comparable = value.offers.filter(
+    (o) =>
+      o.currency === 'USDC' &&
+      Number.isInteger(o.decimals) &&
+      o.decimals >= 0 &&
+      o.decimals <= 18 &&
+      /^\d+$/.test(o.amount),
+  );
+  const normalized = (o: OfferSummary) =>
+    o.decimals <= 6
+      ? BigInt(o.amount) * 10n ** BigInt(6 - o.decimals)
+      : (BigInt(o.amount) + 10n ** BigInt(o.decimals - 6) - 1n) /
+        10n ** BigInt(o.decimals - 6);
+  const best = [...comparable].sort((a, b) =>
+    normalized(a) < normalized(b) ? -1 : 1,
   )[0];
   if (!best) return { ...value, proposal: null };
   input.guard.authorize(input.agentId, propose, {
-    amountBaseUnits: BigInt(best.amount),
+    amountBaseUnits: normalized(best),
   });
   return {
     ...value,
@@ -223,18 +236,26 @@ export async function researchPaidRead(input: {
   const host = new URL(input.url).host.toLowerCase();
   const cap = input.guard.capability(input.agentId);
   if (!cap) throw new AgentRuntimeError('CANCELLED', 'unknown agent');
-  const { value } = await input.guard.run(
+  const { value } = await input.guard.runPaid(
     input.agentId,
     'research.x402Purchase',
     { amountBaseUnits: input.quotedBaseUnits, host, chain: 'arc-testnet' },
-    (signal) =>
-      input.port.buy(
+    async (signal, maxPerRequest) => {
+      const receipt = await input.port.buy(
         input.url,
-        { hosts: cap.domains, maxPerRequest: cap.maxAmountBaseUnits },
+        { hosts: cap.domains, maxPerRequest },
         signal,
-      ),
+      );
+      return {
+        value: receipt,
+        paidBaseUnits:
+          receipt.status === 'PAID'
+            ? receipt.amount && /^\d+$/.test(receipt.amount)
+              ? BigInt(receipt.amount)
+              : maxPerRequest
+            : 0n,
+      };
+    },
   );
-  if (value.status === 'PAID' && value.amount)
-    input.guard.charge(input.agentId, { paidMicroUsd: Number(value.amount) });
   return value;
 }

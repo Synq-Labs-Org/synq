@@ -86,8 +86,9 @@ export type TeamReplyView = Readonly<{
 export function renderTeamReply(r: TeamReplyView, limit = 3800): string {
   const lines: string[] = [];
   for (const s of r.sections) {
-    lines.push(`${s.label}: ${s.text}`);
-    if (s.evidence.length) lines.push(`  Evidence: ${s.evidence.join(' ')}`);
+    lines.push(`${safeLine(s.label)}: ${safeLine(s.text)}`);
+    if (s.evidence.length)
+      lines.push(`  Evidence: ${s.evidence.map(safeLine).join(' ')}`);
   }
   if (r.unavailable.length)
     lines.push(`Unavailable now: ${r.unavailable.join(', ')}.`);
@@ -98,4 +99,11 @@ export function renderTeamReply(r: TeamReplyView, limit = 3800): string {
   if (r.footer) lines.push(r.footer);
   const out = lines.join('\n');
   return out.length <= limit ? out : `${out.slice(0, limit - 1)}…`;
+}
+
+function safeLine(text: string): string {
+  return text
+    .replace(/[\r\n\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

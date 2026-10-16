@@ -65,6 +65,8 @@ export interface ToolGate {
   delegate(input: { parentId: string; childId: string; role: string }): unknown;
   authorize(agentId: string, tool: string): unknown;
   complete(agentId: string): void;
+  signal?(agentId: string): AbortSignal;
+  assertLive?(agentId: string, tool: string): void;
 }
 
 /** Reservation charged before each model call; trued up with real usage after. */
@@ -182,7 +184,10 @@ export class FinanceTeam {
     this.manager.charge(agent.handle.agentId, { toolCalls: 1 }, tool);
     this.toolLog.push({ agentId: agent.handle.agentId, tool });
     const out = run();
-    if (!isThenable(out)) return out;
+    if (!isThenable(out)) {
+      this.gate?.assertLive?.(agent.handle.agentId, tool);
+      return out;
+    }
     return this.withinDeadline(agent, tool, out) as T;
   }
 
@@ -196,7 +201,10 @@ export class FinanceTeam {
     tool: FinanceTool,
     work: PromiseLike<R>,
   ): Promise<R> {
-    const signal = agent.handle.signal;
+    const external = this.gate?.signal?.(agent.handle.agentId);
+    const signal = external
+      ? AbortSignal.any([agent.handle.signal, external])
+      : agent.handle.signal;
     const cancelled = () =>
       new AgentRuntimeError(
         'CANCELLED',
@@ -211,6 +219,7 @@ export class FinanceTeam {
     try {
       const value = await Promise.race([Promise.resolve(work), aborted]);
       if (signal.aborted) throw cancelled();
+      this.gate?.assertLive?.(agent.handle.agentId, tool);
       return value;
     } catch (error) {
       if (error instanceof AgentRuntimeError && error.kind === 'CANCELLED')

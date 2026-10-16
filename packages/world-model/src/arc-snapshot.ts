@@ -883,7 +883,11 @@ export function toolAvailability(
       };
     }
     if (b.financial) {
-      if (pending.meta.freshness === 'UNKNOWN')
+      if (
+        pending.meta.freshness === 'UNKNOWN' ||
+        pending.meta.freshness === 'STALE' ||
+        pending.meta.observedAt === null
+      )
         return {
           ...base,
           status: 'UNVERIFIED',

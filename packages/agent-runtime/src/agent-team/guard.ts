@@ -12,6 +12,7 @@ import {
   type SpendMode,
   type TeamRole,
   type TeamTool,
+  type TeamToolSpec,
   type TemplateId,
 } from './manifests.js';
 
@@ -84,6 +85,8 @@ type Node = {
   controller: AbortController;
   revoked: string | null;
   used: { toolCalls: number; paidMicroUsd: number; tokens: number };
+  /** Paid amounts reserved by in-flight paid reads (settled or released after). */
+  reservedPaid: number;
   activeChildren: Set<string>;
   done: boolean;
 };
@@ -176,6 +179,7 @@ export class CapabilityGuard {
       controller: new AbortController(),
       revoked: null,
       used: { toolCalls: 0, paidMicroUsd: 0, tokens: 0 },
+      reservedPaid: 0,
       activeChildren: new Set(),
       done: false,
     });
@@ -225,7 +229,10 @@ export class CapabilityGuard {
   }): EffectiveCapability {
     const parent = this.live(input.parentId, 'delegate');
     const p = parent.cap;
-    const tpl = input.template ? SUBAGENT_TEMPLATES[input.template] : null;
+    const tpl =
+      input.template && Object.hasOwn(SUBAGENT_TEMPLATES, input.template)
+        ? SUBAGENT_TEMPLATES[input.template]
+        : null;
     if (input.template && !tpl)
       this.refuse(
         input.parentId,
@@ -234,7 +241,7 @@ export class CapabilityGuard {
         'unknown subagent template',
       );
     const role = tpl?.role ?? input.role;
-    if (!role || role === 'SUPERVISOR' || !(role in TEAM_MANIFESTS))
+    if (!role || role === 'SUPERVISOR' || !Object.hasOwn(TEAM_MANIFESTS, role))
       this.refuse(
         input.parentId,
         'CAPABILITY_ESCALATION',
@@ -343,8 +350,9 @@ export class CapabilityGuard {
       ),
       concurrency: m.concurrency,
       timeoutMs: Math.min(m.timeoutMs, p.timeoutMs),
-      delegable: inter(m.delegable, p.delegable),
-      templates: inter(m.templates, p.templates),
+      // A template instance is a leaf: it delegates nothing further.
+      delegable: tpl ? [] : inter(m.delegable, p.delegable),
+      templates: tpl ? [] : inter(m.templates, p.templates),
     });
     const controller = new AbortController();
     const up = parent.controller.signal;
@@ -358,6 +366,7 @@ export class CapabilityGuard {
       controller,
       revoked: null,
       used: { toolCalls: 0, paidMicroUsd: 0, tokens: 0 },
+      reservedPaid: 0,
       activeChildren: new Set(),
       done: false,
     });
@@ -381,12 +390,12 @@ export class CapabilityGuard {
     agentId: string,
     tool: string,
     args: CallArgs = {},
-  ): { flags: RiskFlag[] } {
+  ): { flags: RiskFlag[]; reservedMicroUsd: number } {
     const n = this.live(agentId, tool);
     const c = n.cap;
     if (
       (NEVER_TOOLS as readonly string[]).includes(tool) ||
-      !(tool in TEAM_TOOLS)
+      !Object.hasOwn(TEAM_TOOLS, tool)
     )
       this.refuse(
         agentId,
@@ -395,7 +404,7 @@ export class CapabilityGuard {
         `${tool} is not a tool any agent holds`,
       );
     const t = tool as TeamTool;
-    const spec = TEAM_TOOLS[t];
+    const spec: TeamToolSpec = TEAM_TOOLS[t];
     if (!c.tools.includes(t))
       this.refuse(
         agentId,
@@ -412,12 +421,21 @@ export class CapabilityGuard {
         tool,
         `${c.role} lacks ${spec.effect === 'READ' ? 'read' : 'write'} scope ${spec.scope}`,
       );
-    if (n.used.toolCalls + 1 > c.budgets.toolCalls)
+    // Budgets are additive: a call counts against the instance and every ancestor.
+    for (const x of this.chain(agentId))
+      if (x.used.toolCalls + 1 > x.cap.budgets.toolCalls)
+        this.refuse(
+          agentId,
+          'BUDGET_EXCEEDED',
+          tool,
+          `${x.cap.role} tool budget ${x.cap.budgets.toolCalls} spent`,
+        );
+    if (spec.network && args.host === undefined)
       this.refuse(
         agentId,
-        'BUDGET_EXCEEDED',
+        'FORBIDDEN_TOOL_CALL',
         tool,
-        `tool budget ${c.budgets.toolCalls} spent`,
+        `${tool} reaches the network and must name its host`,
       );
     if (args.chain !== undefined && !c.networks.includes(args.chain))
       this.refuse(
@@ -473,6 +491,25 @@ export class CapabilityGuard {
         tool,
         `${c.role} has no Kernel payment path`,
       );
+    // A paid read reserves its amount up front against the instance and
+    // every ancestor; it is settled (or released) after the call.
+    let reservedMicroUsd = 0;
+    if (spec.effect === 'PAID_READ') {
+      const amount = Number(args.amountBaseUnits!);
+      for (const x of this.chain(agentId))
+        if (
+          x.used.paidMicroUsd + x.reservedPaid + amount >
+          x.cap.budgets.paidMicroUsd
+        )
+          this.refuse(
+            agentId,
+            'BUDGET_EXCEEDED',
+            tool,
+            `${x.cap.role} paid budget ${x.cap.budgets.paidMicroUsd} would be exceeded`,
+          );
+      for (const x of this.chain(agentId)) x.reservedPaid += amount;
+      reservedMicroUsd = amount;
+    }
     const flags: RiskFlag[] = [];
     if (spec.effect === 'PROPOSE' && args.counterparty !== undefined) {
       const verified = this.ctx.verifiedCounterparties().map(lower);
@@ -493,7 +530,66 @@ export class CapabilityGuard {
       tool,
       flags.map((f) => f.code).join(',') || 'within capability',
     );
-    return { flags };
+    return { flags, reservedMicroUsd };
+  }
+
+  /** Throws unless the instance and all its ancestors are live (not revoked, in time). */
+  assertLive(agentId: string, subject: string): void {
+    this.live(agentId, subject);
+  }
+
+  /** Converts a paid reservation into usage (actual may be lower; never refused after paying). */
+  settlePaid(agentId: string, reserved: number, actual: number): void {
+    const paid = Math.max(0, Math.ceil(actual));
+    for (const x of this.chain(agentId)) {
+      x.reservedPaid = Math.max(0, x.reservedPaid - reserved);
+      x.used.paidMicroUsd += paid;
+    }
+    if (paid > reserved)
+      this.event(
+        agentId,
+        'FLAGGED',
+        'paid-read',
+        `paid ${paid} above the reserved ${reserved}`,
+      );
+  }
+
+  releasePaid(agentId: string, reserved: number): void {
+    for (const x of this.chain(agentId))
+      x.reservedPaid = Math.max(0, x.reservedPaid - reserved);
+  }
+
+  /**
+   * A paid read: reserve, pay through `work` with `maxPerRequest` equal to the
+   * reservation, then settle. An ambiguous failure charges the full cap; a receipt
+   * is always returned once paid.
+   */
+  async runPaid<T>(
+    agentId: string,
+    tool: string,
+    args: CallArgs,
+    work: (
+      signal: AbortSignal,
+      maxPerRequest: bigint,
+    ) => Promise<{ value: T; paidBaseUnits: bigint }>,
+  ): Promise<{ value: T; flags: RiskFlag[] }> {
+    const { flags, reservedMicroUsd } = this.authorize(agentId, tool, args);
+    let settled = false;
+    try {
+      const { value } = await this.race(agentId, tool, (signal) =>
+        work(signal, BigInt(reservedMicroUsd)).then((r) => {
+          if (!settled) {
+            this.settlePaid(agentId, reservedMicroUsd, Number(r.paidBaseUnits));
+            settled = true;
+          }
+          return r;
+        }),
+      );
+      return { value: value.value, flags };
+    } finally {
+      if (!settled)
+        this.settlePaid(agentId, reservedMicroUsd, reservedMicroUsd);
+    }
   }
 
   /** Records paid usage (x402 micro-USD, tokens) against the instance and ancestors. */
@@ -535,7 +631,26 @@ export class CapabilityGuard {
     args: CallArgs,
     work: (signal: AbortSignal) => Promise<T>,
   ): Promise<{ value: T; flags: RiskFlag[] }> {
-    const { flags } = this.authorize(agentId, tool, args);
+    const { flags, reservedMicroUsd } = this.authorize(agentId, tool, args);
+    if (reservedMicroUsd) {
+      this.releasePaid(agentId, reservedMicroUsd);
+      this.refuse(
+        agentId,
+        'FORBIDDEN_TOOL_CALL',
+        tool,
+        'paid reads go through runPaid',
+      );
+    }
+    const { value } = await this.race(agentId, tool, work);
+    return { value, flags };
+  }
+
+  /** Races `work` against revocation and the timeout; re-checks liveness after. */
+  private async race<T>(
+    agentId: string,
+    tool: string,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<{ value: T }> {
     const n = this.nodes.get(agentId)!;
     const signal = n.controller.signal;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -570,7 +685,7 @@ export class CapabilityGuard {
       ]);
       // Re-check after the await: revocation wins over a late result.
       this.live(agentId, tool);
-      return { value, flags };
+      return { value };
     } catch (error) {
       if (error instanceof AgentRuntimeError)
         this.event(agentId, 'REFUSED', tool, `${error.kind}: ${error.message}`);
@@ -626,5 +741,8 @@ export function gateOf(guard: CapabilityGuard) {
     authorize: (agentId: string, tool: string) =>
       guard.authorize(agentId, tool),
     complete: (agentId: string) => guard.complete(agentId),
+    signal: (agentId: string) => guard.signal(agentId),
+    assertLive: (agentId: string, tool: string) =>
+      guard.assertLive(agentId, tool),
   };
 }

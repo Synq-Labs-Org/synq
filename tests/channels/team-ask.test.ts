@@ -243,3 +243,28 @@ describe('team personas in chat', () => {
     expect(sent[0]!.text).toMatch(/^Decision \(Kernel\): /m);
   });
 });
+
+import { fixture, CHAT_A, GROUP_A } from './harness.js';
+it('CR-14: groups and DMs use an explicit canonical workspace binding, absent bindings fail closed', async () => {
+  const f = fixture();
+  await f.link(CHAT_A, '111', GROUP_A, 'principal_alice');
+  const scopes: string[] = [];
+  f.ports.team = async (input) => {
+    scopes.push(input.workspaceId);
+    return { sections: [], unavailable: [], approval: null };
+  };
+  expect((await f.gateway.handle(f.message(QUESTION))).code).toBe(
+    'TEAM_WORKSPACE_UNBOUND',
+  );
+  f.ports.teamWorkspace = async () => 'canonical-workspace';
+  f.ports.directLink = async () => ({
+    principalId: 'principal_alice',
+    workspaceId: 'canonical-workspace',
+  });
+  f.ports.direct = async () => ({ text: 'direct' });
+  await f.gateway.handle(f.message(QUESTION));
+  await f.gateway.handle(
+    f.message(QUESTION, { chatKind: 'DIRECT', externalGroupId: '111' }),
+  );
+  expect(scopes).toEqual(['canonical-workspace', 'canonical-workspace']);
+});

@@ -14,6 +14,8 @@ import {
 } from '@synq/payables';
 import {
   alertKeyOf,
+  coolingSecondsFor,
+  type WorkspaceRiskPolicy,
   citeFact,
   citeInference,
   destinationRule,
@@ -121,7 +123,6 @@ export type TeamRequest = Readonly<{
   modelRejected: string | null;
 }>;
 
-const ADDRESS = /0x[0-9a-fA-F]{40}/g;
 const AMOUNT =
   /\$\s?(\d{1,12}(?:\.\d{1,6})?)|\b(\d{1,12}(?:\.\d{1,6})?)\s*(?:usdc|usd|dollars?)\b/i;
 
@@ -132,7 +133,11 @@ export function parseTeamRequest(message: string): TeamRequest {
   const personas = PERSONA_WORDS.filter(([, re]) => re.test(text)).map(
     ([p]) => p,
   );
-  const addresses = text.match(ADDRESS) ?? [];
+  const addresses = [
+    ...text.matchAll(
+      /(?:pay\s+to|send\s+to|to|at|destination|recipient|wallet|address)\s*[:=]?\s*(0x[0-9a-fA-F]{40})\b/gi,
+    ),
+  ].map((m) => m[1]!);
   const amount = AMOUNT.exec(text);
   const capabilities =
     /\b(what can you do|which tools|tools? (are )?(available|unavailable)|are you able|can you (use|reach)|capabilit)/i.test(
@@ -196,6 +201,7 @@ export function anchorModelReading(
   m: z.output<typeof TeamRequestModelSchema>,
 ): TeamRequest {
   const lowerMsg = message.toLowerCase();
+  const nonAddressText = message.replace(/0x[0-9a-fA-F]+/g, ' ');
   const reject = (why: string): TeamRequest => ({
     ...rules,
     modelRejected: why,
@@ -207,11 +213,13 @@ export function anchorModelReading(
     return reject(`model address ${m.recipientAddress} is not in the message`);
   if (
     m.amount &&
-    !new RegExp(`(^|[^\\d.])${m.amount.replace('.', '\\.')}([^\\d]|$)`).test(
-      message,
+    !new RegExp(`(^|[^\\d.])${m.amount.replace('.', '\\.')}([^\\d.]|$)`).test(
+      nonAddressText,
     )
   )
     return reject(`model amount ${m.amount} is not in the message`);
+  if (m.amount && rules.amount && Number(m.amount) !== Number(rules.amount))
+    return reject('model amount disagrees with the explicit amount');
   if (m.kind === 'PAY_REQUEST' && rules.kind !== 'PAY_REQUEST')
     return reject(
       'model widened a non-imperative message into a payment request',
@@ -224,7 +232,15 @@ export function anchorModelReading(
     !/^(this|that|the|our|my|your|a|an)\b/i.test(m.counterparty.trim())
       ? m.counterparty.trim()
       : null;
-  if (named && !lowerMsg.includes(named.toLowerCase().split(/\s+/)[0]!))
+  if (
+    named &&
+    !new RegExp(
+      `(^|[^a-z0-9])${named
+        .toLowerCase()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\s+/g, '\\s+')}([^a-z0-9]|$)`,
+    ).test(lowerMsg)
+  )
     return reject(`model counterparty ${named} is not in the message`);
   return {
     kind: m.kind === 'OTHER' ? rules.kind : m.kind,
@@ -268,6 +284,9 @@ export type TeamDesk = FinanceDesk &
     velocity?: { windowSeconds: number; maxInWindow: bigint; maxCount: number };
     /** Workspace policy: wait after a destination verification (default 24h). */
     destinationCoolingSeconds?: number;
+    riskPolicy?: WorkspaceRiskPolicy;
+    riskPolicyOwners?: readonly Address[];
+    vendorProvenance?: string;
   }>;
 
 export type TeamSection = Readonly<{
@@ -340,8 +359,6 @@ const FRAUD_CODES = new Set([
   'AMOUNT_ANOMALY',
   'SPEND_VELOCITY',
   'PAYOUT_BURST',
-  'DOCUMENT_CONTAINS_INSTRUCTIONS',
-  'UNVERIFIED_PROVENANCE',
   'GUARD_COUNTERPARTY_NOT_APPROVED',
   'CONTROL_RECENTLY_CHANGED',
 ]);
@@ -406,6 +423,10 @@ export async function askTeam(
     confirm?: { ownerApproval: Hex; approval: ApprovalTerms };
     /** Wall clock in ms for latency and guard deadlines. */
     clockMs?: () => number;
+    onControl?: (control: {
+      runId: string;
+      revoke: (reason: string) => void;
+    }) => void;
   } = {},
 ): Promise<TeamReply> {
   const clockMs = options.clockMs ?? Date.now;
@@ -427,6 +448,10 @@ export async function askTeam(
   });
   guard.root(team.supervisor.handle.agentId);
   team.attachGate(gateOf(guard));
+  options.onControl?.({
+    runId,
+    revoke: (reason) => guard.revoke(team.supervisor.handle.agentId, reason),
+  });
   const sup = team.supervisor;
   const origin = options.origin ?? 'CHAT';
   let request = parseTeamRequest(message);
@@ -455,7 +480,7 @@ export async function askTeam(
     if (!recorded) {
       recorded = true;
       const u = team.manager.usage();
-      desk.budget?.record(desk.workspaceId, {
+      await desk.budget?.record(desk.workspaceId, {
         toolCalls: u.toolCalls,
         tokens: u.tokens,
         paidMicroUsd: u.paidMicroUsd,
@@ -498,8 +523,14 @@ export async function askTeam(
         citations.slice(0, 20),
       );
       auditHash = rec.hash;
-    } catch {
+      await desk.cases.anchor(desk.workspaceId);
+    } catch (error) {
       auditHash = null;
+      if (intent)
+        throw new AgentRuntimeError(
+          'CANCELLED',
+          `money-path audit failed: ${(error as Error).name}`,
+        );
     }
     return {
       runId,
@@ -705,7 +736,7 @@ export async function askTeam(
     const cfo = team.spawn(sup, 'CFO');
     const riskAgent = team.spawn(sup, 'RISK');
     const pay = team.spawn(sup, 'PAYMENT');
-    const { timing } = cfoTiming(team, cfo, desk, s0, vi);
+    let { timing } = cfoTiming(team, cfo, desk, s0, vi);
     team.complete(cfo);
 
     // Payment Agent drafts exactly what was asked (never a silent substitute).
@@ -736,8 +767,14 @@ export async function askTeam(
         proposedBy: `agent:${pay.handle.agentId}`,
       }));
 
-    const assessed = riskAgentAssess(team, riskAgent, desk, s0, vi, intent);
+    let assessed = riskAgentAssess(team, riskAgent, desk, s0, vi, intent);
     const now = at();
+    const cooling = await coolingSecondsFor({
+      workspaceId: desk.workspaceId,
+      policy: desk.riskPolicy,
+      owners: desk.riskPolicyOwners ?? [],
+      chainId: asset.chainId,
+    });
     const ruleFlags: RiskFlag[] = [
       ...destinationRule({
         vendorName: clip(vendor.name, 60),
@@ -745,9 +782,7 @@ export async function askTeam(
         chainId: asset.chainId,
         addresses: vendor.addresses,
         now,
-        ...(desk.destinationCoolingSeconds === undefined
-          ? {}
-          : { coolingSeconds: desk.destinationCoolingSeconds }),
+        coolingSeconds: cooling.seconds,
       }),
       // Anomaly rules need the paid history; without it they say nothing rather than guess.
       ...(desk.payoutHistory
@@ -866,7 +901,7 @@ export async function askTeam(
     }
     const holds = await desk.cases.holdFlags(desk.workspaceId, subjectRef);
     team.complete(riskAgent);
-    const risk: RiskRecommendation = RiskRecommendationSchema.parse({
+    let risk: RiskRecommendation = RiskRecommendationSchema.parse({
       kind: 'RISK_RECOMMENDATION',
       subject: vi.vendorInvoiceId,
       recommendation:
@@ -884,7 +919,7 @@ export async function askTeam(
     });
 
     // ---- sections
-    const cfoStance: TeamSection['stance'] =
+    let cfoStance: TeamSection['stance'] =
       timing.action === 'HOLD' || timing.action === 'REFUSE_STALE'
         ? 'HOLD'
         : 'PAY';
@@ -907,13 +942,18 @@ export async function askTeam(
       citations: cfoCites,
     });
     const riskCites: Citation[] = [];
-    if (verified)
+    if (
+      verified &&
+      ['CHAIN', 'ENVIO', 'POSTGRES', 'PLUGIN', 'KERNEL', 'CONFIG'].includes(
+        desk.vendorProvenance ?? '',
+      )
+    )
       riskCites.push(
         citeFact({
           claim: `${vendor.name} verified payout address`,
           source: 'vendor master',
           ref: verified,
-          provenance: 'POSTGRES',
+          provenance: desk.vendorProvenance ?? 'UNVERIFIED',
           observedAt:
             vendor.addresses.find((a) => lower(a.address) === lower(verified))
               ?.at ?? null,
@@ -934,6 +974,75 @@ export async function askTeam(
     });
 
     // ---- compile for the Kernel
+    // Mutation gate: decide on fresh balances, refreshing once if needed.
+    let s = evaluateArcSnapshot(s0, at());
+    if (!s.decision.decisionGrade && desk.refreshWorld) {
+      s = evaluateArcSnapshot(
+        await team.tool(sup, 'world.snapshot', () => desk.refreshWorld!()),
+        at(),
+      );
+      refreshed = true;
+      world = s;
+      const freshCfo = team.spawn(sup, 'CFO');
+      const freshRisk = team.spawn(sup, 'RISK');
+      timing = cfoTiming(team, freshCfo, { ...desk, now: at() }, s, vi).timing;
+      const oldCodes = new Set(assessed.flags.map((f) => f.code));
+      assessed = riskAgentAssess(
+        team,
+        freshRisk,
+        { ...desk, now: at() },
+        s,
+        vi,
+        intent,
+      );
+      team.complete(freshCfo);
+      team.complete(freshRisk);
+      const flags = dedupe([
+        ...risk.flags.filter((f) => !oldCodes.has(f.code)),
+        ...assessed.flags,
+      ]);
+      risk = RiskRecommendationSchema.parse({
+        ...risk,
+        flags,
+        recommendation: flags.some((f) => f.severity === 'HARD')
+          ? 'VETO'
+          : flags.length
+            ? 'REVIEW'
+            : 'CLEAR',
+      });
+      cfoStance =
+        timing.action === 'HOLD' || timing.action === 'REFUSE_STALE'
+          ? 'HOLD'
+          : 'PAY';
+      const ci = sections.findIndex((x) => x.persona === 'CFO');
+      if (ci >= 0)
+        sections[ci] = {
+          ...sections[ci]!,
+          stance: cfoStance,
+          text: cfoText(timing, vi, fromBooks),
+          citations: [
+            factOf('treasury.balances', 'treasury balance', s),
+            factOf('treasury.reserves', 'cash buffer', s),
+          ].filter((c): c is Citation => c !== null),
+        };
+      const ri = sections.findIndex((x) => x.persona === 'RISK');
+      if (ri >= 0)
+        sections[ri] = {
+          ...sections[ri]!,
+          stance:
+            risk.recommendation === 'VETO'
+              ? 'VETO'
+              : risk.recommendation === 'REVIEW'
+                ? 'REVIEW'
+                : 'CLEAR',
+          text: riskText(
+            risk,
+            screen.value.verdict,
+            screen.value.reason,
+            riskCase,
+          ),
+        };
+    }
     const cfoFlags: RiskFlag[] =
       timing.action === 'REFUSE_STALE'
         ? [
@@ -952,16 +1061,18 @@ export async function askTeam(
               },
             ]
           : [];
-    // Mutation gate: decide on fresh balances, refreshing once if needed.
-    let s = evaluateArcSnapshot(s0, at());
-    if (!s.decision.decisionGrade && desk.refreshWorld) {
-      s = evaluateArcSnapshot(
-        await team.tool(sup, 'world.snapshot', () => desk.refreshWorld!()),
-        at(),
-      );
-      refreshed = true;
-      world = s;
-    }
+    const pending = s.capabilities.tools.find(
+      (t) => t.tool === 'payment.submitToKernel',
+    );
+    if (pending && ['PENDING_OUTCOME', 'UNVERIFIED'].includes(pending.status))
+      risk = {
+        ...risk,
+        recommendation: 'VETO',
+        flags: [
+          ...risk.flags,
+          { code: 'PENDING_OUTCOME', severity: 'HARD', detail: pending.reason },
+        ],
+      };
     const stale = staleDataRule(
       [
         {
@@ -1102,7 +1213,7 @@ export async function askTeam(
           claim: `invoice ${vi.number}`,
           source: 'AP ledger',
           ref: vi.vendorInvoiceId,
-          provenance: 'POSTGRES',
+          provenance: s.obligations.payables.meta.provenance,
           observedAt: s.obligations.payables.meta.observedAt,
           now,
         }),
@@ -1254,11 +1365,15 @@ export function composeAnswer(
   tools: readonly ToolAvailability[],
 ): string {
   const lines: string[] = [];
-  if (head) lines.push(head);
+  if (head) lines.push(safeLine(head));
   for (const s of sections) {
-    lines.push(`${s.label}: ${s.text}`);
+    lines.push(
+      `${s.persona === 'DECISION' ? 'Decision (Kernel)' : PERSONA_LABEL[s.persona]}: ${safeLine(s.text)}`,
+    );
     if (s.citations.length)
-      lines.push(`  Evidence: ${s.citations.map(renderCitation).join(' ')}`);
+      lines.push(
+        `  Evidence: ${s.citations.map((c) => safeLine(renderCitation(c))).join(' ')}`,
+      );
   }
   const down = unavailableSummary(tools);
   if (down.length && sections.length)
@@ -1281,7 +1396,7 @@ export function teamReplyView(r: TeamReply): {
       text: s.text,
       evidence: s.citations.map(renderCitation),
     })),
-    unavailable: r.status === 'ANSWERED' ? unavailableSummary(r.tools) : [],
+    unavailable: unavailableSummary(r.tools),
     approval:
       r.decision.status === 'PROPOSED' && r.intent
         ? {
@@ -1305,4 +1420,12 @@ export function unavailableSummary(
     groups.set(key, [...(groups.get(key) ?? []), t.tool]);
   }
   return [...groups.entries()].map(([k, v]) => `${k} (${v.join(', ')})`);
+}
+
+function safeLine(text: string): string {
+  return text
+    .replace(/[\r\n\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
+    .replace(/Decision\s*\(Kernel\)\s*:/gi, '[quoted decision text]')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

@@ -1,4 +1,4 @@
-import type { AuditRecord } from './audit.js';
+import type { AuditAnchor, AuditRecord } from './audit.js';
 import {
   ACTIVE_CASE_STATUSES,
   type RiskAlert,
@@ -11,6 +11,10 @@ type Sql = {
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Record<string, unknown>[] }>;
+};
+/** A pool (pg.Pool) can lend a dedicated client for a transaction. */
+type Pooled = Sql & {
+  connect?: () => Promise<Sql & { release(): void }>;
 };
 
 const ACTIVE_SQL = ACTIVE_CASE_STATUSES.map((s) => `'${s}'`).join(',');
@@ -50,6 +54,17 @@ export const RISK_MIGRATIONS: readonly {
       data jsonb NOT NULL,
       PRIMARY KEY (workspace_id, seq));`,
     down: `DROP TABLE IF EXISTS synq_risk_audit; DROP TABLE IF EXISTS synq_risk_cases; DROP TABLE IF EXISTS synq_risk_alerts;`,
+  },
+  {
+    version: 2,
+    up: `CREATE TABLE IF NOT EXISTS synq_risk_audit_anchors (
+      workspace_id text NOT NULL,
+      seq int NOT NULL,
+      head text NOT NULL,
+      anchored_at bigint NOT NULL,
+      mac text NOT NULL,
+      PRIMARY KEY (workspace_id, seq));`,
+    down: `DROP TABLE IF EXISTS synq_risk_audit_anchors;`,
   },
 ];
 
@@ -94,7 +109,52 @@ const uniqueViolation = (e: unknown) =>
   (e as { code?: string } | null)?.code === '23505';
 
 export class PostgresRiskCaseStore implements RiskCaseStore {
-  constructor(readonly sql: Sql) {}
+  constructor(
+    readonly sql: Pooled,
+    private readonly inTransaction = false,
+  ) {}
+  /** BEGIN/COMMIT on one client; ROLLBACK when `fn` throws. */
+  async transaction<T>(fn: (tx: RiskCaseStore) => Promise<T>): Promise<T> {
+    if (this.inTransaction) return fn(this);
+    const client = this.sql.connect ? await this.sql.connect() : null;
+    const conn: Sql = client ?? this.sql;
+    try {
+      await conn.query('BEGIN');
+      try {
+        const out = await fn(new PostgresRiskCaseStore(conn, true));
+        await conn.query('COMMIT');
+        return out;
+      } catch (e) {
+        await conn.query('ROLLBACK').catch(() => undefined);
+        throw e;
+      }
+    } finally {
+      client?.release();
+    }
+  }
+  async saveAnchor(a: AuditAnchor) {
+    await this.sql.query(
+      `INSERT INTO synq_risk_audit_anchors (workspace_id, seq, head, anchored_at, mac)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (workspace_id, seq) DO NOTHING`,
+      [a.workspaceId, a.seq, a.head, a.anchoredAt, a.mac],
+    );
+  }
+  async latestAnchor(ws: string) {
+    const r = await this.sql.query(
+      'SELECT workspace_id, seq, head, anchored_at, mac FROM synq_risk_audit_anchors WHERE workspace_id=$1 ORDER BY seq DESC LIMIT 1',
+      [ws],
+    );
+    const x = r.rows[0];
+    return x
+      ? {
+          workspaceId: String(x.workspace_id),
+          seq: Number(x.seq),
+          head: String(x.head) as `0x${string}`,
+          anchoredAt: Number(x.anchored_at),
+          mac: String(x.mac) as `0x${string}`,
+        }
+      : null;
+  }
   async migrate() {
     await migrateRisk(this.sql);
   }
