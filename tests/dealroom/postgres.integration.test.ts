@@ -39,7 +39,7 @@ import {
 
 const URL =
   process.env.SYNQ_DEALROOM_TEST_DATABASE_URL ??
-  'postgresql://postgres@127.0.0.1:55433/synq_m2_dealroom';
+  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_m2_dealroom';
 let pool: pg.Pool;
 
 async function ensureDatabase(url: string) {

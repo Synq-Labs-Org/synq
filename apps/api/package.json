@@ -20,13 +20,15 @@
     "./channel-brain": "./src/channel-brain.ts",
     "./transfer-plugin": "./src/transfer-plugin.ts",
     "./lithic-webhook": "./src/lithic-webhook.ts",
-    "./invoice-routes": "./src/invoice-routes.ts"
+    "./invoice-routes": "./src/invoice-routes.ts",
+    "./deal-routes": "./src/deal-routes.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
     "@synq/chain-registry": "workspace:*",
+    "@synq/dealroom": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/funding": "workspace:*",

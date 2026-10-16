@@ -220,6 +220,9 @@ importers:
       '@synq/channels':
         specifier: workspace:*
         version: link:../../packages/channels
+      '@synq/dealroom':
+        specifier: workspace:*
+        version: link:../../packages/dealroom
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain
