@@ -30,6 +30,8 @@ export const PAYMENT_PURPOSES = [
   'INVOICE_REFUND',
   'RECURRING_BILL',
   'GROUP_EXPENSE',
+  /** A surplus distribution from a revenue split to an owner-chosen payee. */
+  'OWNER_DISTRIBUTION',
 ] as const;
 export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
 

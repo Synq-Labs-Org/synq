@@ -255,6 +255,8 @@ export const grantOutboxKey = (grantId: string) => `grant:${grantId}`;
  * replayed grant is refused before its signature leaves the process.
  */
 export async function payGrantOnce(input: {
+  /** Stable application idempotency key, unchanged across reauthorization. */
+  key?: string;
   store: OutboxStore;
   fence: NonceFence;
   grant: ExecutionGrant;
@@ -270,7 +272,7 @@ export async function payGrantOnce(input: {
   now: () => number;
   afterRecord?: (r: OutboxRecord) => Promise<void> | void;
 }): Promise<PayOnceResult> {
-  const key = grantOutboxKey(input.grant.grantId);
+  const key = input.key ?? grantOutboxKey(input.grant.grantId);
   const existing = await input.store.get(key);
   if (existing) {
     assertSamePayment(existing, input.transfer);

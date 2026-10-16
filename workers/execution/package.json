@@ -18,7 +18,8 @@
     "./pg-outbox": "./src/pg-outbox.ts",
     "./council-payout": "./src/council-payout.ts",
     "./cctp-saga": "./src/cctp-saga.ts",
-    "./pg-cctp-gateway": "./src/pg-cctp-gateway.ts"
+    "./pg-cctp-gateway": "./src/pg-cctp-gateway.ts",
+    "./vault-outbox": "./src/vault-outbox.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

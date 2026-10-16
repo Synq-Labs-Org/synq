@@ -100,7 +100,7 @@ const BRAIN_ZONE =
 // Arc v3: packages on the active Arc runtime may not reach archived Monad
 // sponsor integrations, directly or transitively. Their code and tests stay.
 const ARC_ACTIVE =
-  /^(packages\/(domain|schemas|kernel|identity|chain-registry|ledger|invoices|payables|treasury|governance|arc-execution|settlement|funding|channels|agent-runtime|offer-exchange|world-model)|plugins\/circle-[a-z-]+)$/;
+  /^(packages\/(domain|schemas|kernel|identity|chain-registry|ledger|invoices|payables|allocations|treasury|governance|arc-execution|settlement|funding|channels|agent-runtime|offer-exchange|world-model)|plugins\/circle-[a-z-]+)$/;
 const LEGACY_MONAD =
   /^(plugins\/(kuru|perpl|agora|aurora|chainlink-cre|layerzero)|workers\/perpl-executor)$/;
 const MODEL_SDKS =

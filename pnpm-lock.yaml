@@ -43,6 +43,9 @@ importers:
       '@synq/agent-runtime':
         specifier: workspace:*
         version: link:packages/agent-runtime
+      '@synq/allocations':
+        specifier: workspace:*
+        version: link:packages/allocations
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:packages/chain-registry
@@ -432,6 +435,30 @@ importers:
       '@synq/world-model':
         specifier: workspace:*
         version: link:../world-model
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/allocations:
+    dependencies:
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../invoices
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@synq/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@synq/payables':
+        specifier: workspace:*
+        version: link:../payables
       viem:
         specifier: 2.57.4
         version: 2.57.4(typescript@5.9.3)(zod@4.6.5)
