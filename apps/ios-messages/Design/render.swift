@@ -312,6 +312,54 @@ struct Render {
         png(compact(FundHomeView(model: searching, actions: .none)),
             width: phone.width, height: phone.height, scale: 3, to: file("screen-compact-searching.png"))
 
+        // Remaining states and sheets, one screen each.
+        png(ExpandedPhone {
+            PlanTripSheet(prefill: FlightDraft(origin: "DEL", destination: "GOI", originLabel: "Delhi",
+                                               destinationLabel: "Goa", departureDate: "2026-12-01",
+                                               returnDate: "2026-12-05", travelers: 3),
+                          onSearch: { _ in }, onCancel: {})
+        }, width: phone.width, height: phone.height, scale: 3, to: file("sheet-plan-trip.png"))
+        for state in ["AWAITING_PAYMENT", "BOOKING", "BOOKED", "FAILED"] {
+            let m = sampleModel(Samples.activeFund, trips: [Samples.trip(state)])
+            png(ExpandedPhone { TripDetailView(model: m, trip: Samples.trip(state), actions: .none) },
+                width: phone.width, height: phone.height, scale: 3,
+                to: file("screen-trip-\(state.lowercased()).png"))
+        }
+        for state in ["BOOKING", "BOOKED"] {
+            let m = sampleModel(Samples.activeFund, trips: [Samples.gift(state)])
+            png(ExpandedPhone { TripDetailView(model: m, trip: Samples.gift(state), actions: .none) },
+                width: phone.width, height: phone.height, scale: 3,
+                to: file("screen-gift-\(state.lowercased()).png"))
+        }
+        for (state, counted) in [("EXECUTING", 2), ("PAID", 2), ("REJECTED", 1)] {
+            let proposal = Samples.proposal(state, counted: counted, amount: "254.30")
+            png(ExpandedPhone {
+                ProposalDetailView(proposal: proposal, fundName: "Goa crew", network: net, onApprove: {},
+                                   onExplorer: { _ in }, onShare: {}, onBack: {})
+            }, width: phone.width, height: phone.height, scale: 3,
+                to: file("screen-payment-\(state.lowercased()).png"))
+        }
+        for state in ["SETUP", "LAUNCHING", "FAILED"] {
+            png(ExpandedPhone { FundHomeView(model: sampleModel(Samples.fund(state), admin: true), actions: .none) },
+                width: phone.width, height: phone.height, scale: 3,
+                to: file("screen-home-\(state.lowercased()).png"))
+        }
+        png(compact(FundHomeView(model: forming, actions: .none)),
+            width: phone.width, height: phone.height, scale: 3, to: file("screen-compact-forming.png"))
+        if let link = CardLink(url: URL(string: "https://synq.example/approve?p=0x"
+                                            + String(repeating: "11", count: 32) + "&g=0x"
+                                            + String(repeating: "a1", count: 32)
+                                            + "&n=v1.r.tsk2ou.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB")!,
+                               allowedHost: "synq.example") {
+            let status = CardStatus(status: "PENDING", state: "PENDING", counted: 1, required: 2)
+            png(ExpandedPhone {
+                ExpandedCardView(link: link, status: status, error: nil, onRefresh: {}, onReview: {},
+                                 onShareUpdate: {})
+            }, width: phone.width, height: phone.height, scale: 3, to: file("screen-review-card.png"))
+            png(Transcript { LiveBubble { TranscriptCardView(link: link, status: status) } },
+                width: phone.width, height: 420, scale: 3, to: file("transcript-review-card.png"))
+        }
+
         // Foil animation: light sweeping across a holo-rare and a rare card.
         let frames: [(view: AnyView, phase: Double)] = (0..<40).map { i in
             let phase = Double(i) / 40
