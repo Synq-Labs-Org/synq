@@ -1,3 +1,5 @@
+import { WorkspaceTeamReplySchema } from '@synq/workspaces/team-contracts';
+import { WorkspaceTeam } from '@synq/workspaces/team';
 import { dealRoutes } from '../../apps/api/src/deal-routes.js';
 import { WorkspaceDeals } from '@synq/workspaces/deals';
 import { DealRoomService, PostgresDealRoomStore } from '@synq/dealroom';
@@ -1173,7 +1175,7 @@ describe('G5/G6 workspace revenue policies — LOCAL_FIXTURE with Postgres', () 
   });
 });
 
-async function splitFixture(clear = true) {
+async function splitFixture(clear = true, booksAvailable = true) {
   const f = await payoutFixture(true, '100000');
   const revenue = new WorkspaceRevenue(f.finance),
     usdc = token('arc-testnet', 'USDC');
@@ -1327,6 +1329,14 @@ async function splitFixture(clear = true) {
     f.signer,
     f.kernelAuthority,
     clear ? f.screening : undefined,
+    booksAvailable
+      ? () => ({
+          payables: async () => [],
+          payableHistory: async () => [],
+          obligations: async () => [],
+          bills: async () => [],
+        })
+      : undefined,
   );
   await worker.migrate();
   return {
@@ -1340,6 +1350,17 @@ async function splitFixture(clear = true) {
   };
 }
 describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable Postgres', () => {
+  it('refuses to treat missing payable/bill sources as empty books before planning any distribution', async () => {
+    const f = await splitFixture(true, false);
+    await expect(f.worker.process(f.w.id, f.receiptId)).rejects.toMatchObject({
+      code: 'WORKSPACE_OBLIGATION_BOOKS_UNAVAILABLE',
+    });
+    expect(f.signed()).toBe(0);
+    expect(f.fake.paid).toHaveLength(0);
+    const pending = await f.worker.store.byReceipt(f.receiptId);
+    expect(pending).toMatchObject({ state: 'RECEIPT_FINAL', plan: null });
+    expect(await f.worker.store.legs(pending!.splitId)).toHaveLength(0);
+  });
   it('executes a quorum-signed distribution once and retains the workspace floor', async () => {
     const f = await splitFixture();
     await f.worker.pump();
@@ -1404,7 +1425,7 @@ describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable P
     expect(f.signed()).toBe(0);
     expect(f.fake.paid).toHaveLength(0);
   });
-  it('recovers the same signed bytes after a receipt timeout even if the policy was revoked meanwhile', async () => {
+  it('recovers and books the same signed distribution after timeout without obligation readers even if policy and owners changed', async () => {
     const f = await splitFixture();
     f.fake.fail.wait = 1;
     expect((await f.worker.process(f.w.id, f.receiptId))?.state).toBe('FAILED');
@@ -1416,11 +1437,32 @@ describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable P
         await actor.a.signTypedData(revenueRevocationTypedData(f.policy)),
       );
     f.setAuthority({ ...f.authority, owners: [f.outsider.a.address] });
-    expect((await f.worker.process(f.w.id, f.receiptId))?.state).toBe(
+    const restarted = new WorkspaceSplitWorker(
+      f.finance,
+      f.worker.chain,
+      f.signer,
+      f.kernelAuthority,
+      f.screening,
+    );
+    expect((await restarted.process(f.w.id, f.receiptId))?.state).toBe(
       'COMPLETED',
     );
     expect(f.signed()).toBe(1);
     expect(f.fake.paid).toHaveLength(1);
+    const entries = await f.ledger.store.entries(f.w.id);
+    expect(
+      entries
+        .flatMap((e) => e.postings)
+        .filter(
+          (p) =>
+            p.account === 'CASH_ARC_USDC' &&
+            p.counterpartyId === walletTag(f.authority.vault),
+        )
+        .reduce((sum, p) => sum + p.amount, 0n),
+    ).toBe(10000n);
+    await restarted.process(f.w.id, f.receiptId);
+    expect(await f.ledger.store.entries(f.w.id)).toHaveLength(entries.length);
+    expect(f.signed()).toBe(1);
   });
   it('G6/G11 rechecks a persistent vendor hold after grant issuance and before any signature', async () => {
     const f = await splitFixture();
@@ -1597,5 +1639,100 @@ describe('G7 workspace-selected deal parties — LOCAL_FIXTURE with Postgres', (
     await expect(
       deals.get(other.w.id, other.owner.principalId, draft.id),
     ).rejects.toMatchObject({ code: 'DEAL_NOT_FOUND' });
+  });
+});
+
+describe('G10/G14 scoped workspace team — LOCAL_FIXTURE with Postgres', () => {
+  it('isolates snapshots, refuses stale/missing balance proof and never reports missing AP as empty', async () => {
+    const f = await payoutFixture(),
+      other = await payoutFixture();
+    const team = new WorkspaceTeam(
+      f.finance,
+      async () => ({
+        amount: '100000',
+        blockNumber: '1',
+        observedAt: f.store.now(),
+      }),
+      [],
+      undefined,
+      f.payouts,
+    );
+    await team.migrate();
+    await new PostgresDealRoomStore(pool).migrate();
+    const privateDeal = `deal_${randomUUID()}`;
+    const terms = {
+      client: { principalId: f.coowner.principalId },
+      freelancer: { principalId: f.outsider.principalId },
+      arbiter: { principalId: other.owner.principalId },
+    };
+    await pool.query(
+      "INSERT INTO synq_dealroom_deals(deal_id,workspace_id,status,current_version,rev,data,created_at,updated_at) VALUES($1,$2,'DRAFT',1,1,$3,0,0)",
+      [privateDeal, f.w.id, {}],
+    );
+    await pool.query(
+      'INSERT INTO synq_dealroom_versions(deal_id,version,terms_hash,proposed_by,data,created_at) VALUES($1,1,$2,$3,$4,0)',
+      [privateDeal, randomUUID(), f.coowner.principalId, { terms }],
+    );
+    const data = await team.snapshot(f.w.id, f.owner.principalId);
+    expect(data.deals).not.toContainEqual({ id: privateDeal, state: 'DRAFT' });
+    expect(
+      (await team.snapshot(f.w.id, f.coowner.principalId)).deals,
+    ).toContainEqual({ id: privateDeal, state: 'DRAFT' });
+    expect(data.world.identity.workspace.value?.workspaceId).toBe(f.w.id);
+    expect(data.world.treasury.balances.meta.freshness).toBe('UNKNOWN');
+    expect(data.world.obligations.payables.meta.freshness).toBe('UNKNOWN');
+    expect(data.world.decision.decisionGrade).toBe(false);
+    await expect(
+      team.snapshot(f.w.id, other.owner.principalId),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_NOT_FOUND' });
+    const reply = await team.ask(f.w.id, f.owner.principalId, {
+      idempotencyKey: randomUUID(),
+      message: 'What can the finance team do right now?',
+    });
+    expect(WorkspaceTeamReplySchema.parse(reply).answer.length).toBeGreaterThan(
+      0,
+    );
+    expect(JSON.stringify(reply)).not.toMatch(
+      /grantKey|mandateSignature|"mac"/,
+    );
+  });
+  it('turns explicit team instructions into an immutable payout proposal that still needs owner signatures', async () => {
+    const f = await payoutFixture();
+    const team = new WorkspaceTeam(
+      f.finance,
+      async () => ({
+        amount: '0',
+        blockNumber: '1',
+        observedAt: f.store.now(),
+      }),
+      [],
+      undefined,
+      f.payouts,
+    );
+    await team.migrate();
+    const request = {
+      idempotencyKey: randomUUID(),
+      message: `pay Verified supplier 0.05 USDC for Accepted work ref ${randomUUID()}`,
+    };
+    const reply = await team.ask(f.w.id, f.owner.principalId, request);
+    const retry = await team.ask(f.w.id, f.owner.principalId, request);
+    expect('payoutId' in retry && retry.payoutId).toBe(
+      'payoutId' in reply && reply.payoutId,
+    );
+    expect(WorkspaceTeamReplySchema.parse(reply).proposals).toBe(
+      'PENDING_OWNER_SIGNATURE',
+    );
+    expect('payoutId' in reply && reply.payoutId).toBeTruthy();
+    const proposals = await f.payouts.list(f.w.id, f.owner.principalId);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.state).toBe('REVIEW');
+    expect(f.signed()).toBe(0);
+    await expect(
+      team.ask(f.w.id, f.outsider.principalId, {
+        idempotencyKey: randomUUID(),
+        message:
+          'pay Verified supplier 0.05 USDC for Accepted work ref private',
+      }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_NOT_FOUND' });
   });
 });

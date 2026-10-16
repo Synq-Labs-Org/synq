@@ -732,7 +732,7 @@ describe('P21-07 financial explanations carry verifiable citations', () => {
     });
     const d = await teamDesk([smallInvoice], {
       reasoner,
-      evidence: [{ ...evidence, sarahVerified: sarahWallet }],
+      evidence: [{ ...evidence, verifiedRecipient: sarahWallet }],
     });
     const r = await askTeam(QUESTION, d);
     expect(citationProblems(r.citations)).toEqual([]);

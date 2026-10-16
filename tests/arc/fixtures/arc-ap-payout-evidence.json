@@ -2,7 +2,7 @@
   "environment": "ARC_TESTNET",
   "owner": "0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD",
   "agent": "0x250991A47f021935ca86d7D11dd319cE527756AD",
-  "sarahVerified": "0xB781505e5156E68594414D190190fE1FaeDD6780",
+  "verifiedRecipient": "0xB781505e5156E68594414D190190fE1FaeDD6780",
   "payout": {
     "softFlags": [],
     "decision": "ALLOW",

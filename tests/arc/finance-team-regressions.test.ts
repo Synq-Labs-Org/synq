@@ -453,7 +453,7 @@ describe('critic 6: budgets that hold', () => {
         transfers: [
           {
             from: evidence.agent,
-            to: evidence.sarahVerified,
+            to: evidence.verifiedRecipient,
             baseUnits: 40_000n,
           },
         ],

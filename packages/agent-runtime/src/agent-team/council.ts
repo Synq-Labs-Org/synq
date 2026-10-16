@@ -1230,7 +1230,7 @@ async function askTeamRun(
       citations: [],
     });
     for (const e of desk.evidence
-      .filter((x) => lower(x.sarahVerified) === lower(verified ?? ''))
+      .filter((x) => lower(x.verifiedRecipient) === lower(verified ?? ''))
       .slice(-2))
       citations.push(
         citeFact({

@@ -1,3 +1,4 @@
+import type { WorkspaceTeam } from '@synq/workspaces/team';
 import type { WorkspaceDeals } from '@synq/workspaces/deals';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -96,6 +97,7 @@ export function registerWorkspaceRoutes(
   invoices?: () => WorkspaceInvoices | undefined,
   revenue?: WorkspaceRevenue,
   deals?: () => WorkspaceDeals | undefined,
+  team?: WorkspaceTeam,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -170,6 +172,13 @@ export function registerWorkspaceRoutes(
         Boolean(finance),
         Boolean(payouts),
       ),
+      workspaceTeam: team
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Workspace facts and explicit review-only payment proposals; missing sources remain unknown. Spending requires the existing owner quorum and Kernel executor.',
+          }
+        : { status: 'BLOCKED', reason: 'Workspace finance team unavailable.' },
       revenuePolicies: revenue
         ? {
             status: 'AVAILABLE',
@@ -183,7 +192,7 @@ export function registerWorkspaceRoutes(
       automaticSplits: {
         status: 'BLOCKED',
         reason:
-          'Durable receipt-driven runner is test-proven; live transfer screening is unavailable. Noninvoice receipts remain unapplied liabilities.',
+          'Durable receipt-driven runner is fixture-proven; workspace payable/bill sources and live screening are unavailable. Noninvoice receipts remain unapplied liabilities.',
       },
       dealDrafts: deals?.()
         ? {
@@ -520,6 +529,25 @@ export function registerWorkspaceRoutes(
           governance.wake();
           return result;
         }),
+    );
+  }
+  if (team) {
+    app.get('/v2/workspaces/:workspaceId/team/snapshot', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req),
+          data = await team.snapshot(await id(req), s.principalId);
+        return {
+          world: data.world,
+          riskCases: data.riskCases,
+          deals: data.deals,
+        };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/team/ask', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return team.ask(await id(req), s.principalId, req.body);
+      }),
     );
   }
   if (deals) {

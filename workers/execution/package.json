@@ -29,7 +29,8 @@
     "./workspace-governance": "./src/workspace-governance.ts",
     "./workspace-authority": "./src/workspace-authority.ts",
     "./split-executor": "./src/split-executor.ts",
-    "./workspace-splits": "./src/workspace-splits.ts"
+    "./workspace-splits": "./src/workspace-splits.ts",
+    "./workspace-signing": "./src/workspace-signing.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

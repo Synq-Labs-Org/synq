@@ -9,7 +9,6 @@ const Key = z.string().regex(/^[A-Za-z0-9_-]{32}$/);
 const Hex = z.string().regex(/^0x[0-9a-fA-F]+$/) as z.ZodType<`0x${string}`>;
 const PrincipalId = z.string().min(1).max(128);
 
-const CreateBody = z.strictObject({ name: z.string().max(200) });
 const JoinBody = z.strictObject({
   key: Key,
   principalId: PrincipalId,
@@ -106,6 +105,31 @@ async function handle(reply: FastifyReply, run: () => Promise<unknown>) {
 export function registerFundRoutes(
   app: FastifyInstance,
   funds: FundService,
+  extras: Parameters<typeof registerLegacyFundRoutes>[2] & {
+    legacyWrites?: boolean;
+  } = {},
+) {
+  void app.register(async (scope) => {
+    scope.addHook('preHandler', async (request, reply) => {
+      if (
+        request.method !== 'GET' &&
+        request.method !== 'HEAD' &&
+        !extras.legacyWrites
+      )
+        return reply.code(410).send({
+          error: 'LEGACY_FUND_READ_ONLY',
+          message:
+            'Legacy Monad funds are read-only. Create an Arc testnet workspace.',
+          path: '/workspaces',
+        });
+    });
+    registerLegacyFundRoutes(scope, funds, extras);
+  });
+}
+
+function registerLegacyFundRoutes(
+  app: FastifyInstance,
+  funds: FundService,
   extras: {
     assistant?: FundAssistant;
     trips?: TripService;
@@ -194,8 +218,12 @@ export function registerFundRoutes(
       }),
     );
   }
-  app.post('/v1/funds', (request, reply) =>
-    handle(reply.code(201), () => funds.create(CreateBody.parse(request.body))),
+  app.post('/v1/funds', (_request, reply) =>
+    reply.code(410).send({
+      error: 'ARC_WORKSPACE_REQUIRED',
+      message: 'Create an Arc testnet workspace on the Synq page.',
+      path: '/workspaces',
+    }),
   );
   app.get('/v1/funds/:fundId', (request, reply) =>
     handle(reply, async () => {

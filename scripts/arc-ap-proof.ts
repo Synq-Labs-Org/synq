@@ -134,7 +134,7 @@ const out: Record<string, unknown> = {
   environment: 'ARC_TESTNET',
   owner: owner.address,
   agent: agent.address,
-  sarahVerified: sarahWallet,
+  verifiedRecipient: sarahWallet,
 };
 
 // 1. Legitimate invoice: controls → Kernel → grant → payout → AP ledger.

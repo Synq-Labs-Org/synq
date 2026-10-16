@@ -894,6 +894,9 @@ importers:
 
   packages/workspaces:
     dependencies:
+      '@synq/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
       '@synq/allocations':
         specifier: workspace:*
         version: link:../allocations
@@ -915,6 +918,12 @@ importers:
       '@synq/ledger':
         specifier: workspace:*
         version: link:../ledger
+      '@synq/plugin-risk':
+        specifier: workspace:*
+        version: link:../../plugins/risk
+      '@synq/world-model':
+        specifier: workspace:*
+        version: link:../world-model
       pg:
         specifier: 8.18.0
         version: 8.18.0

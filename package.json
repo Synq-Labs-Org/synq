@@ -60,7 +60,8 @@
     "channels:imessage": "node --import tsx apps/api/src/imessage-bridge.ts",
     "channels:imessage:probe": "node --import tsx apps/api/src/imessage-bridge.ts --probe",
     "channels:imessage:find-chat": "node --import tsx apps/api/src/imessage-bridge.ts --find-chat",
-    "ios:messages:check": "sh apps/ios-messages/check.sh"
+    "ios:messages:check": "sh apps/ios-messages/check.sh",
+    "check:no-demo-data": "node scripts/check-no-demo-data.mjs"
   },
   "dependencies": {
     "zod": "4.6.5",

@@ -315,7 +315,14 @@ describe('trading WebSocket resilience', () => {
     autoSignIn();
     // The ack arrives normally here; a generous timeout keeps slow runners from
     // turning it into UNKNOWN_OUTCOME (timeouts have their own tests).
-    const { ws } = trading({ statusTimeoutMs: 5_000 });
+    const { ws } = trading({
+      statusTimeoutMs: 5_000,
+      timers: {
+        ...fastTimers,
+        setTimeout: (fn: () => void, ms: number) =>
+          ms === 5_000 ? setTimeout(fn, ms) : fastTimers.setTimeout(fn, ms),
+      },
+    });
     const fills: unknown[] = [];
     ws.on('fills', (f) => fills.push(...f));
     ws.connect();

@@ -68,6 +68,12 @@ export class WorkspaceSplitWorker {
     private readonly signer: TransferSigner,
     private readonly authority: AuthorityConfig,
     readonly screening: WalletScreeningPort = unavailableScreening(),
+    readonly obligationBooks?: (
+      workspaceId: string,
+    ) => Pick<
+      TreasuryBooks,
+      'payables' | 'payableHistory' | 'obligations' | 'bills'
+    >,
   ) {
     this.revenue = new WorkspaceRevenue(finance);
     this.risk = new RiskCaseService(
@@ -164,6 +170,8 @@ export class WorkspaceSplitWorker {
     return { ...r, finality: 'FINAL' };
   }
   private async current(signed: SignedRevenuePolicy, call: LegCall) {
+    if (!this.obligationBooks)
+      throw new WorkspaceError('WORKSPACE_OBLIGATION_BOOKS_UNAVAILABLE');
     const p = signed.policy,
       current = await this.revenue.active(p.workspaceId);
     if (!current || policyHash(current.signed.policy) !== policyHash(p))
@@ -483,12 +491,16 @@ export class WorkspaceSplitWorker {
             )?.address ?? null)
           : null,
     });
+    const obligations = this.obligationBooks?.(workspaceId);
+    const missingObligations = async (): Promise<never> => {
+      throw new WorkspaceError('WORKSPACE_OBLIGATION_BOOKS_UNAVAILABLE');
+    };
     const books: TreasuryBooks = {
       vendors,
-      payables: async () => [],
-      payableHistory: async () => [],
-      obligations: async () => [],
-      bills: async () => [],
+      payables: obligations?.payables ?? missingObligations,
+      payableHistory: obligations?.payableHistory ?? missingObligations,
+      obligations: obligations?.obligations ?? missingObligations,
+      bills: obligations?.bills ?? missingObligations,
       receivables: async () =>
         (await invoices.list(workspaceId)).map(({ invoice: i }) => ({
           invoiceId: i.invoiceId,

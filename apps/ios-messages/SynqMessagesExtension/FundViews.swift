@@ -176,7 +176,8 @@ struct StartFundView: View {
                         if model.workspaceBusy { Text("Loading workspaces…").synqType(.body, .secondary) }
                         else if model.workspaces.isEmpty { Text("No workspaces yet. Create one on the Synq page.").synqType(.body, .secondary) }
                         ForEach(model.workspaces) { workspace in
-                            Text("\(workspace.displayName) · \(workspace.status)").synqType(.body)
+                            SynqButton(title: "\(workspace.displayName) · \(workspace.status)", kind: .compact,
+                                       action: { model.selectWorkspace(workspace) })
                         }
                         SynqButton(title: "Sign out of workspace", kind: .compact, action: model.signOutWorkspace)
                             .disabled(model.workspaceBusy)
@@ -187,6 +188,10 @@ struct StartFundView: View {
                             .disabled(model.workspaceBusy || workspaceCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                     if let error = model.workspaceError { SynqNote(text: error, error: true) }
+                }
+                if let workspace = model.selectedWorkspace {
+                    WorkspaceDetailView(model: model, workspace: workspace, actions: actions)
+                        .id(workspace.id)
                 }
                 if let error = model.error { SynqNote(text: error, error: true) }
                 HStack {
@@ -505,7 +510,7 @@ struct AskView: View {
             SynqHeroArt(slot: .agent)
             SynqStack {
                 if model.view?.state == "ACTIVE" {
-                    SynqCommandField(text: $command, placeholder: "Ask or tell Synq… e.g. invoice Priya 120 for the logo",
+                    SynqCommandField(text: $command, placeholder: "Ask or tell Synq…",
                                      busy: model.asking || model.searching != nil, onSubmit: submit, onFocus: actions.expand)
                     CommandActivity(model: model, onPerform: perform)
                     if command.isEmpty && model.note == nil && model.searching == nil && !model.asking {
@@ -882,6 +887,103 @@ struct ChipScroller<Content: View>: View {
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: theme.space.s) { content() }.padding(.vertical, 2)
+            }
+        }
+    }
+}
+
+
+struct WorkspaceDetailView: View {
+    @ObservedObject var model: FundModel
+    let workspace: WorkspaceSummary
+    let actions: FundActions
+    @State private var question = ""
+    @Environment(\.synqTheme) private var theme
+    var body: some View {
+        VStack(alignment: .leading, spacing: theme.space.m) {
+            SynqPanel(label: workspace.displayName) {
+                Text("Arc testnet · \(workspace.status)").synqType(.caption, .secondary)
+                if let vault = workspace.vault { Text(vault).synqType(.mono, .secondary) }
+                Text("Wallet signatures authorize spending. This conversation is not linked for notifications yet.").synqType(.body, .secondary)
+                SynqButton(title: "Open workspace and sign", trailingIcon: .forward,
+                           action: { actions.open(model.client.workspacePage(workspace: workspace.id)) })
+                SynqButton(title: model.workspaceLoading ? "Refreshing…" : "Refresh workspace", kind: .compact,
+                           action: { model.selectWorkspace(workspace) }).disabled(model.workspaceLoading)
+                if let error = model.workspaceDetailError { SynqNote(text: error, error: true) }
+            }
+            SynqPanel(label: "Treasury and reconciliation") {
+                if let snapshot = model.workspaceSnapshot {
+                    let balances = snapshot.world.treasury.balances
+                    if let observedAt = balances.meta.observedAt {
+                        Text("Observed \(Date(timeIntervalSince1970: observedAt).formatted()) · \(balances.meta.freshness) at last refresh").synqType(.caption, .secondary)
+                    } else { Text("Observation time unknown.").synqType(.caption, .secondary) }
+                    if balances.value.isEmpty { Text("Balance unknown.").synqType(.body, .secondary) }
+                    ForEach(Array(balances.value.enumerated()), id: \.offset) { _, balance in
+                        Text("\(workspaceUSDC(balance.baseUnits)) · \(balance.chain)").synqType(.body)
+                    }
+                    Text(snapshot.world.decision.decisionGrade ? "Sources were fresh at last refresh" : "Incomplete sources; the balance is not a spending allowance.").synqType(.caption, .secondary)
+                    Text("\(snapshot.riskCases.count) risk cases · \(snapshot.deals?.count.description ?? "Unknown") deals visible to you").synqType(.caption, .secondary)
+                } else { Text("Treasury observations unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Invoices") {
+                if let invoices = model.workspaceInvoices {
+                    if invoices.isEmpty { Text("No invoices in this workspace.").synqType(.body, .secondary) }
+                    ForEach(invoices) { invoice in
+                        Text("\(invoice.number) · \(invoice.status)").synqType(.body)
+                        Text("\(workspaceUSDC(invoice.total)) total · \(workspaceUSDC(invoice.amountDue)) due · \(invoice.reconciliation)").synqType(.caption, .secondary)
+                    }
+                } else { Text("Invoice data unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Payment requests") {
+                if let payouts = model.workspacePayouts {
+                    if payouts.isEmpty { Text("No payment requests in this workspace.").synqType(.body, .secondary) }
+                    ForEach(payouts) { payout in
+                        Text("\(workspaceUSDC(payout.data.amount)) · \(payout.state)").synqType(.body)
+                        Text(payout.data.purpose).synqType(.caption, .secondary)
+                        if let reason = payout.reason { Text(reason).synqType(.caption, .secondary) }
+                        if let hash = payout.txHash { Text(hash).synqType(.mono, .secondary) }
+                        SynqButton(title: "Review payment", kind: .compact,
+                                   action: { actions.open(model.client.workspacePage(workspace: workspace.id, payout: payout.id)) })
+                    }
+                } else { Text("Payment data unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Verified vendors") {
+                if let vendors = model.workspaceVendors {
+                    if vendors.isEmpty { Text("No vendors in this workspace.").synqType(.body, .secondary) }
+                    ForEach(vendors) { vendor in
+                        Text("\(vendor.name) · \(vendor.status)").synqType(.body)
+                        Text(vendor.address).synqType(.mono, .secondary)
+                        if vendor.status == "COOLING" { Text("Eligible after \(Date(timeIntervalSince1970: vendor.eligibleAt).formatted())").synqType(.caption, .secondary) }
+                    }
+                } else { Text("Vendor data unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Available integrations") {
+                if let capabilities = model.workspaceCapabilities {
+                    ForEach(Array(capabilities.entries.enumerated()), id: \.offset) { _, entry in
+                        Text("\(entry.0) · \(entry.1.status)").synqType(.body)
+                        Text(entry.1.reason).synqType(.caption, .secondary)
+                    }
+                } else { Text("Integration availability unknown.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Workspace finance team") {
+                SynqField(label: "Question or payment proposal", text: $question, placeholder: "Ask about this workspace")
+                SynqButton(title: model.workspaceAsking ? "Reading facts…" : "Ask the team", busy: model.workspaceAsking,
+                           action: { model.askWorkspace(question) })
+                    .disabled(model.workspaceAsking || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || question.count > 2000)
+                if let reply = model.workspaceReply {
+                    Text(reply.status).synqType(.caption, .secondary)
+                    Text(reply.answer).synqType(.body)
+                    if let world = reply.world {
+                        Text(world.decisionGrade ? "Sources were fresh when this answer was prepared" : "Incomplete or stale sources; spending recommendations withheld").synqType(.caption, .secondary)
+                    }
+                    ForEach(Array(reply.citations.enumerated()), id: \.offset) { _, citation in
+                        Text("\(citation.path) · \(citation.freshness) · \(citation.source)").synqType(.caption, .secondary)
+                    }
+                    if let payout = reply.payoutId {
+                        SynqButton(title: "Review proposed payment", kind: .compact,
+                                   action: { actions.open(model.client.workspacePage(workspace: workspace.id, payout: payout)) })
+                    }
+                }
             }
         }
     }

@@ -1,3 +1,4 @@
+import { WorkspaceTeam } from '@synq/workspaces/team';
 import { WorkspaceDeals } from '@synq/workspaces/deals';
 import { WorkspaceRevenue } from '@synq/workspaces/revenue';
 import { createHash, randomBytes } from 'node:crypto';
@@ -556,6 +557,17 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       );
       const finance = vault?.finance;
       workspaceFinance = finance;
+      const workspaceTeam =
+        finance && vault
+          ? new WorkspaceTeam(
+              finance,
+              vault.readIndexedBalance,
+              [],
+              () => fundReasoner?.structured,
+              vault.payouts,
+            )
+          : undefined;
+      if (workspaceTeam) await workspaceTeam.migrate();
       workspaceMessage = workspaceCommandPort({
         links: workspaceChannels,
         finance,
@@ -566,6 +578,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
             ? 'LIVE_ARC_TESTNET'
             : 'LOCAL_FIXTURE',
         balance: vault?.readBalance,
+        team: workspaceTeam,
       });
       if (vault) {
         workspaceNotifications = new WorkspaceNotifications(
@@ -588,6 +601,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         () => workspaceInvoices,
         finance ? new WorkspaceRevenue(finance) : undefined,
         () => workspaceDeals,
+        workspaceTeam,
       );
     }
     const readModel = {
@@ -855,12 +869,16 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       `funds: assistant ${fundReasoner ? 'model + instructions' : 'instructions only (no model)'}, flights ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}, gifts ${gifts ? 'live search + Lithic sandbox' : 'off'}`,
     );
     registerFundRoutes(app, funds, {
+      legacyWrites: process.env.SYNQ_LEGACY_MONAD_FUNDS === '1',
       assistant,
       ...(trips ? { trips } : {}),
     });
     // Arc business features for the Messages app. Deal Room and invoices turn
     // on with their link keys; the rest only reads Arc testnet.
-    if (process.env.SYNQ_ARC_BUSINESS !== '0') {
+    if (
+      process.env.SYNQ_WORKSPACES_ENABLED === '1' ||
+      process.env.SYNQ_ARC_BUSINESS !== '0'
+    ) {
       const off = (feature: string) => (e: unknown) => {
         log(`${feature}: off (${(e as Error).message.slice(0, 160)})`);
         return null;
@@ -970,67 +988,73 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           while (busy) await new Promise((resolve) => setTimeout(resolve, 100));
         });
       }
-      const owner = process.env.SYNQ_ARC_OWNER;
-      const floorFrom = (v: string | undefined) => {
-        try {
-          return v ? { operatingFloor: usdcUnits(v) } : {};
-        } catch {
-          log(
-            'business: SYNQ_ARC_FLOOR_USDC is not a USDC amount; default floor',
-          );
-          return {};
-        }
-      };
-      const business = new ArcBusiness({
-        name: process.env.SYNQ_ARC_BUSINESS_NAME || 'Synq demo business',
-        reads: liveArcReads(
-          process.env.SYNQ_ARC_RPC_URL || process.env.SYNQ_ARC_TESTNET_RPC_URL,
-        ),
-        vendors: parseVendors(process.env.SYNQ_ARC_VENDORS),
-        ...(owner && isAddress(owner) ? { owner: getAddress(owner) } : {}),
-        ...floorFrom(process.env.SYNQ_ARC_FLOOR_USDC),
-        now: clock.now,
-        webBaseUrl: process.env.SYNQ_WEB_BASE_URL ?? 'http://localhost:3000',
-        reasoner: fundReasoner?.structured ?? null,
-        env: process.env,
-        offReasons: {
-          ...(process.env.SYNQ_DEALROOM_LINK_KEY && !dealRoom
+      if (process.env.SYNQ_LEGACY_MONAD_FUNDS === '1') {
+        const owner = process.env.SYNQ_ARC_OWNER;
+        const floorFrom = (v: string | undefined) => {
+          try {
+            return v ? { operatingFloor: usdcUnits(v) } : {};
+          } catch {
+            log(
+              'business: SYNQ_ARC_FLOOR_USDC is not a USDC amount; default floor',
+            );
+            return {};
+          }
+        };
+        const business = new ArcBusiness({
+          name: process.env.SYNQ_ARC_BUSINESS_NAME || 'Synq demo business',
+          reads: liveArcReads(
+            process.env.SYNQ_ARC_RPC_URL ||
+              process.env.SYNQ_ARC_TESTNET_RPC_URL,
+          ),
+          vendors: parseVendors(process.env.SYNQ_ARC_VENDORS),
+          ...(owner && isAddress(owner) ? { owner: getAddress(owner) } : {}),
+          ...floorFrom(process.env.SYNQ_ARC_FLOOR_USDC),
+          now: clock.now,
+          webBaseUrl: process.env.SYNQ_WEB_BASE_URL ?? 'http://localhost:3000',
+          reasoner: fundReasoner?.structured ?? null,
+          env: process.env,
+          offReasons: {
+            ...(process.env.SYNQ_DEALROOM_LINK_KEY && !dealRoom
+              ? {
+                  deals:
+                    'Deal Room could not start on this server (see the bot log).',
+                }
+              : {}),
+            ...(process.env.SYNQ_PAY_LINK_KEY && !checkout
+              ? {
+                  invoices:
+                    'Invoices could not start on this server (see the bot log).',
+                }
+              : {}),
+          },
+          ...(dealRoom
             ? {
-                deals:
-                  'Deal Room could not start on this server (see the bot log).',
+                deals: {
+                  service: dealRoom.service,
+                  linkKey: Buffer.from(
+                    process.env.SYNQ_DEALROOM_LINK_KEY!,
+                    'hex',
+                  ),
+                },
               }
             : {}),
-          ...(process.env.SYNQ_PAY_LINK_KEY && !checkout
+          ...(checkout
             ? {
-                invoices:
-                  'Invoices could not start on this server (see the bot log).',
+                invoices: {
+                  service: checkout.invoices,
+                  payLinkKey: Buffer.from(
+                    process.env.SYNQ_PAY_LINK_KEY!,
+                    'hex',
+                  ),
+                },
               }
             : {}),
-        },
-        ...(dealRoom
-          ? {
-              deals: {
-                service: dealRoom.service,
-                linkKey: Buffer.from(
-                  process.env.SYNQ_DEALROOM_LINK_KEY!,
-                  'hex',
-                ),
-              },
-            }
-          : {}),
-        ...(checkout
-          ? {
-              invoices: {
-                service: checkout.invoices,
-                payLinkKey: Buffer.from(process.env.SYNQ_PAY_LINK_KEY!, 'hex'),
-              },
-            }
-          : {}),
-      });
-      registerBusinessRoutes(app, funds, business);
-      log(
-        `business (Arc testnet): deals ${dealRoom ? 'on' : 'off'}, invoices ${checkout ? 'on' : 'off'}, contractors ${parseVendors(process.env.SYNQ_ARC_VENDORS).length}, council read-only`,
-      );
+        });
+        registerBusinessRoutes(app, funds, business);
+        log(
+          `business (Arc testnet): deals ${dealRoom ? 'on' : 'off'}, invoices ${checkout ? 'on' : 'off'}, contractors ${parseVendors(process.env.SYNQ_ARC_VENDORS).length}, council read-only`,
+        );
+      }
     }
     /** Operator-local view of what the bot sent (not evidence; may hold link codes). */
     const outbox: {
@@ -1305,15 +1329,17 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               });
           },
         }).catch((e) => log(`mandate relayer: ${String(e).slice(0, 200)}`));
-        await funds
-          .tick()
-          .catch((e) => log(`funds: ${String(e).slice(0, 200)}`));
-        await trips
-          ?.tick(
-            async (fundId) =>
-              (await fundStore.get(fundId))?.group?.chainGroupId ?? null,
-          )
-          .catch((e) => log(`trips: ${String(e).slice(0, 200)}`));
+        if (process.env.SYNQ_LEGACY_MONAD_FUNDS === '1') {
+          await funds
+            .tick()
+            .catch((e) => log(`funds: ${String(e).slice(0, 200)}`));
+          await trips
+            ?.tick(
+              async (fundId) =>
+                (await fundStore.get(fundId))?.group?.chainGroupId ?? null,
+            )
+            .catch((e) => log(`trips: ${String(e).slice(0, 200)}`));
+        }
         await sleep(4000);
       }
     })();

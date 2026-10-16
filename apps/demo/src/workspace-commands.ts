@@ -1,6 +1,7 @@
+import type { WorkspaceTeam } from '@synq/workspaces/team';
 import { createHash } from 'node:crypto';
 import { redact } from '@synq/plugin-risk';
-import { formatUnits, parseUnits } from 'viem';
+import { formatUnits } from 'viem';
 import { arcCardBase, ContractorPaymentCardSchema } from '@synq/schemas';
 import { renderTelegramCard } from '@synq/channels/cards';
 import type { ChannelPorts, DirectReply } from '@synq/channels';
@@ -12,25 +13,8 @@ const safeText = (text: string) => {
   const clean = redact(text).value;
   return typeof clean === 'string' ? clean : '[REDACTED]';
 };
-export type WorkspacePayCommand = {
-  vendor: string;
-  amount: string;
-  purpose: string;
-  obligation: string;
-};
-export function parseWorkspacePay(text: string): WorkspacePayCommand | null {
-  const m =
-    /^(?:\/pay(?:@[a-z0-9_]+)?|pay(?:\s+(?:a\s+)?contractor)?)\s+(.+?)\s+((?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?)\s+usdc\s+for\s+(.+?)\s+(?:ref|#)\s*:?\s*(.+)$/i.exec(
-      text.trim(),
-    );
-  if (!m) return null;
-  return {
-    vendor: m[1]!.trim(),
-    amount: String(parseUnits(m[2]!, 6)),
-    purpose: m[3]!.trim(),
-    obligation: m[4]!.trim(),
-  };
-}
+export { parseWorkspacePay } from '@synq/workspaces/payout-command';
+import { parseWorkspacePay } from '@synq/workspaces/payout-command';
 const commandKey = (scope: string) => {
   const h = createHash('sha256').update(scope).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
@@ -40,6 +24,7 @@ export function workspaceCommandPort(input: {
   links: WorkspaceChannelLinks;
   finance?: WorkspaceFinance;
   payouts?: WorkspacePayouts;
+  team?: WorkspaceTeam;
   origin: string;
   mode: 'LIVE_ARC_TESTNET' | 'LOCAL_FIXTURE';
   balance?: (
@@ -186,6 +171,18 @@ export function workspaceCommandPort(input: {
             : 'No verified vendors yet. Add one with the owner quorum on the secure page.',
         );
       }
+      const ask = /^\/?(?:team|ask)(?:@[a-z0-9_]+)?\s+(.+)$/is.exec(text);
+      if (ask && input.team) {
+        const reply = await input.team.ask(ws, sender.principalId, {
+          message: ask[1],
+          idempotencyKey: commandKey(
+            `${ws}:${q.channel}:${q.chatId}:${q.eventId}`,
+          ),
+        });
+        if ('payoutId' in reply && reply.payoutId)
+          url.searchParams.set('payout', reply.payoutId);
+        return review(safeText(reply.answer));
+      }
       if (/^\/?treasury(?:@[a-z0-9_]+)?$/i.test(text) && input.balance) {
         const balance = await input.balance(ws);
         return review(
@@ -193,7 +190,7 @@ export function workspaceCommandPort(input: {
         );
       }
       return review(
-        'Workspace commands: /vendors, /pay status, /treasury. To propose a payout: pay <vendor name> <amount> USDC for <purpose> ref <invoice reference>. Only verified vendors are accepted. Chat never approves or signs.',
+        'Workspace commands: /vendors, /pay status, /treasury, /team <question>. To propose a payout: pay <vendor name> <amount> USDC for <purpose> ref <invoice reference>. Only verified vendors are accepted. Chat never approves or signs.',
       );
     } catch (error) {
       return review(

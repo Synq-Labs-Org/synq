@@ -8,7 +8,7 @@ import type { SpecialistRole } from './manifests.js';
  * model, and the model can only pick one of these typed intents (and never
  * the money path: the Supervisor refuses model-classified payments).
  *
- * Payments: only an explicit imperative ("Pay Sarah's invoice") is
+ * Payments: only an explicit imperative ("Pay the supplier's invoice") is
  * PAY_INVOICE. Questions and wishes ("can I pay…?") are PAY_CHECK, which
  * ends in a typed owner confirmation and never in a grant. Negations go to
  * timing advice and past tense ("did I pay…?") to the Audit read path.

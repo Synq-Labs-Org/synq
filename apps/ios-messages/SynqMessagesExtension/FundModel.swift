@@ -81,6 +81,20 @@ final class FundModel: ObservableObject {
 
     let client: FundClient
     @Published var workspaces: [WorkspaceSummary] = []
+    @Published var workspaceSnapshot: WorkspaceSnapshot?
+    @Published var workspaceCapabilities: WorkspaceCapabilities?
+    @Published var selectedWorkspace: WorkspaceSummary?
+    @Published var workspaceInvoices: [WorkspaceInvoice]?
+    @Published var workspacePayouts: [WorkspacePayout]?
+    @Published var workspaceVendors: [WorkspaceVendor]?
+    @Published var workspaceReply: WorkspaceTeamReply?
+    @Published var workspaceLoading = false
+    @Published var workspaceAsking = false
+    @Published var workspaceDetailError: String?
+    private var workspaceLoad: Task<Void, Never>?
+    private var workspaceAsk: Task<Void, Never>?
+    private var workspaceRequestId = UUID().uuidString
+    private var workspaceQuestion = ""
     @Published var workspaceSignedIn = false
     @Published var workspaceBusy = false
     @Published var workspaceError: String?
@@ -116,10 +130,13 @@ final class FundModel: ObservableObject {
     func refreshWorkspaces() async {
         workspaceBusy = true
         defer { workspaceBusy = false }
-        do { workspaces = try await WorkspaceClient(host: client.host).list(); workspaceError = nil }
+        do {
+            workspaces = try await WorkspaceClient(host: client.host).list(); workspaceError = nil
+            if let selected = selectedWorkspace, !workspaces.contains(where: { $0.id == selected.id }) { selectWorkspace(nil) }
+        }
         catch {
             workspaceError = (error as? FundAPIError)?.message ?? "Could not load your workspaces."
-            if WorkspaceKeychain.load(host: client.host) == nil { workspaceSignedIn = false; workspaces = [] }
+            if WorkspaceKeychain.load(host: client.host) == nil { workspaceSignedIn = false; workspaces = []; selectWorkspace(nil) }
         }
     }
 
@@ -128,7 +145,77 @@ final class FundModel: ObservableObject {
         workspaceBusy = true
         Task {
             await WorkspaceClient(host: client.host).logout()
+            selectWorkspace(nil)
             workspaceSignedIn = false; workspaces = []; workspaceError = nil; workspaceBusy = false
+        }
+    }
+
+    private func workspaceFailure(_ message: String) {
+        if WorkspaceKeychain.load(host: client.host) == nil {
+            selectWorkspace(nil)
+            workspaces = []; workspaceSignedIn = false
+            workspaceError = "Your session expired. Sign in again with a new private code."
+        } else { workspaceDetailError = message }
+    }
+    func selectWorkspace(_ workspace: WorkspaceSummary?) {
+        workspaceLoad?.cancel(); workspaceAsk?.cancel()
+        let changedWorkspace = selectedWorkspace?.id != workspace?.id
+        selectedWorkspace = workspace
+        workspaceInvoices = nil; workspacePayouts = nil; workspaceVendors = nil
+        workspaceSnapshot = nil; workspaceCapabilities = nil
+        workspaceReply = nil; workspaceDetailError = nil; workspaceAsking = false; workspaceLoading = false
+        if changedWorkspace || workspace == nil { workspaceRequestId = UUID().uuidString; workspaceQuestion = "" }
+        guard let workspace else { return }
+        workspaceLoading = true
+        workspaceLoad = Task {
+            defer { if selectedWorkspace?.id == workspace.id && !Task.isCancelled { workspaceLoading = false } }
+            let client = WorkspaceClient(host: client.host)
+            do {
+                let invoices = try await client.invoices(workspace.id)
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspaceInvoices = invoices
+            } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Some workspace data could not be loaded. Refresh or sign in again.") } }
+            guard !Task.isCancelled else { return }
+            do {
+                let payouts = try await client.payouts(workspace.id)
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspacePayouts = payouts
+            } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Payment requests unavailable. Refresh or sign in again.") } }
+            guard !Task.isCancelled else { return }
+            do {
+                let finance = try await client.finance(workspace.id)
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspaceVendors = finance.vendors
+            } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Vendors unavailable. Refresh or sign in again.") } }
+            guard !Task.isCancelled else { return }
+            do {
+                let snapshot = try await client.snapshot(workspace.id)
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspaceSnapshot = snapshot
+            } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Treasury snapshot unavailable. Refresh or sign in again.") } }
+            guard !Task.isCancelled else { return }
+            do {
+                let capabilities = try await client.capabilities()
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspaceCapabilities = capabilities
+            } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Feature availability could not be checked.") } }
+
+        }
+    }
+    func askWorkspace(_ message: String) {
+        guard let workspace = selectedWorkspace, !workspaceAsking else { return }
+        if workspaceQuestion != message { workspaceRequestId = UUID().uuidString; workspaceQuestion = message }
+        let requestId = workspaceRequestId
+        workspaceAsking = true; workspaceDetailError = nil; workspaceReply = nil
+        workspaceAsk = Task {
+            defer { if selectedWorkspace?.id == workspace.id && !Task.isCancelled { workspaceAsking = false } }
+            do {
+                let reply = try await WorkspaceClient(host: client.host).ask(workspace.id, message: message, requestId: requestId)
+                guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+                workspaceReply = reply
+            } catch {
+                if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure((error as? FundAPIError)?.message ?? "The team could not respond. Retry the same question safely.") }
+            }
         }
     }
 

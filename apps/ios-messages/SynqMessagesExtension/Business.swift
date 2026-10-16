@@ -530,7 +530,7 @@ enum BusinessParser {
             return .split(amount: n)
         }
 
-        // "invoice Priya 120 for the logo", "send an invoice to Priya for 120 usdc for the logo", "bill Priya $120 logo"
+        // "invoice a customer 120 for the logo", "send an invoice to a customer for 120 usdc for the logo", "bill a customer $120 logo"
         let invoiceHead = lead + "(?:(?:send|create|make|raise|draft|issue) )?(?:an |a )?(?:invoice|bill)(?: to| for)? "
         let named = "([a-z][a-z .'-]{0,40}?)"
         let patterns = [
@@ -548,13 +548,13 @@ enum BusinessParser {
             }
         }
 
-        // "ask CFO and risk whether to pay Sarah", "what does my finance team think…"
+        // "ask CFO and risk whether to pay a supplier", "what does my finance team think…"
         if s.range(of: "\\b(cfo|risk agent|finance team|council)\\b", options: .regularExpression) != nil
             || s.range(of: lead + "ask (?:the |my |our )?(?:team|risk)\\b", options: .regularExpression) != nil {
             return .team(question: text)
         }
 
-        // "draft a deal: …", "set up a deal room with Sarah", "create an escrow deal"
+        // "draft a deal: …", "set up a deal room with a supplier", "create an escrow deal"
         if s.range(of: lead + "(?:draft|create|make|start|open|set up|setup|write up|propose)(?: up)? (?:a |an |the |new )*(?:escrow )?deal\\b", options: .regularExpression) != nil
             || s.range(of: "^deal room\\b", options: .regularExpression) != nil {
             let body = text.replacingOccurrences(

@@ -1716,7 +1716,7 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         environment: 'arc-testnet',
         owner: parties.owner.address,
         agent: parties.agent,
-        sarahVerified: parties.sarah,
+        verifiedRecipient: parties.sarah,
         payout: {
           softFlags: p.risk?.flags.filter((f) => f.severity === 'SOFT') ?? [],
           decision: 'ALLOW',

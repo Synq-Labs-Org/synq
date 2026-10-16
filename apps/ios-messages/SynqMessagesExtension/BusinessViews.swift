@@ -221,7 +221,7 @@ struct DealRoomSheet: View {
         _text = State(initialValue: sheet.text)
     }
 
-    private let example = "Logo and brand kit for Sarah: 300 USDC total. 150 when the logo concepts are delivered, 150 for the final brand kit, within 14 days."
+    private let prompt = "Describe the work, total USDC, milestones and deadlines"
 
     var body: some View {
         SheetScaffold(title: "Deal room", onCancel: onClose) {
@@ -248,11 +248,8 @@ struct DealRoomSheet: View {
             Text("Describe the work, the total and the milestones").synqType(.headline)
             Text("Synq drafts terms from your words only, then both sides review and sign.")
                 .synqType(.caption, .secondary).fixedSize(horizontal: false, vertical: true)
-            SynqCommandField(text: $text, placeholder: example, busy: business.busy == .deals,
+            SynqCommandField(text: $text, placeholder: prompt, busy: business.busy == .deals,
                              onSubmit: { business.draftDeal(text) }, onFocus: {})
-        }
-        if text.isEmpty {
-            SynqChip(title: "Use an example", icon: .deal) { text = example }
         }
         SynqButton(title: business.busy == .deals ? "Drafting…" : "Draft the deal", icon: .deal, trailingIcon: .forward,
                    busy: business.busy == .deals) { business.draftDeal(text) }
@@ -348,7 +345,7 @@ struct GetPaidSheet: View {
     @ViewBuilder
     private var form: some View {
         SynqGroup(emphasis: true) {
-            SynqField(label: "Bill to", icon: .people, text: $payer, placeholder: "Priya")
+            SynqField(label: "Bill to", icon: .people, text: $payer, placeholder: "Customer name")
             SynqField(label: "Amount", icon: .money, text: $amount, placeholder: "120.00", detail: "USDC",
                       keyboard: .decimal, large: true, divider: true)
             SynqField(label: "For", icon: .receipt, text: $note, placeholder: "Logo design", divider: true)
@@ -518,7 +515,7 @@ struct TeamSheet: View {
         _question = State(initialValue: sheet.autoRun ? "" : sheet.text)
     }
 
-    private let ideas = ["Ask CFO and Risk whether to pay Sarah", "Can we afford to pay Sarah 100 USDC this week?",
+    private let ideas = ["Review open payment requests", "What is reserved in this workspace?",
                          "What can the finance team do right now?"]
 
     var body: some View {

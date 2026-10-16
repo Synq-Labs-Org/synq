@@ -52,3 +52,15 @@ runParserChecks(check: check)
 
 if failures > 0 { exit(1) }
 print("native card and command checks passed")
+
+// Workspace money stays exact beyond floating-point integer precision.
+check(workspaceUSDC("9007199254740993123456") == "9007199254740993.123456 USDC", "workspace exact large USDC")
+check(workspaceUSDC("1") == "0.000001 USDC", "workspace smallest USDC unit")
+check(workspaceUSDC("0") == "0 USDC", "workspace zero USDC")
+check(workspaceUSDC("1e6") == "Unknown amount", "workspace malformed money refused")
+let nativeInvoice = try JSONDecoder().decode(WorkspaceInvoice.self, from: JSONSerialization.data(withJSONObject: ["invoiceId": "inv_contract", "number": "INV-1", "status": "PAID", "reconciliation": "FINALIZED", "total": "10000", "amountDue": "0"]))
+check(nativeInvoice.total == "10000" && nativeInvoice.reconciliation == "FINALIZED", "workspace invoice wire contract keeps integer strings and finality")
+let nativePayout = try JSONDecoder().decode(WorkspacePayout.self, from: JSONSerialization.data(withJSONObject: ["data": ["id": UUID().uuidString, "amount": "50000", "purpose": "Accepted work"], "state": "REVIEW", "reason": NSNull(), "txHash": NSNull()]))
+check(nativePayout.state == "REVIEW" && nativePayout.txHash == nil, "workspace unsigned request is not a paid receipt")
+let nativeSnapshot = try JSONDecoder().decode(WorkspaceSnapshot.self, from: JSONSerialization.data(withJSONObject: ["world": ["builtAt": 2000000000, "treasury": ["balances": ["value": [], "meta": ["freshness": "UNKNOWN", "source": "indexer", "observedAt": NSNull()]], "availableToSpend": ["value": NSNull(), "meta": ["freshness": "UNKNOWN", "source": "missing obligations", "observedAt": NSNull()]]], "decision": ["decisionGrade": false, "reasons": ["Payables unavailable"]]], "riskCases": [], "deals": NSNull()]))
+check(nativeSnapshot.world.treasury.balances.meta.observedAt == nil && nativeSnapshot.world.treasury.availableToSpend.value == nil && !nativeSnapshot.world.decision.decisionGrade, "workspace missing sources stay unknown across native contract")

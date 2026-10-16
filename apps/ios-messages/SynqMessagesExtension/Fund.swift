@@ -44,6 +44,85 @@ struct WorkspaceSummary: Decodable, Equatable, Identifiable {
     let threshold: Int?
 }
 
+struct WorkspaceInvoice: Decodable, Identifiable {
+    let invoiceId: String
+    let number: String
+    let status: String
+    let reconciliation: String
+    let total: String
+    let amountDue: String
+    var id: String { invoiceId }
+}
+struct WorkspacePayout: Decodable, Identifiable {
+    struct Data: Decodable { let id: String; let amount: String; let purpose: String }
+    let data: Data
+    let state: String
+    let reason: String?
+    let txHash: String?
+    var id: String { data.id }
+}
+struct WorkspaceVendor: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let address: String
+    let status: String
+    let eligibleAt: Double
+}
+struct WorkspaceFinanceView: Decodable { let vendors: [WorkspaceVendor] }
+struct WorkspaceTeamReply: Decodable {
+    struct Citation: Decodable { let path: String; let source: String; let freshness: String }
+    struct World: Decodable { let builtAt: Double; let decisionGrade: Bool }
+    let answer: String
+    let status: String
+    let citations: [Citation]
+    let world: World?
+    let payoutId: String?
+}
+func workspaceUSDC(_ baseUnits: String) -> String {
+    guard !baseUnits.isEmpty, baseUnits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return "Unknown amount" }
+    let padded = String(repeating: "0", count: max(0, 7 - baseUnits.count)) + baseUnits
+    let boundary = padded.index(padded.endIndex, offsetBy: -6)
+    let whole = String(padded[..<boundary]).drop(while: { $0 == "0" })
+    var fraction = String(padded[boundary...])
+    while fraction.last == "0" { fraction.removeLast() }
+    return "\(whole.isEmpty ? "0" : String(whole))\(fraction.isEmpty ? "" : "." + fraction) USDC"
+}
+
+struct WorkspaceObserved<Value: Decodable>: Decodable {
+    struct Meta: Decodable { let freshness: String; let source: String; let observedAt: Double? }
+    let value: Value
+    let meta: Meta
+}
+struct WorkspaceSnapshot: Decodable {
+    struct Record: Decodable, Identifiable { let id: String; let state: String }
+    struct World: Decodable {
+        struct Balance: Decodable { let chain: String; let asset: String; let account: String; let baseUnits: String }
+        struct Treasury: Decodable { let balances: WorkspaceObserved<[Balance]>; let availableToSpend: WorkspaceObserved<String?> }
+        struct Decision: Decodable { let decisionGrade: Bool; let reasons: [String] }
+        let builtAt: Double
+        let treasury: Treasury
+        let decision: Decision
+    }
+    let world: World
+    let riskCases: [Record]
+    let deals: [Record]?
+}
+struct WorkspaceCapabilities: Decodable {
+    struct Capability: Decodable { let status: String; let reason: String }
+    let circleWallets: Capability
+    let gasStation: Capability
+    let usyc: Capability
+    let earn: Capability
+    let swap: Capability
+    let duffel: Capability
+    let lithic: Capability
+    let cctp: Capability
+    let gateway: Capability
+    var entries: [(String, Capability)] {
+        [("Circle Wallets", circleWallets), ("Gas Station", gasStation), ("USYC eligibility", usyc), ("Earn", earn), ("Swap", swap), ("Duffel", duffel), ("Lithic", lithic), ("CCTP", cctp), ("Gateway", gateway)]
+    }
+}
+
 struct WorkspaceClient {
     let host: String
     var session: URLSession = .shared
@@ -86,6 +165,30 @@ struct WorkspaceClient {
     func list() async throws -> [WorkspaceSummary] {
         struct Response: Decodable { let workspaces: [WorkspaceSummary] }
         return try await call("/workspaces", as: Response.self).workspaces
+    }
+    private func workspacePath(_ workspace: String, _ suffix: String) throws -> String {
+        guard UUID(uuidString: workspace) != nil else { throw FundAPIError(error: "INVALID_WORKSPACE", message: "Choose a valid workspace.") }
+        return "/workspaces/\(workspace)\(suffix)"
+    }
+    func invoices(_ workspace: String) async throws -> [WorkspaceInvoice] {
+        struct Response: Decodable { let invoices: [WorkspaceInvoice] }
+        return try await call(workspacePath(workspace, "/invoices"), as: Response.self).invoices
+    }
+    func payouts(_ workspace: String) async throws -> [WorkspacePayout] {
+        struct Response: Decodable { let payouts: [WorkspacePayout] }
+        return try await call(workspacePath(workspace, "/payouts"), as: Response.self).payouts
+    }
+    func finance(_ workspace: String) async throws -> WorkspaceFinanceView {
+        try await call(workspacePath(workspace, "/finance"), as: WorkspaceFinanceView.self)
+    }
+    func ask(_ workspace: String, message: String, requestId: String) async throws -> WorkspaceTeamReply {
+        try await call(workspacePath(workspace, "/team/ask"), body: ["message": message, "idempotencyKey": requestId], as: WorkspaceTeamReply.self)
+    }
+    func snapshot(_ workspace: String) async throws -> WorkspaceSnapshot {
+        try await call(workspacePath(workspace, "/team/snapshot"), as: WorkspaceSnapshot.self)
+    }
+    func capabilities() async throws -> WorkspaceCapabilities {
+        try await call("/capabilities", as: WorkspaceCapabilities.self)
     }
     func logout() async {
         struct Response: Decodable { let ok: Bool }
@@ -598,11 +701,15 @@ struct FundClient {
 
     // Pages on the Synq site where the passkey ceremonies happen.
 
-    func workspacePage() -> URL {
+    func workspacePage(workspace: String? = nil, payout: String? = nil) -> URL {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
         c.path = "/workspaces"
+        var items: [URLQueryItem] = []
+        if let workspace { items.append(URLQueryItem(name: "workspace", value: workspace)) }
+        if let payout { items.append(URLQueryItem(name: "payout", value: payout)) }
+        if !items.isEmpty { c.queryItems = items }
         return c.url!
     }
 

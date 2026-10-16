@@ -20,7 +20,7 @@ export const PayoutEvidenceSchema = z.object({
   environment: z.string().min(1),
   owner: Address,
   agent: Address,
-  sarahVerified: Address,
+  verifiedRecipient: Address,
   payout: z.object({
     softFlags: z.array(z.unknown()),
     decision: z.enum(['ALLOW', 'REQUIRE_OWNER_APPROVAL', 'DENY']),

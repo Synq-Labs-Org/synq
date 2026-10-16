@@ -317,7 +317,7 @@ async function superviseFinanceRun(
     if (moving && intent.classifiedBy !== 'RULES')
       return reply(
         'NEEDS_CLARIFICATION',
-        'I will not start a payment from a guessed intent. Say exactly which invoice to pay, for example "Pay Sarah\'s invoice INV-0042".',
+        'I will not start a payment from a guessed intent. Say exactly which invoice to pay, for example "Pay the supplier\'s invoice <reference>".',
       );
 
     // Freshness is judged at use time (desk.now), not when the snapshot was built.
@@ -372,7 +372,7 @@ async function superviseFinanceRun(
           findEvidence(desk, intent.txHash),
         );
         const answer = e
-          ? `${e.payout.amount} USDC to ${e.sarahVerified} on ${e.environment}, Kernel ${e.payout.decision}, grant ${e.payout.grantId}. Receipt: ${e.payout.explorer}`
+          ? `${e.payout.amount} USDC to ${e.verifiedRecipient} on ${e.environment}, Kernel ${e.payout.decision}, grant ${e.payout.grantId}. Receipt: ${e.payout.explorer}`
           : `No recorded receipt for ${intent.txHash ?? 'that payment'}.`;
         return reply('ANSWERED', answer);
       }

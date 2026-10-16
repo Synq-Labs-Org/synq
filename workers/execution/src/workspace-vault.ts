@@ -596,6 +596,36 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
       });
       return { amount: String(amount), blockNumber: String(a.blockNumber) };
     },
+    readIndexedBalance: async (id: string) => {
+      const a = await finance.authority(id);
+      const cursor = (
+        await setups.workspaces.pool.query(
+          'SELECT block_number FROM synq_arc_index_cursors WHERE stream=$1',
+          [`workspace:${id}`],
+        )
+      ).rows[0];
+      if (!cursor)
+        throw new WorkspaceError('WORKSPACE_INDEXER_UNAVAILABLE', 503);
+      const blockNumber = BigInt(cursor.block_number);
+      const [finalized, block] = await Promise.all([
+        chain.client.getBlock({ blockTag: 'finalized' }),
+        chain.client.getBlock({ blockNumber }),
+      ]);
+      if (finalized.number === null || blockNumber > finalized.number)
+        throw new WorkspaceError('INDEXED_BALANCE_NOT_FINAL');
+      const amount = await chain.client.readContract({
+        address: a.token,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [a.vault],
+        blockNumber,
+      });
+      return {
+        amount: String(amount),
+        blockNumber: String(blockNumber),
+        observedAt: Number(block.timestamp),
+      };
+    },
     readAuthority: (id: string) => readWorkspaceAuthority(chain, setups, id),
     execute: (workspaceId: string) => executor.execute(workspaceId),
     wake: () => {

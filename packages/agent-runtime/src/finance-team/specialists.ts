@@ -1048,7 +1048,8 @@ export async function auditAgentExplain(
     );
     const expected = units(e.payout.amount);
     const hit = r?.transfers.find(
-      (t) => lower(t.to) === lower(e.sarahVerified) && t.baseUnits === expected,
+      (t) =>
+        lower(t.to) === lower(e.verifiedRecipient) && t.baseUnits === expected,
     );
     chainCheck = r && r.status === 'success' && hit ? 'VERIFIED' : 'MISMATCH';
     chainDetail = !r
@@ -1056,7 +1057,7 @@ export async function auditAgentExplain(
       : r.status !== 'success'
         ? 'transaction reverted'
         : hit
-          ? `block ${r.blockNumber}: USDC transfer of ${e.payout.amount} to ${e.sarahVerified} from ${r.from}`
+          ? `block ${r.blockNumber}: USDC transfer of ${e.payout.amount} to ${e.verifiedRecipient} from ${r.from}`
           : 'no matching USDC transfer to the verified recipient in the receipt';
   }
   const fee = ledger.NETWORK_FEES;
@@ -1070,7 +1071,7 @@ export async function auditAgentExplain(
       ]
     : [];
   const explanation = [
-    `On ${e.environment}, the payout in ${e.payout.hash} sent ${e.payout.amount} USDC to the verified contractor address ${e.sarahVerified}.`,
+    `On ${e.environment}, the payout in ${e.payout.hash} sent ${e.payout.amount} USDC to the verified contractor address ${e.verifiedRecipient}.`,
     `The Kernel decided ${e.payout.decision} (${e.payout.reasons.join('; ')}) and issued grant ${e.payout.grantId}; the restricted executor signed only that exact call.`,
     `Ledger: ${Object.entries(ledger)
       .map(([k, v]) => `${k} ${v}`)
@@ -1093,7 +1094,7 @@ export async function auditAgentExplain(
     environment: e.environment,
     explorer: e.payout.explorer,
     amount: e.payout.amount,
-    recipient: e.sarahVerified,
+    recipient: e.verifiedRecipient,
     kernelDecision: e.payout.decision,
     kernelReasons: [...e.payout.reasons],
     grantId: e.payout.grantId,

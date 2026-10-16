@@ -340,6 +340,21 @@ struct Render {
         workspaceLinked.workspaces = [WorkspaceSummary(id: "00000000-0000-4000-8000-000000000001", displayName: "Studio workspace", kind: "BUSINESS", chainId: 5042002, status: "LAUNCHING", vault: nil, threshold: nil)]
         shot("screen-workspace-linked.png", StartFundView(model: workspaceLinked, actions: .none, onPasteLink: {}))
 
+        let workspacePreview = sampleModel(nil)
+        let selectedWorkspace = WorkspaceSummary(id: "00000000-0000-4000-8000-000000000001", displayName: "Studio workspace", kind: "BUSINESS", chainId: 5042002, status: "ACTIVE", vault: nil, threshold: 2)
+        workspacePreview.selectedWorkspace = selectedWorkspace
+        workspacePreview.workspaceInvoices = []
+        workspacePreview.workspacePayouts = []
+        workspacePreview.workspaceVendors = []
+        shot("screen-workspace-empty.png", height: 1700, scale: 2, WorkspaceDetailView(model: workspacePreview, workspace: selectedWorkspace, actions: .none))
+        workspacePreview.workspaceInvoices = [WorkspaceInvoice(invoiceId: "preview-invoice", number: "INV-1", status: "PAID", reconciliation: "FINALIZED", total: "10000", amountDue: "0")]
+        workspacePreview.workspacePayouts = [WorkspacePayout(data: .init(id: "00000000-0000-4000-8000-000000000002", amount: "50000", purpose: "Accepted project delivery"), state: "REVIEW", reason: nil, txHash: nil)]
+        workspacePreview.workspaceVendors = [WorkspaceVendor(id: "preview-vendor", name: "Project supplier", address: "Payout address shown after verification", status: "COOLING", eligibleAt: 1_792_224_000)]
+        shot("screen-workspace-records.png", height: 1900, scale: 2, WorkspaceDetailView(model: workspacePreview, workspace: selectedWorkspace, actions: .none))
+        workspacePreview.workspaceInvoices = nil; workspacePreview.workspacePayouts = nil; workspacePreview.workspaceVendors = nil
+        workspacePreview.workspaceDetailError = "Payment requests unavailable. Refresh or sign in again."
+        shot("screen-workspace-data-error.png", height: 1700, scale: 2, WorkspaceDetailView(model: workspacePreview, workspace: selectedWorkspace, actions: .none))
+
         let home = sampleModel(Samples.activeFund, trips: [Samples.trip("VOTING"), Samples.gift("BOOKED")])
         shot("screen-home.png", fund(home))
         shot("screen-home-full.png", height: 1900, scale: 2, fund(home))

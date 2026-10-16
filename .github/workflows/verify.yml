@@ -39,6 +39,8 @@ jobs:
         run: corepack pnpm test:schema-compat
       - name: Plugin contract tests
         run: corepack pnpm test:plugins
+      - name: Reject demo identities in shipped runtime
+        run: corepack pnpm check:no-demo-data
       - name: Unit tests with machine-readable results
         run: corepack pnpm test:report P01
       - name: Build

@@ -16,7 +16,10 @@
     "./revenue": "./src/revenue.ts",
     "./revenue-contracts": "./src/revenue-contracts.ts",
     "./deals": "./src/deals.ts",
-    "./deal-contracts": "./src/deal-contracts.ts"
+    "./deal-contracts": "./src/deal-contracts.ts",
+    "./team": "./src/team.ts",
+    "./payout-command": "./src/payout-command.ts",
+    "./team-contracts": "./src/team-contracts.ts"
   },
   "dependencies": {
     "@synq/kernel": "workspace:*",
@@ -28,6 +31,9 @@
     "@synq/ledger": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/allocations": "workspace:*",
-    "@synq/dealroom": "workspace:*"
+    "@synq/dealroom": "workspace:*",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/world-model": "workspace:*",
+    "@synq/plugin-risk": "workspace:*"
   }
 }

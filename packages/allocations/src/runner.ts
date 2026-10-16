@@ -1125,8 +1125,6 @@ export class SplitRunner {
     const { store, ledger, books, executor } = this.deps;
     const p = this.policy;
     const at = this.deps.now();
-    const vendors = await books.vendors();
-    const history = await books.payableHistory();
     for (const leg of await store.legs(s.splitId)) {
       if (leg.kind !== 'TRANSFER' || leg.state !== 'CONFIRMED') continue;
       const ev = leg.evidence!;
@@ -1153,6 +1151,10 @@ export class SplitRunner {
       }
       const entries: JournalEntry[] = [];
       if (leg.purpose === 'CONTRACTOR_PAYABLE') {
+        const [vendors, history] = await Promise.all([
+          books.vendors(),
+          books.payableHistory(),
+        ]);
         const invoice = history.find(
           (i) => i.vendorInvoiceId === leg.documentRef,
         );

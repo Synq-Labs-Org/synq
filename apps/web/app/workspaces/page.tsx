@@ -20,6 +20,7 @@ import { GovernancePanel } from './governance-panel';
 import { InvoicePanel } from './invoice-panel';
 import { RevenuePanel } from './revenue-panel';
 import { DealPanel } from './deal-panel';
+import { TeamPanel } from './team-panel';
 
 type Provider = {
   request(input: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -449,6 +450,10 @@ export default function WorkspacesPage() {
                   principalId={principal}
                 />
               )}
+              <TeamPanel
+                key={`team-${view.workspace.id}`}
+                workspaceId={view.workspace.id}
+              />
               <ChannelPanel
                 key={`channel-${view.workspace.id}`}
                 workspaceId={view.workspace.id}

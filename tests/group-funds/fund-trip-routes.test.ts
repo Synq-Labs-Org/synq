@@ -67,6 +67,7 @@ function server() {
     ports: { now: () => NOW },
   } as unknown as FundService;
   registerFundRoutes(app, funds, {
+    legacyWrites: true,
     assistant: new FundAssistant({
       complete: null,
       today: () => '2026-10-16',
@@ -354,6 +355,7 @@ describe('GET /v1/funds/:id/trips/:tripId/card', () => {
         ports: { now: () => NOW },
       } as unknown as FundService,
       {
+        legacyWrites: true,
         trips: new TripService(new MemoryTripStore(), ports),
         webBaseUrl: 'https://synq.example',
       },
@@ -396,5 +398,41 @@ describe('GET /v1/funds/:id/trips/:tripId/card', () => {
       url: `/v1/funds/${FUND_ID}/trips/${tripId}/card?k=${'x'.repeat(32)}`,
     });
     expect(denied.statusCode).not.toBe(200);
+  });
+});
+
+describe('G3 legacy Monad fund creation and writes', () => {
+  it('refuses new legacy funds even when existing-fund writes are enabled', async () => {
+    const app = Fastify();
+    const create = vi.fn();
+    registerFundRoutes(app, { create } as unknown as FundService, {
+      legacyWrites: true,
+    });
+    const result = await app.inject({
+      method: 'POST',
+      url: '/v1/funds',
+      payload: { name: 'New group' },
+    });
+    expect(result.statusCode).toBe(410);
+    expect(result.json().error).toBe('ARC_WORKSPACE_REQUIRED');
+    expect(create).not.toHaveBeenCalled();
+    await app.close();
+  });
+  it('defaults legacy mutations to read-only before any service call', async () => {
+    const join = vi.fn(),
+      view = vi.fn(async () => fundView);
+    const app = Fastify();
+    registerFundRoutes(app, { join, view } as unknown as FundService);
+    const result = await app.inject({
+      method: 'POST',
+      url: `/v1/funds/${FUND_ID}/members`,
+      payload: {},
+    });
+    expect(result.statusCode).toBe(410);
+    expect(join).not.toHaveBeenCalled();
+    expect((await app.inject(`/v1/funds/${FUND_ID}?k=${KEY}`)).statusCode).toBe(
+      200,
+    );
+    await app.close();
   });
 });

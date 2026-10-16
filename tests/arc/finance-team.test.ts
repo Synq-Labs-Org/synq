@@ -646,7 +646,7 @@ describe('finance team: Audit explains a real Arc transaction (P21-07)', () => {
 
   it('explains the recorded payout with tx hash, Kernel reasons, grant, ledger lines and explorer link', async () => {
     const d = await desk([cleanInvoice], {
-      receipts: async () => receipt(evidence.sarahVerified, 40_000n),
+      receipts: async () => receipt(evidence.verifiedRecipient, 40_000n),
     });
     const r = await superviseFinance('explain last payment', d);
     const a = r.audit!;
@@ -655,7 +655,7 @@ describe('finance team: Audit explains a real Arc transaction (P21-07)', () => {
       txHash: evidence.payout.hash,
       environment: 'ARC_TESTNET',
       amount: '0.04',
-      recipient: evidence.sarahVerified,
+      recipient: evidence.verifiedRecipient,
       kernelDecision: 'ALLOW',
       grantId: evidence.payout.grantId,
       ledgerBalanced: true,
