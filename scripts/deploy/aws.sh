@@ -76,11 +76,10 @@ config)
     printf 'SYNQ_DOMAIN=%s\nSYNQ_ACME_EMAIL=%s\nPOSTGRES_PASSWORD=%s\nSYNQ_CARD_LINK_KEY=%s\nSYNQ_DEALROOM_LINK_KEY=%s\nSYNQ_PAY_LINK_KEY=%s\n' "$DOMAIN" "$ACME_EMAIL" "$pg" "$card" "$deal" "$pay"
     grep -E '^(export +)?(TELEGRAM_BOT_TOKEN|OPENAI_API_KEY|OPENAI_MODEL|SYNQ_MONAD_TESTNET_RPC_URL|DUFFEL_TEST_TOKEN|SEARCHAPI_KEY|LITHIC_API_KEY|LITHIC_ENV|SYNQ_ARC_RPC_URL|SYNQ_ARC_VENDORS|SYNQ_ARC_OWNER|SYNQ_ARC_BUSINESS_NAME|SYNQ_ARC_FLOOR_USDC)=' "$env_file" | sed -E 's/^export +//'
     grep -q -E '^(export +)?SYNQ_MONAD_TESTNET_RPC_URL=' "$env_file" || echo 'SYNQ_MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz'
-    # Arc business features (Messages app): the governed vault's allowlisted contractor
-    # (the Arc RPC defaults to the registry's public endpoint unless SYNQ_ARC_RPC_URL is set).
-    grep -q -E '^(export +)?SYNQ_ARC_VENDORS=' "$env_file" || echo 'SYNQ_ARC_VENDORS=Sarah:0xB781505e5156E68594414D190190fE1FaeDD6780:1792105682'
   )
   grep -q '^TELEGRAM_BOT_TOKEN=' <<<"$body" || { echo "TELEGRAM_BOT_TOKEN missing in $env_file" >&2; exit 1; }
+  # Arc business features: contractors are payable only while the governed vault allowlists them.
+  grep -q '^SYNQ_ARC_VENDORS=' <<<"$body" || echo "note: SYNQ_ARC_VENDORS (Name:0xAddress:verifiedAtUnix) not in $env_file; Pay a contractor stays off" >&2
   put env "$body"
   put testnet-key "$(tr -d '[:space:]' <"${SYNQ_TESTNET_KEY_FILE:-$HOME/.synq/testnet.key}")"
   echo "stored /synq/prod/env ($(wc -l <<<"$body" | tr -d ' ') keys) and /synq/prod/testnet-key"
