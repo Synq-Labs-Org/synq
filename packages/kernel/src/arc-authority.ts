@@ -6,6 +6,14 @@ import {
   type Address,
   type Hex,
 } from 'viem';
+import {
+  verifyVaultSetup,
+  vaultSetupHash,
+  vaultSetupIntentId,
+  vaultSetupValue,
+  type VaultSetup,
+  type SetupSignature,
+} from './arc-vault-setup.js';
 
 /**
  * Arc payment authority: the deterministic barrier between an agent's proposal
@@ -333,6 +341,104 @@ export type AuthorityConfig = {
   /** Payments at or above this many base units fail closed when risk is unavailable. */
   riskRequiredAbove: bigint;
 };
+
+/** A setup signature is separate from login/payment approvals and binds every factory parameter. */
+export async function decideVaultCreation(input: {
+  config: AuthorityConfig;
+  setup: VaultSetup;
+  signatures: readonly SetupSignature[];
+  expected: {
+    factory: Address;
+    token: Address;
+    sponsor: Address;
+    operator: Address;
+  };
+  sponsorReservation: { setupHash: Hex; maxGasNativeWei: string } | null;
+  simulationOk: boolean;
+  now: number;
+}): Promise<Decision> {
+  const { setup: s, config, now } = input;
+  try {
+    await verifyVaultSetup(s, input.signatures, now);
+  } catch {
+    return {
+      outcome: 'DENY',
+      reasons: ['invalid, incomplete or expired owner setup signatures'],
+    };
+  }
+  for (const key of ['factory', 'token', 'sponsor', 'operator'] as const)
+    if (lower(s[key]) !== lower(input.expected[key]))
+      return { outcome: 'DENY', reasons: [`wrong setup ${key}`] };
+  const hash = vaultSetupHash(s);
+  if (
+    !input.simulationOk ||
+    input.sponsorReservation?.setupHash !== hash ||
+    input.sponsorReservation.maxGasNativeWei !== s.maxGasNativeWei
+  )
+    return {
+      outcome: 'DENY',
+      reasons: ['simulation or durable sponsor reservation missing'],
+    };
+  if (
+    config.grantKey.length < 32 ||
+    config.grantTtlSeconds <= 0 ||
+    !Number.isSafeInteger(config.grantTtlSeconds)
+  )
+    throw new AuthorityError(
+      'BAD_MANDATE',
+      'invalid vault grant configuration',
+    );
+  const call = vaultSetupValue(s);
+  const body: Omit<ExecutionGrant, 'mac'> = {
+    grantId: `grt_${randomBytes(12).toString('hex')}`,
+    intentId: vaultSetupIntentId(s),
+    mandateId: vaultSetupIntentId(s),
+    mandateVersion: 1,
+    mandateHash: hash,
+    chainId: call.chainId,
+    token: call.token,
+    payer: call.payer,
+    recipient: call.recipient,
+    amount: '0',
+    actionHash: transferActionHash(call),
+    operator: config.operator,
+    nonce: `0x${randomBytes(32).toString('hex')}`,
+    issuedAt: now,
+    expiresAt: Math.min(s.expiresAt, now + config.grantTtlSeconds),
+    issuedByKernel: true,
+  };
+  return {
+    outcome: 'ALLOW',
+    reasons: [
+      'all proposed Safe owners signed exact setup; sponsor gas reserved',
+    ],
+    grant: Object.freeze({ ...body, mac: macOf(config.grantKey, body) }),
+  };
+}
+
+export async function admitVaultCreationGrant(input: {
+  setup: VaultSetup;
+  grant: ExecutionGrant;
+  grantKey: Uint8Array;
+  now: number;
+  fence: NonceFence;
+}) {
+  const id = vaultSetupIntentId(input.setup);
+  if (
+    input.grant.intentId !== id ||
+    input.grant.mandateId !== id ||
+    input.grant.mandateHash !== vaultSetupHash(input.setup)
+  )
+    throw new AuthorityError(
+      'GRANT_MISMATCH',
+      'factory setup differs from the signed owners and caps',
+    );
+  await admitGrant({
+    ...input,
+    call: vaultSetupValue(input.setup),
+    mandateRevoked: false,
+  });
+}
 
 /**
  * Decision. `ownerApproval` is the owner's EIP-712 signature over the intent

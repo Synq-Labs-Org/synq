@@ -181,6 +181,35 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
       digest(token),
     ]);
   }
+  async nativeCode(principalId: string) {
+    const code = randomBytes(24).toString('hex');
+    const expiresAt = this.now() + 120;
+    await this.pool.query(
+      'INSERT INTO synq_ws_native_handoffs(digest,principal_id,expires_at) VALUES($1,$2,$3)',
+      [digest(code), principalId, expiresAt],
+    );
+    return { code, expiresAt };
+  }
+  async redeemNativeCode(code: string) {
+    if (!/^[0-9a-f]{48}$/.test(code))
+      throw new WorkspaceError('INVALID_NATIVE_CODE', 401);
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = this.now() + 900;
+    const principalId = await this.transaction(async (sql) => {
+      const r = await sql.query(
+        'UPDATE synq_ws_native_handoffs SET used_at=$2 WHERE digest=$1 AND used_at IS NULL AND expires_at>$2 RETURNING principal_id',
+        [digest(code), this.now()],
+      );
+      if (!r.rows[0]) throw new WorkspaceError('INVALID_NATIVE_CODE', 401);
+      const principal = String(r.rows[0].principal_id);
+      await sql.query(
+        "INSERT INTO synq_ws_sessions(digest,principal_id,audience,expires_at) VALUES($1,$2,'native',$3)",
+        [digest(token), principal, expiresAt],
+      );
+      return principal;
+    });
+    return { token, principalId, expiresAt };
+  }
   private async member(
     sql: Pool | PoolClient,
     id: string,

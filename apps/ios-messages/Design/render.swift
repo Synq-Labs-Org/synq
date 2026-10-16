@@ -328,6 +328,17 @@ struct Render {
         shot("screen-start.png", StartFundView(model: sampleModel(nil), actions: .none, onPasteLink: {},
                                                text: "Flights from Delhi to Goa Dec 1–5 for 3"))
         shot("screen-start-empty.png", StartFundView(model: sampleModel(nil), actions: .none, onPasteLink: {}))
+        shot("screen-workspace-signin-full.png", height: 1700, scale: 2, StartFundView(model: sampleModel(nil), actions: .none, onPasteLink: {}))
+        let workspaceLoading = sampleModel(nil)
+        workspaceLoading.workspaceBusy = true
+        shot("screen-workspace-loading.png", StartFundView(model: workspaceLoading, actions: .none, onPasteLink: {}))
+        let workspaceError = sampleModel(nil)
+        workspaceError.workspaceError = "Workspace sign-in is unavailable. Try again with a new private code."
+        shot("screen-workspace-error.png", StartFundView(model: workspaceError, actions: .none, onPasteLink: {}))
+        let workspaceLinked = sampleModel(nil)
+        workspaceLinked.workspaceSignedIn = true
+        workspaceLinked.workspaces = [WorkspaceSummary(id: "00000000-0000-4000-8000-000000000001", displayName: "Studio workspace", kind: "BUSINESS", chainId: 5042002, status: "LAUNCHING", vault: nil, threshold: nil)]
+        shot("screen-workspace-linked.png", StartFundView(model: workspaceLinked, actions: .none, onPasteLink: {}))
 
         let home = sampleModel(Samples.activeFund, trips: [Samples.trip("VOTING"), Samples.gift("BOOKED")])
         shot("screen-home.png", fund(home))

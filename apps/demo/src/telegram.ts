@@ -108,6 +108,9 @@ import { registerFundRoutes } from './fund-routes.js';
 import { registerBusinessRoutes } from './business-routes.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
 import { PostgresWorkspaceStore } from '@synq/workspaces';
+import { WorkspaceVaultSetups } from '@synq/workspaces';
+import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
+import { workspaceChannelRuntime } from './workspace-channels.js';
 import {
   ArcBusiness,
   liveArcReads,
@@ -503,7 +506,31 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         process.env.SYNQ_ORIGIN,
       );
       await workspaces.migrate();
-      registerWorkspaceRoutes(app, workspaces);
+      const vault =
+        process.env.SYNQ_WORKSPACE_OPERATOR_KEY_FILE &&
+        process.env.SYNQ_WORKSPACE_GRANT_KEY_FILE
+          ? await workspaceVaultRuntime({
+              setups: (defaults) =>
+                new WorkspaceVaultSetups(workspaces, defaults),
+              operatorKeyFile: process.env.SYNQ_WORKSPACE_OPERATOR_KEY_FILE,
+              grantKeyFile: process.env.SYNQ_WORKSPACE_GRANT_KEY_FILE,
+              rpcUrl: process.env.SYNQ_ARC_RPC_URL,
+              dailyGasLimitWei: BigInt(
+                process.env.SYNQ_WORKSPACE_DAILY_GAS_WEI ??
+                  '1000000000000000000',
+              ),
+              maxCreationGasWei: BigInt(
+                process.env.SYNQ_WORKSPACE_CREATION_GAS_WEI ??
+                  '200000000000000000',
+              ),
+            })
+          : undefined;
+      if (vault) closers.push(() => vault.stop());
+      const workspaceChannels = await workspaceChannelRuntime(
+        workspaces,
+        token,
+      );
+      registerWorkspaceRoutes(app, workspaces, vault, workspaceChannels);
     }
     const readModel = {
       reader,

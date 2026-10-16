@@ -9,21 +9,36 @@ import {
   loginTypedData,
   PostgresWorkspaceStore,
   workspaceView,
+  type WorkspaceVaultSetups,
+  type WorkspaceChannelLinks,
 } from '@synq/workspaces';
+import { IdentityError } from '@synq/identity';
 
 const COOKIE = '__Host-synq_workspace';
-export function workspaceCapabilities() {
+export function workspaceCapabilities(
+  vaultReady = false,
+  telegramReady = false,
+) {
   const blocked = (reason: string) => ({ status: 'BLOCKED' as const, reason });
   return {
     chainId: 5042002,
     network: 'Arc testnet',
     moneyApproval: 'OWNER_EIP712_KERNEL_ONE_USE_GRANT',
-    workspaces: { status: 'AVAILABLE', scope: 'IDENTITY_AND_FORMATION_ONLY' },
-    vaultCreation: blocked(
-      'Owner-signed setup, Kernel admission and sponsor outbox are not connected yet.',
-    ),
+    workspaces: {
+      status: 'AVAILABLE',
+      scope: vaultReady ? 'SIGNED_VAULT_SETUP' : 'IDENTITY_AND_FORMATION_ONLY',
+    },
+    vaultCreation: vaultReady
+      ? {
+          status: 'AVAILABLE',
+          reason:
+            'All proposed owners must sign setup; capped sponsored Arc testnet execution only.',
+        }
+      : blocked(
+          'Owner-signed setup, Kernel admission and sponsor outbox are not connected yet.',
+        ),
     circleWallets: blocked(
-      'Requires Circle credentials and a verified wallet adapter.',
+      'Requires Circle credentials and enrollment integration; provisioning adapter is test-proven only.',
     ),
     gasStation: blocked('Requires Circle Wallets and a sponsorship policy.'),
     usyc: blocked('Requires a per-wallet eligibility check.'),
@@ -33,15 +48,23 @@ export function workspaceCapabilities() {
     lithic: blocked('Workspace sandbox card integration is not connected.'),
     cctp: blocked('Workspace settlement integration is not connected.'),
     gateway: blocked('Workspace settlement integration is not connected.'),
-    channelBinding: blocked(
-      'Requires authenticated channel-link proof; URL parameters are not proof.',
-    ),
+    channelBinding: telegramReady
+      ? {
+          status: 'AVAILABLE',
+          reason:
+            'Telegram provider proof, privately delivered code and wallet signature required. iMessage needs a verified bridge.',
+        }
+      : blocked(
+          'Requires authenticated channel-link proof; URL parameters are not proof.',
+        ),
   };
 }
 
 export function registerWorkspaceRoutes(
   app: FastifyInstance,
   store: PostgresWorkspaceStore,
+  vault?: { setups: WorkspaceVaultSetups; wake(): void },
+  channels?: WorkspaceChannelLinks,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -57,6 +80,12 @@ export function registerWorkspaceRoutes(
         return reply.code(error.status).send({
           error: error.code,
           message: error.code.replaceAll('_', ' ').toLowerCase(),
+        });
+      if (error instanceof IdentityError)
+        return reply.code(403).send({
+          error: error.code,
+          message:
+            'Channel identity proof or wallet signature was not accepted.',
         });
       // SQL errors may contain session hashes or invite digests. Never log request data.
       return reply.code(500).send({
@@ -103,7 +132,9 @@ export function registerWorkspaceRoutes(
     await store.throttle(`auth:${address}`, 20);
   };
   app.get('/v2/capabilities', (_req, reply) =>
-    handle(reply, async () => workspaceCapabilities()),
+    handle(reply, async () =>
+      workspaceCapabilities(Boolean(vault), Boolean(channels)),
+    ),
   );
   app.post('/v2/auth/challenge', (req, reply) =>
     handle(reply, async () => {
@@ -168,6 +199,25 @@ export function registerWorkspaceRoutes(
       return { principalId: session.principalId };
     }),
   );
+  app.post('/v2/auth/native-code', (req, reply) =>
+    handle(reply, async () => {
+      z.strictObject({}).parse(req.body);
+      const session = await auth(req, true);
+      if (session.audience !== 'web')
+        throw new WorkspaceError('WEB_SIGN_IN_REQUIRED', 403);
+      await store.throttle(`native-code:${session.principalId}`, 5);
+      return store.nativeCode(session.principalId);
+    }),
+  );
+  app.post('/v2/auth/native-session', (req, reply) =>
+    handle(reply, async () => {
+      await anonymous(req);
+      const body = z
+        .strictObject({ code: z.string().regex(/^[0-9a-f]{48}$/) })
+        .parse(req.body);
+      return store.redeemNativeCode(body.code);
+    }),
+  );
   app.get('/v2/workspaces', (req, reply) =>
     handle(reply, async () => ({
       workspaces: await store.list((await auth(req)).principalId),
@@ -199,6 +249,85 @@ export function registerWorkspaceRoutes(
         session.principalId,
         AcceptInviteSchema.parse(req.body).token,
       );
+    }),
+  );
+  const setupPort = () => {
+    if (!vault) throw new WorkspaceError('VAULT_CREATION_BLOCKED', 503);
+    return vault;
+  };
+  const channelPort = () => {
+    if (!channels) throw new WorkspaceError('CHANNEL_BINDING_BLOCKED', 503);
+    return channels;
+  };
+  app.get('/v2/workspaces/:workspaceId/channels/config', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req);
+      return channelPort().config(await id(req), session.principalId);
+    }),
+  );
+  app.post('/v2/workspaces/:workspaceId/channels/challenge', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req, true);
+      return channelPort().request(
+        await id(req),
+        session.principalId,
+        req.body,
+      );
+    }),
+  );
+  app.post('/v2/workspaces/:workspaceId/channels/complete', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req, true);
+      return channelPort().complete(
+        await id(req),
+        session.principalId,
+        req.body,
+      );
+    }),
+  );
+  app.post('/v2/workspaces/:workspaceId/channels/bind', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req, true);
+      return channelPort().bind(await id(req), session.principalId, req.body);
+    }),
+  );
+  app.get('/v2/workspaces/:workspaceId/vault/setup', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req);
+      return {
+        proposal: await setupPort().setups.view(
+          await id(req),
+          session.principalId,
+        ),
+      };
+    }),
+  );
+  app.post('/v2/workspaces/:workspaceId/vault/setup', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req, true);
+      return {
+        proposal: await setupPort().setups.propose(
+          await id(req),
+          session.principalId,
+          req.body,
+        ),
+      };
+    }),
+  );
+  app.post('/v2/workspaces/:workspaceId/vault/setup/approve', (req, reply) =>
+    handle(reply, async () => {
+      const session = await auth(req, true);
+      const body = z
+        .strictObject({ signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/) })
+        .parse(req.body);
+      const port = setupPort();
+      const proposal = await port.setups.approve(
+        await id(req),
+        session.principalId,
+        body.signature as `0x${string}`,
+      );
+      port.wake();
+      return { proposal };
     }),
   );
 }

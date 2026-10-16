@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./arc": "./src/arc-authority.ts",
     "./arc-escrow": "./src/arc-escrow.ts",
-    "./arc-agent-jobs": "./src/arc-agent-jobs.ts"
+    "./arc-agent-jobs": "./src/arc-agent-jobs.ts",
+    "./arc-vault-setup": "./src/arc-vault-setup.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

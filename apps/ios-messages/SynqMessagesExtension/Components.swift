@@ -1232,3 +1232,15 @@ struct SynqCardBubble: View {
         .accessibilityLabel(model.accessibilityLabel)
     }
 }
+
+// Secure input cannot be captured by macOS ImageRenderer; previews show only its placeholder.
+struct SynqPrivateCodeField: View {
+    @Binding var text: String
+    var body: some View {
+#if os(iOS)
+        SecureField("Private sign-in code from the web page", text: $text).synqType(.body).synqKeyboard(.codes)
+#else
+        Text("Private sign-in code from the web page").synqType(.body, .secondary)
+#endif
+    }
+}

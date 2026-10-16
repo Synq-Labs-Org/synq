@@ -436,6 +436,9 @@ importers:
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -879,6 +882,12 @@ importers:
 
   packages/workspaces:
     dependencies:
+      '@synq/identity':
+        specifier: workspace:*
+        version: link:../identity
+      '@synq/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       pg:
         specifier: 8.18.0
         version: 8.18.0
@@ -1230,6 +1239,9 @@ importers:
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@synq/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
       viem:
         specifier: 2.57.4
         version: 2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5)

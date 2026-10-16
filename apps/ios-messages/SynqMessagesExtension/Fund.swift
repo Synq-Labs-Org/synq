@@ -1,4 +1,98 @@
 import Foundation
+import Security
+
+struct WorkspaceSession: Codable {
+    let token: String
+    let principalId: String
+    let expiresAt: Double
+}
+
+enum WorkspaceKeychain {
+    private static func query(_ host: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "synq.workspace.\(host)", kSecAttrAccount as String: "session"]
+    }
+    static func load(host: String) -> WorkspaceSession? {
+        var q = query(host)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data, let session = try? JSONDecoder().decode(WorkspaceSession.self, from: data),
+              session.expiresAt > Date().timeIntervalSince1970 else { return nil }
+        return session
+    }
+    static func save(_ session: WorkspaceSession, host: String) throws {
+        var q = query(host)
+        SecItemDelete(q as CFDictionary)
+        q[kSecValueData as String] = try JSONEncoder().encode(session)
+        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else {
+            throw FundAPIError(error: "KEYCHAIN_UNAVAILABLE", message: "Could not securely save sign-in. Try again after unlocking your phone.")
+        }
+    }
+    static func clear(host: String) { SecItemDelete(query(host) as CFDictionary) }
+}
+
+struct WorkspaceSummary: Decodable, Equatable, Identifiable {
+    let id: String
+    let displayName: String
+    let kind: String
+    let chainId: Int
+    let status: String
+    let vault: String?
+    let threshold: Int?
+}
+
+struct WorkspaceClient {
+    let host: String
+    var session: URLSession = .shared
+    private func call<T: Decodable>(_ path: String, body: [String: String]? = nil, authenticated: Bool = true, as type: T.Type) async throws -> T {
+        var c = URLComponents(); c.scheme = "https"; c.host = host; c.path = "/api/v2\(path)"
+        guard let url = c.url else { throw FundAPIError(error: "INVALID_HOST", message: "Synq's host is not configured.") }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        if let body {
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        if authenticated {
+            guard let stored = WorkspaceKeychain.load(host: host) else {
+                throw FundAPIError(error: "SESSION_EXPIRED", message: "Sign in again with a new private code from the Synq page.")
+            }
+            request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "authorization")
+        }
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            if status == 401 && authenticated { WorkspaceKeychain.clear(host: host) }
+            if let error = try? JSONDecoder().decode(FundAPIError.self, from: data) { throw error }
+            throw FundAPIError(error: "WORKSPACE_UNAVAILABLE", message: "Workspace sign-in is not available on this server yet.")
+        }
+        return try JSONDecoder().decode(type, from: data)
+    }
+    func redeem(code: String) async throws {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized.range(of: "^[0-9a-f]{48}$", options: .regularExpression) != nil else {
+            throw FundAPIError(error: "INVALID_CODE", message: "Paste the private sign-in code from the Synq page.")
+        }
+        let received = try await call("/auth/native-session", body: ["code": normalized], authenticated: false, as: WorkspaceSession.self)
+        guard received.token.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+              received.expiresAt > Date().timeIntervalSince1970 else {
+            throw FundAPIError(error: "INVALID_SESSION", message: "The sign-in response was not valid.")
+        }
+        try WorkspaceKeychain.save(received, host: host)
+    }
+    func list() async throws -> [WorkspaceSummary] {
+        struct Response: Decodable { let workspaces: [WorkspaceSummary] }
+        return try await call("/workspaces", as: Response.self).workspaces
+    }
+    func logout() async {
+        struct Response: Decodable { let ok: Bool }
+        _ = try? await call("/auth/logout", body: [:], as: Response.self)
+        WorkspaceKeychain.clear(host: host)
+    }
+}
 
 // MARK: - API models (mirror of apps/demo/src/fund-service.ts FundView)
 

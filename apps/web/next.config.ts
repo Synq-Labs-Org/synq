@@ -19,7 +19,12 @@ const config: NextConfig = {
   distDir: 'dist',
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@synq/identity', '@synq/schemas', '@synq/workspaces'],
+  transpilePackages: [
+    '@synq/identity',
+    '@synq/schemas',
+    '@synq/workspaces',
+    '@synq/kernel',
+  ],
   webpack(webpackConfig: {
     resolve: { extensionAlias?: Record<string, string[]> };
   }) {

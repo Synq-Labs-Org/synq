@@ -1,13 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, randomInt, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
 import Fastify from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { getAddress, type Hex } from 'viem';
+import { getAddress, zeroAddress, type Hex } from 'viem';
+import { contract, token } from '@synq/chain-registry/arc';
+import { vaultSetupTypedData } from '@synq/kernel/arc-vault-setup';
+import { WorkspaceVaultSetups } from '../../packages/workspaces/src/vault-setup.js';
 import { PostgresWorkspaceStore } from '../../packages/workspaces/src/postgres.js';
 import { loginTypedData } from '../../packages/workspaces/src/contracts.js';
 import { registerWorkspaceRoutes } from '../../apps/demo/src/workspace-routes.js';
 import { durablePool, testDatabaseUrl } from '../durable/pg.js';
+import { workspacePool } from './pg.js';
 
 const origin = 'https://synq.test';
 let pool: Pool;
@@ -32,7 +36,7 @@ async function login(a = account(), audience: 'web' | 'native' = 'native') {
   };
 }
 beforeAll(async () => {
-  pool = await durablePool(
+  pool = await workspacePool(
     testDatabaseUrl('SYNQ_WORKSPACES_TEST_DATABASE_URL', 'synq_m2_workspaces'),
   );
   store = new PostgresWorkspaceStore(pool, origin, () => clock);
@@ -68,7 +72,7 @@ describe('G1 durable workspace isolation and membership', () => {
             'SELECT version FROM synq_workspaces_migrations',
           )
         ).rows.map((r) => r.version),
-      ).toEqual([1]);
+      ).toEqual([1, 2, 3, 4]);
     } finally {
       await migrationPool.end();
     }
@@ -231,6 +235,36 @@ describe('G1 durable workspace isolation and membership', () => {
 });
 
 describe('G2 signed login and scoped sessions', () => {
+  it('hands a short-lived native session off once without persisting plaintext codes', async () => {
+    const user = await login();
+    const handoff = await store.nativeCode(user.principalId);
+    expect(
+      (
+        await pool.query(
+          'SELECT 1 FROM synq_ws_native_handoffs WHERE digest=$1',
+          [handoff.code],
+        )
+      ).rowCount,
+    ).toBe(0);
+    const results = await Promise.allSettled([
+      store.redeemNativeCode(handoff.code),
+      store.redeemNativeCode(handoff.code),
+    ]);
+    const passed = results.filter((r) => r.status === 'fulfilled');
+    expect(passed).toHaveLength(1);
+    if (passed[0]?.status !== 'fulfilled') throw new Error('no native session');
+    expect(
+      (await store.session(passed[0].value.token, 'native')).principalId,
+    ).toBe(user.principalId);
+    await expect(
+      store.session(passed[0].value.token, 'web'),
+    ).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    const expired = await store.nativeCode(user.principalId);
+    clock += 120;
+    await expect(store.redeemNativeCode(expired.code)).rejects.toMatchObject({
+      code: 'INVALID_NATIVE_CODE',
+    });
+  });
   it('rejects wrong signer, concurrent replay, audience confusion and expiration', async () => {
     const a = account();
     const b = account();
@@ -378,6 +412,267 @@ describe('G2 signed login and scoped sessions', () => {
         'HttpOnly; Secure; SameSite=Strict',
       );
       expect(session.json()).not.toHaveProperty('token');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('G1 G2 durable vault setup and sponsor ledger', () => {
+  function setups() {
+    const sponsor = account();
+    return new WorkspaceVaultSetups(store, {
+      factory: contract('arc-testnet', 'SYNQ_ARC_VAULT_FACTORY').address,
+      token: token('arc-testnet', 'USDC').address,
+      sponsor: sponsor.address,
+      operator: sponsor.address,
+      guardian: zeroAddress,
+      maxGasNativeWei: '40',
+    });
+  }
+  async function prepared(
+    service: WorkspaceVaultSetups,
+    user?: Awaited<ReturnType<typeof login>>,
+  ) {
+    const u = user ?? (await login());
+    const { workspace: w } = await store.create(u.principalId, {
+      displayName: 'Vault formation',
+      kind: 'GROUP',
+    });
+    const p = (await service.propose(w.id, u.principalId, {}))!;
+    const signature = await u.a.signTypedData(vaultSetupTypedData(p.setup));
+    await service.approve(w.id, u.principalId, signature);
+    return { u, w, p };
+  }
+  it('freezes the owner set and accepts only setup signatures from each proposed owner', async () => {
+    const a = await login();
+    const b = await login();
+    const viewer = await login();
+    const { workspace: w } = await store.create(a.principalId, {
+      displayName: 'Two owners',
+      kind: 'GROUP',
+    });
+    await store.accept(
+      b.principalId,
+      (await store.invite(w.id, a.principalId, { role: 'OWNER' })).token,
+    );
+    await store.accept(
+      viewer.principalId,
+      (await store.invite(w.id, a.principalId, { role: 'VIEWER' })).token,
+    );
+    const service = setups();
+    const proposal = (await service.propose(w.id, a.principalId, {}))!;
+    expect(proposal.setup.threshold).toBe(2);
+    await expect(service.view(w.id, viewer.principalId)).rejects.toMatchObject({
+      code: 'WORKSPACE_NOT_FOUND',
+    });
+    await expect(
+      service.approve(w.id, a.principalId, a.signature),
+    ).rejects.toMatchObject({ code: 'INVALID_SETUP_SIGNATURE' });
+    await expect(
+      store.invite(w.id, a.principalId, { role: 'OWNER' }),
+    ).rejects.toMatchObject({ code: 'OWNER_SETUP_REQUIRED' });
+    const first = await service.approve(
+      w.id,
+      a.principalId,
+      await a.a.signTypedData(vaultSetupTypedData(proposal.setup)),
+    );
+    expect(first?.state).toBe('AWAITING_SIGNATURES');
+    const secondSignature = await b.a.signTypedData(
+      vaultSetupTypedData(proposal.setup),
+    );
+    expect(
+      (await service.approve(w.id, b.principalId, secondSignature))?.state,
+    ).toBe('READY');
+    expect(
+      (await service.approve(w.id, b.principalId, secondSignature))
+        ?.signedOwners,
+    ).toHaveLength(2);
+    await expect(
+      pool.query(
+        "UPDATE synq_ws_vault_setups SET data=jsonb_set(data,'{threshold}','1') WHERE workspace_id=$1",
+        [w.id],
+      ),
+    ).rejects.toThrow('immutable');
+  });
+  it('reserves gas atomically under concurrent creation and keeps unknown outcomes reserved', async () => {
+    clock = 2_000_000_000 + randomInt(1, 100_000_000) * 86400;
+    const service = setups();
+    const a = await prepared(service);
+    const b = await prepared(service);
+    const results = await Promise.allSettled([
+      service.reserveGas(a.w.id, 40n),
+      service.reserveGas(b.w.id, 40n),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const day = Math.floor(clock / 86400);
+    expect(
+      String(
+        (
+          await pool.query(
+            'SELECT used_wei FROM synq_ws_sponsor_days WHERE day=$1',
+            [day],
+          )
+        ).rows[0].used_wei,
+      ),
+    ).toBe('40');
+    const winner = results[0]!.status === 'fulfilled' ? a : b;
+    const restarted = new WorkspaceVaultSetups(
+      new PostgresWorkspaceStore(pool, origin, () => clock),
+      service.defaults,
+    );
+    await restarted.reserveGas(winner.w.id, 40n);
+    expect(
+      String(
+        (
+          await pool.query(
+            'SELECT used_wei FROM synq_ws_sponsor_days WHERE day=$1',
+            [day],
+          )
+        ).rows[0].used_wei,
+      ),
+    ).toBe('40');
+    const hash = `0x${randomBytes(32).toString('hex')}` as Hex;
+    await restarted.settleGas(winner.w.id, winner.p.setupHash, hash, 7n);
+    await restarted.settleGas(winner.w.id, winner.p.setupHash, hash, 7n);
+    expect(
+      String(
+        (
+          await pool.query(
+            'SELECT used_wei FROM synq_ws_sponsor_days WHERE day=$1',
+            [day],
+          )
+        ).rows[0].used_wei,
+      ),
+    ).toBe('7');
+    await expect(
+      restarted.settleGas(winner.w.id, winner.p.setupHash, hash, 6n),
+    ).rejects.toMatchObject({ code: 'SPONSOR_RECONCILIATION_MISMATCH' });
+    await expect(
+      restarted.settleGas(winner.w.id, winner.p.setupHash, hash, -1n),
+    ).rejects.toMatchObject({ code: 'SPONSOR_RECONCILIATION_MISMATCH' });
+  });
+  it('enforces principal creation quotas independently of the gas budget', async () => {
+    clock = 2_000_000_000 + randomInt(1, 100_000_000) * 86400;
+    const service = setups();
+    const user = await login();
+    const a = await prepared(service, user);
+    const b = await prepared(service, user);
+    await service.reserveGas(a.w.id, 1000n, 1);
+    await expect(service.reserveGas(b.w.id, 1000n, 1)).rejects.toMatchObject({
+      code: 'VAULT_CREATION_RATE_LIMIT',
+    });
+    expect(
+      (
+        await pool.query(
+          'SELECT 1 FROM synq_ws_sponsor_reservations WHERE workspace_id=$1',
+          [b.w.id],
+        )
+      ).rowCount,
+    ).toBe(0);
+    await service.settleGas(
+      a.w.id,
+      a.p.setupHash,
+      `0x${randomBytes(32).toString('hex')}`,
+      0n,
+    );
+  });
+  it('carries unresolved gas reservations into a new UTC day before admitting new spend', async () => {
+    clock += 10 * 86400;
+    const service = setups();
+    const a = await prepared(service);
+    await service.reserveGas(a.w.id, 60n);
+    clock += 86400;
+    const b = await prepared(service);
+    await expect(service.reserveGas(b.w.id, 60n)).rejects.toMatchObject({
+      code: 'SPONSOR_BUDGET_EXHAUSTED',
+    });
+    // Failed admission rolls the rollover back; recovery of the original reservation commits it.
+    await service.reserveGas(a.w.id, 60n);
+    const day = Math.floor(clock / 86400);
+    expect(
+      String(
+        (
+          await pool.query(
+            'SELECT used_wei FROM synq_ws_sponsor_days WHERE day=$1',
+            [day],
+          )
+        ).rows[0].used_wei,
+      ),
+    ).toBe('40');
+    await service.settleGas(
+      a.w.id,
+      a.p.setupHash,
+      `0x${randomBytes(32).toString('hex')}`,
+      5n,
+    );
+    await service.reserveGas(b.w.id, 60n);
+    expect(
+      String(
+        (
+          await pool.query(
+            'SELECT used_wei FROM synq_ws_sponsor_days WHERE day=$1',
+            [day],
+          )
+        ).rows[0].used_wei,
+      ),
+    ).toBe('45');
+    await service.settleGas(
+      b.w.id,
+      b.p.setupHash,
+      `0x${randomBytes(32).toString('hex')}`,
+      5n,
+    );
+  });
+  it('serves JSON-safe setup contracts and never accepts login signatures as vault approval', async () => {
+    const user = await login();
+    const service = setups();
+    const { workspace: w } = await store.create(user.principalId, {
+      displayName: 'HTTP setup',
+      kind: 'PERSONAL',
+    });
+    const app = Fastify();
+    let wakes = 0;
+    registerWorkspaceRoutes(app, store, {
+      setups: service,
+      wake: () => {
+        wakes++;
+      },
+    });
+    const headers = { authorization: `Bearer ${user.token}` };
+    try {
+      const caps = await app.inject({ url: '/v2/capabilities' });
+      expect(caps.json().vaultCreation.status).toBe('AVAILABLE');
+      const proposed = await app.inject({
+        method: 'POST',
+        url: `/v2/workspaces/${w.id}/vault/setup`,
+        headers,
+        payload: {},
+      });
+      expect(proposed.statusCode).toBe(200);
+      expect(typeof proposed.json().proposal.typedData.message.threshold).toBe(
+        'string',
+      );
+      const bad = await app.inject({
+        method: 'POST',
+        url: `/v2/workspaces/${w.id}/vault/setup/approve`,
+        headers,
+        payload: { signature: user.signature },
+      });
+      expect(bad.statusCode).toBe(403);
+      expect(wakes).toBe(0);
+      const setup = (await service.record(w.id))!.setup;
+      const good = await app.inject({
+        method: 'POST',
+        url: `/v2/workspaces/${w.id}/vault/setup/approve`,
+        headers,
+        payload: {
+          signature: await user.a.signTypedData(vaultSetupTypedData(setup)),
+        },
+      });
+      expect(good.statusCode).toBe(200);
+      expect(good.json().proposal.state).toBe('READY');
+      expect(wakes).toBe(1);
     } finally {
       await app.close();
     }

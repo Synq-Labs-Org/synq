@@ -58,3 +58,10 @@
 .workspace-secret {
   overflow-wrap: anywhere;
 }
+.workspace-shell p,
+.workspace-shell li {
+  overflow-wrap: anywhere;
+}
+.workspace-shell input[type='checkbox'] {
+  width: auto;
+}

@@ -40,6 +40,14 @@ check(swapped != nil && swapped?.preview == nil, "preview for another group is d
 let noNonce = payload.openUrl!.replacingOccurrences(of: "&n=", with: "&x=")
 check(CardLink(url: URL(string: noNonce)!, allowedHost: "synq.example") == nil, "link without nonce refused")
 
+// G2/G12: native contracts accept integer server timestamps and empty forming workspaces.
+let sessionData = try JSONSerialization.data(withJSONObject: ["token": String(repeating: "a", count: 64), "principalId": "wallet:contract-check", "expiresAt": 2_000_000_000])
+let workspaceSession = try JSONDecoder().decode(WorkspaceSession.self, from: sessionData)
+check(workspaceSession.expiresAt == 2_000_000_000, "workspace integer expiry contract")
+let workspaceData = try JSONSerialization.data(withJSONObject: ["id": UUID().uuidString, "displayName": "New workspace", "kind": "GROUP", "chainId": 5042002, "status": "FORMING", "vault": NSNull(), "threshold": NSNull()])
+let workspace = try JSONDecoder().decode(WorkspaceSummary.self, from: workspaceData)
+check(workspace.chainId == 5042002 && workspace.vault == nil && workspace.threshold == nil, "workspace forming state has no fabricated vault")
+
 runParserChecks(check: check)
 
 if failures > 0 { exit(1) }

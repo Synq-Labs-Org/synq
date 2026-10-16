@@ -1399,7 +1399,7 @@ export class ChannelGateway {
     envelope: Envelope,
   ): Promise<GatewayOutcome> {
     return this.replyOutcome(envelope, 'HANDLED', 'WORKSPACE_ONBOARDING', {
-      text: 'Create or join an Arc testnet workspace on the secure Synq page. Connect your own wallet and sign in. This link does not bind the chat or approve money. Vault activation is not available yet.',
+      text: 'Create or join an Arc testnet workspace on the secure Synq page. Connect your own wallet and sign in. This link does not bind the chat or approve money. Vault setup requires a separate signature from every proposed owner.',
       buttons: [{ label: 'Start a workspace', url: this.web('/workspaces') }],
     });
   }

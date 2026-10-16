@@ -151,11 +151,10 @@ struct StartFundView: View {
     let actions: FundActions
     let onPasteLink: () -> Void
     @State var text = ""
+    @State private var workspaceCode = ""
     @Environment(\.synqCompact) private var compact
     @Environment(\.synqTheme) private var theme
 
-    private var plan: (name: String, flight: FlightPlan?, draft: FlightDraft?) { FundModel.startPlan(for: text) }
-    private var canStart: Bool { !plan.name.isEmpty && !model.busy }
 
     var body: some View {
         SynqScreen {
@@ -165,27 +164,30 @@ struct StartFundView: View {
 
     private var expandedBody: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
-            SynqWordmarkBar(network: networkTitle(SynqNetwork.fundBackend))
+            SynqWordmarkBar(network: "Arc Testnet")
             SynqHeroArt(slot: .home)
             SynqStack {
                 SynqPanel(label: "Arc testnet workspace") {
-                    Text("Create or join with your own wallet. Vault activation is not available yet.")
+                    Text("Create or join with your own wallet. Review and sign vault setup on the secure page. Testnet only.")
                         .synqType(.body, .secondary)
                     SynqButton(title: "Start a workspace", trailingIcon: .forward,
                                action: { actions.open(model.client.workspacePage()) })
+                    if model.workspaceSignedIn {
+                        if model.workspaceBusy { Text("Loading workspaces…").synqType(.body, .secondary) }
+                        else if model.workspaces.isEmpty { Text("No workspaces yet. Create one on the Synq page.").synqType(.body, .secondary) }
+                        ForEach(model.workspaces) { workspace in
+                            Text("\(workspace.displayName) · \(workspace.status)").synqType(.body)
+                        }
+                        SynqButton(title: "Sign out of workspace", kind: .compact, action: model.signOutWorkspace)
+                            .disabled(model.workspaceBusy)
+                    } else {
+                        SynqPrivateCodeField(text: $workspaceCode)
+                        SynqButton(title: model.workspaceBusy ? "Signing in…" : "Sign in with code", busy: model.workspaceBusy,
+                                   action: { let code = workspaceCode; workspaceCode = ""; model.signInWorkspace(code: code) })
+                            .disabled(model.workspaceBusy || workspaceCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    if let error = model.workspaceError { SynqNote(text: error, error: true) }
                 }
-                SynqPanel(label: "New group fund") {
-                    Text(plan.name.isEmpty ? "Start a group fund" : plan.name).synqType(.headline).lineLimit(1)
-                    Text("Pool money with this chat. Everyone joins with a passkey, and every payment needs two approvals.")
-                        .synqType(.body, .secondary).fixedSize(horizontal: false, vertical: true)
-                    SynqCommandField(text: $text, placeholder: "Name it, or tell Synq the plan…", busy: model.busy,
-                                     onSubmit: start, onFocus: actions.expand)
-                    interpretation
-                    examples
-                }
-                SynqButton(title: model.busy ? "Starting…" : "Start \(plan.name.isEmpty ? "fund" : "“\(plan.name)”") & invite chat",
-                           trailingIcon: .forward, busy: model.busy, action: start)
-                    .disabled(!canStart)
                 if let error = model.error { SynqNote(text: error, error: true) }
                 HStack {
                     SynqButton(title: "Paste a Synq link", icon: .copy, kind: .compact, action: onPasteLink)
@@ -200,16 +202,11 @@ struct StartFundView: View {
 
     private var compactBody: some View {
         VStack(alignment: .leading, spacing: theme.space.m) {
-            SynqWordmarkBar(network: networkTitle(SynqNetwork.fundBackend), compact: true)
+            SynqWordmarkBar(network: "Arc Testnet", compact: true)
             SynqStack(spacing: \.m) {
                 SynqButton(title: "Start an Arc workspace", trailingIcon: .forward,
                            action: { actions.open(model.client.workspacePage()) })
-                Text("Start a group fund · everyone joins with a passkey").synqType(.caption, .secondary)
-                SynqCommandField(text: $text, placeholder: "Name it, or tell Synq the plan…", busy: model.busy,
-                                 onSubmit: start, onFocus: actions.expand)
-                SynqButton(title: model.busy ? "Starting…" : "Start & invite chat", trailingIcon: .forward,
-                           busy: model.busy, action: start)
-                    .disabled(!canStart)
+                SynqButton(title: "Workspace sign-in and settings", kind: .compact, action: actions.expand)
                 if let error = model.error { SynqNote(text: error, error: true) }
             }
         }
@@ -217,36 +214,7 @@ struct StartFundView: View {
         .synqScroll()
     }
 
-    @ViewBuilder
-    private var interpretation: some View {
-        if let flight = plan.flight {
-            SynqGroup {
-                SynqRow(icon: .flight, title: "Then searches \(flight.origin) → \(flight.destination)",
-                        subtitle: "\(TripFormat.range(flight.departureDate, flight.returnDate)) · \(TripFormat.travellers(flight.travelers)) · once the fund is live",
-                        trailing: .none)
-            }
-        } else if let d = plan.draft {
-            SynqGroup {
-                SynqRow(icon: .flight, title: "A trip to \(d.destinationLabel ?? "")",
-                        subtitle: "Add where from and when, and Synq searches once the fund is live", trailing: .none)
-            }
-        }
-    }
 
-    private var examples: some View {
-        ChipScroller {
-            ForEach(["Goa trip Dec 1–5", "Sam's birthday gift", "Flat bills"], id: \.self) { ex in
-                SynqChip(title: ex) {
-                    text = ex == "Goa trip Dec 1–5" ? "Flights from Delhi to Goa Dec 1–5 for 3" : ex
-                }
-            }
-        }
-    }
-
-    private func start() {
-        guard canStart else { return }
-        model.create(fromCommand: text) { ref in actions.insertInvite(ref, nil) }
-    }
 }
 
 // MARK: - Home
@@ -573,16 +541,17 @@ struct AskView: View {
     }
 
     private var suggestions: some View {
-        let first = model.view?.recipients.first?.name ?? "Priya"
-        let ideas: [(SynqIcon, String, String)] = [
-            (.deal, "Draft a deal with Sarah", "Draft a deal: logo for Sarah, 300 USDC total, 150 when concepts are delivered, 150 for the final files"),
-            (.receipt, "Invoice Priya 120 for the logo", "Invoice Priya 120 for the logo"),
-            (.team, "Ask CFO and Risk whether to pay Sarah", "Ask CFO and Risk whether to pay Sarah"),
-            (.split, "Split 1500", "Split 1500"),
-            (.flight, "Flights Delhi → Goa Dec 1–5 for 3", "Book a flight from Delhi to Goa Dec 1–5 for 3"),
-            (.gift, "Gift under $40", "Find a gift for car lovers under $40"),
-            (.send, "Send 5 to \(first)", "Send 5 to \(first)"),
+        var ideas: [(SynqIcon, String, String)] = [
+            (.deal, "Draft a deal", "Draft a deal"),
+            (.receipt, "Create an invoice", "Create an invoice"),
+            (.team, "Ask the finance team", "Ask the finance team"),
+            (.split, "Review revenue split", "Review revenue split"),
+            (.flight, "Plan a trip", "Plan a trip"),
+            (.gift, "Find a gift", "Find a gift"),
         ]
+        if let first = model.view?.recipients.first?.name {
+            ideas.append((.send, "Pay \(first)", "Pay \(first)"))
+        }
         return VStack(alignment: .leading, spacing: theme.space.s) {
             SynqSectionLabel(text: "Try")
             ForEach(ideas, id: \.1) { idea in

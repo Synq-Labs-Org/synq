@@ -8,7 +8,8 @@
     "./server": "./src/server.ts",
     "./grant": "./src/grant.ts",
     "./challenge": "./src/challenge.ts",
-    "./mera-browser": "./src/mera-browser.ts"
+    "./mera-browser": "./src/mera-browser.ts",
+    "./channel-link-data": "./src/channel-link-data.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

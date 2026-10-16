@@ -146,6 +146,40 @@ export class PostgresOutboxStore implements OutboxStore {
     });
   }
 
+  /** Checks admission and stores signed bytes in the same transaction. */
+  async createAdmittingGrant(
+    record: OutboxRecord,
+    grant: ExecutionGrant,
+    admit: (fence: NonceFence) => Promise<void>,
+  ): Promise<'CREATED' | 'KEY_EXISTS'> {
+    return withTransaction(this.pool, async (sql) => {
+      await sql.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+        record.key,
+      ]);
+      const existing = await sql.query(
+        'SELECT 1 FROM synq_arc_payout_outbox WHERE key=$1',
+        [record.key],
+      );
+      if (existing.rows.length) return 'KEY_EXISTS';
+      const txPool: SqlPool = {
+        query: sql.query.bind(sql),
+        connect: async () => {
+          throw new Error('nested transaction');
+        },
+      };
+      await admit(new PostgresGrantFence(txPool));
+      const consumed = await sql.query(
+        'SELECT 1 FROM synq_consumed_grants WHERE grant_id=$1 AND nonce=$2',
+        [grant.grantId, grant.nonce.toLowerCase()],
+      );
+      if (!consumed.rows.length)
+        throw new Error('grant admission did not consume its nonce');
+      if (!(await insertRecord(sql, record, grant.grantId)))
+        throw new Error('outbox key raced during admission');
+      return 'CREATED';
+    });
+  }
+
   /** Records still SIGNED (broadcast outcome unknown) for a recovery sweep. */
   async unsettled(limit = 100): Promise<OutboxRecord[]> {
     const r = await this.pool.query(

@@ -12,6 +12,8 @@ import {
 } from '@synq/workspaces/contracts';
 import { api, ApiFailure, describeError } from '../../lib/api';
 import './theme.css';
+import { VaultPanel } from './vault-panel';
+import { ChannelPanel } from './channel-panel';
 
 type Provider = {
   request(input: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -65,6 +67,10 @@ export default function WorkspacesPage() {
     'MEMBER',
   );
   const [connected, setConnected] = useState(false);
+  const [nativeCode, setNativeCode] = useState<{
+    code: string;
+    expiresAt: number;
+  } | null>(null);
   const [principal, setPrincipal] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +91,7 @@ export default function WorkspacesPage() {
         setView(null);
         setItems([]);
         setPrincipal(null);
+        setNativeCode(null);
         setInviteLink('');
       }
       setError(describeError(e));
@@ -92,6 +99,14 @@ export default function WorkspacesPage() {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!nativeCode) return;
+    const timer = setTimeout(
+      () => setNativeCode(null),
+      Math.max(0, nativeCode.expiresAt * 1000 - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [nativeCode]);
   useEffect(() => {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     const token = fragment.get('invite');
@@ -107,6 +122,18 @@ export default function WorkspacesPage() {
           setItems(r.workspaces);
           setPrincipal(me.principalId);
           setConnected(true);
+          const selected = new URLSearchParams(window.location.search).get(
+            'workspace',
+          );
+          if (selected && r.workspaces.some((w) => w.id === selected))
+            void api
+              .get(`/v2/workspaces/${selected}`, WorkspaceViewSchema)
+              .then((v) => {
+                if (active) setView(v);
+              })
+              .catch((e: unknown) => {
+                if (active) setError(describeError(e));
+              });
         }
       })
       .catch((e: unknown) => {
@@ -217,6 +244,49 @@ export default function WorkspacesPage() {
             ))}
           </section>
           <section>
+            <h2>Sign in to iMessage</h2>
+            <p>
+              Generate a private one-use code, then paste it into Synq’s
+              iMessage extension. It expires in two minutes and grants no
+              payment authority.
+            </p>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  setNativeCode(
+                    await api.post(
+                      '/v2/auth/native-code',
+                      z.strictObject({
+                        code: z.string(),
+                        expiresAt: z.number(),
+                      }),
+                      {},
+                    ),
+                  );
+                })
+              }
+            >
+              Generate private sign-in code
+            </button>
+            {nativeCode && (
+              <>
+                <p className="workspace-secret">{nativeCode.code}</p>
+                <button
+                  disabled={busy || Date.now() / 1000 >= nativeCode.expiresAt}
+                  onClick={() =>
+                    void run(async () => {
+                      await navigator.clipboard.writeText(nativeCode.code);
+                      setNativeCode(null);
+                    })
+                  }
+                >
+                  Copy code for iMessage
+                </button>
+              </>
+            )}
+          </section>
+          <section>
             <h2>Create a workspace</h2>
             <label htmlFor="workspace-name">Name</label>
             <input
@@ -291,11 +361,38 @@ export default function WorkspacesPage() {
             <section>
               <h2>{view.workspace.displayName}</h2>
               <p>{view.workspace.status} · Arc testnet</p>
-              <p>
-                Vault activation is blocked while owner-signed setup, Kernel
-                admission and sponsored execution are connected. No vault or
-                balance has been created.
-              </p>
+              {view.workspace.vault ? (
+                <p>
+                  Vault: {view.workspace.vault} · {view.workspace.threshold}{' '}
+                  owner signatures required.
+                </p>
+              ) : (
+                <p>
+                  No active vault yet. Proposed owners must review and sign
+                  setup separately from sign-in.
+                </p>
+              )}
+              {isOwner && (
+                <VaultPanel
+                  key={view.workspace.id}
+                  workspaceId={view.workspace.id}
+                  onActivated={() =>
+                    void run(async () => {
+                      setView(
+                        await api.get(
+                          `/v2/workspaces/${view.workspace.id}`,
+                          WorkspaceViewSchema,
+                        ),
+                      );
+                      await refresh();
+                    })
+                  }
+                />
+              )}
+              <ChannelPanel
+                key={`channel-${view.workspace.id}`}
+                workspaceId={view.workspace.id}
+              />
               <ul>
                 {view.members.map((m) => (
                   <li key={m.principalId}>
@@ -364,6 +461,7 @@ export default function WorkspacesPage() {
                 setItems([]);
                 setView(null);
                 setPrincipal(null);
+                setNativeCode(null);
                 setInviteLink('');
               })
             }

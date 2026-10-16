@@ -80,6 +80,10 @@ final class FundModel: ObservableObject {
     let voter = deviceVoterId()
 
     let client: FundClient
+    @Published var workspaces: [WorkspaceSummary] = []
+    @Published var workspaceSignedIn = false
+    @Published var workspaceBusy = false
+    @Published var workspaceError: String?
     let book: FundBook
     /// The Arc business features, scoped by the same fund id and key.
     let business: BusinessModel
@@ -90,6 +94,42 @@ final class FundModel: ObservableObject {
         self.client = client
         self.book = book
         business = BusinessModel(client: BusinessClient(host: client.host))
+        workspaceSignedIn = WorkspaceKeychain.load(host: client.host) != nil
+        if workspaceSignedIn { Task { await refreshWorkspaces() } }
+    }
+
+    func signInWorkspace(code: String) {
+        guard !workspaceBusy else { return }
+        workspaceBusy = true; workspaceError = nil
+        Task {
+            defer { workspaceBusy = false }
+            do {
+                try await WorkspaceClient(host: client.host).redeem(code: code)
+                workspaceSignedIn = true
+                await refreshWorkspaces()
+            } catch {
+                workspaceError = (error as? FundAPIError)?.message ?? "Could not sign in. Try a new private code."
+            }
+        }
+    }
+
+    func refreshWorkspaces() async {
+        workspaceBusy = true
+        defer { workspaceBusy = false }
+        do { workspaces = try await WorkspaceClient(host: client.host).list(); workspaceError = nil }
+        catch {
+            workspaceError = (error as? FundAPIError)?.message ?? "Could not load your workspaces."
+            if WorkspaceKeychain.load(host: client.host) == nil { workspaceSignedIn = false; workspaces = [] }
+        }
+    }
+
+    func signOutWorkspace() {
+        guard !workspaceBusy else { return }
+        workspaceBusy = true
+        Task {
+            await WorkspaceClient(host: client.host).logout()
+            workspaceSignedIn = false; workspaces = []; workspaceError = nil; workspaceBusy = false
+        }
     }
 
     var network: String { view?.networkLabel ?? SynqNetwork.fundBackend }

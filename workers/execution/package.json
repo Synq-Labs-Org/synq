@@ -22,12 +22,15 @@
     "./vault-outbox": "./src/vault-outbox.ts",
     "./escrow": "./src/escrow.ts",
     "./pg-escrow": "./src/pg-escrow.ts",
-    "./agent-stack": "./src/agent-stack.ts"
+    "./agent-stack": "./src/agent-stack.ts",
+    "./workspace-vault": "./src/workspace-vault.ts",
+    "./circle-wallets": "./src/circle-wallets.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
+    "@synq/workspaces": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/governance": "workspace:*",

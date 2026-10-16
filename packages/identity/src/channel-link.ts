@@ -12,6 +12,7 @@ import {
   type Hex,
 } from 'viem';
 import { IdentityError } from './errors.js';
+import { channelLinkTypedData } from './channel-link-data.js';
 import { canonicalJson } from './providers/common.js';
 
 /**
@@ -62,7 +63,7 @@ const MAX_CODE_ATTEMPTS = 3;
 export type ChannelProofVerifier = (
   proof: unknown,
   now: number,
-) => { channelUserId: string; displayHandle?: string } | null;
+) => { channelUserId: string; displayHandle?: string; proofId?: Hex } | null;
 
 /** Delivers a one-time code privately to the platform user (e.g. bot DM). */
 export type ChannelCodeSender = (input: {
@@ -113,44 +114,11 @@ export type ChannelLinkRecord = Readonly<{
   unlinkSignature: Hex | null;
 }>;
 
-export const CHANNEL_LINK_DOMAIN = {
-  name: 'Synq Channel Link',
-  version: '1',
-} as const;
-export const CHANNEL_LINK_TYPES = {
-  ChannelLink: [
-    { name: 'purpose', type: 'string' },
-    { name: 'statement', type: 'string' },
-    { name: 'challengeId', type: 'string' },
-    { name: 'workspaceId', type: 'string' },
-    { name: 'channel', type: 'string' },
-    { name: 'channelUserId', type: 'string' },
-    { name: 'wallet', type: 'address' },
-    { name: 'nonce', type: 'bytes32' },
-    { name: 'issuedAt', type: 'uint64' },
-    { name: 'expiresAt', type: 'uint64' },
-  ],
-} as const;
-
-export function channelLinkTypedData(c: ChannelLinkChallenge) {
-  return {
-    domain: CHANNEL_LINK_DOMAIN,
-    types: CHANNEL_LINK_TYPES,
-    primaryType: 'ChannelLink' as const,
-    message: {
-      purpose: c.purpose,
-      statement: c.statement,
-      challengeId: c.challengeId,
-      workspaceId: c.workspaceId,
-      channel: c.channel,
-      channelUserId: c.channelUserId,
-      wallet: c.wallet,
-      nonce: c.nonce,
-      issuedAt: BigInt(c.issuedAt),
-      expiresAt: BigInt(c.expiresAt),
-    },
-  };
-}
+export {
+  CHANNEL_LINK_DOMAIN,
+  CHANNEL_LINK_TYPES,
+  channelLinkTypedData,
+} from './channel-link-data.js';
 
 export type InsertLinkResult = 'OK' | 'CHANNEL_LINKED' | 'WALLET_LINKED';
 
@@ -408,7 +376,15 @@ export class ChannelLinkService {
     const channelUserId = parseChannelUserId(channel, proven.channelUserId);
     let proofHash: Hex;
     try {
-      proofHash = sha256(`${channel}:${canonicalJson(proof)}`);
+      if (
+        proven.proofId !== undefined &&
+        !/^0x[0-9a-fA-F]{64}$/.test(proven.proofId)
+      )
+        throw new Error('invalid proof id');
+      proofHash =
+        proven.proofId !== undefined
+          ? sha256(`${channel}:provider-proof:${proven.proofId.toLowerCase()}`)
+          : sha256(`${channel}:${canonicalJson(proof)}`);
     } catch {
       throw new IdentityError('UNAUTHORIZED', 'channel proof invalid');
     }
