@@ -371,3 +371,500 @@ export const EDGE_CASES: [string, InteractiveCard][] = [
     }),
   ],
 ];
+
+/* ------------------------------------------------------------------ */
+/* Arc-era card types: deal, escrow, invoice, risk, agent, payout, flight */
+/* ------------------------------------------------------------------ */
+
+/** Arc testnet chain id (sample data). */
+const ARC_TESTNET = 5_042_002;
+const hash = (n: number) =>
+  `0x${n.toString(16).padStart(4, '0').repeat(16)}` as const;
+export const SAMPLE_CLIENT = sampleAddress('c11e', '0001');
+export const SAMPLE_FREELANCER = sampleAddress('f4ee', '0002');
+const SAMPLE_ESCROW = sampleAddress('e5c0', '0003');
+const arc = (n: number) => ({
+  ...base(n),
+  groupId: 'ws_studio',
+  groupLabel: 'Kite Studio (preview)',
+  observedAt: NOW - 180,
+  chainId: ARC_TESTNET,
+  executionMode: 'LIVE_ARC_TESTNET' as const,
+});
+
+export const ARC_SAMPLES: Record<string, InteractiveCard> = Object.fromEntries(
+  (
+    [
+      [
+        'deal',
+        {
+          ...arc(101),
+          type: 'DEAL_PROPOSAL',
+          dealId: 'deal_7f3a91c2',
+          version: 2,
+          termsHash: hash(0x9f3a),
+          title: 'Landing page redesign',
+          status: 'NEGOTIATING',
+          client: { label: 'Maya (Kite Studio)', address: SAMPLE_CLIENT },
+          freelancer: { label: 'Arjun Rao', address: SAMPLE_FREELANCER },
+          total: { amount: '1250', symbol: 'USDC' },
+          milestoneCount: 3,
+          signatures: { client: 'SIGNED', freelancer: 'PENDING' },
+          escrow: SAMPLE_ESCROW,
+          expiresAt: NOW + 3 * 86_400,
+          actions: [
+            {
+              kind: 'REVIEW_APPROVE',
+              label: 'Review and sign',
+              url: `${W}/deal/deal_7f3a91c2?t=preview`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'escrow',
+        {
+          ...arc(102),
+          type: 'ESCROW_MILESTONE',
+          dealId: 'deal_7f3a91c2',
+          termsHash: hash(0x9f3a),
+          escrowDealId: '42',
+          escrow: SAMPLE_ESCROW,
+          milestoneIndex: 1,
+          milestoneCount: 3,
+          title: 'Responsive build',
+          amount: { amount: '500', symbol: 'USDC' },
+          state: 'DELIVERED',
+          deadline: NOW + 5 * 86_400,
+          evidence: {
+            type: 'GITHUB_PR',
+            hash: hash(0x51ab),
+            label: 'kite/site PR #18 merged',
+          },
+          disputeDeadline: null,
+          transactions: [{ label: 'Escrow funded', hash: hash(0x7c21) }],
+          actions: [
+            {
+              kind: 'VIEW',
+              label: 'Review delivery',
+              url: `${W}/deal/deal_7f3a91c2?m=1`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'invoice',
+        {
+          ...arc(103),
+          type: 'INVOICE',
+          invoiceId: 'inv_3c9e10aa',
+          number: 'INV-2026-014',
+          version: 1,
+          status: 'PARTIAL',
+          issuer: { label: 'Arjun Rao', address: SAMPLE_FREELANCER },
+          payer: 'Kite Studio',
+          total: { amount: '840.5', symbol: 'USDC' },
+          paid: { amount: '400', symbol: 'USDC' },
+          due: { amount: '440.5', symbol: 'USDC' },
+          overpaid: { amount: '0', symbol: 'USDC' },
+          dueDate: '2026-11-01',
+          paymentRef: hash(0x4e1d),
+          termsHash: hash(0x2b77),
+          paymentCount: 1,
+          lastPaymentTx: hash(0x8d02),
+          actions: [
+            {
+              kind: 'VIEW',
+              label: 'Pay invoice',
+              url: `${W}/pay/inv_3c9e10aa?t=preview`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'risk',
+        {
+          ...arc(104),
+          type: 'RISK_HOLD',
+          caseId: 'case_a91f2c7d0e',
+          revision: 1,
+          subject: {
+            kind: 'DESTINATION',
+            label: 'Sarah (contractor)',
+            address: sampleAddress('bad0', '0004'),
+          },
+          state: 'HELD',
+          flags: [
+            {
+              code: 'DESTINATION_CHANGED',
+              severity: 'HARD',
+              detail: 'Payout address differs from the verified one on file',
+              reviewerClearable: false,
+            },
+            {
+              code: 'AMOUNT_ANOMALY',
+              severity: 'SOFT',
+              detail: '100 USDC is 4x this vendor’s usual payout',
+              reviewerClearable: true,
+            },
+          ],
+          clearedBy:
+            'Owner signature after verifying the new address from the old wallet',
+          amount: { amount: '100', symbol: 'USDC' },
+          alertCount: 1,
+          openedAt: NOW - 600,
+          actions: [
+            {
+              kind: 'VIEW',
+              label: 'Review the case',
+              url: `${W}/risk/case_a91f2c7d0e`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'agent',
+        {
+          ...arc(105),
+          type: 'AGENT_RECOMMENDATION',
+          runId: 'team_tg_5c1e9a',
+          question:
+            'Ask your CFO and Risk Agent whether we should pay this contractor',
+          roles: [
+            {
+              persona: 'CFO',
+              stance: 'PAY',
+              summary: 'Cash covers it after reserves; pay on the due date',
+              citations: 2,
+            },
+            {
+              persona: 'RISK',
+              stance: 'CLEAR',
+              summary: 'Verified payout address; no fraud flags',
+              citations: 2,
+            },
+            {
+              persona: 'PAYMENT',
+              stance: 'INFO',
+              summary: 'Prepared a 120 USDC payout via the vault policy',
+              citations: 1,
+            },
+          ],
+          decision: {
+            outcome: 'NEEDS_APPROVAL',
+            reasons: ['Above the per-action cap: the owner signs'],
+          },
+          counterparty: 'Arjun',
+          amount: { amount: '120', symbol: 'USDC' },
+          evidence: { facts: 4, inferences: 1, oldestFactSeconds: 95 },
+          riskCaseId: null,
+          auditHash: hash(0xa0d1),
+          actions: [
+            {
+              kind: 'REVIEW_APPROVE',
+              label: 'Review and sign in your wallet',
+              url: `${W}/intents/int_vi_7`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'contractor',
+        {
+          ...arc(106),
+          type: 'CONTRACTOR_PAYMENT',
+          paymentId: 'int_vi_7',
+          recipient: {
+            label: 'Arjun Rao',
+            address: SAMPLE_FREELANCER,
+            verified: true,
+          },
+          amount: { amount: '120', symbol: 'USDC' },
+          route: 'VAULT_POLICY_PAY',
+          obligationRef: 'vi_INV-2026-014',
+          approvals: { counted: 1, required: 1 },
+          status: 'CONFIRMED',
+          transactionHash: hash(0x3f9e),
+          evidenceHash: hash(0x11aa),
+          actions: [
+            {
+              kind: 'EXPLORER',
+              label: 'View on explorer',
+              url: `https://testnet.arcscan.app/tx/${hash(0x3f9e)}`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+      [
+        'flight',
+        {
+          ...arc(107),
+          type: 'FLIGHT_COMPARISON',
+          chainId: null,
+          executionMode: 'PROVIDER_SANDBOX',
+          tripId: 'trp_0a1b2c3d4e5f6a7b',
+          proposalId: null,
+          origin: 'DEL',
+          destination: 'GOI',
+          departureDate: '2026-12-01',
+          returnDate: '2026-12-05',
+          travelers: 3,
+          cabin: 'economy',
+          options: [
+            {
+              optionId: 'f1',
+              carrier: 'Duffel Airways',
+              flights: 'ZZ 123 / ZZ 456',
+              legs: [
+                { origin: 'DEL', destination: 'GOI', date: '2026-12-01' },
+                { origin: 'GOI', destination: 'DEL', date: '2026-12-05' },
+              ],
+              stops: 0,
+              price: { amount: '254.3', symbol: 'USD' },
+              baggage: '1 checked bag',
+              refundable: true,
+              votes: 2,
+            },
+            {
+              optionId: 'f2',
+              carrier: 'Duffel Airways',
+              flights: 'ZZ 781 / ZZ 902',
+              legs: [
+                { origin: 'DEL', destination: 'GOI', date: '2026-12-01' },
+                { origin: 'GOI', destination: 'DEL', date: '2026-12-05' },
+              ],
+              stops: 1,
+              price: { amount: '198.75', symbol: 'USD' },
+              baggage: 'Cabin bag only',
+              refundable: false,
+              votes: 1,
+            },
+            {
+              optionId: 'f3',
+              carrier: 'Duffel Airways',
+              flights: 'ZZ 210 / ZZ 344',
+              legs: [
+                { origin: 'DEL', destination: 'GOI', date: '2026-12-01' },
+                { origin: 'GOI', destination: 'DEL', date: '2026-12-05' },
+              ],
+              stops: 0,
+              price: { amount: '301', symbol: 'USD' },
+              baggage: '2 checked bags',
+              refundable: true,
+              votes: 0,
+            },
+          ],
+          preferredOptionId: 'f1',
+          provider: 'Duffel (test mode)',
+          actions: [
+            {
+              kind: 'VOTE',
+              label: 'Compare and vote',
+              url: `${W}/fund/trips/trp_0a1b2c3d4e5f6a7b`,
+              style: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    ] as const
+  ).map(([k, c]) => [k, InteractiveCardSchema.parse(c)]),
+);
+
+const editArc = (name: string, patch: Record<string, unknown>) =>
+  InteractiveCardSchema.parse({ ...ARC_SAMPLES[name], ...patch });
+const LONG =
+  'An extraordinarily long label that keeps going well past any width a card could show';
+const HUGE = '98765432109876543210987654321.123456';
+
+/** Two stress cases per Arc-era type: huge amounts, long names, missing optional fields, terminal states. */
+export const ARC_EDGE_CASES: [string, InteractiveCard][] = [
+  [
+    'deal: settled, both signed, huge total, long names',
+    editArc('deal', {
+      status: 'SETTLED',
+      title: LONG,
+      client: { label: LONG, address: SAMPLE_CLIENT },
+      total: { amount: HUGE, symbol: 'USDC' },
+      milestoneCount: 32,
+      signatures: { client: 'SIGNED', freelancer: 'SIGNED' },
+      actions: [],
+    }),
+  ],
+  [
+    'deal: draft, no escrow, no expiry, declined',
+    editArc('deal', {
+      status: 'DRAFT',
+      version: 1,
+      escrow: null,
+      expiresAt: null,
+      signatures: { client: 'PENDING', freelancer: 'DECLINED' },
+      executionMode: 'LOCAL_FIXTURE',
+    }),
+  ],
+  [
+    'escrow: disputed with deadline, no evidence, no txs',
+    editArc('escrow', {
+      state: 'DISPUTED',
+      evidence: null,
+      transactions: [],
+      disputeDeadline: NOW + 2 * 86_400,
+      escrowDealId: null,
+      escrow: null,
+      actions: [],
+    }),
+  ],
+  [
+    'escrow: released, 32 milestones, huge amount, long title',
+    editArc('escrow', {
+      state: 'RELEASED',
+      milestoneIndex: 31,
+      milestoneCount: 32,
+      title: LONG,
+      amount: { amount: HUGE, symbol: 'USDC' },
+      escrowDealId:
+        '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+    }),
+  ],
+  [
+    'invoice: paid in full, holo',
+    editArc('invoice', {
+      status: 'PAID',
+      paid: { amount: '840.5', symbol: 'USDC' },
+      due: { amount: '0', symbol: 'USDC' },
+      paymentCount: 2,
+      actions: [],
+    }),
+  ],
+  [
+    'invoice: overpaid, huge numbers, long payer, draft refs missing',
+    editArc('invoice', {
+      status: 'OVERPAID',
+      payer: LONG,
+      total: { amount: HUGE, symbol: 'USDC' },
+      paid: { amount: '98765432109876543210987654321.5', symbol: 'USDC' },
+      due: { amount: '0', symbol: 'USDC' },
+      overpaid: { amount: '0.376544', symbol: 'USDC' },
+      paymentRef: null,
+      termsHash: null,
+      lastPaymentTx: null,
+    }),
+  ],
+  [
+    'risk: blocked, eight flags, no amount, no address',
+    editArc('risk', {
+      state: 'BLOCKED',
+      subject: { kind: 'VENDOR', label: LONG, address: null },
+      amount: null,
+      flags: Array.from({ length: 8 }, (_, i) => ({
+        code: i % 2 ? 'SCREENING_HIT' : 'SPEND_VELOCITY',
+        severity: i % 3 ? 'HARD' : 'SOFT',
+        detail: `${LONG} (${i})`,
+        reviewerClearable: false,
+      })),
+    }),
+  ],
+  [
+    'risk: resolved, no flags',
+    editArc('risk', { state: 'RESOLVED', flags: [], revision: 3 }),
+  ],
+  [
+    'agent: deny, single role, no amount or evidence',
+    editArc('agent', {
+      roles: [
+        {
+          persona: 'RISK',
+          stance: 'VETO',
+          summary: 'Payout address changed an hour ago; hold the payment',
+          citations: 0,
+        },
+      ],
+      decision: { outcome: 'DENY', reasons: [] },
+      counterparty: null,
+      amount: null,
+      evidence: { facts: 0, inferences: 0, oldestFactSeconds: null },
+      riskCaseId: 'case_a91f2c7d0e',
+    }),
+  ],
+  [
+    'agent: allow, six roles, long summaries',
+    editArc('agent', {
+      roles: (
+        ['CFO', 'RISK', 'PAYMENT', 'AUDIT', 'INVOICE', 'RESEARCH'] as const
+      ).map((persona, i) => ({
+        persona,
+        stance: (
+          ['PAY', 'CLEAR', 'INFO', 'CLEAR', 'INFO', 'UNAVAILABLE'] as const
+        )[i],
+        summary: LONG,
+        citations: i,
+      })),
+      decision: { outcome: 'ALLOW', reasons: [LONG] },
+      amount: { amount: HUGE, symbol: 'USDC' },
+    }),
+  ],
+  [
+    'contractor: unverified, denied, agent wallet, no tx',
+    editArc('contractor', {
+      recipient: {
+        label: LONG,
+        address: sampleAddress('bad0', '0004'),
+        verified: false,
+      },
+      route: 'AGENT_WALLET',
+      obligationRef: null,
+      approvals: { counted: 0, required: 2 },
+      status: 'DENIED',
+      transactionHash: null,
+      evidenceHash: null,
+      actions: [],
+    }),
+  ],
+  [
+    'contractor: awaiting approval, huge amount',
+    editArc('contractor', {
+      amount: { amount: HUGE, symbol: 'USDC' },
+      approvals: { counted: 0, required: 1 },
+      status: 'AWAITING_APPROVAL',
+      transactionHash: null,
+      executionMode: 'LOCAL_FIXTURE',
+    }),
+  ],
+  [
+    'flight: one way, five options, no preference, long carrier',
+    editArc('flight', {
+      returnDate: null,
+      preferredOptionId: null,
+      options: [1, 2, 3, 4, 5].map((i) => ({
+        optionId: `o${i}`,
+        carrier: `${LONG.slice(0, 70)} ${i}`,
+        flights: null,
+        legs: [{ origin: 'DEL', destination: 'GOI', date: '2026-12-01' }],
+        stops: i % 3,
+        price: { amount: `${i}234567.89`, symbol: 'USD' },
+        baggage: null,
+        refundable: i % 2 === 0,
+        votes: 0,
+      })),
+    }),
+  ],
+  [
+    'flight: single option, nine travellers, first class',
+    editArc('flight', {
+      travelers: 9,
+      cabin: 'first',
+      options: [
+        {
+          ...(ARC_SAMPLES.flight as { options: object[] }).options[0],
+          price: { amount: '0.01', symbol: 'USD' },
+        },
+      ],
+      actions: [],
+    }),
+  ],
+];

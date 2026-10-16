@@ -9,6 +9,7 @@ import {
   TelegramBotApi,
   HELP_TEXT,
   type ChannelPorts,
+  type OutboundMessage,
 } from '@synq/channels';
 import {
   dealDraftPort,
@@ -35,7 +36,7 @@ const EVE = 7003; // in the chat, never opted in
 const k = (...p: string[]) => p.join('\u0000');
 const LINK_KEY = new Uint8Array(32).fill(5);
 
-async function world() {
+async function world(options: { cards?: boolean } = {}) {
   const clock = { t: T0 };
   const calls: { method: string; body: Record<string, unknown> }[] = [];
   let n = 0;
@@ -152,6 +153,9 @@ async function world() {
     webBaseUrl: 'https://synq.example',
     linkKey: LINK_KEY,
     reasoner: null,
+    ...(options.cards
+      ? { cards: { executionMode: 'LOCAL_FIXTURE' as const } }
+      : {}),
   });
   const ports: ChannelPorts = {
     activeMember: async (g, p) =>
@@ -208,7 +212,24 @@ async function world() {
   };
   const sent = () =>
     calls.filter((c) => c.method === 'sendMessage').map((c) => c.body);
-  return { clock, gateway, adapter, say, sent, calls, r, dealCalls, memory };
+  const outbound: OutboundMessage[] = [];
+  const send = adapter.send.bind(adapter);
+  adapter.send = async (chat, m) => {
+    outbound.push(m);
+    return send(chat, m);
+  };
+  return {
+    clock,
+    gateway,
+    adapter,
+    say,
+    sent,
+    calls,
+    r,
+    dealCalls,
+    memory,
+    outbound,
+  };
 }
 
 describe('Deal Room chat surface', () => {
@@ -281,6 +302,36 @@ describe('Deal Room chat surface', () => {
     expect(yes.out[0]!.status).not.toBe('HANDLED');
     expect((await w.r.service.view(m[1]!)).deal.status).toBe('DRAFT');
     expect((await w.r.service.view(m[1]!)).signatures).toHaveLength(0);
+  });
+
+  it('/deal replies with a DEAL_PROPOSAL card when cards are on; its only action is the review link', async () => {
+    const w = await world({ cards: true });
+    w.clock.t = T0 - 600;
+    await w.say(
+      DANA,
+      'We need the Synq landing page rebuilt: hero section, pricing table and docs links.',
+    );
+    await w.say(
+      MAYA,
+      'Happy to. 0.03 USDC total: 0.01 USDC when the hero section PR is merged, 0.02 USDC on final delivery of pricing and docs.',
+    );
+    await w.say(DANA, 'Deal. Hero within 7 days, the rest within 14 days.');
+    w.clock.t = T0;
+    const deal = await w.say(DANA, '/deal landing page');
+    expect(deal.out[0]).toMatchObject({ code: 'DEAL_DRAFTED' });
+    const msg = w.outbound.at(-1)!;
+    const card = msg.card!;
+    expect(card.type).toBe('DEAL_PROPOSAL');
+    if (card.type !== 'DEAL_PROPOSAL') throw new Error('card');
+    expect(card).toMatchObject({
+      version: 1,
+      status: 'DRAFT',
+      total: { amount: '0.03', symbol: 'USDC' },
+      signatures: { client: 'PENDING', freelancer: 'PENDING' },
+      executionMode: 'LOCAL_FIXTURE',
+    });
+    expect(card.actions.map((a) => a.url)).toEqual([msg.buttons![0]!.url]);
+    expect(msg.text).toMatch(/never signs or funds/);
   });
 
   it('guest "@bot draft a deal" reads only the trigger and the replied-to message', async () => {

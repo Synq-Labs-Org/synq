@@ -17,6 +17,7 @@
     "@synq/domain": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/ledger": "workspace:*",
+    "@synq/schemas": "workspace:*",
     "viem": "2.57.4",
     "zod": "4.6.5"
   }

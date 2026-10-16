@@ -60,7 +60,7 @@ describe('card banners', () => {
     const labels = new Set<string>();
     for (const mode of EXECUTION_MODES) {
       const card = edit('receipt-testnet', { executionMode: mode });
-      const label = renderer.face(card).mode!.label;
+      const label = renderer.content(card).mode!.label;
       expect(JSON.stringify(renderer.tree(card))).toContain(label);
       labels.add(label);
     }
@@ -101,7 +101,7 @@ describe('card banners', () => {
       ...Object.values(SAMPLE_CARDS),
       ...EDGE_CASES.map(([, c]) => c),
     ]) {
-      const face = renderer.face(card);
+      const face = renderer.content(card);
       expect(face.network).toBe('Monad Testnet');
       expect(face.mode?.label).toMatch(
         /^(REAL TESTNET|TESTNET|SANDBOX|SIMULATED|NOT EXECUTED|READ ONLY)$/,
@@ -111,13 +111,13 @@ describe('card banners', () => {
       expect(tree).toContain(face.mode!.label);
     }
     expect(
-      new CardBannerRenderer({ networkLabel: null }).face(SAMPLE_CARDS.dca!)
+      new CardBannerRenderer({ networkLabel: null }).content(SAMPLE_CARDS.dca!)
         .mode,
     ).toBeNull();
   });
 
   it('grades rarity by state: pending common, approved rare, settled holo', () => {
-    const rarity = (card: InteractiveCard) => renderer.face(card).rarity;
+    const rarity = (card: InteractiveCard) => renderer.content(card).grade;
     expect(rarity(SAMPLE_CARDS.proposal!)).toBe('COMMON');
     expect(
       rarity(
@@ -139,15 +139,15 @@ describe('card banners', () => {
   });
 
   it('keeps headline amounts exact when they fit and marks approximations', () => {
-    expect(renderer.face(SAMPLE_CARDS.treasury!).headline).toEqual({
-      label: 'BAL',
-      value: '300',
+    expect(renderer.content(SAMPLE_CARDS.treasury!).headline).toEqual({
+      label: 'BALANCE',
+      value: '300.00',
       unit: 'AUSD',
     });
     const huge = EDGE_CASES.find(([n]) => n.startsWith('treasury: huge'))![1];
-    expect(renderer.face(huge).headline?.value).toBe('≈ 1.23e30');
+    expect(renderer.content(huge).headline?.value).toBe('≈ 1.23e30');
     const gift = EDGE_CASES.find(([n]) => n.startsWith('gift: five'))![1];
-    expect(renderer.face(gift).headline).toMatchObject({ label: 'FROM' });
+    expect(renderer.content(gift).headline).toMatchObject({ label: 'FROM' });
   });
 
   it('groups digits without changing the exact amount', () => {

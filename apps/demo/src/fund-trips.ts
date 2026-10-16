@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { SendRecord } from '@synq/funding';
 import { FundError, type FundView } from './fund-service.js';
 import type { Cabin } from './fund-intents.js';
+import { flightTripCard } from './trip-cards.js';
 
 /**
  * Group picks for a fund: flights (Duffel test mode) and gifts (live product
@@ -329,6 +330,17 @@ export class TripService {
     voterId: string | null,
   ): Promise<TripView> {
     return this.view(await this.own(fundId, key, tripId), voterId);
+  }
+
+  /** The flight trip as a FLIGHT_COMPARISON card (null for gifts). */
+  async card(fundId: string, key: string, tripId: string, webBaseUrl: string) {
+    const fund = await this.ports.fund(fundId, key);
+    const trip = await this.own(fundId, key, tripId);
+    return flightTripCard(trip, {
+      groupLabel: fund.name,
+      webBaseUrl,
+      now: this.ports.now(),
+    });
   }
 
   async list(fundId: string, key: string, voterId: string | null) {

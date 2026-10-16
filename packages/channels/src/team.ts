@@ -1,3 +1,5 @@
+import type { InteractiveCard } from '@synq/schemas';
+
 /**
  * Synq's specialists in chat. They are labelled personas inside the single
  * Synq bot (no extra bots): "ask your CFO and Risk Agent whether we should
@@ -80,6 +82,12 @@ export type TeamReplyView = Readonly<{
   /** A payout proposal: the owner signs in the wallet; chat never approves. */
   approval: { label: string; reviewPath: string } | null;
   footer?: string | null;
+  /**
+   * Cards for the answer: an AGENT_RECOMMENDATION sent with the reply and,
+   * when the council froze a payout, the RISK_HOLD after it. The gateway
+   * re-validates them; they carry links only and never approve.
+   */
+  cards?: readonly InteractiveCard[];
 }>;
 
 /** One coherent chat message: "CFO: …", "Risk: …", "Decision (Kernel): …". */

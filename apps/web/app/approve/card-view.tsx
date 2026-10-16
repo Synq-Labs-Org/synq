@@ -1,5 +1,8 @@
 import {
+  CARD_EXECUTION_MODE_LABEL,
   EXECUTION_MODE_LABEL,
+  isArcCard,
+  type ArcCard,
   type CardMoney,
   type InteractiveCard,
 } from '@synq/schemas';
@@ -48,7 +51,112 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
+/** Facts of an Arc-era card, then its network, mode and freshness. */
+function arcRows(card: ArcCard) {
+  const facts: [string, string][] = (() => {
+    switch (card.type) {
+      case 'DEAL_PROPOSAL':
+        return [
+          ['Deal', `${card.title} (v${card.version}, ${card.status})`],
+          ['Total', money(card.total)],
+          [
+            'Client',
+            `${card.client.label} ${card.client.address} ${card.signatures.client}`,
+          ],
+          [
+            'Freelancer',
+            `${card.freelancer.label} ${card.freelancer.address} ${card.signatures.freelancer}`,
+          ],
+          ['Terms hash', card.termsHash],
+        ];
+      case 'ESCROW_MILESTONE':
+        return [
+          [
+            'Milestone',
+            `${card.milestoneIndex + 1}/${card.milestoneCount} ${card.title}`,
+          ],
+          ['Amount', money(card.amount)],
+          ['State', card.state],
+          ['Terms hash', card.termsHash],
+          ...card.transactions.map((t): [string, string] => [t.label, t.hash]),
+        ];
+      case 'INVOICE':
+        return [
+          ['Invoice', `${card.number} v${card.version} (${card.status})`],
+          ['Total', money(card.total)],
+          ['Paid', money(card.paid)],
+          ['Due', `${money(card.due)} by ${card.dueDate}`],
+          ...(card.paymentRef
+            ? [['Memo reference', card.paymentRef] as [string, string]]
+            : []),
+        ];
+      case 'RISK_HOLD':
+        return [
+          ['Case', `${card.caseId} (${card.state})`],
+          [
+            'Subject',
+            `${card.subject.label}${card.subject.address ? ` ${card.subject.address}` : ''}`,
+          ],
+          ...card.flags.map((f): [string, string] => [
+            `${f.severity} ${f.code}`,
+            f.detail,
+          ]),
+          ['Clears with', card.clearedBy],
+        ];
+      case 'AGENT_RECOMMENDATION':
+        return [
+          ...card.roles.map((r): [string, string] => [
+            r.persona,
+            `${r.stance}: ${r.summary}`,
+          ]),
+          ['Decision (Kernel)', card.decision.outcome],
+        ];
+      case 'CONTRACTOR_PAYMENT':
+        return [
+          [
+            'Pay',
+            `${money(card.amount)} to ${card.recipient.label} ${card.recipient.address}`,
+          ],
+          ['Verified payout address', card.recipient.verified ? 'yes' : 'NO'],
+          ['Approvals', `${card.approvals.counted}/${card.approvals.required}`],
+          ['Status', card.status],
+          ...(card.transactionHash
+            ? [['Transaction', card.transactionHash] as [string, string]]
+            : []),
+        ];
+      case 'FLIGHT_COMPARISON':
+        return [
+          [
+            'Route',
+            `${card.origin} to ${card.destination}${card.returnDate ? ' and back' : ''}`,
+          ],
+          ...card.options.map((o): [string, string] => [
+            o.optionId === card.preferredOptionId ? 'Preferred' : 'Option',
+            `${o.carrier}: ${money(o.price)}, ${o.refundable ? 'refundable' : 'non-refundable'}, ${o.votes} votes`,
+          ]),
+        ];
+    }
+  })();
+  return (
+    <>
+      {facts.map(([k, v], i) => (
+        <Row key={i} k={k} v={v} />
+      ))}
+      <Row
+        k="Network"
+        v={card.chainId === null ? 'Off-chain' : `chain ${card.chainId}`}
+      />
+      <Row
+        k="Mode"
+        v={`[${card.executionMode}] ${CARD_EXECUTION_MODE_LABEL[card.executionMode]}`}
+      />
+      <Row k="Observed" v={new Date(card.observedAt * 1000).toISOString()} />
+    </>
+  );
+}
+
 function rows(card: InteractiveCard) {
+  if (isArcCard(card)) return arcRows(card);
   switch (card.type) {
     case 'GROUP_TREASURY':
       return (
