@@ -47,7 +47,7 @@ struct AsciiTheme: SynqTheme {
     ], artFamily: mono)
 
     let space = SynqSpacing()
-    let radius = SynqRadii(panel: 7, control: 7, badge: 3, key: 5, bubble: 10)
+    let radius = SynqRadii(panel: 7, control: 7, badge: 3, key: 5, bubble: 16)
     let lines = SynqLines(hairline: 1, control: 1, ruleDash: [2, 3])
     let motion = SynqMotion()
     let glyphs = SynqGlyphs(bracketOpen: "[", bracketClose: "]", strongOpen: "{", strongClose: "}",

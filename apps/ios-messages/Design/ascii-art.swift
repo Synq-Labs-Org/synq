@@ -632,15 +632,15 @@ func strip(_ s: Scene, x: Double, y: Double, w: Double) -> Piece {
 
 let pieces: [Piece] = [
     hero(home), hero(flights), hero(fund), hero(send), hero(gift), hero(receipt), hero(deal), hero(risk), hero(agent),
-    strip(home, x: 140, y: 96, w: 860),
-    strip(flights, x: 150, y: 92, w: 820),
-    strip(fund, x: 0, y: 150, w: 1000),
-    strip(send, x: 280, y: 290, w: 720),
-    strip(gift, x: 230, y: 130, w: 640),
-    strip(receipt, x: 270, y: 110, w: 560),
-    strip(deal, x: 100, y: 150, w: 900),
-    strip(risk, x: 150, y: 120, w: 700),
-    strip(agent, x: 100, y: 120, w: 800),
+    strip(home, x: 0, y: 140, w: 1000),
+    strip(flights, x: 0, y: 95, w: 1000),
+    strip(fund, x: 0, y: 200, w: 1000),
+    strip(send, x: 140, y: 300, w: 860),
+    strip(gift, x: 0, y: 140, w: 1000),
+    strip(receipt, x: 0, y: 40, w: 1000),
+    strip(deal, x: 0, y: 150, w: 1000),
+    strip(risk, x: 0, y: 130, w: 1000),
+    strip(agent, x: 0, y: 130, w: 1000),
 ]
 
 // MARK: - Rasterise and map to glyphs
