@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import type { Hex } from 'viem';
+import { Ledger, PostgresLedgerStore, migrateFinance } from '@synq/ledger';
+import { keccak256, toHex } from 'viem';
 import {
   DEALROOM_MIGRATIONS,
   DealRoomError,
+  DealRoomService,
   PostgresDealRoomStore,
   acceptsFor,
   migrateDealRoom,
@@ -70,10 +72,19 @@ const code = async (p: Promise<unknown>) => {
   }
   return 'NO_ERROR';
 };
-const pgRoom = () => room(new PostgresDealRoomStore(pool));
+const pgRoom = () => {
+  const r = room(new PostgresDealRoomStore(pool));
+  const ledger = new Ledger(new PostgresLedgerStore(pool));
+  const service = new DealRoomService(r.store, {
+    ...r.service.config,
+    books: { ledger, workspaceId: 'wsp_dealroom_test' },
+  });
+  return { ...r, service, ledger };
+};
 
 beforeAll(async () => {
   pool = await ensureDatabase(URL);
+  await migrateFinance(pool);
   await migrateDealRoom(pool, 0);
   await pool.query('DROP TABLE IF EXISTS synq_dealroom_migrations');
   expect(await migrateDealRoom(pool)).toBe(DEALROOM_MIGRATIONS.at(-1)!.version);
@@ -85,6 +96,48 @@ afterAll(async () => {
 });
 
 describe('Deal Room Postgres store', () => {
+  it('CR-04: ledger postings roll back when the funded deal transition fails', async () => {
+    const r = await signedBoth(pgRoom());
+    const id = r.view.deal.dealId;
+    const v = r.view.current;
+    const m = await mandate({
+      owner: client,
+      id: `mnd_atomic_${id}`,
+      payer: client.address,
+      recipients: [ESCROW],
+      purposes: ['ESCROW_FUNDING'],
+      cap: v.terms.total,
+      budget: v.terms.total,
+    });
+    await r.service.authorizeFunding(id, kernel(m));
+    await pool.query(
+      `CREATE OR REPLACE FUNCTION synq_test_reject_funded() RETURNS trigger AS $$ BEGIN IF NEW.status='FUNDED' THEN RAISE EXCEPTION 'injected commit failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`,
+    );
+    await pool.query(
+      `CREATE TRIGGER synq_test_reject_funded BEFORE UPDATE ON synq_dealroom_deals FOR EACH ROW EXECUTE FUNCTION synq_test_reject_funded()`,
+    );
+    const rec = fundedRecord(v, 99n);
+    try {
+      await expect(
+        r.service.recordFunded({ dealId: id, ...rec }),
+      ).rejects.toThrow('injected commit failure');
+      expect((await r.service.view(id)).deal.status).toBe('FUNDING');
+      const entries = await pool.query(
+        `SELECT data FROM synq_ledger_entries WHERE data->'evidence'->>'txHash'=$1`,
+        [rec.execution.txs[0]!.hash],
+      );
+      expect(entries.rows).toEqual([]);
+    } finally {
+      await pool.query(
+        'DROP TRIGGER synq_test_reject_funded ON synq_dealroom_deals',
+      );
+      await pool.query('DROP FUNCTION synq_test_reject_funded()');
+    }
+    expect(
+      (await r.service.recordFunded({ dealId: id, ...rec })).deal.status,
+    ).toBe('FUNDED');
+  });
+
   it('migrations are versioned in their own table and reversible', async () => {
     const r = await pool.query(
       'SELECT version FROM synq_dealroom_migrations ORDER BY version',
@@ -321,8 +374,10 @@ describe('Deal Room Postgres store', () => {
       mandateRevoked: false,
       fence: fence(),
     });
-    const h = `0x${'c3'.repeat(32)}` as Hex;
+    const h = keccak256(toHex(`${id}:release`));
     const exec = {
+      op: 'RELEASE' as const,
+      milestone: 0,
       escrowDealId: 41n,
       txs: [
         {
@@ -400,11 +455,13 @@ describe('Deal Room Postgres store', () => {
     const { call } = await r.service.refundCall(id, 1);
     expect(call.funder).toBe(client.address);
     expect(call.sender).toBe(arbiter.address);
-    const h2 = `0x${'c4'.repeat(32)}` as Hex;
+    const h2 = keccak256(toHex(`${id}:refund`));
     const done = await r.service.recordRefunded({
       dealId: id,
       milestone: 1,
       execution: {
+        op: 'REFUND' as const,
+        milestone: 1,
         escrowDealId: 41n,
         txs: [{ label: 'refund', hash: h2, from: arbiter.address, feeWei: 2n }],
         transfers: [
@@ -432,6 +489,7 @@ describe('Deal Room Postgres store', () => {
       'FUNDED',
       'ATTESTED_DELIVERED',
       'ATTESTED_ACCEPT_RELEASE',
+      'RELEASE_GRANTED',
       'RELEASED',
       'ATTESTED_DISPUTE',
       'ATTESTED_ARBITER_REFUND',

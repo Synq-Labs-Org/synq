@@ -5,6 +5,7 @@ import {
   type AuthorityConfig,
   type Decision as KernelDecision,
   type MandateState,
+  type NonceFence,
   type OwnerApproval,
   type PaymentIntent,
   type PaymentMandate,
@@ -95,8 +96,22 @@ export type DealRoomConfig = Readonly<{
   escrow: Address;
   settings: DraftSettings;
   newId?: () => string;
-  /** When set, chain effects are posted to these books (idempotent per log). */
-  books?: { ledger: Ledger; workspaceId: string } | null;
+  /**
+   * The books chain effects are posted to (idempotent per log), before the
+   * Deal Room state changes. Without books, chain effects are refused. The
+   * workspace defaults to the deal's own.
+   */
+  books: { ledger: Ledger; workspaceId?: string } | null;
+  /**
+   * The executor's grant fence. A dispute burns the nonces of outstanding
+   * release grants through it, so a granted release can no longer run.
+   */
+  fence?: NonceFence | null;
+  /**
+   * Server-side evidence check (e.g. the GitHub API). Without it, delivered
+   * evidence is stored as unverified; a party can never mark it verified.
+   */
+  evidenceVerifier?: ((e: Evidence) => Promise<boolean>) | null;
 }>;
 
 export type DealView = Readonly<{
@@ -110,7 +125,11 @@ export type DealView = Readonly<{
 
 /** What the executor reports back; structural so this package needs no signer code. */
 export type ExecutionRecord = Readonly<{
+  /** The escrow operation, proven from the decoded escrow event. */
+  op: 'OPEN' | 'RELEASE' | 'REFUND' | 'DISPUTE';
   escrowDealId: bigint;
+  /** Milestone index from the decoded event (null for OPEN and DISPUTE). */
+  milestone: number | null;
   txs: readonly { label: string; hash: Hex; from: Address; feeWei: bigint }[];
   transfers: readonly {
     from: Address;
@@ -130,6 +149,21 @@ export type ChainEscrowDeal = Readonly<{
   refundAfter: bigint;
   termsHash: Hex;
   milestones: readonly { amount: bigint; status: string }[];
+}>;
+
+/** Why a funding attempt failed, with what the executor recorded before broadcast. */
+export type FundingFailure = Readonly<{
+  reason: string;
+  /** Every pre-broadcast record of this funding grant (approve, open). */
+  broadcast: readonly { step: string; hash: Hex }[];
+  /**
+   * When an `open` was broadcast: its receipt status and every escrow deal
+   * opened by this payer with this version's terms hash (chain reads).
+   */
+  chain?: Readonly<{
+    openReceipt: 'SUCCESS' | 'REVERTED' | 'NOT_FOUND';
+    openedDealIds: readonly bigint[];
+  }>;
 }>;
 
 export type KernelInputs = Readonly<{
@@ -155,6 +189,7 @@ export class DealRoomService {
   constructor(
     readonly store: DealRoomStore,
     readonly config: DealRoomConfig,
+    private readonly inTransaction = false,
   ) {}
 
   private now() {
@@ -165,6 +200,7 @@ export class DealRoomService {
       token: this.config.asset.token,
       chainId: this.config.asset.chainId,
       escrow: this.config.escrow,
+      disputePeriodSeconds: this.config.settings.disputePeriodSeconds,
     };
   }
   private id() {
@@ -299,14 +335,10 @@ export class DealRoomService {
       origin,
       funding: null,
       escrow: null,
-      milestones: terms.milestones.map((m) => ({
-        index: m.index,
-        status: 'PENDING',
-        evidenceHash: null,
-        authorizedBy: null,
-        txs: [],
-      })),
+      milestones: pendingMilestones(terms),
       dispute: null,
+      linkEpoch: 0,
+      failedFundingAttempts: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -443,7 +475,12 @@ export class DealRoomService {
       to: 'NEGOTIATING',
       actor: input.by,
       payload: { termsHash: version.termsHash, parent: current.termsHash },
-      patch: { currentVersion: next, funding: null },
+      // Per-milestone state follows the new version (it may add or drop milestones).
+      patch: {
+        currentVersion: next,
+        funding: null,
+        milestones: pendingMilestones(version.terms),
+      },
       version,
       signature,
     });
@@ -652,6 +689,14 @@ export class DealRoomService {
         'WRONG_SIGNER',
         'funding mandate must be the client’s',
       );
+    // One funding grant per version and attempt; a new attempt exists only
+    // after the previous one was proven not to have opened an escrow deal.
+    const key = `fund:v${view.current.version}:a${view.deal.failedFundingAttempts ?? 0}`;
+    if (view.transitions.some((x) => x.idempotencyKey === key))
+      throw new DealRoomError(
+        'REPLAYED',
+        `a funding grant was already issued for v${view.current.version}`,
+      );
     const r = await this.authorize(
       call,
       {
@@ -664,7 +709,8 @@ export class DealRoomService {
     if (r.decision.outcome === 'ALLOW')
       await this.apply(view, {
         kind: 'FUNDING_GRANTED',
-        key: `fund:v${view.current.version}:${r.decision.grant.grantId}`,
+        key,
+        exclusive: true,
         to: 'FUNDING',
         actor: 'kernel',
         payload: {
@@ -675,23 +721,63 @@ export class DealRoomService {
           funding: {
             intentId: r.intent.intentId,
             grantId: r.decision.grant.grantId,
+            nonce: r.decision.grant.nonce,
           },
         },
       });
     return { ...r, call };
   }
 
-  /** The executor failed before funding landed: back to ACCEPTED, a new grant is needed. */
-  async fundingFailed(dealId: string, reason: string) {
+  /**
+   * A funding attempt failed. Back to ACCEPTED (a new grant may be issued)
+   * only with proof that no escrow deal was opened: no `open` was broadcast,
+   * or its receipt reverted and the chain shows no deal with this payer and
+   * terms hash. Anything else goes to NEEDS_REVIEW, where only a recorded
+   * funding or a later proof moves the deal (CR-02).
+   */
+  async fundingFailed(dealId: string, failure: FundingFailure) {
     const view = await this.view(dealId);
-    if (view.deal.status !== 'FUNDING') return view;
+    const { deal } = view;
+    if (deal.status !== 'FUNDING' && deal.status !== 'NEEDS_REVIEW')
+      throw new DealRoomError('WRONG_STATE', `deal is ${deal.status}`);
+    const opened = failure.broadcast.some((b) => b.step === 'OPEN');
+    const noOpen =
+      !opened ||
+      (failure.chain?.openReceipt === 'REVERTED' &&
+        failure.chain.openedDealIds.length === 0);
+    // Retire the prior grant before any retry. Old rows without a nonce or
+    // deployments without the executor fence remain in review.
+    const proven = noOpen && !!deal.funding?.nonce && !!this.config.fence;
+    if (proven) await this.config.fence!.consume(deal.funding!.nonce!);
+    const attempt = deal.failedFundingAttempts ?? 0;
+    if (!proven)
+      return this.apply(view, {
+        kind: 'FUNDING_NEEDS_REVIEW',
+        key: `fundreview:a${attempt}:${failure.broadcast.map((b) => b.hash).join(',')}`,
+        to: 'NEEDS_REVIEW',
+        actor: 'executor',
+        payload: {
+          reason: failure.reason.slice(0, 300),
+          broadcast: failure.broadcast,
+          chain: failure.chain
+            ? {
+                openReceipt: failure.chain.openReceipt,
+                openedDealIds: failure.chain.openedDealIds.map(String),
+              }
+            : null,
+        },
+      });
     return this.apply(view, {
       kind: 'FUNDING_FAILED',
-      key: `fundfail:${view.deal.funding?.grantId ?? 'none'}`,
+      key: `fundfail:a${attempt}`,
       to: 'ACCEPTED',
       actor: 'executor',
-      payload: { reason: reason.slice(0, 300) },
-      patch: { funding: null },
+      payload: {
+        reason: failure.reason.slice(0, 300),
+        broadcast: failure.broadcast,
+        grantId: deal.funding?.grantId ?? null,
+      },
+      patch: { funding: null, failedFundingAttempts: attempt + 1 },
     });
   }
 
@@ -705,11 +791,26 @@ export class DealRoomService {
     dealId: string;
     execution: ExecutionRecord;
     chain: ChainEscrowDeal;
-  }) {
+  }): Promise<DealView> {
+    if (!this.inTransaction && this.store.withLedger) {
+      return this.store.withLedger((store, ledger) =>
+        new DealRoomService(
+          store,
+          {
+            ...this.config,
+            books: this.config.books ? { ...this.config.books, ledger } : null,
+          },
+          true,
+        ).recordFunded(input),
+      );
+    }
     const view = await this.view(input.dealId);
-    if (view.deal.status !== 'FUNDING')
+    if (view.deal.status !== 'FUNDING' && view.deal.status !== 'NEEDS_REVIEW')
       throw new DealRoomError('WRONG_STATE', `deal is ${view.deal.status}`);
     const t = view.current.terms;
+    assertExecutionHashes(input.execution);
+    if (input.execution.op !== 'OPEN' || input.execution.milestone !== null)
+      throw new DealRoomError('FUNDING_MISMATCH', 'not an escrow open');
     const problems = fundingMismatches(
       t,
       view.current.termsHash,
@@ -719,6 +820,20 @@ export class DealRoomService {
     if (problems.length)
       throw new DealRoomError('FUNDING_MISMATCH', problems.join('; '));
     const fundingTxs = input.execution.txs.map((x) => x.hash);
+    const transfer = input.execution.transfers.find(
+      (x) =>
+        lower(x.from) === lower(t.client.wallet) &&
+        lower(x.to) === lower(t.escrow),
+    )!;
+    // Books first (idempotent per log), then the state change.
+    await this.book(view, input.execution, (b) =>
+      escrowFundingEntry(b, {
+        txHash: transfer.hash,
+        logIndex: transfer.logIndex,
+        amount: transfer.value,
+        at: this.now(),
+      }),
+    );
     const out = await this.apply(view, {
       kind: 'FUNDED',
       key: `funded:${input.execution.escrowDealId}`,
@@ -736,25 +851,13 @@ export class DealRoomService {
           fundingTxs,
           fundedAt: this.now(),
         },
-        milestones: view.deal.milestones.map((m) => ({
+        // Rebuilt from the funded version, whose split the chain just proved.
+        milestones: pendingMilestones(t).map((m) => ({
           ...m,
           status: 'FUNDED' as const,
         })),
       },
     });
-    const transfer = input.execution.transfers.find(
-      (x) =>
-        lower(x.from) === lower(t.client.wallet) &&
-        lower(x.to) === lower(t.escrow),
-    )!;
-    await this.book(view, input.execution, (b) =>
-      escrowFundingEntry(b, {
-        txHash: transfer.hash,
-        logIndex: transfer.logIndex,
-        amount: transfer.value,
-        at: this.now(),
-      }),
-    );
     return out;
   }
 
@@ -782,6 +885,7 @@ export class DealRoomService {
     const { deal, current } = view;
     if (!POST_FUNDING.includes(deal.status) || !deal.escrow)
       throw new DealRoomError('WRONG_STATE', `deal is ${deal.status}`);
+    assertShape(view);
     const rule = ATTESTATION_RULES[input.kind];
     if (!rule.by.includes(input.role))
       throw new DealRoomError(
@@ -801,11 +905,49 @@ export class DealRoomService {
       throw new DealRoomError('EXPIRED', 'attestation deadline passed');
     if (view.attestations.some((a) => lower(a.nonce) === lower(input.nonce)))
       throw new DealRoomError('REPLAYED', 'attestation nonce already used');
+    if (input.kind === 'DISPUTE') {
+      // As on chain: one dispute per party per deal, never while one is active.
+      if (
+        view.attestations.some(
+          (a) => a.kind === 'DISPUTE' && a.role === input.role,
+        )
+      )
+        throw new DealRoomError(
+          'REPLAYED',
+          `${input.role} already raised its one dispute on this deal`,
+        );
+      if (this.disputeActive(deal))
+        throw new DealRoomError(
+          'MILESTONE_DISPUTED',
+          'a dispute is already active on this deal',
+        );
+    }
     let evidence: Evidence | null = null;
     if (input.kind === 'DELIVERED') {
-      evidence = checkEvidence(input.evidence, term.evidenceType);
+      // `verifiedBy` is never taken from the party: only the server's check sets it.
+      const claimed = {
+        ...checkEvidence(input.evidence, term.evidenceType),
+        verifiedBy: null,
+        checkedAt: this.now(),
+      };
+      const verifier = this.config.evidenceVerifier;
+      if (verifier) {
+        if (!(await verifier(claimed).catch(() => false)))
+          throw new DealRoomError(
+            'EVIDENCE_INVALID',
+            'the evidence could not be verified at its source',
+          );
+        evidence =
+          claimed.type === 'FILE_SHA256'
+            ? claimed
+            : { ...claimed, verifiedBy: 'GITHUB_API' };
+      } else evidence = claimed;
     } else if (input.evidence) {
-      evidence = EvidenceSchema.parse(input.evidence);
+      evidence = {
+        ...EvidenceSchema.parse(input.evidence),
+        verifiedBy: null,
+        checkedAt: this.now(),
+      };
     }
     const evidenceHash = evidenceHashOf(evidence);
     if (input.kind === 'ACCEPT_RELEASE' && evidenceHash !== ms.evidenceHash)
@@ -862,6 +1004,23 @@ export class DealRoomService {
                   : m.authorizedBy,
             },
     );
+    // A dispute revokes every outstanding release grant: their nonces are
+    // burned in the executor's fence, so admission refuses them (CR-07).
+    const revoked: { grantId: string; burned: boolean }[] = [];
+    if (input.kind === 'DISPUTE') {
+      const outstanding = outstandingReleaseGrants(view, this.now());
+      if (outstanding.length && !this.config.fence)
+        throw new DealRoomError(
+          'WRONG_STATE',
+          'release grants are outstanding and no executor fence is configured to revoke them',
+        );
+      for (const g of outstanding)
+        revoked.push({
+          grantId: g.grantId,
+          // false: the executor already admitted it (a release may land; it is then recorded).
+          burned: await this.config.fence!.consume(g.nonce),
+        });
+    }
     const dispute =
       input.kind === 'DISPUTE'
         ? {
@@ -878,7 +1037,12 @@ export class DealRoomService {
       key: `attest:${input.milestone}:${input.kind}`,
       to: dealStatusFromMilestones(milestones),
       actor: input.role,
-      payload: { attestationId, evidenceHash, signer },
+      payload: {
+        attestationId,
+        evidenceHash,
+        signer,
+        ...(revoked.length ? { revokedReleaseGrants: revoked } : {}),
+      },
       patch: { milestones, dispute },
       attestation,
     });
@@ -901,6 +1065,7 @@ export class DealRoomService {
   ): Promise<{ call: EscrowReleaseCall; view: DealView; via: Attestation }> {
     const view = await this.view(dealId);
     const { deal, current } = view;
+    assertShape(view);
     const ms = deal.milestones[milestone];
     const term = current.terms.milestones[milestone];
     if (!ms || !term || !deal.escrow)
@@ -953,7 +1118,16 @@ export class DealRoomService {
   }
 
   async authorizeRelease(dealId: string, milestone: number, k: KernelInputs) {
-    const { call, via } = await this.releaseCall(dealId, milestone);
+    const { call, via, view } = await this.releaseCall(dealId, milestone);
+    if (
+      outstandingReleaseGrants(view, this.now()).some(
+        (g) => g.milestone === milestone,
+      )
+    )
+      throw new DealRoomError(
+        'REPLAYED',
+        `a release grant for milestone ${milestone} is outstanding`,
+      );
     if (lower(k.mandate.owner) !== lower(call.sender))
       throw new DealRoomError(
         'WRONG_SIGNER',
@@ -968,6 +1142,23 @@ export class DealRoomService {
       },
       k,
     );
+    if (r.decision.outcome === 'ALLOW') {
+      const g = r.decision.grant;
+      // Recorded so a dispute can revoke it before it runs.
+      await this.apply(view, {
+        kind: 'RELEASE_GRANTED',
+        key: `release-grant:m${milestone}:${g.grantId}`,
+        to: view.deal.status,
+        actor: 'kernel',
+        payload: {
+          milestone,
+          grantId: g.grantId,
+          nonce: g.nonce,
+          expiresAt: g.expiresAt,
+        },
+        exclusive: true,
+      });
+    }
     return { ...r, call };
   }
 
@@ -976,7 +1167,19 @@ export class DealRoomService {
     dealId: string;
     milestone: number;
     execution: ExecutionRecord;
-  }) {
+  }): Promise<DealView> {
+    if (!this.inTransaction && this.store.withLedger) {
+      return this.store.withLedger((store, ledger) =>
+        new DealRoomService(
+          store,
+          {
+            ...this.config,
+            books: this.config.books ? { ...this.config.books, ledger } : null,
+          },
+          true,
+        ).recordReleased(input),
+      );
+    }
     const view = await this.view(input.dealId);
     const ms = view.deal.milestones[input.milestone];
     const t = view.current.terms;
@@ -984,8 +1187,19 @@ export class DealRoomService {
       throw new DealRoomError('NOT_FOUND', `milestone ${input.milestone}`);
     const key = `released:${input.milestone}`;
     if (view.transitions.some((x) => x.idempotencyKey === key)) return view;
-    this.sameEscrowDeal(view, input.execution);
-    if (ms.status !== 'ACCEPTED')
+    assertShape(view);
+    this.sameExecution(view, input.execution, 'RELEASE', input.milestone);
+    // DISPUTED is accepted only when a release grant for it was issued before
+    // the dispute: the chain then proves the release ran first.
+    const grantedBefore = view.transitions.some(
+      (x) =>
+        x.kind === 'RELEASE_GRANTED' &&
+        (x.payload as { milestone?: number }).milestone === input.milestone,
+    );
+    if (
+      ms.status !== 'ACCEPTED' &&
+      !(ms.status === 'DISPUTED' && grantedBefore)
+    )
       throw new DealRoomError('WRONG_STATE', `milestone is ${ms.status}`);
     const paid = input.execution.transfers.filter(
       (x) =>
@@ -1016,14 +1230,6 @@ export class DealRoomService {
             }
           : m,
     );
-    await this.apply(view, {
-      kind: 'RELEASED',
-      key,
-      to: dealStatusFromMilestones(milestones),
-      actor: 'chain',
-      payload: { txs: input.execution.txs.map((x) => x.hash) },
-      patch: { milestones },
-    });
     const p = paid[0]!;
     await this.book(view, input.execution, (b) =>
       escrowReleaseEntry(b, {
@@ -1034,6 +1240,14 @@ export class DealRoomService {
         milestone: input.milestone,
       }),
     );
+    await this.apply(view, {
+      kind: 'RELEASED',
+      key,
+      to: dealStatusFromMilestones(milestones),
+      actor: 'chain',
+      payload: { txs: input.execution.txs.map((x) => x.hash) },
+      patch: { milestones },
+    });
     return this.view(input.dealId);
   }
 
@@ -1044,6 +1258,7 @@ export class DealRoomService {
   ): Promise<{ call: EscrowRefundCall; view: DealView; via: Attestation }> {
     const view = await this.view(dealId);
     const { deal, current } = view;
+    assertShape(view);
     const ms = deal.milestones[milestone];
     const term = current.terms.milestones[milestone];
     if (!ms || !term || !deal.escrow)
@@ -1103,7 +1318,19 @@ export class DealRoomService {
     dealId: string;
     milestone: number;
     execution: ExecutionRecord;
-  }) {
+  }): Promise<DealView> {
+    if (!this.inTransaction && this.store.withLedger) {
+      return this.store.withLedger((store, ledger) =>
+        new DealRoomService(
+          store,
+          {
+            ...this.config,
+            books: this.config.books ? { ...this.config.books, ledger } : null,
+          },
+          true,
+        ).recordRefunded(input),
+      );
+    }
     const view = await this.view(input.dealId);
     const t = view.current.terms;
     const ms = view.deal.milestones[input.milestone];
@@ -1111,7 +1338,8 @@ export class DealRoomService {
       throw new DealRoomError('NOT_FOUND', `milestone ${input.milestone}`);
     const key = `refunded:${input.milestone}`;
     if (view.transitions.some((x) => x.idempotencyKey === key)) return view;
-    this.sameEscrowDeal(view, input.execution);
+    assertShape(view);
+    this.sameExecution(view, input.execution, 'REFUND', input.milestone);
     if (ms.status !== 'REFUNDING')
       throw new DealRoomError('WRONG_STATE', `milestone is ${ms.status}`);
     const back = input.execution.transfers.filter(
@@ -1142,14 +1370,6 @@ export class DealRoomService {
             }
           : m,
     );
-    await this.apply(view, {
-      kind: 'REFUNDED',
-      key,
-      to: dealStatusFromMilestones(milestones),
-      actor: 'chain',
-      payload: { txs: input.execution.txs.map((x) => x.hash) },
-      patch: { milestones },
-    });
     const p = back[0]!;
     await this.book(view, input.execution, (b) =>
       escrowRefundEntry(b, {
@@ -1160,15 +1380,45 @@ export class DealRoomService {
         milestone: input.milestone,
       }),
     );
+    await this.apply(view, {
+      kind: 'REFUNDED',
+      key,
+      to: dealStatusFromMilestones(milestones),
+      actor: 'chain',
+      payload: { txs: input.execution.txs.map((x) => x.hash) },
+      patch: { milestones },
+    });
     return this.view(input.dealId);
   }
 
   /** Records the on-chain dispute transaction for the deal's active dispute. */
-  async recordDispute(input: { dealId: string; execution: ExecutionRecord }) {
+  async recordDispute(input: {
+    dealId: string;
+    execution: ExecutionRecord;
+  }): Promise<DealView> {
+    if (!this.inTransaction && this.store.withLedger) {
+      return this.store.withLedger((store, ledger) =>
+        new DealRoomService(
+          store,
+          {
+            ...this.config,
+            books: this.config.books ? { ...this.config.books, ledger } : null,
+          },
+          true,
+        ).recordDispute(input),
+      );
+    }
     const view = await this.view(input.dealId);
     const d = view.deal.dispute;
     if (!d) throw new DealRoomError('WRONG_STATE', 'no dispute attested');
-    this.sameEscrowDeal(view, input.execution);
+    if (
+      view.transitions.some(
+        (x) => x.idempotencyKey === `dispute-tx:${d.attestationId}`,
+      )
+    )
+      return view;
+    this.sameExecution(view, input.execution, 'DISPUTE', null);
+    await this.book(view, input.execution, () => null);
     const out = await this.apply(view, {
       kind: 'DISPUTE_ON_CHAIN',
       key: `dispute-tx:${d.attestationId}`,
@@ -1182,14 +1432,37 @@ export class DealRoomService {
         },
       },
     });
-    await this.book(view, input.execution, () => null);
     return out;
+  }
+
+  /** Revokes every review link issued so far (new links use the next epoch). */
+  async revokeLinks(dealId: string, actor: string) {
+    const view = await this.view(dealId);
+    const epoch = (view.deal.linkEpoch ?? 0) + 1;
+    return this.apply(view, {
+      kind: 'LINKS_REVOKED',
+      key: `links-revoked:${epoch}`,
+      to: view.deal.status,
+      actor,
+      payload: { epoch },
+      patch: { linkEpoch: epoch },
+    });
   }
 
   // ---------------------------------------------------------------- internals
 
-  /** An execution report must be about this deal's escrow deal. */
-  private sameEscrowDeal(view: DealView, exec: ExecutionRecord) {
+  /**
+   * An execution report must be this deal's escrow deal, this operation and
+   * this milestone (as decoded from the escrow event by the executor), and
+   * none of its transactions may already be recorded anywhere on the deal.
+   */
+  private sameExecution(
+    view: DealView,
+    exec: ExecutionRecord,
+    op: ExecutionRecord['op'],
+    milestone: number | null,
+  ) {
+    assertExecutionHashes(exec);
     if (
       !view.deal.escrow ||
       BigInt(view.deal.escrow.escrowDealId) !== exec.escrowDealId
@@ -1197,6 +1470,18 @@ export class DealRoomService {
       throw new DealRoomError(
         'FUNDING_MISMATCH',
         `execution is for escrow deal ${exec.escrowDealId}, not this deal`,
+      );
+    if (exec.op !== op || exec.milestone !== milestone)
+      throw new DealRoomError(
+        'FUNDING_MISMATCH',
+        `execution is ${exec.op} of milestone ${exec.milestone}, not ${op} of ${milestone}`,
+      );
+    const seen = recordedTxs(view.deal);
+    const dup = exec.txs.find((t) => seen.has(lower(t.hash)));
+    if (dup)
+      throw new DealRoomError(
+        'REPLAYED',
+        `transaction ${dup.hash} is already recorded on this deal`,
       );
   }
 
@@ -1252,10 +1537,16 @@ export class DealRoomService {
       version?: DealVersion;
       signature?: DealSignature;
       attestation?: Attestation;
+      /** The key must be new: a replay or a lost race is an error, not a no-op. */
+      exclusive?: boolean;
     },
   ): Promise<DealView> {
     const { deal } = view;
-    if (view.transitions.some((x) => x.idempotencyKey === t.key)) return view;
+    if (view.transitions.some((x) => x.idempotencyKey === t.key)) {
+      if (t.exclusive)
+        throw new DealRoomError('REPLAYED', `${t.kind} already recorded`);
+      return view;
+    }
     if (t.to !== deal.status) assertTransition(deal.status, t.to);
     const now = this.now();
     const next: Deal = {
@@ -1265,7 +1556,7 @@ export class DealRoomService {
       rev: deal.rev + 1,
       updatedAt: now,
     };
-    await this.store.commit({
+    const r = await this.store.commit({
       dealId: deal.dealId,
       expectedRev: deal.rev,
       deal: next,
@@ -1283,6 +1574,8 @@ export class DealRoomService {
       ...(t.signature ? { signature: t.signature } : {}),
       ...(t.attestation ? { attestation: t.attestation } : {}),
     });
+    if (t.exclusive && r.outcome === 'DUPLICATE')
+      throw new DealRoomError('REPLAYED', `${t.kind} already recorded`);
     return this.view(deal.dealId);
   }
 
@@ -1293,10 +1586,15 @@ export class DealRoomService {
     effect: (b: DealBooks) => JournalEntry | null,
   ) {
     const books = this.config.books;
-    if (!books) return;
+    if (!books)
+      throw new DealRoomError(
+        'WRONG_STATE',
+        'no books configured: chain effects cannot be recorded without posting them',
+      );
+    const workspaceId = books.workspaceId ?? view.deal.workspaceId;
     const t = view.current.terms;
     const b: DealBooks = {
-      workspaceId: books.workspaceId,
+      workspaceId,
       dealId: view.deal.dealId,
       chainId: t.asset.chainId,
       assetId: assetIdOf(t.asset),
@@ -1308,7 +1606,7 @@ export class DealRoomService {
     if (e) await books.ledger.post(e);
     for (const tx of exec.txs) {
       const gas = arcGasEntry({
-        workspaceId: books.workspaceId,
+        workspaceId,
         chain: this.config.chainName,
         txHash: tx.hash,
         payer: tx.from,
@@ -1319,6 +1617,62 @@ export class DealRoomService {
       if (gas) await books.ledger.post(gas);
     }
   }
+}
+
+/** One PENDING milestone state per milestone of `t`. */
+export function pendingMilestones(t: Terms): MilestoneState[] {
+  return t.milestones.map((m) => ({
+    index: m.index,
+    status: 'PENDING',
+    evidenceHash: null,
+    authorizedBy: null,
+    txs: [],
+  }));
+}
+
+/** Per-milestone state must mirror the current version (CR-01). */
+function assertShape(view: DealView) {
+  const n = view.current.terms.milestones.length;
+  if (
+    view.deal.milestones.length !== n ||
+    view.deal.milestones.some((m, i) => m.index !== i)
+  )
+    throw new DealRoomError(
+      'CONFLICT',
+      `deal tracks ${view.deal.milestones.length} milestones, v${view.current.version} has ${n}`,
+    );
+}
+
+/** Every transaction hash already recorded on the deal. */
+function recordedTxs(deal: Deal): Set<string> {
+  return new Set(
+    [
+      ...(deal.escrow?.fundingTxs ?? []),
+      ...deal.milestones.flatMap((m) => m.txs.map((x) => x.hash)),
+      ...(deal.dispute?.txs ?? []),
+    ].map(lower),
+  );
+}
+
+/** Release grants issued and not yet recorded as released (expired ones excluded). */
+export function outstandingReleaseGrants(view: DealView, now: number) {
+  const released = new Set(
+    view.transitions
+      .filter((x) => x.kind === 'RELEASED')
+      .map((x) => x.idempotencyKey.split(':')[1]),
+  );
+  return view.transitions
+    .filter((x) => x.kind === 'RELEASE_GRANTED')
+    .map(
+      (x) =>
+        x.payload as {
+          milestone: number;
+          grantId: string;
+          nonce: Hex;
+          expiresAt: number;
+        },
+    )
+    .filter((g) => g.expiresAt > now && !released.has(String(g.milestone)));
 }
 
 /** Registry asset id of the agreement asset (`@synq/domain` assetKey). */
@@ -1462,4 +1816,22 @@ export function checkEvidence(
   if (type === 'GITHUB_PR' && (m[2] !== 'pull' || ev.prNumber !== Number(m[3])))
     throw new DealRoomError('EVIDENCE_INVALID', 'PR URL and number differ');
   return ev;
+}
+
+function assertExecutionHashes(exec: ExecutionRecord) {
+  const hashes = new Set(exec.txs.map((t) => t.hash.toLowerCase()));
+  if (
+    !hashes.size ||
+    hashes.size !== exec.txs.length ||
+    exec.transfers.some(
+      (t) =>
+        !hashes.has(t.hash.toLowerCase()) ||
+        !Number.isSafeInteger(t.logIndex) ||
+        t.logIndex < 0,
+    )
+  )
+    throw new DealRoomError(
+      'FUNDING_MISMATCH',
+      'transfer log is not bound to a unique execution transaction',
+    );
 }

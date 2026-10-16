@@ -361,6 +361,9 @@ importers:
       '@category-labs/mera':
         specifier: 0.2.0
         version: 0.2.0(viem@2.57.4(typescript@5.9.3)(zod@4.6.5))
+      '@synq/dealroom':
+        specifier: workspace:*
+        version: link:../../packages/dealroom
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity

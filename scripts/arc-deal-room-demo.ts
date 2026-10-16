@@ -75,6 +75,7 @@ import {
   acceptsFor,
   attestationTypedData,
   dealDraftPort,
+  githubEvidenceVerifier,
   decimalOf,
   evidenceHashOf,
   fundingMismatches,
@@ -96,6 +97,8 @@ import {
   type TransferSigner,
 } from '@synq/execution-worker/arc';
 import {
+  MemoryEscrowBroadcastJournal,
+  probeEscrowFunding,
   executeEscrowDispute,
   executeEscrowOpen,
   executeEscrowRefund,
@@ -280,7 +283,9 @@ async function balancesAt(
     }
 }
 const record = (e: EscrowExecution) => ({
+  op: e.op,
   escrowDealId: e.escrowDealId,
+  milestone: e.milestone,
   txs: e.txs.map((t) => ({
     label: t.label,
     hash: t.hash,
@@ -433,6 +438,9 @@ async function main() {
   await store.migrate();
   await migrateFinance(pool);
   const workspaceId = `wsp_dealroom_${runId}`;
+  // Executor ports: the grant fence and the pre-broadcast record store.
+  const fence = new MemoryNonceFence();
+  const journal = new MemoryEscrowBroadcastJournal();
   const ledger = new Ledger(new PostgresLedgerStore(pool));
   const service = new DealRoomService(store, {
     now,
@@ -440,11 +448,15 @@ async function main() {
     asset: ASSET,
     escrow: escrow.address,
     settings: {
-      disputePeriodSeconds: 30 * 86_400,
+      // SynqMilestoneEscrow.DISPUTE_PERIOD, read from the deployed contract.
+      disputePeriodSeconds: escrow.disputePeriodSeconds,
       refundGraceSeconds: 7 * 86_400,
       offerTtlSeconds: 3 * 86_400,
     },
     books: { ledger, workspaceId },
+    // The executor's fence: a dispute burns outstanding release grants in it.
+    fence,
+    evidenceVerifier: githubEvidenceVerifier(),
   });
 
   // ------------------------------------------------------------ 1 identity
@@ -616,6 +628,7 @@ async function main() {
       arbiter: partyOf.ARBITER!,
       webBaseUrl: 'https://synq.example',
       linkKey,
+      now,
       reasoner,
     });
   const draftAttempts: unknown[] = [];
@@ -912,7 +925,6 @@ async function main() {
     grantTtlSeconds: 600,
     riskRequiredAbove: 1_000_000n,
   };
-  const fence = new MemoryNonceFence();
   const mandate = async (
     owner: typeof clientKey,
     id: string,
@@ -1013,6 +1025,7 @@ async function main() {
         /GRANT_MISMATCH/,
       );
       let exec: EscrowExecution;
+      const fundingFromBlock = await chain.client.getBlockNumber();
       try {
         exec = await executeEscrowOpen({
           chain,
@@ -1021,11 +1034,31 @@ async function main() {
           grant,
           grantKey: kernelConfig.grantKey,
           fence,
+          journal,
           mandateRevoked: false,
           now: now(),
         });
       } catch (e) {
-        await service.fundingFailed(dealId, (e as Error).message);
+        // Back to ACCEPTED only with proof that no escrow deal was opened;
+        // otherwise the deal waits in NEEDS_REVIEW (never a blind retry).
+        const broadcast = journal.forGrant(grant.grantId);
+        const open = broadcast.find((b) => b.step === 'OPEN');
+        await service
+          .fundingFailed(dealId, {
+            reason: (e as Error).message,
+            broadcast,
+            ...(open
+              ? {
+                  chain: await probeEscrowFunding(chain, {
+                    openHash: open.hash,
+                    payer: clientKey.address,
+                    termsHash: view.current.termsHash,
+                    fromBlock: fundingFromBlock,
+                  }),
+                }
+              : {}),
+          })
+          .catch(() => undefined);
         throw e;
       }
       recordTxs(4, exec);
@@ -1210,6 +1243,7 @@ async function main() {
         grant: auth.decision.grant,
         grantKey: kernelConfig.grantKey,
         fence,
+        journal,
         mandateRevoked: false,
         now: now(),
       });
@@ -1324,6 +1358,7 @@ async function main() {
         chain,
         signer: signerOf(clientKey),
         escrowDealId,
+        journal,
       });
       recordTxs(6, exec);
       await service.recordDispute({ dealId, execution: record(exec) });
@@ -1444,6 +1479,7 @@ async function main() {
         grant: auth.decision.grant,
         grantKey: kernelConfig.grantKey,
         fence,
+        journal,
         mandateRevoked: false,
         now: now(),
       });
@@ -1589,17 +1625,21 @@ async function cancelMode(dealId: string) {
   const head = await store.get(dealId);
   must(head?.escrow, `deal ${dealId} is not funded`);
   const ledger = new Ledger(new PostgresLedgerStore(pool));
+  const fence = new MemoryNonceFence();
+  const journal = new MemoryEscrowBroadcastJournal();
   const service = new DealRoomService(store, {
     now,
     chainName: 'arc-testnet',
     asset: ASSET,
     escrow: escrow.address,
     settings: {
-      disputePeriodSeconds: 30 * 86_400,
+      disputePeriodSeconds: escrow.disputePeriodSeconds,
       refundGraceSeconds: 7 * 86_400,
       offerTtlSeconds: 3 * 86_400,
     },
     books: { ledger, workspaceId: head.workspaceId },
+    fence,
+    evidenceVerifier: githubEvidenceVerifier(),
   });
   const view0 = await service.view(dealId);
   const t = view0.current.terms;
@@ -1635,7 +1675,6 @@ async function cancelMode(dealId: string) {
     grantTtlSeconds: 600,
     riskRequiredAbove: 1_000_000n,
   };
-  const fence = new MemoryNonceFence();
   const m: PaymentMandate = {
     mandateId: `mnd_cancel_${runId}`,
     version: 1,
@@ -1731,6 +1770,7 @@ async function cancelMode(dealId: string) {
           grant: auth.decision.grant,
           grantKey: kernelConfig.grantKey,
           fence,
+          journal,
           mandateRevoked: false,
           now: now(),
         });

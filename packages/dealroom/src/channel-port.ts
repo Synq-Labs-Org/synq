@@ -58,16 +58,54 @@ export type PartyResolver = (input: {
 }) => Promise<Party | null>;
 
 /** HMAC navigation token for a deal page link. It grants viewing, never signing. */
-export function dealLinkToken(key: Uint8Array, dealId: string): string {
-  return createHmac('sha256', key)
-    .update(`synq-deal-link:${dealId}`)
+/** Default lifetime of a review link. */
+export const DEAL_LINK_TTL_SECONDS = 7 * 86_400;
+
+const linkMac = (
+  key: Uint8Array,
+  dealId: string,
+  expiresAt: number,
+  epoch: number,
+) =>
+  createHmac('sha256', key)
+    .update(`synq-deal-link:${dealId}:${expiresAt}:${epoch}`)
     .digest('base64url')
     .slice(0, 32);
+
+/**
+ * HMAC navigation token for a deal page: `<expiresAt>.<epoch>.<mac>`. It
+ * grants viewing only, never signing. It lapses at `expiresAt`, and every
+ * token of an older epoch dies when the deal's links are revoked
+ * (`DealRoomService.revokeLinks`).
+ */
+export function dealLinkToken(
+  key: Uint8Array,
+  dealId: string,
+  opts: { expiresAt: number; epoch: number },
+): string {
+  return `${opts.expiresAt}.${opts.epoch}.${linkMac(key, dealId, opts.expiresAt, opts.epoch)}`;
 }
-export function verifyDealLink(key: Uint8Array, dealId: string, token: string) {
-  const want = Buffer.from(dealLinkToken(key, dealId));
-  const got = Buffer.from(String(token));
-  return want.length === got.length && timingSafeEqual(want, got);
+
+export function verifyDealLink(
+  key: Uint8Array,
+  dealId: string,
+  token: string,
+  opts: { now: number; epoch: number },
+): boolean {
+  const m = /^([0-9]{1,12})\.([0-9]{1,6})\.([A-Za-z0-9_-]{32})$/.exec(
+    String(token),
+  );
+  if (!m) return false;
+  const expiresAt = Number(m[1]);
+  const epoch = Number(m[2]);
+  const want = Buffer.from(linkMac(key, dealId, expiresAt, epoch));
+  const got = Buffer.from(m[3]!);
+  return (
+    want.length === got.length &&
+    timingSafeEqual(want, got) &&
+    opts.now < expiresAt &&
+    epoch === opts.epoch
+  );
 }
 
 export function dealDraftPort(deps: {
@@ -77,6 +115,8 @@ export function dealDraftPort(deps: {
   arbiter: Party;
   webBaseUrl: string;
   linkKey: Uint8Array;
+  now: () => number;
+  linkTtlSeconds?: number;
   reasoner: StructuredReasoner | null;
 }) {
   return async (input: ChatDealRequest): Promise<ChatDealReply> => {
@@ -178,7 +218,15 @@ export function dealDraftPort(deps: {
         status: 'DRAFTED',
         dealId: id,
         summary,
-        url: `${deps.webBaseUrl.replace(/\/$/, '')}/deal/${id}?t=${dealLinkToken(deps.linkKey, id)}`,
+        url: `${deps.webBaseUrl.replace(/\/$/, '')}/deal/${id}?t=${dealLinkToken(
+          deps.linkKey,
+          id,
+          {
+            expiresAt:
+              deps.now() + (deps.linkTtlSeconds ?? DEAL_LINK_TTL_SECONDS),
+            epoch: view.deal.linkEpoch ?? 0,
+          },
+        )}`,
       };
     } catch (e) {
       if (e instanceof DealRoomError) return refuse(e.message);

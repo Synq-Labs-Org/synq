@@ -1,5 +1,5 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import type { Address, Hex } from 'viem';
+import { keccak256, toHex, type Address, type Hex } from 'viem';
 import { contract, token } from '@synq/chain-registry/arc';
 import {
   MemoryNonceFence,
@@ -209,8 +209,14 @@ export class Clock {
 export function room(
   store: DealRoomStore = new MemoryDealRoomStore(),
   clock = new Clock(),
+  opts: {
+    evidenceVerifier?: (e: Evidence) => Promise<boolean>;
+    books?: boolean;
+  } = {},
 ) {
   const ledger = new Ledger(new MemoryLedgerStore());
+  /** The executor's grant fence, shared with the service for dispute revocation. */
+  const executorFence = new MemoryNonceFence();
   const service = new DealRoomService(store, {
     now: clock.now,
     chainName: 'arc-testnet',
@@ -221,10 +227,17 @@ export function room(
       refundGraceSeconds: 7 * 86_400,
       offerTtlSeconds: 3 * 86_400,
     },
-    books: { ledger, workspaceId: 'wsp_dealroom_test' },
+    books:
+      opts.books === false
+        ? null
+        : { ledger, workspaceId: 'wsp_dealroom_test' },
+    fence: executorFence,
+    ...(opts.evidenceVerifier
+      ? { evidenceVerifier: opts.evidenceVerifier }
+      : {}),
     newId: () => `deal_${RUN}_${++dealSeq}`,
   });
-  return { service, ledger, clock, store };
+  return { service, ledger, clock, store, executorFence };
 }
 
 export async function drafted(r = room()) {
@@ -396,9 +409,11 @@ export const fence = () => new MemoryNonceFence();
 /** What the executor would report for a funded escrow deal (fixture; tests only). */
 export function fundedRecord(v: DealVersion, escrowDealId = 7n) {
   const t = v.terms;
-  const hash = `0x${'0f'.repeat(32)}` as Hex;
+  const hash = keccak256(toHex(`fund:${v.dealId}`));
   return {
     execution: {
+      op: 'OPEN' as const,
+      milestone: null,
       escrowDealId,
       txs: [
         {

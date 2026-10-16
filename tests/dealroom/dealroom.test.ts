@@ -174,7 +174,9 @@ describe('Deal Room drafting from authorized context', () => {
       view.current.provenance[milestoneKey(0, 'deadline')]![0],
     ).toMatchObject({ messageId: '903', quote: 'within 7 days' });
     // Wallets come from verified links only: no provenance from chat or model.
-    expect(view.current.provenance['milestones.0.payee']).toBeUndefined();
+    expect(view.current.provenance['milestones.0.payee']).toMatchObject([
+      { kind: 'VERIFIED_LINK' },
+    ]);
   });
 
   it('P13-01: an unreceived old group message cannot be cited', async () => {
@@ -903,6 +905,8 @@ describe('Deal Room milestones: release, dispute, refund', () => {
     ).toBe('GRANT_MISMATCH');
     const hash = `0x${'aa'.repeat(32)}` as Hex;
     const execution = {
+      op: 'RELEASE' as const,
+      milestone: 0,
       escrowDealId: 7n,
       txs: [
         {
@@ -1131,6 +1135,8 @@ describe('Deal Room milestones: release, dispute, refund', () => {
     ).toBe('DENY');
     const hash = `0x${'bb'.repeat(32)}` as Hex;
     const toFreelancer = {
+      op: 'REFUND' as const,
+      milestone: 1,
       escrowDealId: 7n,
       txs: [{ label: 'refund', hash, from: arbiter.address, feeWei: 1n }],
       transfers: [

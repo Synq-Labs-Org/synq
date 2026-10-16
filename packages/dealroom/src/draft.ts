@@ -3,6 +3,7 @@ import type { Address } from 'viem';
 import { injectionSignals, type StructuredReasoner } from '@synq/agent-runtime';
 import {
   DealRoomError,
+  isCitableTerm,
   milestoneKey,
   type DealAsset,
   type EvidenceType,
@@ -377,7 +378,27 @@ export function termsFromProposal(input: {
   settings: DraftSettings;
 }): DraftResult {
   const { proposal: p, asset, now, settings } = input;
-  const cited = resolveCitations(input.context, p.citations);
+  // Every citation must name an authorized message and quote it verbatim (P13-01).
+  resolveCitations(input.context, p.citations);
+  // Then it must be about a citable term and actually state the drafted value.
+  const ambiguities = [...p.ambiguities];
+  const kept = p.citations.filter((c) => {
+    if (!isCitableTerm(c.term)) {
+      ambiguities.push(
+        `a chat message cannot be the source of ${c.term}; it comes from verified records (citation of message ${c.messageId} ignored)`,
+      );
+      return false;
+    }
+    const why = citationProblem(c, p, asset);
+    if (why) {
+      ambiguities.push(
+        `message ${c.messageId} does not support ${c.term} (${why}); ${c.term} is Synq's interpretation only`,
+      );
+      return false;
+    }
+    return true;
+  });
+  const cited = resolveCitations(input.context, kept);
   const milestones = p.milestones.map((m, index) => ({
     index,
     title: m.title,
@@ -432,9 +453,18 @@ export function termsFromProposal(input: {
   ];
   for (const k of interpreted)
     provenance[k] = [...(cited[k] ?? []), input.interpretation];
-  for (const [k, v] of Object.entries(cited))
-    if (!provenance[k]) provenance[k] = [...v, input.interpretation];
-  const ambiguities = [...p.ambiguities];
+  const link = (party: Party): Provenance => ({
+    kind: 'VERIFIED_LINK',
+    role: party.role,
+    method: party.verification.method,
+    reference: party.verification.reference,
+    wallet: party.wallet,
+  });
+  provenance.client = [link(terms.client)];
+  provenance.freelancer = [link(terms.freelancer)];
+  provenance.arbiter = [link(terms.arbiter)];
+  for (const m of milestones)
+    provenance[milestoneKey(m.index, 'payee')] = [link(terms.freelancer)];
   for (const m of input.context.messages) {
     const signals = injectionSignals(m.text).filter((s) => s !== 'SEND_FUNDS');
     if (signals.length)
@@ -454,6 +484,49 @@ export function termsFromProposal(input: {
     ambiguities,
     interpretation: input.interpretation,
   };
+}
+
+/**
+ * Why a citation does not state the value it is cited for, or null. Amounts
+ * must appear as the exact drafted decimal next to the asset (USDC, USD or $);
+ * a deadline must state the drafted number of days (or weeks).
+ */
+export function citationProblem(
+  c: Citation,
+  p: DraftProposal,
+  asset: DealAsset,
+): string | null {
+  const m = /^milestones\.([0-9]{1,2})\.([A-Za-z]+)$/.exec(c.term);
+  const ms = m ? p.milestones[Number(m[1])] : null;
+  if (m && !ms) return 'no such milestone';
+  const numbers = [
+    ...c.quote.matchAll(/(?<![0-9.])([0-9]+(?:\.[0-9]+)?)(?![0-9])/g),
+  ].map((x) => x[1]!);
+  const amount =
+    c.term === 'total' ? p.total : m?.[2] === 'amount' ? ms!.amount : null;
+  if (amount !== null) {
+    const want = unitsOf(amount, asset.decimals);
+    const states = numbers.some((n) => {
+      try {
+        return unitsOf(n, asset.decimals) === want;
+      } catch {
+        return false;
+      }
+    });
+    if (!states) return `the quote does not state ${amount}`;
+    const sym = asset.symbol.replace(/[^A-Za-z]/g, '');
+    if (!new RegExp(`\\b(${sym}|usd)\\b|\\$`, 'i').test(c.quote))
+      return `the quote does not name ${asset.symbol}`;
+  }
+  if (m?.[2] === 'deadline') {
+    const days = ms!.dueInDays;
+    const states = numbers.some(
+      (n) => Number(n) === days || Number(n) * 7 === days,
+    );
+    if (!states || !/\b(day|days|week|weeks)\b/i.test(c.quote))
+      return `the quote does not state ${days} days`;
+  }
+  return null;
 }
 
 /** Draft from the authorized context; the model when available, else deterministic. */

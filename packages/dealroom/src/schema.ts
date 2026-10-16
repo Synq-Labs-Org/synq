@@ -34,6 +34,11 @@ export const DEAL_STATUSES = [
   'REFUNDED',
   'CANCELLED',
   'EXPIRED',
+  /**
+   * A funding attempt failed after an `open` may have been broadcast and its
+   * outcome is not proven: nothing proceeds until the chain is reconciled.
+   */
+  'NEEDS_REVIEW',
 ] as const;
 export type DealStatus = (typeof DEAL_STATUSES)[number];
 
@@ -183,11 +188,21 @@ export const ProvenanceSchema = z.discriminatedUnion('kind', [
     what: z.enum(['BOTH_PARTIES_SIGNED', 'KERNEL_GRANT']),
     ref: z.string().min(1).max(200),
   }),
+  /** A wallet taken from a verified identity link, never from chat or a model. */
+  z.strictObject({
+    kind: z.literal('VERIFIED_LINK'),
+    role: z.enum(ROLES),
+    method: z.enum(['CHANNEL_LINK', 'GOVERNANCE_MEMBER', 'WALLET_SIGNATURE']),
+    reference: z.string().min(1).max(200),
+    wallet: AddressSchema,
+  }),
 ]);
 export type Provenance = z.output<typeof ProvenanceSchema>;
 
 /** Paths of the terms that carry provenance (e.g. `total`, `milestones.0.amount`). */
 export const TERM_KEYS = [
+  'client',
+  'freelancer',
   'title',
   'scope',
   'deliverables',
@@ -208,6 +223,22 @@ export const MILESTONE_TERM_KEYS = [
   'evidenceType',
   'payee',
 ] as const;
+/**
+ * The only terms a chat message may be cited for. Parties, payees, the
+ * arbiter, asset and escrow come from verified links and the registry.
+ */
+export const CITABLE_MILESTONE_KEYS = [
+  'title',
+  'amount',
+  'deadline',
+  'acceptanceCondition',
+  'evidenceType',
+] as const;
+export function isCitableTerm(term: string): boolean {
+  if (['title', 'scope', 'deliverables', 'total'].includes(term)) return true;
+  const m = /^milestones\.([0-9]{1,2})\.([A-Za-z]+)$/.exec(term);
+  return !!m && (CITABLE_MILESTONE_KEYS as readonly string[]).includes(m[2]!);
+}
 export const milestoneKey = (
   i: number,
   k: (typeof MILESTONE_TERM_KEYS)[number],
@@ -343,10 +374,14 @@ export type Deal = Readonly<{
   currentVersion: number;
   rev: number;
   origin: DealOrigin;
-  funding: Readonly<{ intentId: string; grantId: string }> | null;
+  funding: Readonly<{ intentId: string; grantId: string; nonce?: Hex }> | null;
   escrow: EscrowBinding | null;
   milestones: readonly MilestoneState[];
   dispute: DisputeState | null;
+  /** Bumped to revoke every review link issued so far (absent = 0). */
+  linkEpoch?: number;
+  /** Funding attempts proven not to have landed (each allows one new grant). */
+  failedFundingAttempts?: number;
   createdAt: number;
   updatedAt: number;
 }>;

@@ -8,3 +8,4 @@ export * from './ledger.js';
 export * from './service.js';
 export * from './postgres.js';
 export * from './channel-port.js';
+export * from './evidence.js';

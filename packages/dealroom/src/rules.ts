@@ -21,7 +21,13 @@ const lower = (a: string) => a.toLowerCase();
 /** Problems that make terms impossible to fund on SynqMilestoneEscrow; empty means valid. */
 export function termProblems(
   t: Terms,
-  expected?: { token: string; chainId: number; escrow: string },
+  expected?: {
+    token: string;
+    chainId: number;
+    escrow: string;
+    /** SynqMilestoneEscrow.DISPUTE_PERIOD as read from the deployed escrow. */
+    disputePeriodSeconds?: number;
+  },
 ): string[] {
   const out: string[] = [];
   const sum = t.milestones.reduce((a, m) => a + m.amount, 0n);
@@ -64,6 +70,13 @@ export function termProblems(
       out.push('asset is not the registry asset for this deployment');
     if (lower(t.escrow) !== lower(expected.escrow))
       out.push('escrow is not the registry SynqMilestoneEscrow');
+    if (
+      expected.disputePeriodSeconds !== undefined &&
+      t.dispute.periodSeconds !== expected.disputePeriodSeconds
+    )
+      out.push(
+        `dispute period ${t.dispute.periodSeconds}s is not the escrow's DISPUTE_PERIOD ${expected.disputePeriodSeconds}s`,
+      );
   }
   return out;
 }
@@ -83,7 +96,9 @@ export const DEAL_TRANSITIONS: Readonly<
   DRAFT: ['NEGOTIATING', 'ACCEPTED', 'CANCELLED', 'EXPIRED'],
   NEGOTIATING: ['NEGOTIATING', 'ACCEPTED', 'CANCELLED', 'EXPIRED'],
   ACCEPTED: ['NEGOTIATING', 'FUNDING', 'CANCELLED', 'EXPIRED'],
-  FUNDING: ['FUNDED', 'ACCEPTED'],
+  FUNDING: ['FUNDED', 'ACCEPTED', 'NEEDS_REVIEW'],
+  // Only chain reconciliation leaves review: proven funded, or proven not.
+  NEEDS_REVIEW: ['FUNDED', 'ACCEPTED'],
   FUNDED: ['IN_PROGRESS', 'DELIVERED', 'DISPUTED', 'SETTLED', 'REFUNDED'],
   IN_PROGRESS: ['IN_PROGRESS', 'DELIVERED', 'DISPUTED', 'SETTLED', 'REFUNDED'],
   DELIVERED: ['IN_PROGRESS', 'DELIVERED', 'DISPUTED', 'SETTLED', 'REFUNDED'],

@@ -1,3 +1,4 @@
+import { Ledger, PostgresLedgerStore } from '@synq/ledger';
 import {
   DealRoomError,
   TermsSchema,
@@ -147,13 +148,34 @@ const unique = (e: unknown) => (e as { code?: string }).code === '23505';
 
 /** Postgres store: one transaction per commit, the head row locked FOR UPDATE. */
 export class PostgresDealRoomStore implements DealRoomStore {
-  constructor(readonly pool: PgPool) {}
+  constructor(
+    readonly pool: PgPool,
+    private readonly inTransaction = false,
+  ) {}
+
+  async withLedger<T>(
+    fn: (store: DealRoomStore, ledger: Ledger) => Promise<T>,
+  ): Promise<T> {
+    return this.tx(async (c) => {
+      const connection: PgPool = {
+        query: c.query.bind(c),
+        connect: async () => {
+          throw new Error('nested connection is not allowed');
+        },
+      };
+      return fn(
+        new PostgresDealRoomStore(connection, true),
+        new Ledger(new PostgresLedgerStore(c)),
+      );
+    });
+  }
 
   async migrate() {
     await migrateDealRoom(this.pool);
   }
 
   private async tx<T>(fn: (c: Sql) => Promise<T>): Promise<T> {
+    if (this.inTransaction) return fn(this.pool);
     const c = await this.pool.connect();
     try {
       await c.query('BEGIN');

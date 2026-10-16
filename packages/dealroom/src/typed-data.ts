@@ -232,9 +232,22 @@ export function attestationTypedData(input: {
   };
 }
 
-/** keccak over the evidence's canonical JSON; zero when an attestation carries none. */
+/**
+ * The part of evidence a party asserts and signs: what was delivered, not who
+ * checked it or when (`verifiedBy` / `checkedAt` are set only by the server).
+ */
+export const evidenceClaim = (e: Evidence) => ({
+  type: e.type,
+  url: e.url,
+  repo: e.repo,
+  commitSha: e.commitSha,
+  prNumber: e.prNumber,
+  sha256: e.sha256,
+});
+
+/** keccak over the evidence claim's canonical JSON; zero when an attestation carries none. */
 export const evidenceHashOf = (e: Evidence | null): Hex =>
-  e ? keccak256(toHex(canonical(e))) : ZERO32;
+  e ? keccak256(toHex(canonical(evidenceClaim(e)))) : ZERO32;
 
 /** Recovers the signer of typed data; a malformed signature is BAD_SIGNATURE. */
 export async function recoverSigner(

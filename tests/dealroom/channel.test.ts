@@ -140,6 +140,7 @@ async function world() {
   const port = dealDraftPort({
     service: r.service,
     workspaceId: 'wsp_chat',
+    now: () => clock.t,
     resolveParty: async ({ principalId, externalUserId, role }) => {
       const p =
         (principalId && byPrincipal[principalId]) ||
@@ -258,8 +259,12 @@ describe('Deal Room chat surface', () => {
         .inline_keyboard[0]![0]!.url,
     );
     const m = /\/deal\/(deal_[^?]+)\?t=(.+)$/.exec(url)!;
-    expect(verifyDealLink(LINK_KEY, m[1]!, m[2]!)).toBe(true);
-    expect(verifyDealLink(LINK_KEY, m[1]!, 'x'.repeat(32))).toBe(false);
+    expect(verifyDealLink(LINK_KEY, m[1]!, m[2]!, { now: T0, epoch: 0 })).toBe(
+      true,
+    );
+    expect(
+      verifyDealLink(LINK_KEY, m[1]!, 'x'.repeat(32), { now: T0, epoch: 0 }),
+    ).toBe(false);
     const view = await w.r.service.view(m[1]!);
     const cited = Object.values(view.current.provenance)
       .flat()

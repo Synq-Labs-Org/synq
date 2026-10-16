@@ -1,3 +1,4 @@
+import type { Ledger } from '@synq/ledger';
 import {
   DealRoomError,
   type Attestation,
@@ -38,6 +39,10 @@ export type CommitOutcome = Readonly<{
 
 export interface DealRoomStore {
   migrate(): Promise<void>;
+  /** Share one transaction between chain-effect books and the deal transition. */
+  withLedger?<T>(
+    fn: (store: DealRoomStore, ledger: Ledger) => Promise<T>,
+  ): Promise<T>;
   /** Inserts a new deal with its first version and transition; DUPLICATE when the deal id exists. */
   create(input: {
     deal: Deal;

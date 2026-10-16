@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from 'react';
 import { z } from 'zod';
+import { typedDataMismatches } from '../../../lib/deal-approval';
 import { api, describeError } from '../../../lib/api';
 
 /**
@@ -24,18 +25,30 @@ const DealSchema = z.looseObject({
   status: z.string(),
   version: z.number(),
   termsHash: z.string(),
+  parentTermsHash: z.string().nullable(),
+  provenanceHash: z.string(),
   terms: z.looseObject({
     title: z.string(),
     scope: z.string(),
     deliverables: z.array(z.string()),
-    asset: z.looseObject({ symbol: z.string() }),
+    asset: z.looseObject({
+      symbol: z.string(),
+      token: z.string(),
+      chainId: z.number(),
+      decimals: z.number(),
+    }),
     escrow: z.string(),
     total: z.string(),
+    deposit: z.string(),
     refundAfter: z.number(),
     expiresAt: z.number(),
+    disputePeriodSeconds: z.number(),
+    refundPolicy: z.string(),
+    cancellation: z.string(),
     parties: z.array(
       z.looseObject({
         role: z.string(),
+        principalId: z.string(),
         name: z.string(),
         wallet: z.string(),
         verifiedBy: z.string(),
@@ -49,6 +62,7 @@ const DealSchema = z.looseObject({
         deadline: z.number(),
         acceptanceCondition: z.string(),
         evidenceType: z.string(),
+        payee: z.string(),
         status: z.string(),
       }),
     ),
@@ -80,7 +94,7 @@ const DealSchema = z.looseObject({
     primaryType: z.string(),
   }),
 });
-type Deal = z.output<typeof DealSchema>;
+export type Deal = z.output<typeof DealSchema>;
 
 type Eip1193 = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -164,6 +178,11 @@ export default function DealPage({
     setError(null);
     setBusy(true);
     try {
+      const bad = typedDataMismatches(deal);
+      if (bad.length)
+        throw new Error(
+          `The message to sign differs from what this page shows (${bad.join(', ')}). Nothing was signed.`,
+        );
       const { w, from, role } = await wallet();
       const signature = (await w.request({
         method: 'eth_signTypedData_v4',
@@ -286,7 +305,7 @@ export default function DealPage({
               Milestone {m.index + 1}: {m.title}
             </dt>
             <dd>
-              {m.amount} {sym}
+              {m.amount} {sym} to <code>{m.payee}</code>
               <Sources list={p[`milestones.${m.index}.amount`]} /> · due{' '}
               {day(m.deadline)}
               <Sources list={p[`milestones.${m.index}.deadline`]} /> ·{' '}
@@ -295,10 +314,20 @@ export default function DealPage({
             </dd>
           </div>
         ))}
+        <dt>Asset</dt>
+        <dd>
+          {sym} <code>{t.asset.token}</code> on chain {deal.chain.chainId}
+        </dd>
+        <dt>Escrow contract</dt>
+        <dd>
+          <code>{t.escrow}</code>
+        </dd>
         <dt>Disputes</dt>
         <dd>
-          The arbiter decides; a dispute freezes the client's release for 30
-          days.
+          The arbiter decides; a dispute freezes the client's release for{' '}
+          {Math.round(t.disputePeriodSeconds / 86_400)} days. On chain the
+          arbiter can also release or refund any unreleased milestone at any
+          time, so you are trusting the arbiter named above.
         </dd>
         <dt>Refunds</dt>
         <dd>

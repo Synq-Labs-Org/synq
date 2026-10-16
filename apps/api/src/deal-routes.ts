@@ -23,6 +23,7 @@ import {
 export type DealRouteDeps = {
   service: DealRoomService;
   linkKey: Uint8Array;
+  now?: () => number;
 };
 
 const EIP712_DOMAIN = [
@@ -53,6 +54,7 @@ export function dealPageView(service: DealRoomService, view: DealView) {
     version: v.version,
     termsHash: v.termsHash,
     parentTermsHash: v.parentTermsHash,
+    provenanceHash: v.provenanceHash,
     proposedBy: v.proposedBy,
     terms: {
       title: t.title,
@@ -61,12 +63,16 @@ export function dealPageView(service: DealRoomService, view: DealView) {
       asset: t.asset,
       escrow: t.escrow,
       total: dec(t.total),
+      totalUnits: t.total.toString(),
       deposit: dec(t.deposit),
       refundAfter: t.refundAfter,
       expiresAt: t.expiresAt,
       disputePeriodSeconds: t.dispute.periodSeconds,
+      refundPolicy: t.refundPolicy,
+      cancellation: t.cancellation,
       parties: (['client', 'freelancer', 'arbiter'] as const).map((k) => ({
         role: t[k].role,
+        principalId: t[k].principalId,
         name: t[k].displayName,
         wallet: t[k].wallet,
         verifiedBy: t[k].verification.method,
@@ -75,6 +81,7 @@ export function dealPageView(service: DealRoomService, view: DealView) {
         index: m.index,
         title: m.title,
         amount: dec(m.amount),
+        amountUnits: m.amount.toString(),
         deadline: m.deadline,
         acceptanceCondition: m.acceptanceCondition,
         evidenceType: m.evidenceType,
@@ -118,15 +125,24 @@ export function dealPageView(service: DealRoomService, view: DealView) {
 }
 
 const Id = z.string().regex(/^deal_[A-Za-z0-9_]{1,64}$/);
-const Token = z.object({ t: z.string().min(10).max(64) });
+const Token = z.object({ t: z.string().min(10).max(80) });
 const Sig = z.string().regex(/^0x[0-9a-fA-F]{130}$/);
 
 export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
-  const open = (params: unknown, query: unknown) => {
+  const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
+  /** Expired, revoked, forged and unknown links all look the same: 404. */
+  const open = async (params: unknown, query: unknown) => {
     const id = Id.parse((params as { id: string }).id);
     const { t } = Token.parse(query);
-    if (!verifyDealLink(deps.linkKey, id, t))
-      throw new DealRoomError('NOT_FOUND', 'unknown deal link');
+    const deal = await deps.service.store.get(id);
+    if (
+      !deal ||
+      !verifyDealLink(deps.linkKey, id, t, {
+        now: now(),
+        epoch: deal.linkEpoch ?? 0,
+      })
+    )
+      throw new DealRoomError('NOT_FOUND', 'unknown or expired deal link');
     return id;
   };
   const fail = (e: unknown) => {
@@ -145,7 +161,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.get('/v1/deals/:id', async (req, reply) => {
     try {
-      const id = open(req.params, req.query);
+      const id = await open(req.params, req.query);
       return dealPageView(deps.service, await deps.service.view(id));
     } catch (e) {
       const f = fail(e);
@@ -155,7 +171,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.post('/v1/deals/:id/sign', async (req, reply) => {
     try {
-      const id = open(req.params, req.query);
+      const id = await open(req.params, req.query);
       const body = z
         .object({
           version: z.number().int().positive(),
@@ -178,7 +194,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.post('/v1/deals/:id/decline', async (req, reply) => {
     try {
-      const id = open(req.params, req.query);
+      const id = await open(req.params, req.query);
       const body = z
         .object({
           version: z.number().int().positive(),
@@ -228,10 +244,21 @@ export async function registerDealRoom(input: {
   if (!/^(?:[0-9a-fA-F]{2}){32,}$/.test(raw))
     throw new Error('SYNQ_DEALROOM_LINK_KEY must be at least 32 bytes of hex');
   const { contract, token } = await import('@synq/chain-registry/arc');
-  const { DealRoomService } = await import('@synq/dealroom');
+  const { DealRoomService, githubEvidenceVerifier } =
+    await import('@synq/dealroom');
   const { PostgresDealRoomStore } = await import('@synq/dealroom/postgres');
+  const { Ledger, PostgresLedgerStore, migrateFinance } =
+    await import('@synq/ledger');
+  const { connectChain } = await import('@synq/execution-worker/arc');
+  const { verifyEscrow } = await import('@synq/execution-worker/escrow');
   const store = new PostgresDealRoomStore(input.pool);
   await store.migrate();
+  // Books: chain effects are refused without them.
+  await migrateFinance(input.pool);
+  // The dispute period signed into terms is the deployed escrow's own.
+  const escrow = await verifyEscrow(
+    await connectChain('arc-testnet', input.env.SYNQ_ARC_RPC_URL),
+  );
   const usdc = token('arc-testnet', 'USDC');
   const service = new DealRoomService(store, {
     now: () => Math.floor(Date.now() / 1000),
@@ -245,10 +272,16 @@ export async function registerDealRoom(input: {
     },
     escrow: contract('arc-testnet', 'SYNQ_MILESTONE_ESCROW').address,
     settings: {
-      disputePeriodSeconds: 30 * 86_400,
+      disputePeriodSeconds: escrow.disputePeriodSeconds,
       refundGraceSeconds: 7 * 86_400,
       offerTtlSeconds: 3 * 86_400,
     },
+    books: { ledger: new Ledger(new PostgresLedgerStore(input.pool)) },
+    evidenceVerifier: githubEvidenceVerifier(fetch, {
+      ...(input.env.SYNQ_GITHUB_TOKEN
+        ? { token: input.env.SYNQ_GITHUB_TOKEN }
+        : {}),
+    }),
   });
   await input.app.register(dealRoutes, {
     service,

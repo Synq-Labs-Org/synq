@@ -1759,6 +1759,15 @@ export class ChannelGateway {
         text: 'The Deal Room is not configured in this deployment.',
       });
     const now = this.options.now();
+    // Each draft costs a model call and a stored deal: one per user per cooldown.
+    const key = `deal:${envelope.channel}:${envelope.externalUserId}`;
+    if (
+      now - (this.lastBrain.get(key) ?? -Infinity) <
+      (this.options.brainCooldownSeconds ?? 10)
+    )
+      return this.replyOutcome(envelope, 'REFUSED', 'DEAL_RATE_LIMITED', {
+        text: 'One deal draft at a time: wait a few seconds and try again.',
+      });
     if (
       !(await this.options.store.claimNotification(
         envelope.channel,
@@ -1768,6 +1777,7 @@ export class ChannelGateway {
       ))
     )
       return this.result('IGNORED', 'DEAL_ALREADY_RUN_FOR_EVENT');
+    this.lastBrain.set(key, now);
     const context = await this.consentedContext(envelope, group, now);
     let reply: DealDraftReply;
     try {

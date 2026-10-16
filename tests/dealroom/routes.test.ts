@@ -3,7 +3,7 @@ import Fastify from 'fastify';
 import { hashTypedData } from 'viem';
 import { dealLinkToken } from '@synq/dealroom';
 import { dealRoutes } from '../../apps/api/src/deal-routes.js';
-import { acceptSig, declineSig, drafted, room } from './harness.js';
+import { T0, acceptSig, declineSig, drafted, room } from './harness.js';
 
 const KEY = new Uint8Array(32).fill(3);
 
@@ -11,9 +11,13 @@ async function app() {
   const r = room();
   const d = await drafted(r);
   const server = Fastify();
-  await server.register(dealRoutes, { service: r.service, linkKey: KEY });
+  await server.register(dealRoutes, {
+    service: r.service,
+    linkKey: KEY,
+    now: r.clock.now,
+  });
   const id = d.view.deal.dealId;
-  const t = dealLinkToken(KEY, id);
+  const t = dealLinkToken(KEY, id, { expiresAt: T0 + 3_600, epoch: 0 });
   return { server, r, d, id, t };
 }
 
