@@ -321,7 +321,8 @@ if (fresh) {
     distributions: [],
     limits: {
       // Never above the vault's own per-payment cap; the window limit is this proof's budget.
-      maxAutonomousPerLeg: window.perPaymentCap,
+      maxAutonomousPerLeg:
+        window.perPaymentCap < u('0.005') ? window.perPaymentCap : u('0.005'),
       maxAutonomousPerWindow: u('0.005'),
       windowSeconds: 86_400,
       maxSplitsPerWindow: 3,
