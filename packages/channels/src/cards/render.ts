@@ -1,8 +1,12 @@
 import {
+  CARD_EXECUTION_MODE_LABEL,
   EXECUTION_MODE_LABEL,
+  isArcCard,
+  type ArcCard,
   type CardMoney,
   type InteractiveCard,
 } from '@synq/schemas';
+import { cardNetworkLabel } from './content/network.js';
 import type {
   ChannelId,
   OutboundCallback,
@@ -48,11 +52,135 @@ export function cardTitle(card: InteractiveCard): string {
       return `DCA ${card.asset}: ${card.status.toLowerCase()}`;
     case 'EXECUTION_RECEIPT':
       return `${RECEIPT_VERB[card.status]} [${card.executionMode}]: ${card.label}`;
+    case 'DEAL_PROPOSAL':
+      return `Deal: ${card.title} (v${card.version}, ${card.status})`;
+    case 'ESCROW_MILESTONE':
+      return `Milestone ${card.milestoneIndex + 1}/${card.milestoneCount} ${card.state}: ${card.title}`;
+    case 'INVOICE':
+      return `Invoice ${card.number}: ${card.status}`;
+    case 'RISK_HOLD':
+      return card.state === 'RELEASED' || card.state === 'RESOLVED'
+        ? `Risk hold cleared: ${card.subject.label}`
+        : `Payout on hold: ${card.subject.label}`;
+    case 'AGENT_RECOMMENDATION':
+      return `Team answer${card.counterparty ? ` on paying ${card.counterparty}` : ''}`;
+    case 'CONTRACTOR_PAYMENT':
+      return `Contractor payment to ${card.recipient.label}: ${card.status}`;
+    case 'FLIGHT_COMPARISON':
+      return `Flights ${card.origin} → ${card.destination}${card.returnDate ? ` and back` : ''}`;
+  }
+}
+
+/** Network, execution mode and freshness, on every Arc-era card. */
+function arcFooter(card: ArcCard): string[] {
+  return [
+    `Network: ${cardNetworkLabel(card.chainId)}${card.chainId === null ? '' : ` (chain ${card.chainId})`}`,
+    `Mode: [${card.executionMode}] ${CARD_EXECUTION_MODE_LABEL[card.executionMode]}`,
+    `Observed ${when(card.observedAt)}`,
+  ];
+}
+
+const DECISION = {
+  ALLOW: 'ALLOW (within the signed mandate)',
+  NEEDS_APPROVAL: 'NEEDS APPROVAL (the owner signs in their wallet)',
+  DENY: 'DENY',
+  NOT_SUBMITTED: 'NOT SUBMITTED (no payout prepared)',
+} as const;
+
+function arcLines(card: ArcCard): string[] {
+  switch (card.type) {
+    case 'DEAL_PROPOSAL':
+      return [
+        `Total: ${money(card.total)} over ${card.milestoneCount} milestone${card.milestoneCount === 1 ? '' : 's'}`,
+        `Client: ${card.client.label} (${card.client.address}) ${card.signatures.client}`,
+        `Freelancer: ${card.freelancer.label} (${card.freelancer.address}) ${card.signatures.freelancer}`,
+        `Deal ${card.dealId} v${card.version}, terms ${card.termsHash}`,
+        ...(card.escrow ? [`Escrow ${card.escrow}`] : []),
+        ...(card.expiresAt !== null
+          ? [`Offer lapses ${when(card.expiresAt)}`]
+          : []),
+        'Each party signs this exact version in their own wallet; a chat reply never signs or funds.',
+      ];
+    case 'ESCROW_MILESTONE':
+      return [
+        `Amount: ${money(card.amount)} · State: ${card.state}`,
+        `Due ${when(card.deadline)}`,
+        ...(card.disputeDeadline !== null
+          ? [`Dispute window until ${when(card.disputeDeadline)}`]
+          : []),
+        ...(card.evidence
+          ? [
+              `Evidence (${card.evidence.type}): ${card.evidence.label} ${card.evidence.hash}`,
+            ]
+          : []),
+        `Deal ${card.dealId}${card.escrowDealId !== null ? `, escrow deal #${card.escrowDealId}` : ''}${card.escrow ? ` at ${card.escrow}` : ''}`,
+        `Terms ${card.termsHash}`,
+        ...card.transactions.map((x) => `${x.label}: tx ${x.hash}`),
+      ];
+    case 'INVOICE':
+      return [
+        `Total: ${money(card.total)} · Paid: ${money(card.paid)} · Due: ${money(card.due)}${card.status === 'OVERPAID' ? ` · Overpaid: ${money(card.overpaid)}` : ''}`,
+        `From ${card.issuer.label} (${card.issuer.address}) to ${card.payer}, due ${card.dueDate}`,
+        `Invoice ${card.invoiceId} v${card.version}${card.termsHash ? `, terms ${card.termsHash}` : ''}`,
+        ...(card.paymentRef
+          ? [
+              `Memo reference ${card.paymentRef}; pay only through the Synq link.`,
+            ]
+          : []),
+        ...(card.lastPaymentTx
+          ? [`Last payment tx ${card.lastPaymentTx}`]
+          : []),
+      ];
+    case 'RISK_HOLD':
+      return [
+        `Case ${card.caseId} (rev ${card.revision}): ${card.state}`,
+        `Subject: ${card.subject.label}${card.subject.address ? ` (${card.subject.address})` : ''}`,
+        ...(card.amount ? [`Held amount: ${money(card.amount)}`] : []),
+        ...card.flags.map(
+          (f) =>
+            `· [${f.severity}] ${f.code}: ${f.detail}${f.reviewerClearable ? '' : ' (policy; no reviewer can clear it)'}`,
+        ),
+        `Clears with: ${card.clearedBy}`,
+        `Opened ${when(card.openedAt)}`,
+      ];
+    case 'AGENT_RECOMMENDATION':
+      return [
+        ...(card.amount ? [`Amount: ${money(card.amount)}`] : []),
+        ...card.roles.map(
+          (r) =>
+            `${r.persona}: ${r.stance}. ${r.summary}${r.citations ? ` (${r.citations} citations)` : ''}`,
+        ),
+        `Decision (Kernel): ${DECISION[card.decision.outcome]}${card.decision.reasons.length ? `; ${card.decision.reasons.join('; ')}` : ''}`,
+        `Evidence: ${card.evidence.facts} verified facts, ${card.evidence.inferences} model inferences${card.evidence.oldestFactSeconds !== null ? `, oldest ${card.evidence.oldestFactSeconds}s` : ''}`,
+        ...(card.riskCaseId ? [`Risk case ${card.riskCaseId}`] : []),
+        CHAT_NEVER_APPROVES,
+      ];
+    case 'CONTRACTOR_PAYMENT':
+      return [
+        `Amount: ${money(card.amount)} to ${card.recipient.label} (${card.recipient.address})${card.recipient.verified ? ', verified payout address' : ', NOT a verified payout address'}`,
+        `Route: ${card.route === 'VAULT_POLICY_PAY' ? 'vault policy.pay' : 'agent wallet'} · Approvals: ${card.approvals.counted}/${card.approvals.required}`,
+        `Status: ${card.status}${card.transactionHash ? ` · tx ${card.transactionHash}` : ''}`,
+        `Intent ${card.paymentId}${card.obligationRef ? ` for ${card.obligationRef}` : ''}`,
+        ...(card.status === 'PROPOSED' || card.status === 'AWAITING_APPROVAL'
+          ? [CHAT_NEVER_APPROVES]
+          : []),
+      ];
+    case 'FLIGHT_COMPARISON':
+      return [
+        `${card.departureDate}${card.returnDate ? ` to ${card.returnDate} (return)` : ' (one way)'}, ${card.travelers} traveller${card.travelers === 1 ? '' : 's'}, ${card.cabin}`,
+        ...card.options.map(
+          (o) =>
+            `${o.optionId === card.preferredOptionId ? '★ ' : '· '}${o.carrier}${o.flights ? ` ${o.flights}` : ''}: ${money(o.price)}; ${o.legs.map((l) => `${l.origin}-${l.destination} ${l.date}`).join(', ')}; ${o.stops ? `${o.stops} stop${o.stops === 1 ? '' : 's'}` : 'nonstop'}${o.baggage ? `; ${o.baggage}` : ''}; ${o.refundable ? 'refundable' : 'non-refundable'} (${o.votes} votes)`,
+        ),
+        `Provider: ${card.provider}`,
+        ...(card.proposalId ? [CHAT_NEVER_APPROVES] : []),
+      ];
   }
 }
 
 /** Plain lines shared by every text surface. */
 export function cardLines(card: InteractiveCard): string[] {
+  if (isArcCard(card)) return [...arcLines(card), ...arcFooter(card)];
   switch (card.type) {
     case 'GROUP_TREASURY':
       return [
