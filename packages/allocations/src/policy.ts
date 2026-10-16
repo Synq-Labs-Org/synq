@@ -142,7 +142,12 @@ export class PolicyError extends Error {
       | 'INVALID_POLICY'
       | 'NOT_SIGNED_BY_OWNER'
       | 'MANDATE_MISMATCH'
-      | 'POLICY_NOT_ACTIVE',
+      | 'POLICY_NOT_ACTIVE'
+      | 'OWNER_NOT_REGISTERED'
+      | 'TREASURY_NOT_REGISTERED'
+      | 'POLICY_SUPERSEDED'
+      | 'POLICY_REVOKED'
+      | 'BAD_REVOCATION',
     message: string = code,
   ) {
     super(message);
@@ -225,7 +230,11 @@ export function mandateFromPolicy(p: RevenuePolicy): PaymentMandate {
     token: p.token,
     payer: p.treasury,
     recipients: p.allowedBeneficiaries.map((b) => b.address),
-    purposes: ['CONTRACTOR_PAYOUT', 'VENDOR_INVOICE'],
+    purposes: [
+      'CONTRACTOR_PAYOUT',
+      'VENDOR_INVOICE',
+      ...(p.distributions.length ? (['OWNER_DISTRIBUTION'] as const) : []),
+    ],
     perActionCap: p.limits.maxAutonomousPerLeg,
     periodBudget: p.limits.maxAutonomousPerWindow,
     periodSeconds: p.limits.windowSeconds,

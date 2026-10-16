@@ -147,7 +147,11 @@ export function forecastCash(input: {
   // Reservations are not subtracted here: the obligations they hold for are
   // projected as outflows below. Only restricted and in-flight money is.
   const startCash =
-    availableLiquidity({ ...pos, reservations: 0n }) - input.heldForTax;
+    availableLiquidity({
+      ...pos,
+      reservations: 0n,
+      ...(pos.workspaceCash === undefined ? {} : { workspaceReservations: 0n }),
+    }) - input.heldForTax;
   const shock = (a: bigint) =>
     input.scenario === 'EXPENSE_SHOCK'
       ? a + (a * BigInt(params.expenseShockBps)) / 10_000n

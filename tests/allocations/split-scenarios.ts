@@ -4,6 +4,7 @@ import {
   explainAllocation,
   legRef,
   receiptKey,
+  treasuryScope,
   type SplitStore,
 } from '@synq/allocations';
 import { walletCashWei, walletTag } from '@synq/ledger';
@@ -72,7 +73,7 @@ export function splitScenarios(
       expect(bal.ACCOUNTS_PAYABLE).toBe(0n);
       expect(bal.CONTRACTOR_EXPENSE).toBe(usd('300'));
       expect(bal.OWNER_EQUITY).toBe(usd('18'));
-      const res = await w.store.reservations(w.policy.workspaceId);
+      const res = await w.store.reservations(treasuryScope(w.policy));
       expect(
         res
           .filter((r) => r.status === 'ACTIVE')
@@ -113,7 +114,7 @@ export function splitScenarios(
       });
       expect(await w.outbox.get(tax.legKey)).toBeNull();
       expect(w.fake.paid.some((p) => p.amount === tax.amount)).toBe(false);
-      const r = (await w.store.reservations(w.policy.workspaceId)).find(
+      const r = (await w.store.reservations(treasuryScope(w.policy))).find(
         (x) => x.reservationId === tax.legKey,
       )!;
       expect(r).toMatchObject({
@@ -338,12 +339,12 @@ export function splitScenarios(
         (await w.runner.run(split.splitId, { stopAt: 'SPLIT_AUTHORIZED' }))
           .state,
       ).toBe('SPLIT_AUTHORIZED');
-      const held = await w.store.reservations(w.policy.workspaceId);
+      const held = await w.store.reservations(treasuryScope(w.policy));
       expect(held.filter((r) => r.status === 'ACTIVE')).toHaveLength(6);
       const cancelled = await w.runner.cancel(split.splitId, 'owner cancelled');
       expect(cancelled.state).toBe('CANCELLED');
       expect(
-        (await w.store.reservations(w.policy.workspaceId)).every(
+        (await w.store.reservations(treasuryScope(w.policy))).every(
           (r) => r.status === 'RELEASED',
         ),
       ).toBe(true);
@@ -373,14 +374,9 @@ export function splitScenarios(
         txHash: TX(2),
         receiptId: receiptKey(USDC.chainId, TX(2), 3),
       });
-      const w2 = await world({
-        store,
-        policy,
-        receipt: second,
-        cash: usd('1200'),
-      });
-      const s = (await w2.runner.trigger(second)).split;
-      const done = await w2.runner.run(s.splitId);
+      await w.addReceipt(second);
+      const s = (await w.runner.trigger(second)).split;
+      const done = await w.runner.run(s.splitId);
       expect(done.state).toBe('NEEDS_REVIEW');
       expect(done.note).toMatch(/frequency limit/);
     });
@@ -393,9 +389,9 @@ export function splitScenarios(
         txHash: TX(3),
         receiptId: receiptKey(USDC.chainId, TX(3), 3),
       });
-      const w2 = await world({ store, receipt: second, cash: usd('3000') });
-      const s = (await w2.runner.trigger(second)).split;
-      await w2.runner.run(s.splitId);
+      await w.addReceipt(second);
+      const s = (await w.runner.trigger(second)).split;
+      await w.runner.run(s.splitId);
       const plan = (await store.get(s.splitId))!.plan!;
       expect(plan.legs.some((l) => l.documentRef === 'vin_dev_1')).toBe(false);
     });

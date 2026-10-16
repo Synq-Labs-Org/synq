@@ -20,7 +20,12 @@ import {
   mandateTypedData,
   type AuthorityConfig,
 } from '@synq/kernel/arc';
-import { Ledger, MemoryLedgerStore, walletTag } from '@synq/ledger';
+import {
+  Ledger,
+  MemoryLedgerStore,
+  walletTag,
+  type JournalEntry,
+} from '@synq/ledger';
 import {
   vendorDirectory,
   type Vendor,
@@ -29,6 +34,7 @@ import {
 import {
   SplitRunner,
   isoDay,
+  openPayables,
   mandateFromPolicy,
   parsePolicy,
   policyTypedData,
@@ -38,7 +44,9 @@ import {
   type Receivable,
   type RecurringBill,
   type RevenuePolicy,
+  type RunnerDeps,
   type SignedRevenuePolicy,
+  type WorkspaceRegistry,
   type SplitStore,
   type TreasuryBooks,
 } from '@synq/allocations';
@@ -56,6 +64,10 @@ export const VAULT = contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE')
   .address as Address;
 export const POLICY = contract('arc-testnet', 'SYNQ_ARC_VAULT_POLICY')
   .address as Address;
+const USDC_CODE = readFileSync(
+  new URL('../arc/fixtures/arc-testnet-usdc.code', import.meta.url),
+  'utf8',
+).trim() as Hex;
 const POLICY_CODE = readFileSync(
   new URL('./fixtures/arc-testnet-vault-policy.code', import.meta.url),
   'utf8',
@@ -136,6 +148,8 @@ export const devInvoice = (
   number: `DEV-${id}`,
   payTo: DEV,
   chainId: USDC.chainId,
+  token: USDC.address,
+  decimals: USDC.decimals,
   amount,
   issuedOn: day(-10),
   dueOn: day(dueIn),
@@ -293,6 +307,8 @@ export function fakeVaultChain(
   >();
   const broadcasts: Hex[] = [];
   const paid: { recipient: Address; amount: bigint; ref: Hex }[] = [];
+  /** Failure injection: each counter fails that many upcoming calls. */
+  const fail = { estimateGas: 0, receipt: 0, wait: 0 };
   const capError = (amount: bigint, cap: bigint) => {
     const err = new Error('execution reverted') as Error & { data: Hex };
     err.data = encodeErrorResult({
@@ -303,6 +319,12 @@ export function fakeVaultChain(
     return err;
   };
   const check = (data: Hex) => {
+    if (data.startsWith('0xa9059cbb')) {
+      // Plain ERC-20 transfer from the operator wallet (wallet fallback).
+      const t = decodeFunctionData({ abi: erc20Abi, data });
+      const [recipient, amount] = t.args as [Address, bigint];
+      return { recipient, amount, ref: null as Hex | null };
+    }
     const d = decodeFunctionData({ abi: VAULT_POLICY_ABI, data });
     if (d.functionName !== 'pay') throw new Error('not pay');
     const [recipient, amount, ref] = d.args as [Address, bigint, Hex];
@@ -313,18 +335,34 @@ export function fakeVaultChain(
   };
   const client = {
     getChainId: async () => USDC.chainId,
-    getCode: async () => POLICY_CODE,
+    getCode: async ({ address }: { address: Address }) =>
+      address.toLowerCase() === USDC.address.toLowerCase()
+        ? USDC_CODE
+        : POLICY_CODE,
     readContract: async ({ functionName }: { functionName: string }) =>
       functionName === 'safe'
         ? VAULT
         : functionName === 'operator'
           ? operator.address
-          : 0n,
+          : functionName === 'balanceOf'
+            ? 10n ** 15n
+            : 0n,
     call: async ({ data }: { data: Hex }) => {
-      check(data);
-      return { data: '0x' };
+      const c = check(data);
+      return {
+        data:
+          c.ref === null
+            ? encodeAbiParameters([{ type: 'bool' }], [true])
+            : ('0x' as Hex),
+      };
     },
-    estimateGas: async () => 90_000n,
+    estimateGas: async () => {
+      if (fail.estimateGas > 0) {
+        fail.estimateGas--;
+        throw new Error('rpc 503');
+      }
+      return 90_000n;
+    },
     getTransactionCount: async () => nonce,
     estimateFeesPerGas: async () => ({
       maxFeePerGas: 21_000_000_000n,
@@ -349,8 +387,8 @@ export function fakeVaultChain(
         mined.set(hash, { status: 'reverted', block, logs: [] });
         return hash;
       }
-      windowSpent += call.amount;
-      paid.push(call);
+      if (call.ref !== null) windowSpent += call.amount;
+      paid.push({ ...call, ref: call.ref ?? ('0x' as Hex) });
       const base = {
         blockNumber: block,
         transactionHash: hash,
@@ -368,34 +406,45 @@ export function fakeVaultChain(
             topics: encodeEventTopics({
               abi: erc20Abi,
               eventName: 'Transfer',
-              args: { from: VAULT, to: call.recipient },
+              args: {
+                from: call.ref === null ? operator.address : VAULT,
+                to: call.recipient,
+              },
             }),
             data: encodeAbiParameters([{ type: 'uint256' }], [call.amount]),
             logIndex: 1,
           },
-          {
-            ...base,
-            address: POLICY,
-            topics: encodeEventTopics({
-              abi: VAULT_POLICY_ABI,
-              eventName: 'OperatorPaid',
-              args: {
-                ref: call.ref,
-                operator: operator.address,
-                recipient: call.recipient,
-              },
-            }),
-            data: encodeAbiParameters(
-              [{ type: 'address' }, { type: 'uint256' }],
-              [USDC.address, call.amount],
-            ),
-            logIndex: 2,
-          },
+          ...(call.ref === null
+            ? []
+            : [
+                {
+                  ...base,
+                  address: POLICY,
+                  topics: encodeEventTopics({
+                    abi: VAULT_POLICY_ABI,
+                    eventName: 'OperatorPaid',
+                    args: {
+                      ref: call.ref,
+                      operator: operator.address,
+                      recipient: call.recipient,
+                    },
+                  }),
+                  data: encodeAbiParameters(
+                    [{ type: 'address' }, { type: 'uint256' }],
+                    [USDC.address, call.amount],
+                  ),
+                  logIndex: 2,
+                },
+              ]),
         ],
       });
       return hash;
     },
     getTransactionReceipt: async ({ hash }: { hash: Hex }) => {
+      if (fail.receipt > 0) {
+        fail.receipt--;
+        throw new Error('receipt rpc timeout');
+      }
       const m = mined.get(hash);
       if (!m) throw new Error('receipt not found');
       return {
@@ -407,13 +456,19 @@ export function fakeVaultChain(
         logs: m.logs,
       };
     },
-    waitForTransactionReceipt: async ({ hash }: { hash: Hex }) =>
-      client.getTransactionReceipt({ hash }),
+    waitForTransactionReceipt: async ({ hash }: { hash: Hex }) => {
+      if (fail.wait > 0) {
+        fail.wait--;
+        throw new Error('worker died while waiting for the receipt');
+      }
+      return client.getTransactionReceipt({ hash });
+    },
   };
   return {
     client: client as unknown as PublicClient,
     broadcasts,
     paid,
+    fail,
     get windowSpent() {
       return windowSpent;
     },
@@ -443,62 +498,99 @@ export const kernelConfig: AuthorityConfig = {
 };
 
 export type World = Awaited<ReturnType<typeof world>>;
+export type FakeChain = ReturnType<typeof fakeVaultChain>;
+
+/** The workspace's registered treasury and owners (not settable by a policy). */
+export const registryOf = (
+  entries: Record<string, { treasury: Address; owners: Address[] }> = {},
+): WorkspaceRegistry => ({
+  principals: async (workspaceId) => ({
+    treasury: entries[workspaceId]?.treasury ?? VAULT,
+    owners: entries[workspaceId]?.owners ?? [owner.address],
+    source: 'test:configured-workspace-owner',
+  }),
+});
+
+export const ledgerReceipt = (
+  workspaceId: string,
+  receipt: FinalReceipt,
+): JournalEntry => ({
+  entryId: `je_receipt_${receipt.txHash.slice(2)}_${receipt.logIndex}`,
+  workspaceId,
+  occurredAt: T0 - 60,
+  memo: `Payment for ${receipt.invoiceNumber}`,
+  source: { kind: 'CHAIN_TX', ref: receipt.invoiceId },
+  evidence: {
+    chainId: receipt.chainId,
+    txHash: receipt.txHash,
+    logIndex: receipt.logIndex,
+    recipient: receipt.recipient,
+  },
+  idempotencyKey: receipt.receiptId,
+  postings: [
+    {
+      account: 'CASH_ARC_USDC',
+      assetId: USDC.assetId,
+      amount: receipt.amount,
+      counterpartyId: walletTag(receipt.recipient),
+      documentRef: receipt.invoiceId,
+    },
+    {
+      account: 'ACCOUNTS_RECEIVABLE',
+      assetId: USDC.assetId,
+      amount: -receipt.amount,
+      counterpartyId: 'payer:Acme',
+      documentRef: receipt.invoiceId,
+    },
+  ],
+  reversalOf: null,
+});
 
 /**
  * Everything a runner needs, around the $1,500 scenario: books, ledger with
  * the receipt already settled (as `InvoiceService.settle` books it), a fake
- * vault chain and an outbox store that outlive any one runner.
+ * vault chain and an outbox store that outlive any one runner. Worlds can
+ * share a store, a chain (one treasury) and an outbox.
  */
 export async function world(
   input: {
     store: SplitStore;
+    ledger?: Ledger;
     policy?: RevenuePolicy;
     signed?: SignedRevenuePolicy;
     receipt?: FinalReceipt;
-    cash?: bigint;
+    /** Cash already in the treasury on chain, outside this world's receipts. */
+    otherCash?: bigint;
     payables?: VendorInvoice[];
     chainCaps?: { perPaymentCap?: bigint; windowCap?: bigint };
     outbox?: OutboxStore;
+    fake?: FakeChain;
+    /** Shared on-chain treasury balance (for worlds on one treasury). */
+    treasuryCash?: { value: bigint };
+    registry?: WorkspaceRegistry;
+    vendorList?: Vendor[];
+    bills?: RecurringBill[];
   } = { store: undefined as unknown as SplitStore },
 ) {
   const policy = input.policy ?? policy1500();
   const signed = input.signed ?? (await signPolicy(policy));
   const receipt = input.receipt ?? receipt1500();
-  const vs = vendors();
-  const ledger = new Ledger(new MemoryLedgerStore(), vendorDirectory(vs));
-  await ledger.post({
-    entryId: 'je_receipt',
-    workspaceId: WS,
-    occurredAt: T0 - 60,
-    memo: 'Payment for INV-2001',
-    source: { kind: 'CHAIN_TX', ref: receipt.invoiceId },
-    evidence: {
-      chainId: receipt.chainId,
-      txHash: receipt.txHash,
-      logIndex: receipt.logIndex,
-      recipient: receipt.recipient,
-    },
-    idempotencyKey: receipt.receiptId,
-    postings: [
-      {
-        account: 'CASH_ARC_USDC',
-        assetId: USDC.assetId,
-        amount: receipt.amount,
-        counterpartyId: walletTag(receipt.recipient),
-        documentRef: receipt.invoiceId,
-      },
-      {
-        account: 'ACCOUNTS_RECEIVABLE',
-        assetId: USDC.assetId,
-        amount: -receipt.amount,
-        counterpartyId: 'payer:Acme',
-        documentRef: receipt.invoiceId,
-      },
-    ],
-    reversalOf: null,
-  });
+  const vs = input.vendorList ?? vendors();
+  const ledger =
+    input.ledger ??
+    new Ledger(new MemoryLedgerStore(), {
+      verifiedPayout: (cp, chainId) =>
+        vendorDirectory(vs).verifiedPayout(cp, chainId),
+    });
+  const fake = input.fake ?? fakeVaultChain(input.chainCaps);
+  const treasuryCash = input.treasuryCash ?? { value: input.otherCash ?? 0n };
+  const paidBefore = fake.paid.reduce((a, p) => a + p.amount, 0n);
+  const addReceipt = async (r: FinalReceipt) => {
+    await ledger.post(ledgerReceipt(policy.workspaceId, r));
+    treasuryCash.value += r.amount;
+  };
+  await addReceipt(receipt);
   const payables = input.payables ?? [devInvoice(usd('300'), 5)];
-  const fake = fakeVaultChain(input.chainCaps);
   const chain = await connectChain('arc-testnet', undefined, fake.client);
   const outbox = input.outbox ?? new MemoryOutboxStore();
   const signer = countingSigner();
@@ -508,19 +600,31 @@ export async function world(
     at: null as string | null,
     mode: 'throw' as 'throw' | 'hang',
   };
+  const settled: { holdKey: string; status: 'CONSUMED' | 'RELEASED' }[] = [];
   const books: TreasuryBooks = {
     position: async () => {
-      const { reservations: _r, ...p } = position(input.cash ?? receipt.amount);
+      const { reservations: _r, ...p } = position(
+        treasuryCash.value -
+          (fake.paid.reduce((a, x) => a + x.amount, 0n) - paidBefore),
+      );
       return { ...p, observedAt: clock - 5 };
     },
     vendors: async () => vs,
-    payables: async () => payables,
+    payables: async () =>
+      openPayables(payables, await ledger.store.entries(policy.workspaceId)),
     payableHistory: async () => payables,
     obligations: async () => [],
-    bills: async () => bills1500(),
+    bills: async () => input.bills ?? bills1500(),
     receivables: async () => receivables1500(),
+    settledHolds: async () => settled,
   };
-  const makeRunner = (afterRecord?: (k: string, r: OutboxRecord) => unknown) =>
+  const registry = input.registry ?? registryOf();
+  // The executor's grant-nonce fence is durable in production: share it across restarts.
+  const fence = new MemoryNonceFence();
+  const makeRunner = (
+    afterRecord?: (k: string, r: OutboxRecord) => unknown,
+    over: Partial<RunnerDeps> = {},
+  ) =>
     new SplitRunner({
       store: input.store,
       ledger,
@@ -530,7 +634,7 @@ export async function world(
         signer,
         asset: USDC,
         grantKey: GRANT_KEY,
-        fence: new MemoryNonceFence(),
+        fence,
         now,
         afterRecord: async (k, r) => {
           if (crash.at === k) {
@@ -544,10 +648,12 @@ export async function world(
       receipts: { verify: async (r) => r },
       books,
       signedPolicy: signed,
+      registry,
       kernel: kernelConfig,
       assetId: USDC.assetId,
       chain: 'arc-testnet',
       now,
+      ...over,
     });
   return {
     policy,
@@ -555,10 +661,16 @@ export async function world(
     receipt,
     ledger,
     fake,
+    chain,
     outbox,
     signer,
     crash,
     books,
+    settled,
+    vendors: vs,
+    treasuryCash,
+    addReceipt,
+    registry,
     store: input.store,
     runner: makeRunner(),
     makeRunner,

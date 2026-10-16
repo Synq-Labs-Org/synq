@@ -1,5 +1,6 @@
 import type { AllocationPlan } from './waterfall.js';
 import { AllocationError } from './waterfall.js';
+import type { PolicyRegistration, StoredRevocation } from './registry.js';
 import {
   TERMINAL,
   assertTransition,
@@ -17,6 +18,10 @@ type Sql = {
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Record<string, unknown>[] }>;
+};
+/** A pool (`connect` gives a dedicated client) or a client already in a transaction. */
+type PoolLike = Sql & {
+  connect?: () => Promise<Sql & { release(): void }>;
 };
 
 /**
@@ -77,6 +82,57 @@ export const ALLOCATION_MIGRATIONS: readonly {
     down: `DROP TABLE IF EXISTS synq_alloc_events; DROP TABLE IF EXISTS synq_alloc_reservations;
       DROP TABLE IF EXISTS synq_alloc_legs; DROP TABLE IF EXISTS synq_alloc_splits;`,
   },
+  {
+    // Holds per treasury scope with a hold key; legs that may have paid stay
+    // fenced; the policy registry and owner-signed revocations.
+    version: 2,
+    up: `ALTER TABLE synq_alloc_reservations ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT '';
+    ALTER TABLE synq_alloc_reservations ADD COLUMN IF NOT EXISTS hold_key text NOT NULL DEFAULT '';
+    UPDATE synq_alloc_reservations h SET
+      scope = (s.data->'receipt'->>'chainId') || ':' || lower(s.data->'receipt'->>'token') || ':' || lower(s.data->'receipt'->>'recipient'),
+      hold_key = CASE
+        WHEN h.purpose='OPERATING_FLOOR' THEN 'floor:' || h.reservation_id
+        WHEN h.purpose='TAX_ESTIMATE' THEN 'tax:' || s.receipt_id
+        ELSE COALESCE(l.data->>'obligationRef', 'legacy:' || h.reservation_id) END
+      FROM synq_alloc_splits s, synq_alloc_legs l
+      WHERE h.split_id=s.split_id AND l.leg_key=h.reservation_id AND h.scope='';
+    CREATE INDEX IF NOT EXISTS synq_alloc_reservations_scope ON synq_alloc_reservations (scope, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS synq_alloc_one_active_hold
+      ON synq_alloc_reservations (scope, workspace_id, hold_key)
+      WHERE status = 'ACTIVE' AND hold_key NOT LIKE 'floor:%' AND hold_key <> '';
+    DROP INDEX IF EXISTS synq_alloc_one_grant_per_obligation;
+    CREATE UNIQUE INDEX IF NOT EXISTS synq_alloc_one_grant_per_obligation_v2
+      ON synq_alloc_legs (policy_id, obligation_ref)
+      WHERE obligation_ref IS NOT NULL AND (
+        state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED','NEEDS_REVIEW')
+        OR (state = 'FAILED' AND data->>'txHash' IS NOT NULL));
+    CREATE TABLE IF NOT EXISTS synq_alloc_policies (
+      policy_id text NOT NULL,
+      version int NOT NULL,
+      workspace_id text NOT NULL,
+      owner text NOT NULL,
+      policy_hash text NOT NULL,
+      registered_at bigint NOT NULL,
+      PRIMARY KEY (policy_id, version));
+    CREATE TABLE IF NOT EXISTS synq_alloc_policy_revocations (
+      policy_id text NOT NULL,
+      workspace_id text NOT NULL,
+      through_version int NOT NULL,
+      signer text NOT NULL,
+      signature text NOT NULL,
+      reason text NOT NULL,
+      signed_at bigint NOT NULL,
+      recorded_at bigint NOT NULL,
+      PRIMARY KEY (policy_id, signature));`,
+    down: `DROP TABLE IF EXISTS synq_alloc_policy_revocations; DROP TABLE IF EXISTS synq_alloc_policies;
+      DROP INDEX IF EXISTS synq_alloc_one_grant_per_obligation_v2;
+      CREATE UNIQUE INDEX IF NOT EXISTS synq_alloc_one_grant_per_obligation
+        ON synq_alloc_legs (policy_id, obligation_ref)
+        WHERE obligation_ref IS NOT NULL AND state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED');
+      DROP INDEX IF EXISTS synq_alloc_one_active_hold; DROP INDEX IF EXISTS synq_alloc_reservations_scope;
+      ALTER TABLE synq_alloc_reservations DROP COLUMN IF EXISTS hold_key;
+      ALTER TABLE synq_alloc_reservations DROP COLUMN IF EXISTS scope;`,
+  },
 ];
 
 export async function migrateAllocations(
@@ -120,6 +176,8 @@ const dec = <T>(raw: unknown): T =>
 
 const reservationOf = (x: Record<string, unknown>): Reservation => ({
   reservationId: String(x.reservation_id),
+  scope: String(x.scope),
+  holdKey: String(x.hold_key),
   workspaceId: String(x.workspace_id),
   splitId: String(x.split_id),
   purpose: String(x.purpose) as Reservation['purpose'],
@@ -131,7 +189,111 @@ const reservationOf = (x: Record<string, unknown>): Reservation => ({
 });
 
 export class PostgresSplitStore implements SplitStore {
-  constructor(readonly sql: Sql) {}
+  constructor(readonly sql: PoolLike) {}
+  async atomically<T>(
+    locks: readonly string[],
+    fn: (tx: SplitStore) => Promise<T>,
+  ): Promise<T> {
+    const lock = async (c: Sql) => {
+      for (const k of [...new Set(locks)].sort())
+        await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+          `synq_alloc:${k}`,
+        ]);
+    };
+    if (!this.sql.connect) {
+      // Already a transaction's client: take the locks and run.
+      await lock(this.sql);
+      return fn(this);
+    }
+    const client = await this.sql.connect();
+    try {
+      await client.query('BEGIN');
+      await lock(client);
+      const out = await fn(new PostgresSplitStore(client));
+      await client.query('COMMIT');
+      return out;
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+  async putPolicy(r: PolicyRegistration) {
+    await this.sql.query(
+      `INSERT INTO synq_alloc_policies (policy_id, version, workspace_id, owner, policy_hash, registered_at)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (policy_id, version) DO NOTHING`,
+      [
+        r.policyId,
+        r.version,
+        r.workspaceId,
+        r.owner,
+        r.policyHash,
+        r.registeredAt,
+      ],
+    );
+    return (await this.policyVersions(r.policyId)).find(
+      (x) => x.version === r.version,
+    )!;
+  }
+  async policyVersions(policyId: string) {
+    const r = await this.sql.query(
+      'SELECT * FROM synq_alloc_policies WHERE policy_id=$1 ORDER BY version',
+      [policyId],
+    );
+    return r.rows.map(
+      (x): PolicyRegistration => ({
+        policyId: String(x.policy_id),
+        version: Number(x.version),
+        workspaceId: String(x.workspace_id),
+        owner: String(x.owner) as PolicyRegistration['owner'],
+        policyHash: String(x.policy_hash) as PolicyRegistration['policyHash'],
+        registeredAt: Number(x.registered_at),
+      }),
+    );
+  }
+  async putRevocation(r: StoredRevocation) {
+    await this.sql.query(
+      `INSERT INTO synq_alloc_policy_revocations (policy_id, workspace_id, through_version, signer, signature, reason, signed_at, recorded_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
+      [
+        r.policyId,
+        r.workspaceId,
+        r.throughVersion,
+        r.signer,
+        r.signature,
+        r.reason,
+        r.at,
+        r.recordedAt,
+      ],
+    );
+  }
+  async revocations(policyId: string) {
+    const r = await this.sql.query(
+      'SELECT * FROM synq_alloc_policy_revocations WHERE policy_id=$1',
+      [policyId],
+    );
+    return r.rows.map(
+      (x): StoredRevocation => ({
+        policyId: String(x.policy_id),
+        workspaceId: String(x.workspace_id),
+        throughVersion: Number(x.through_version),
+        reason: String(x.reason),
+        at: Number(x.signed_at),
+        signer: String(x.signer) as StoredRevocation['signer'],
+        signature: String(x.signature) as StoredRevocation['signature'],
+        recordedAt: Number(x.recorded_at),
+      }),
+    );
+  }
+  async validatedSince(policyId: string, since: number) {
+    const r = await this.sql.query(
+      `SELECT DISTINCT e.split_id FROM synq_alloc_events e JOIN synq_alloc_splits s ON s.split_id = e.split_id
+       WHERE s.policy_id=$1 AND e.to_state='POLICY_VALIDATED' AND e.at >= $2 AND s.state <> 'CANCELLED'`,
+      [policyId, since],
+    );
+    return r.rows.map((x) => String(x.split_id));
+  }
   async migrate() {
     await migrateAllocations(this.sql);
   }
@@ -271,19 +433,30 @@ export class PostgresSplitStore implements SplitStore {
     return next;
   }
   async reserve(res: Reservation) {
-    await this.sql.query(
-      `INSERT INTO synq_alloc_reservations (reservation_id, workspace_id, split_id, purpose, amount, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT (reservation_id) DO NOTHING`,
-      [
-        res.reservationId,
-        res.workspaceId,
-        res.splitId,
-        res.purpose,
-        res.amount.toString(),
-        res.status,
-        res.createdAt,
-      ],
-    );
+    await this.sql
+      .query(
+        `INSERT INTO synq_alloc_reservations (reservation_id, workspace_id, split_id, purpose, amount, status, created_at, updated_at, scope, hold_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9) ON CONFLICT (reservation_id) DO NOTHING`,
+        [
+          res.reservationId,
+          res.workspaceId,
+          res.splitId,
+          res.purpose,
+          res.amount.toString(),
+          res.status,
+          res.createdAt,
+          res.scope,
+          res.holdKey,
+        ],
+      )
+      .catch((e: { code?: string }) => {
+        if (e.code === '23505')
+          throw new AllocationError(
+            'CONFLICT',
+            `${res.holdKey} is already held`,
+          );
+        throw e;
+      });
     const r = await this.sql.query(
       'SELECT amount FROM synq_alloc_reservations WHERE reservation_id=$1',
       [res.reservationId],
@@ -308,17 +481,19 @@ export class PostgresSplitStore implements SplitStore {
       if (!x.rows[0]) throw new AllocationError('NOT_FOUND', id);
     }
   }
-  async reservations(workspaceId: string) {
+  async reservations(scope: string) {
     const r = await this.sql.query(
-      'SELECT * FROM synq_alloc_reservations WHERE workspace_id=$1 ORDER BY reservation_id',
-      [workspaceId],
+      'SELECT * FROM synq_alloc_reservations WHERE scope=$1 ORDER BY created_at, reservation_id',
+      [scope],
     );
     return r.rows.map(reservationOf);
   }
   async transfersSince(policyId: string, since: number) {
     const r = await this.sql.query(
       `SELECT data FROM synq_alloc_legs WHERE policy_id=$1 AND kind='TRANSFER'
-       AND state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED') AND coalesce(authorized_at,0) >= $2`,
+       AND (state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED','NEEDS_REVIEW')
+            OR (state = 'FAILED' AND data->>'txHash' IS NOT NULL))
+       AND coalesce(authorized_at,0) >= $2`,
       [policyId, since],
     );
     return r.rows.map((x) => dec<LegRecord>(x.data));
@@ -326,7 +501,8 @@ export class PostgresSplitStore implements SplitStore {
   async grantedLegs(policyId: string) {
     const r = await this.sql.query(
       `SELECT data FROM synq_alloc_legs WHERE policy_id=$1
-       AND state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED')`,
+       AND (state IN ('AUTHORIZED','SUBMITTED','CONFIRMED','RECONCILED','NEEDS_REVIEW')
+            OR (state = 'FAILED' AND data->>'txHash' IS NOT NULL))`,
       [policyId],
     );
     return r.rows.map((x) => dec<LegRecord>(x.data));

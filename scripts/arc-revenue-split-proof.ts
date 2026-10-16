@@ -100,7 +100,7 @@ import {
 } from '@synq/allocations';
 import { connectChain, verifyContract } from '@synq/execution-worker/arc';
 import { FileOutboxStore } from '@synq/execution-worker/arc-outbox';
-import { simulate } from '@synq/execution-worker/vault';
+import { SAFE_ABI, simulate } from '@synq/execution-worker/vault';
 import {
   readVaultWindow,
   vaultPayData,
@@ -263,6 +263,8 @@ if (fresh) {
     number: `DEV-${runId}-${m}`,
     payTo: contractorAddr,
     chainId: usdc.chainId,
+    token: usdc.address,
+    decimals: usdc.decimals,
     amount: u(amt as string),
     issuedOn: today,
     dueOn: inDays(due as number),
@@ -289,14 +291,8 @@ if (fresh) {
       cadenceDays: 30,
     },
   ];
-  // Free cash already in the treasury counts toward the floor; the floor is
-  // set so this receipt tops it up by $500 (0.005).
-  const preFree = await chain.client.readContract({
-    address: usdc.address,
-    abi: erc20Abi,
-    functionName: 'balanceOf',
-    args: [treasury],
-  });
+  // This workspace's floor is funded only from its booked receipt, even
+  // though other workspaces may share the same on-chain treasury.
   const policy = parsePolicy({
     policyId: `freelancer_revenue_${runId}`,
     version: 1,
@@ -309,7 +305,7 @@ if (fresh) {
     validFrom: now() - 60,
     validUntil: now() + 7 * 86_400,
     taxReserveBps: 1_500,
-    operatingFloor: preFree + u('0.005'),
+    operatingFloor: u('0.005'),
     obligationHorizonDays: 30,
     allowedBeneficiaries: [
       {
@@ -459,7 +455,9 @@ async function finalReceipt(hash: Hex): Promise<FinalReceipt> {
   const p = payments[0]!;
   const settled = await invoices.settle(p);
   if (settled.outcome === 'UNMATCHED') throw new Error(settled.reason);
-  const inv = (await invoiceStore.get(st.invoiceId))!.invoice;
+  const inv = settled.invoice;
+  if (inv.invoiceId !== st.invoiceId)
+    throw new Error('Memo payment matched another invoice');
   return {
     receiptId: receiptKey(p.chainId, p.txHash, p.logIndex),
     chainId: p.chainId,
@@ -592,6 +590,26 @@ const runner = new SplitRunner({
   },
   books,
   signedPolicy: st.signed,
+  registry: {
+    async principals(workspaceId) {
+      if (workspaceId !== st.workspaceId) throw new Error('unknown workspace');
+      const owners =
+        st.mode === 'VAULT'
+          ? await chain.client.readContract({
+              address: st.treasury,
+              abi: SAFE_ABI,
+              functionName: 'getOwners',
+            })
+          : [owner.address];
+      return {
+        treasury: st.treasury,
+        owners: owners.filter(
+          (a) => a.toLowerCase() === owner.address.toLowerCase(),
+        ),
+        source: 'configured workspace owner intersected with live Safe owners',
+      };
+    },
+  },
   kernel,
   assetId: usdc.assetId,
   chain: 'arc-testnet',
@@ -674,7 +692,7 @@ for (const h of myTxs) {
 const entries = await ledger.store.entries(st.workspaceId);
 const ledgerCash = walletCashWei(entries, usdc.assetId);
 const after = await balances(tracked);
-const endBlock = await chain.client.getBlockNumber();
+const endBlock = await chain.client.getBlockNumber({ cacheTime: 0 });
 const reconciliation = Object.entries(tracked).map(([role, addr]) => {
   const book = ledgerCash.get(walletTag(addr)) ?? 0n;
   const delta = after[role]! - st.before[role]!;

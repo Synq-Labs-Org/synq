@@ -12,15 +12,22 @@
  * Both admit the leg's Kernel grant against the exact call before signing a
  * new transaction, and only then.
  */
-import { erc20Abi, parseEventLogs, type Address, type Hex } from 'viem';
+import { erc20Abi, parseEventLogs, type Address } from 'viem';
 import { money, type AssetRef } from '@synq/domain';
 import { contract } from '@synq/chain-registry/arc';
 import {
+  AuthorityError,
   admitGrant,
   type ExecutionGrant,
   type NonceFence,
 } from '@synq/kernel/arc';
-import type { LegCall, LegExecutor, LegPayResult } from '@synq/allocations';
+import {
+  legIntentId,
+  legRef,
+  type LegCall,
+  type LegExecutor,
+  type LegPayResult,
+} from '@synq/allocations';
 import type { ArcChain, TransferSigner } from '@synq/execution-worker/arc';
 import {
   payOnce,
@@ -46,15 +53,33 @@ type Common = {
   afterRecord?: (legKey: string, r: OutboxRecord) => Promise<void> | void;
 };
 
-const admit = (
+/**
+ * The runner's last check under lock, then grant admission: the grant must
+ * be for this very leg (its intent id) and the exact call, unexpired and
+ * unused; the mandate's revocation state comes from the claim.
+ */
+const admit = async (
   c: Common,
   payer: Address,
-  grant: ExecutionGrant,
-  call: LegCall,
-) =>
-  admitGrant({
+  call: LegCall & {
+    grant: ExecutionGrant;
+    claim: () => Promise<{ mandateRevoked: boolean }>;
+  },
+) => {
+  if (call.ref !== legRef(call.legKey))
+    throw new AuthorityError(
+      'GRANT_MISMATCH',
+      'on-chain reference differs from the granted leg',
+    );
+  const { mandateRevoked } = await call.claim();
+  if (call.grant.intentId !== legIntentId(call.legKey))
+    throw new AuthorityError(
+      'GRANT_MISMATCH',
+      `grant ${call.grant.grantId} is for another leg (${call.grant.intentId})`,
+    );
+  await admitGrant({
     grantKey: c.grantKey,
-    grant,
+    grant: call.grant,
     call: {
       chainId: c.asset.chainId,
       token: c.asset.address,
@@ -63,9 +88,10 @@ const admit = (
       amount: call.amount,
     },
     now: c.now(),
-    mandateRevoked: false,
+    mandateRevoked,
     fence: c.fence,
   });
+};
 
 export function vaultLegExecutor(
   c: Common,
@@ -105,6 +131,7 @@ export function vaultLegExecutor(
   return {
     vault,
     policy,
+    onChainReference: true,
     async simulate(call) {
       return simulate(c.chain, c.signer.address, policy, vaultPayData(call));
     },
@@ -120,7 +147,7 @@ export function vaultLegExecutor(
         signer: c.signer,
         asset: c.asset,
         call: { recipient: call.recipient, amount: call.amount, ref: call.ref },
-        authorize: () => admit(c, vault, call.grant, call),
+        authorize: () => admit(c, vault, call),
         now: c.now,
         afterRecord: async (rec) => {
           await call.onRecorded(rec.hash);
@@ -136,6 +163,7 @@ export function vaultLegExecutor(
 export function walletLegExecutor(c: Common): LegExecutor {
   const payer = c.signer.address;
   return {
+    onChainReference: false,
     async simulate(call) {
       try {
         await c.chain.client.simulateContract({
@@ -155,8 +183,7 @@ export function walletLegExecutor(c: Common): LegExecutor {
       return r ? { hash: r.hash, state: r.state } : null;
     },
     async pay(call) {
-      if (!(await c.store.get(call.legKey)))
-        await admit(c, payer, call.grant, call);
+      if (!(await c.store.get(call.legKey))) await admit(c, payer, call);
       const r = await payOnce({
         store: c.store,
         key: call.legKey,
@@ -190,6 +217,15 @@ export function walletLegExecutor(c: Common): LegExecutor {
               l.address.toLowerCase() === c.asset.address.toLowerCase() &&
               l.args.to.toLowerCase() === call.recipient.toLowerCase(),
           )?.logIndex ?? -1;
+        // Fail closed: never book a payment without its exact transfer log.
+        if (logIndex < 0)
+          return {
+            state: 'NEEDS_REVIEW',
+            hash: rec.hash,
+            signedNow: r.signedNow,
+            note: 'receipt has no matching transfer log',
+            evidence: null,
+          };
       }
       return {
         state:
@@ -210,8 +246,8 @@ export function walletLegExecutor(c: Common): LegExecutor {
           to: ev.to,
           amount: ev.amount.baseUnits,
           // A plain transfer carries no on-chain reference; the leg key is
-          // bound through the outbox record and the grant instead.
-          ref: call.ref as Hex,
+          // bound through the outbox record and the grant's intent id.
+          ref: null,
           gasPayer: payer,
           feeWei: ev.feeWei,
           explorer: ev.explorer,

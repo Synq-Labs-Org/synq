@@ -1,5 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { ExecutionGrant } from '@synq/kernel/arc';
+import type { PolicyRegistration, StoredRevocation } from './registry.js';
 import {
   AllocationError,
   type AllocationLeg,
@@ -79,6 +80,8 @@ export const LEG_STATES = [
   'CONFIRMED',
   'RECONCILED',
   'FREE',
+  /** A hold that was released or rolled forward (no money moved). */
+  'RELEASED',
   'FAILED',
   'NEEDS_REVIEW',
   'CANCELLED',
@@ -95,8 +98,11 @@ export type LegEvidence = Readonly<{
   from: Address;
   to: Address;
   amount: bigint;
-  /** On-chain reference emitted with the payment (keccak256 of the leg key). */
-  ref: Hex;
+  /**
+   * On-chain reference emitted with the payment (keccak256 of the leg key),
+   * or null when the payment path carries none (plain wallet transfer).
+   */
+  ref: Hex | null;
   gasPayer: Address;
   feeWei: bigint;
   explorer: string;
@@ -137,6 +143,14 @@ export type LegRecord = Readonly<
 export type ReservationPurpose = AllocationLeg['purpose'];
 export type Reservation = Readonly<{
   reservationId: string;
+  /** `treasuryScope(...)`: holds are counted per treasury account and token. */
+  scope: string;
+  /**
+   * What the hold is for, e.g. `bill:<id>@<date>`, `payable:<id>`,
+   * `tax:<receiptId>`, `floor:<legKey>`. At most one ACTIVE hold per
+   * (scope, workspace, holdKey) except floor top-ups.
+   */
+  holdKey: string;
   workspaceId: string;
   splitId: string;
   purpose: ReservationPurpose;
@@ -191,13 +205,30 @@ export interface SplitStore {
     status: Reservation['status'],
     at: number,
   ): Promise<void>;
-  reservations(workspaceId: string): Promise<Reservation[]>;
+  /** Every hold on one treasury scope, any workspace. */
+  reservations(scope: string): Promise<Reservation[]>;
   /** Transfer legs of a policy authorized at or after `since` (any split). */
   transfersSince(policyId: string, since: number): Promise<LegRecord[]>;
   /** Legs of a policy holding a grant or paid (obligation fence). */
   grantedLegs(policyId: string): Promise<LegRecord[]>;
   /** Splits of a policy created at or after `since`. */
   splitsSince(policyId: string, since: number): Promise<SplitRecord[]>;
+  /** Splits of a policy that passed POLICY_VALIDATED at or after `since` (not cancelled). */
+  validatedSince(policyId: string, since: number): Promise<string[]>;
+  /**
+   * Runs `fn` holding the named locks (sorted, held to the end). On
+   * Postgres this is one transaction with transaction-scoped advisory locks;
+   * `fn` must use the store it is given. Never nest calls.
+   */
+  atomically<T>(
+    locks: readonly string[],
+    fn: (tx: SplitStore) => Promise<T>,
+  ): Promise<T>;
+  /** Insert-if-absent; returns the stored registration. */
+  putPolicy(r: PolicyRegistration): Promise<PolicyRegistration>;
+  policyVersions(policyId: string): Promise<PolicyRegistration[]>;
+  putRevocation(r: StoredRevocation): Promise<void>;
+  revocations(policyId: string): Promise<StoredRevocation[]>;
   events(splitId: string): Promise<SplitEvent[]>;
   /** Non-terminal splits, oldest first (for restart recovery). */
   open(): Promise<SplitRecord[]>;
@@ -208,9 +239,54 @@ export const GRANTED_STATES: readonly LegState[] = [
   'SUBMITTED',
   'CONFIRMED',
   'RECONCILED',
+  // May have moved money until a human resolves it.
+  'NEEDS_REVIEW',
 ];
 
+/** A leg that holds a grant or may have paid: counted in windows and fences. */
+export const holdsOrSpent = (l: Pick<LegRecord, 'state' | 'txHash'>) =>
+  GRANTED_STATES.includes(l.state) || (l.state === 'FAILED' && !!l.txHash);
+
+/** Holds are counted per (chain, token, treasury). */
+export const treasuryScope = (p: {
+  chainId: number;
+  token: string;
+  treasury: string;
+}) => `${p.chainId}:${p.token.toLowerCase()}:${p.treasury.toLowerCase()}`;
+
+/** Minimal async mutex per key, for the memory store. */
+class Locks {
+  private tails = new Map<string, Promise<void>>();
+  async with<T>(keys: readonly string[], fn: () => Promise<T>): Promise<T> {
+    const sorted = [...new Set(keys)].sort();
+    const releases: (() => void)[] = [];
+    for (const k of sorted) {
+      const prev = this.tails.get(k) ?? Promise.resolve();
+      let release!: () => void;
+      const next = new Promise<void>((r) => (release = r));
+      this.tails.set(
+        k,
+        prev.then(() => next),
+      );
+      await prev;
+      releases.push(release);
+    }
+    try {
+      return await fn();
+    } finally {
+      for (const r of releases) r();
+    }
+  }
+}
+
+/**
+ * In-memory store for tests. `atomically` serializes on its locks but does
+ * not roll back: callers do their compare-and-set first.
+ */
 export class MemorySplitStore implements SplitStore {
+  private locks = new Locks();
+  private policies: PolicyRegistration[] = [];
+  private revoked: StoredRevocation[] = [];
   private splits = new Map<string, SplitRecord>();
   private legRows = new Map<string, LegRecord>();
   private res = new Map<string, Reservation>();
@@ -306,6 +382,17 @@ export class MemorySplitStore implements SplitStore {
         );
       return;
     }
+    if (
+      !r.holdKey.startsWith('floor:') &&
+      [...this.res.values()].some(
+        (x) =>
+          x.status === 'ACTIVE' &&
+          x.scope === r.scope &&
+          x.workspaceId === r.workspaceId &&
+          x.holdKey === r.holdKey,
+      )
+    )
+      throw new AllocationError('CONFLICT', `${r.holdKey} is already held`);
     this.res.set(r.reservationId, r);
   }
   async setReservation(id: string, status: Reservation['status'], at: number) {
@@ -314,22 +401,56 @@ export class MemorySplitStore implements SplitStore {
     if (cur.status === 'ACTIVE')
       this.res.set(id, { ...cur, status, updatedAt: at });
   }
-  async reservations(workspaceId: string) {
-    return [...this.res.values()].filter((r) => r.workspaceId === workspaceId);
+  async reservations(scope: string) {
+    return [...this.res.values()].filter((r) => r.scope === scope);
   }
   async transfersSince(policyId: string, since: number) {
     return [...this.legRows.values()].filter(
       (l) =>
         l.policyId === policyId &&
         l.kind === 'TRANSFER' &&
-        GRANTED_STATES.includes(l.state) &&
+        holdsOrSpent(l) &&
         (l.authorizedAt ?? 0) >= since,
     );
   }
   async grantedLegs(policyId: string) {
     return [...this.legRows.values()].filter(
-      (l) => l.policyId === policyId && GRANTED_STATES.includes(l.state),
+      (l) => l.policyId === policyId && holdsOrSpent(l),
     );
+  }
+  async validatedSince(policyId: string, since: number) {
+    const ids = new Set(
+      this.log
+        .filter((e) => e.to === 'POLICY_VALIDATED' && e.at >= since)
+        .map((e) => e.splitId),
+    );
+    return [...ids].filter((id) => {
+      const s = this.splits.get(id);
+      return s && s.policyId === policyId && s.state !== 'CANCELLED';
+    });
+  }
+  async atomically<T>(
+    locks: readonly string[],
+    fn: (tx: SplitStore) => Promise<T>,
+  ): Promise<T> {
+    return this.locks.with(locks, () => fn(this));
+  }
+  async putPolicy(r: PolicyRegistration) {
+    const cur = this.policies.find(
+      (x) => x.policyId === r.policyId && x.version === r.version,
+    );
+    if (cur) return cur;
+    this.policies.push(r);
+    return r;
+  }
+  async policyVersions(policyId: string) {
+    return this.policies.filter((x) => x.policyId === policyId);
+  }
+  async putRevocation(r: StoredRevocation) {
+    this.revoked.push(r);
+  }
+  async revocations(policyId: string) {
+    return this.revoked.filter((x) => x.policyId === policyId);
   }
   async splitsSince(policyId: string, since: number) {
     return [...this.splits.values()].filter(

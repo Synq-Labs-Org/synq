@@ -41,7 +41,8 @@ export class AllocationError extends Error {
       | 'DUPLICATE_RECEIPT'
       | 'WRONG_STATE'
       | 'CONFLICT'
-      | 'NOT_FOUND',
+      | 'NOT_FOUND'
+      | 'LEG_NOT_PAYABLE',
     message: string = code,
   ) {
     super(message);
@@ -91,21 +92,41 @@ export type CashPosition = Readonly<{
   refundLiabilities: bigint;
   /** Yield positions: valued separately, never liquid cash. */
   invested: bigint;
+  /**
+   * This workspace's own cash in the treasury, from its ledger (a cash
+   * sub-ledger). When the treasury is shared, the workspace can never spend
+   * more than its own booked cash minus its own holds, whatever is on chain.
+   */
+  workspaceCash?: bigint;
+  /** Active holds of this workspace only (included in `reservations`). */
+  workspaceReservations?: bigint;
 }>;
 
-/** Cash that can fund anything: finalized cash minus everything already spoken for. */
+/**
+ * Cash that can fund anything: the lower of (finalized treasury cash minus
+ * every hold on the treasury, any workspace) and (this workspace's booked
+ * cash minus its own holds), each also minus in-flight payments, escrow and
+ * refunds owed.
+ */
 export function availableLiquidity(p: CashPosition): bigint {
-  const held =
-    p.reservations +
-    p.committedOutgoing +
-    p.escrowLiabilities +
-    p.refundLiabilities;
+  const restricted =
+    p.committedOutgoing + p.escrowLiabilities + p.refundLiabilities;
+  const held = p.reservations + restricted;
   if (held > p.onChainFinalized)
     throw new AllocationError(
       'OVER_COMMITTED',
       `${held} held > ${p.onChainFinalized} finalized cash`,
     );
-  return p.onChainFinalized - held;
+  const chainFree = p.onChainFinalized - held;
+  if (p.workspaceCash === undefined) return chainFree;
+  const own = (p.workspaceReservations ?? 0n) + restricted;
+  if (own > p.workspaceCash)
+    throw new AllocationError(
+      'OVER_COMMITTED',
+      `${own} held > ${p.workspaceCash} of this workspace's booked cash`,
+    );
+  const ownFree = p.workspaceCash - own;
+  return ownFree < chainFree ? ownFree : chainFree;
 }
 
 /** An open receivable: expected money, never spendable until it is a final receipt. */
@@ -152,6 +173,8 @@ export type AllocationLeg = Readonly<{
   documentRef: string | null;
   /** Kernel obligation ref: the same vendor invoice is never granted twice. */
   obligationRef: string | null;
+  /** What the leg's hold is for (`bill:<id>@<date>`, `payable:<id>`, `tax:<receipt>`, `floor:<leg>`). */
+  holdKey: string | null;
   dueOn: string | null;
   autonomy: 'AUTONOMOUS' | 'OWNER_APPROVAL_REQUIRED' | 'NOT_A_TRANSFER';
   basis: string;
@@ -252,6 +275,13 @@ export type WaterfallInput = Readonly<{
   obligations: readonly Obligation[];
   bills: readonly RecurringBill[];
   receivables: readonly Receivable[];
+  /** Holds this workspace already has on the treasury: never planned twice. */
+  held?: Readonly<{
+    /** Bill occurrences already held or paid (`bill:<id>@<date>`). */
+    billKeys: ReadonlySet<string>;
+    /** Operating-floor holds already active. */
+    floorReserved: bigint;
+  }>;
 }>;
 
 /**
@@ -324,6 +354,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
     documentRef: null,
     obligationRef: null,
     dueOn: null,
+    holdKey: null,
     autonomy: 'NOT_A_TRANSFER',
     basis,
     flags: [],
@@ -338,6 +369,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
         'TAX_ESTIMATE',
         tax,
         `${(p.taxReserveBps / 100).toFixed(2)}% of the ${units(r.amount, d)} gross receipt, held as an estimate (no transfer, not a tax payment)`,
+        { holdKey: `tax:${r.receiptId}` },
       ),
     );
   }
@@ -383,6 +415,21 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
           payTo: null,
         };
     const flags = [...assessed.flags];
+    if (!inv.token)
+      flags.push({
+        code: 'ASSET_UNSPECIFIED',
+        severity: 'HARD',
+        detail: `${inv.number} does not name its token`,
+      });
+    else if (
+      getAddress(inv.token) !== p.token ||
+      (inv.decimals !== undefined && inv.decimals !== p.decimals)
+    )
+      flags.push({
+        code: 'WRONG_ASSET',
+        severity: 'HARD',
+        detail: `${inv.number} is in ${inv.token}/${inv.decimals ?? '?'} decimals, the policy pays ${p.token}/${p.decimals}`,
+      });
     const verified = vendor ? verifiedAddress(vendor, p.chainId) : null;
     const listed = allowed.get(inv.vendorId);
     if (!listed)
@@ -404,6 +451,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
         reserve('PAYABLE_HELD', inv.amount, `${basis}: held, not paid`, {
           documentRef: inv.vendorInvoiceId,
           obligationRef: `payable:${inv.vendorInvoiceId}`,
+          holdKey: `payable:${inv.vendorInvoiceId}`,
           dueOn: inv.dueOn,
           beneficiaryId: inv.vendorId,
           flags,
@@ -418,6 +466,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
         payTo: listed!.address,
         documentRef: inv.vendorInvoiceId,
         obligationRef: `payable:${inv.vendorInvoiceId}`,
+        holdKey: `payable:${inv.vendorInvoiceId}`,
         dueOn: inv.dueOn,
         autonomy:
           inv.amount > p.limits.maxAutonomousPerLeg
@@ -428,36 +477,39 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
       });
   }
 
-  // 3. Bills and payroll falling due within the horizon.
+  // 3. Bills and payroll falling due within the horizon, one hold per
+  //    occurrence; an occurrence already held (or paid) is not held again.
+  const heldBills = input.held?.billKeys ?? new Set<string>();
   for (const bill of [...input.bills].sort((a, b) =>
     a.billId.localeCompare(b.billId),
-  )) {
-    const dates = billOccurrences(bill, today, p.obligationHorizonDays);
-    if (!dates.length) continue;
-    const need = bill.amount * BigInt(dates.length);
-    const amount = need <= remaining ? need : remaining;
-    if (amount < need)
-      shortfalls.push({
-        purpose: 'UPCOMING_BILL',
-        ref: bill.billId,
-        needed: need - amount,
-        reason: `${bill.label}: ${units(need - amount, d)} not covered by this receipt`,
-      });
-    take(
-      reserve(
-        'UPCOMING_BILL',
-        amount,
-        `${bill.label} (${bill.kind.toLowerCase()}) ${units(bill.amount, d)} × ${dates.length} due ${dates.join(', ')}`,
-        { documentRef: bill.billId, dueOn: dates[0]! },
-      ),
-    );
-  }
+  ))
+    for (const date of billOccurrences(bill, today, p.obligationHorizonDays)) {
+      const holdKey = `bill:${bill.billId}@${date}`;
+      if (heldBills.has(holdKey)) continue;
+      const amount = bill.amount <= remaining ? bill.amount : remaining;
+      if (amount < bill.amount)
+        shortfalls.push({
+          purpose: 'UPCOMING_BILL',
+          ref: holdKey,
+          needed: bill.amount - amount,
+          reason: `${bill.label} due ${date}: ${units(bill.amount - amount, d)} not covered by this receipt`,
+        });
+      take(
+        reserve(
+          'UPCOMING_BILL',
+          amount,
+          `${bill.label} (${bill.kind.toLowerCase()}) ${units(bill.amount, d)} due ${date}`,
+          { documentRef: bill.billId, dueOn: date, holdKey },
+        ),
+      );
+    }
 
-  // 4. Operating floor: top up only what free cash outside this receipt lacks.
+  // 4. Operating floor: top up only what free cash outside this receipt and
+  //    the floor already held lack.
+  const floorReserved = input.held?.floorReserved ?? 0n;
+  const floorHave = freeOutsideReceipt + floorReserved;
   const floorNeed =
-    p.operatingFloor > freeOutsideReceipt
-      ? p.operatingFloor - freeOutsideReceipt
-      : 0n;
+    p.operatingFloor > floorHave ? p.operatingFloor - floorHave : 0n;
   if (floorNeed > 0n) {
     const amount = floorNeed <= remaining ? floorNeed : remaining;
     if (amount < floorNeed)
@@ -471,7 +523,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
       reserve(
         'OPERATING_FLOOR',
         amount,
-        `operating floor ${units(p.operatingFloor, d)} minus ${units(freeOutsideReceipt, d)} free cash already held`,
+        `operating floor ${units(p.operatingFloor, d)} minus ${units(freeOutsideReceipt, d)} free cash and ${units(floorReserved, d)} floor already held`,
       ),
     );
   }
@@ -510,6 +562,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
       payTo: b.address,
       documentRef: dist.label,
       obligationRef: null,
+      holdKey: null,
       dueOn: null,
       autonomy:
         amount > p.limits.maxAutonomousPerLeg
@@ -560,6 +613,7 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
     payTo: null,
     documentRef: null,
     obligationRef: null,
+    holdKey: null,
     dueOn: null,
     autonomy: 'NOT_A_TRANSFER',
     basis:
@@ -567,11 +621,21 @@ export function computeWaterfall(input: WaterfallInput): AllocationPlan {
     flags: [],
   });
 
-  const legs: AllocationLeg[] = drafts.map((x, i) => ({
-    ...x,
-    legIndex: i,
-    legKey: `${r.receiptId}#${i}`,
-  }));
+  const legs: AllocationLeg[] = drafts.map((x, i) => {
+    const legKey = `${r.receiptId}#${i}`;
+    return {
+      ...x,
+      legIndex: i,
+      legKey,
+      holdKey:
+        x.holdKey ??
+        (x.purpose === 'OPERATING_FLOOR'
+          ? `floor:${legKey}`
+          : x.kind === 'FREE_CASH'
+            ? null
+            : `leg:${legKey}`),
+    };
+  });
   const total = legs.reduce((a, l) => a + l.amount, 0n);
   if (total !== r.amount)
     throw new AllocationError('CONSERVATION', `${total} != ${r.amount}`);

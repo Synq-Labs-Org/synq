@@ -9,12 +9,12 @@ import {
 import {
   decide,
   type AuthorityConfig,
+  type Decision,
   type ExecutionGrant,
   type PaymentIntent,
+  type PaymentPurpose,
 } from '@synq/kernel/arc';
 import {
-  CashReservations,
-  LedgerError,
   arcGasEntry,
   walletTag,
   type JournalEntry,
@@ -31,25 +31,33 @@ import {
   PolicyError,
   mandateFromPolicy,
   policyHash,
-  verifySignedPolicy,
   type SignedRevenuePolicy,
 } from './policy.js';
 import {
-  GRANTED_STATES,
+  policyStanding,
+  registerPolicy,
+  type WorkspaceRegistry,
+} from './registry.js';
+import {
   TERMINAL,
+  holdsOrSpent,
   isCancellable,
+  treasuryScope,
   type LegEvidence,
   type LegRecord,
   type LegState,
+  type Reservation,
   type SplitRecord,
   type SplitStore,
 } from './split.js';
 import {
   AllocationError,
+  availableLiquidity,
   computeWaterfall,
   type AllocationPlan,
   type CashPosition,
   type FinalReceipt,
+  type LegPurpose,
   type Receivable,
   type RecurringBill,
 } from './waterfall.js';
@@ -59,13 +67,21 @@ import {
  *
  * Every step reads its inputs fresh, writes its result with a
  * compare-and-set transition, and is safe to run again after a crash at any
- * point. Transfer legs go through the authority chain one at a time: the
- * owner-signed policy is the mandate, the Kernel issues a grant bound to the
- * exact call for each leg, and the executor pays it at most once per leg key
- * (`<receiptId>#<legIndex>`), recording signed bytes before broadcast and
- * recovering from that record on restart instead of signing again. A leg
- * already paid is never paid again; a leg whose outcome is unknown stops the
- * split for review rather than being retried.
+ * point. Steps that read and change shared state run inside
+ * `store.atomically` with a named lock (one Postgres transaction):
+ *   - `treasury:<scope>`: rolling holds forward, planning and reserving, and
+ *     cancelling, so holds on one treasury never race each other;
+ *   - `policy:<policyId>`: the frequency and window limits and every Kernel
+ *     grant, so concurrent splits cannot together exceed them;
+ *   - `split:<splitId>`: cancellation and the claim each leg makes right
+ *     before it is signed.
+ * Transfer legs go through the authority chain one at a time: the policy
+ * must be signed by a registered owner of the workspace, be its latest
+ * registered version and not be revoked; the Kernel issues a grant bound to
+ * the exact call and the leg; the executor pays at most once per leg key,
+ * recording signed bytes before broadcast and recovering from that record
+ * instead of signing again. A leg whose outcome is unknown stops the split
+ * for review.
  */
 
 /** Exact call a transfer leg makes: the executor pays only this. */
@@ -87,6 +103,8 @@ export type LegPayResult = Readonly<{
 }>;
 
 export interface LegExecutor {
+  /** True when the payment emits `ref` on chain (vault OperatorPaid). */
+  readonly onChainReference: boolean;
   /** Read-only simulation of the exact payment from the treasury. */
   simulate(
     call: LegCall,
@@ -95,13 +113,16 @@ export interface LegExecutor {
   recorded(legKey: string): Promise<{ hash: Hex; state: string } | null>;
   /**
    * Pays exactly once per leg key. With a durable record it recovers (reads
-   * the receipt or rebroadcasts the same bytes) and never signs; the grant
-   * is admitted only before signing a new transaction. `onRecorded` runs
-   * after the signed bytes are durable and before broadcast.
+   * the receipt or rebroadcasts the same bytes) and never signs. Before
+   * signing a new transaction it calls `claim` (the runner re-checks the
+   * leg, the split and the policy under lock; it throws to refuse) and then
+   * admits the grant, which must be for this leg (`legIntentId`).
+   * `onRecorded` runs after the signed bytes are durable, before broadcast.
    */
   pay(
     call: LegCall & {
       grant: ExecutionGrant;
+      claim: () => Promise<{ mandateRevoked: boolean }>;
       onRecorded: (hash: Hex) => Promise<void>;
     },
   ): Promise<LegPayResult>;
@@ -114,18 +135,36 @@ export interface ReceiptVerifier {
 
 /** Real books the waterfall reads (chain, ledger, vendor master, invoices). */
 export interface TreasuryBooks {
-  /** Finalized treasury balance and restricted buckets; reservations come from the split store. */
+  /** Finalized treasury balance and restricted buckets; holds come from the split store. */
   position(): Promise<Omit<CashPosition, 'reservations'>>;
   vendors(): Promise<Vendor[]>;
-  /** Open vendor invoices (not paid, not held by another split). */
+  /** Open vendor invoices (not paid). */
   payables(): Promise<VendorInvoice[]>;
   payableHistory(): Promise<VendorInvoice[]>;
   obligations(): Promise<Obligation[]>;
   bills(): Promise<RecurringBill[]>;
   receivables(): Promise<Receivable[]>;
+  /**
+   * Holds settled outside the split: a bill occurrence paid
+   * (`bill:<id>@<date>` CONSUMED), a tax estimate remitted
+   * (`tax:<receiptId>` CONSUMED), or a hold no longer needed (RELEASED).
+   */
+  settledHolds?(): Promise<
+    readonly { holdKey: string; status: 'CONSUMED' | 'RELEASED' }[]
+  >;
 }
 
 export const legRef = (legKey: string): Hex => keccak256(stringToHex(legKey));
+/** Kernel intent id of a leg: grants are bound to exactly one leg through it. */
+export const legIntentId = (legKey: string) => `int_${legKey}`;
+
+export function kernelPurposeOf(purpose: LegPurpose): PaymentPurpose {
+  return purpose === 'CONTRACTOR_PAYABLE'
+    ? 'CONTRACTOR_PAYOUT'
+    : purpose === 'DISTRIBUTION'
+      ? 'OWNER_DISTRIBUTION'
+      : 'VENDOR_INVOICE';
+}
 
 export type RunnerDeps = Readonly<{
   store: SplitStore;
@@ -134,6 +173,8 @@ export type RunnerDeps = Readonly<{
   receipts: ReceiptVerifier;
   books: TreasuryBooks;
   signedPolicy: SignedRevenuePolicy;
+  /** Registered owners and treasury of each workspace (not settable by a policy). */
+  registry: WorkspaceRegistry;
   kernel: AuthorityConfig;
   /** Registry asset id of the policy token (ledger asset). */
   assetId: string;
@@ -143,11 +184,17 @@ export type RunnerDeps = Readonly<{
   trace?: (event: string, detail: Record<string, unknown>) => void;
 }>;
 
+const sum = (xs: readonly { amount: bigint }[]) =>
+  xs.reduce((a, x) => a + x.amount, 0n);
+
 export class SplitRunner {
   constructor(readonly deps: RunnerDeps) {}
 
   private get policy() {
     return this.deps.signedPolicy.policy;
+  }
+  private get scope() {
+    return treasuryScope(this.policy);
   }
   private trace(event: string, detail: Record<string, unknown> = {}) {
     this.deps.trace?.(event, detail);
@@ -209,31 +256,44 @@ export class SplitRunner {
     return out;
   }
 
-  /** Cancels before execution: releases every reservation; nothing was signed. */
+  /**
+   * Cancels before execution, atomically: in one transaction holding the
+   * split and treasury locks, the split is compare-and-set to CANCELLED
+   * first, and only then are its holds released and its legs cancelled. A
+   * cancel that lost the race to execution changes nothing.
+   */
   async cancel(splitId: string, reason: string): Promise<SplitRecord> {
-    const s = await this.must(splitId);
-    if (!isCancellable(s.state))
-      throw new AllocationError(
-        'WRONG_STATE',
-        `${s.state}: cancellation is only allowed before execution`,
-      );
     const at = this.deps.now();
-    for (const leg of await this.deps.store.legs(splitId)) {
-      if (leg.kind !== 'FREE_CASH')
-        await this.deps.store
-          .setReservation(leg.legKey, 'RELEASED', at)
-          .catch(() => undefined);
-      await this.deps.store.updateLeg(leg.legKey, leg.state, {
-        state: 'CANCELLED',
-        note: reason,
-        updatedAt: at,
-      });
-    }
-    return this.deps.store.advance(
-      splitId,
-      { state: s.state, rev: s.rev },
-      { state: 'CANCELLED', note: reason },
-      at,
+    return this.deps.store.atomically(
+      [`split:${splitId}`, `treasury:${this.scope}`],
+      async (tx) => {
+        const s = await tx.get(splitId);
+        if (!s) throw new AllocationError('NOT_FOUND', splitId);
+        if (!isCancellable(s.state))
+          throw new AllocationError(
+            'WRONG_STATE',
+            `${s.state}: cancellation is only allowed before execution`,
+          );
+        const done = await tx.advance(
+          splitId,
+          { state: s.state, rev: s.rev },
+          { state: 'CANCELLED', note: reason },
+          at,
+        );
+        const holds = await tx.reservations(this.scope);
+        for (const leg of await tx.legs(splitId)) {
+          const h = holds.find(
+            (x) => x.reservationId === leg.legKey && x.status === 'ACTIVE',
+          );
+          if (h) await tx.setReservation(h.reservationId, 'RELEASED', at);
+          await tx.updateLeg(leg.legKey, leg.state, {
+            state: 'CANCELLED',
+            note: reason,
+            updatedAt: at,
+          });
+        }
+        return done;
+      },
     );
   }
 
@@ -243,7 +303,7 @@ export class SplitRunner {
     opts: { stopAt?: SplitRecord['state'] } = {},
   ): Promise<SplitRecord> {
     for (let guard = 0; guard < 20; guard++) {
-      const s = await this.must(splitId);
+      const s = await this.must(this.deps.store, splitId);
       if (TERMINAL.includes(s.state) || s.state === opts.stopAt) return s;
       const next = await this.step(s);
       if (next.state === s.state && next.rev === s.rev) return next;
@@ -252,8 +312,8 @@ export class SplitRunner {
     throw new AllocationError('WRONG_STATE', `${splitId} did not settle`);
   }
 
-  private async must(splitId: string) {
-    const s = await this.deps.store.get(splitId);
+  private async must(store: SplitStore, splitId: string) {
+    const s = await store.get(splitId);
     if (!s) throw new AllocationError('NOT_FOUND', splitId);
     return s;
   }
@@ -263,6 +323,7 @@ export class SplitRunner {
     state: SplitRecord['state'],
     note: string | null,
     plan?: AllocationPlan,
+    store: SplitStore = this.deps.store,
   ) {
     this.trace('split.advance', {
       splitId: s.splitId,
@@ -270,7 +331,7 @@ export class SplitRunner {
       to: state,
       note,
     });
-    return this.deps.store.advance(
+    return store.advance(
       s.splitId,
       { state: s.state, rev: s.rev },
       { state, note, ...(plan ? { plan } : {}) },
@@ -281,9 +342,15 @@ export class SplitRunner {
   private async step(s: SplitRecord): Promise<SplitRecord> {
     switch (s.state) {
       case 'RECEIPT_FINAL':
-        return this.reconcileLiabilities(s);
+        return this.planAndReserve(s);
       case 'LIABILITIES_RECONCILED':
-        return this.createReservations(s);
+        return this.deps.store.atomically(
+          [`treasury:${this.scope}`],
+          async (tx) => {
+            const cur = await this.must(tx, s.splitId);
+            return cur.rev === s.rev ? this.createReservations(tx, cur) : cur;
+          },
+        );
       case 'RESERVATIONS_CREATED':
         return this.validatePolicy(s);
       case 'POLICY_VALIDATED':
@@ -299,9 +366,17 @@ export class SplitRunner {
       case 'EXECUTING':
         return this.execute(s);
       case 'EACH_LEG_RECONCILED': {
-        const waiting = (await this.deps.store.legs(s.splitId)).filter(
-          (l) => l.state === 'AWAITING_APPROVAL',
+        const legs = await this.deps.store.legs(s.splitId);
+        const waiting = legs.filter((l) => l.state === 'AWAITING_APPROVAL');
+        const cancelled = legs.filter(
+          (l) => l.kind === 'TRANSFER' && l.state === 'CANCELLED',
         );
+        if (cancelled.length)
+          return this.advance(
+            s,
+            'NEEDS_REVIEW',
+            `${cancelled.length} transfer leg(s) were cancelled during execution: ${cancelled.map((l) => l.legKey).join(', ')}`,
+          );
         return waiting.length
           ? this.advance(
               s,
@@ -315,17 +390,123 @@ export class SplitRunner {
     }
   }
 
-  /** The receipt is in the books, the position is fresh, and the plan is computed. */
-  private async reconcileLiabilities(s: SplitRecord): Promise<SplitRecord> {
-    const { books, store, ledger } = this.deps;
+  /** This workspace's booked cash in the treasury wallet (cash sub-ledger). */
+  private async workspaceCash(workspaceId: string): Promise<bigint> {
+    const tag = walletTag(this.policy.treasury);
+    let cash = 0n;
+    for (const e of await this.deps.ledger.store.entries(workspaceId))
+      for (const p of e.postings)
+        if (
+          p.account === 'CASH_ARC_USDC' &&
+          p.assetId === this.deps.assetId &&
+          p.counterpartyId === tag
+        )
+          cash += p.amount;
+    return cash;
+  }
+
+  /** A payee is payable now: on the policy allowlist and verified in the vendor master. */
+  private payeeOk(vendors: readonly Vendor[], beneficiaryId: string | null) {
+    const p = this.policy;
+    const listed = p.allowedBeneficiaries.find(
+      (b) => b.beneficiaryId === beneficiaryId,
+    );
+    const vendor = vendors.find((v) => v.vendorId === beneficiaryId);
+    const verified = vendor ? verifiedAddress(vendor, p.chainId) : null;
+    return !!listed && !!verified && getAddress(verified) === listed.address;
+  }
+
+  /**
+   * Holds that move no money are settled or rolled forward before planning:
+   * bills paid or tax remitted (from the books) are consumed; a held payable
+   * whose payee is now verified, or that is no longer open, is released so
+   * the payable is planned afresh; a held distribution whose payee is now
+   * verified is released to free cash; a bill no longer on the books is
+   * released; floor holds above the policy floor are released, newest first.
+   */
+  private async rollForward(
+    tx: SplitStore,
+    ctx: {
+      vendors: readonly Vendor[];
+      open: readonly VendorInvoice[];
+      bills: readonly RecurringBill[];
+      settled: readonly { holdKey: string; status: 'CONSUMED' | 'RELEASED' }[];
+    },
+  ) {
+    const p = this.policy;
+    const at = this.deps.now();
+    const mine = (await tx.reservations(this.scope)).filter(
+      (h) => h.status === 'ACTIVE' && h.workspaceId === p.workspaceId,
+    );
+    const settle = async (h: Reservation, status: Reservation['status']) => {
+      await tx.setReservation(h.reservationId, status, at);
+      const leg = (await tx.legs(h.splitId)).find(
+        (l) => l.legKey === h.reservationId,
+      );
+      if (leg && leg.state === 'RESERVED')
+        await tx.updateLeg(leg.legKey, 'RESERVED', {
+          state: 'RELEASED',
+          note: `hold ${status.toLowerCase()} by roll-forward`,
+          updatedAt: at,
+        });
+      this.trace('hold.settled', { holdKey: h.holdKey, status });
+    };
+    const floors: Reservation[] = [];
+    for (const h of mine) {
+      const done = ctx.settled.find((x) => x.holdKey === h.holdKey);
+      if (done) {
+        await settle(h, done.status);
+        continue;
+      }
+      if (h.purpose === 'PAYABLE_HELD') {
+        const id = h.holdKey.replace(/^payable:/, '');
+        const inv = ctx.open.find((i) => i.vendorInvoiceId === id);
+        if (
+          !inv ||
+          (this.payeeOk(ctx.vendors, inv.vendorId) &&
+            inv.token &&
+            getAddress(inv.token) === p.token)
+        )
+          await settle(h, 'RELEASED');
+      } else if (h.purpose === 'UPCOMING_BILL') {
+        const billId = h.holdKey.replace(/^bill:/, '').split('@')[0];
+        if (!ctx.bills.some((b) => b.billId === billId))
+          await settle(h, 'RELEASED');
+      } else if (h.purpose === 'DISTRIBUTION') {
+        const leg = (await tx.legs(h.splitId)).find(
+          (l) => l.legKey === h.reservationId,
+        );
+        if (
+          leg?.kind === 'RESERVE' &&
+          this.payeeOk(ctx.vendors, leg.beneficiaryId)
+        )
+          await settle(h, 'RELEASED');
+      } else if (h.purpose === 'OPERATING_FLOOR') floors.push(h);
+    }
+    let floor = sum(floors);
+    for (const h of [...floors].sort((a, b) => b.createdAt - a.createdAt)) {
+      if (floor <= p.operatingFloor) break;
+      await settle(h, 'RELEASED');
+      floor -= h.amount;
+    }
+  }
+
+  /**
+   * Under the treasury lock: roll holds forward, plan against the treasury's
+   * holds (every workspace) and this workspace's own cash sub-ledger, and
+   * reserve, all in one transaction.
+   */
+  private async planAndReserve(s: SplitRecord): Promise<SplitRecord> {
+    const { books, ledger } = this.deps;
+    const p = this.policy;
     const r = s.receipt;
     const entries = await ledger.store.entries(s.workspaceId);
     const booked = entries.find((e) => e.idempotencyKey === r.receiptId);
     const cash = booked?.postings.find(
-      (p) =>
-        p.account === 'CASH_ARC_USDC' &&
-        p.assetId === this.deps.assetId &&
-        p.counterpartyId === walletTag(r.recipient),
+      (x) =>
+        x.account === 'CASH_ARC_USDC' &&
+        x.assetId === this.deps.assetId &&
+        x.counterpartyId === walletTag(r.recipient),
     );
     if (!booked || cash?.amount !== r.amount)
       return this.advance(
@@ -333,55 +514,106 @@ export class SplitRunner {
         'NEEDS_REVIEW',
         `receipt ${r.receiptId} is not booked to the treasury in the ledger`,
       );
-    const held = (await store.reservations(s.workspaceId)).filter(
-      (x) => x.status === 'ACTIVE' && x.splitId !== s.splitId,
-    );
-    const pos = await books.position();
-    const position: CashPosition = {
-      ...pos,
-      reservations: held.reduce((a, x) => a + x.amount, 0n),
-    };
-    // Payables another split already holds, granted or paid are not planned again.
-    const otherLegs = (
-      await Promise.all(
-        [...new Set(held.map((h) => h.splitId))].map((id) => store.legs(id)),
-      )
-    ).flat();
-    const taken = new Set(
-      [...(await store.grantedLegs(this.policy.policyId)), ...otherLegs]
-        .filter((l) => l.splitId !== s.splitId && l.state !== 'CANCELLED')
-        .map((l) => l.obligationRef),
-    );
-    const payables = (await books.payables()).filter(
-      (i) => !taken.has(`payable:${i.vendorInvoiceId}`),
-    );
-    const plan = computeWaterfall({
-      policy: this.policy,
-      policyHash: policyHash(this.policy),
-      receipt: r,
-      position,
-      asOf: this.deps.now(),
-      vendors: await books.vendors(),
-      payables,
-      payableHistory: await books.payableHistory(),
-      obligations: await books.obligations(),
-      bills: await books.bills(),
-      receivables: await books.receivables(),
-    });
-    return this.advance(
-      s,
-      'LIABILITIES_RECONCILED',
-      `plan ${plan.planHash.slice(0, 10)}: ${plan.legs.length} legs, free cash ${plan.remainder}`,
-      plan,
+    const [pos, vendors, open, history, obligations, bills, receivables] =
+      await Promise.all([
+        books.position(),
+        books.vendors(),
+        books.payables(),
+        books.payableHistory(),
+        books.obligations(),
+        books.bills(),
+        books.receivables(),
+      ]);
+    const settled = (await books.settledHolds?.()) ?? [];
+    return this.deps.store.atomically(
+      [`treasury:${this.scope}`],
+      async (tx) => {
+        const cur = await this.must(tx, s.splitId);
+        if (cur.state !== 'RECEIPT_FINAL' || cur.rev !== s.rev) return cur;
+        await this.rollForward(tx, { vendors, open, bills, settled });
+        const all = (await tx.reservations(this.scope)).filter(
+          (h) => h.splitId !== s.splitId,
+        );
+        const active = all.filter((h) => h.status === 'ACTIVE');
+        const mineActive = active.filter(
+          (h) => h.workspaceId === s.workspaceId,
+        );
+        const mineAll = all.filter(
+          (h) => h.workspaceId === s.workspaceId && h.status !== 'RELEASED',
+        );
+        const position: CashPosition = {
+          ...pos,
+          reservations: sum(active),
+          workspaceCash: await this.workspaceCash(s.workspaceId),
+          workspaceReservations: sum(mineActive),
+        };
+        // Payables held, granted or paid elsewhere are not planned again.
+        const taken = new Set<string | null>([
+          ...mineAll
+            .filter((h) => h.holdKey.startsWith('payable:'))
+            .map((h) => h.holdKey),
+          ...(await tx.grantedLegs(p.policyId))
+            .filter((l) => l.splitId !== s.splitId)
+            .map((l) => l.obligationRef),
+        ]);
+        let plan: AllocationPlan;
+        try {
+          plan = computeWaterfall({
+            policy: p,
+            policyHash: policyHash(p),
+            receipt: r,
+            position,
+            asOf: this.deps.now(),
+            vendors,
+            payables: open.filter(
+              (i) => !taken.has(`payable:${i.vendorInvoiceId}`),
+            ),
+            payableHistory: history,
+            obligations,
+            bills,
+            receivables,
+            held: {
+              billKeys: new Set(
+                mineAll
+                  .filter((h) => h.holdKey.startsWith('bill:'))
+                  .map((h) => h.holdKey),
+              ),
+              floorReserved: sum(
+                mineActive.filter((h) => h.purpose === 'OPERATING_FLOOR'),
+              ),
+            },
+          });
+        } catch (e) {
+          if (e instanceof AllocationError && e.code === 'OVER_COMMITTED')
+            return this.advance(
+              cur,
+              'NEEDS_REVIEW',
+              `OVER_COMMITTED: cash is over-committed: ${e.message}`,
+              undefined,
+              tx,
+            );
+          throw e;
+        }
+        const next = await this.advance(
+          cur,
+          'LIABILITIES_RECONCILED',
+          `plan ${plan.planHash.slice(0, 10)}: ${plan.legs.length} legs, free cash ${plan.remainder}`,
+          plan,
+          tx,
+        );
+        return this.createReservations(tx, next);
+      },
     );
   }
 
-  /** Each reserve and transfer leg holds its cash; admission against confirmed cash. */
-  private async createReservations(s: SplitRecord): Promise<SplitRecord> {
-    const { store } = this.deps;
+  /** Each reserve and transfer leg holds its cash; admission against the current holds. */
+  private async createReservations(
+    tx: SplitStore,
+    s: SplitRecord,
+  ): Promise<SplitRecord> {
     const plan = s.plan!;
     const at = this.deps.now();
-    await store.putLegs(
+    await tx.putLegs(
       plan.legs.map((l) => ({
         ...l,
         splitId: s.splitId,
@@ -397,40 +629,53 @@ export class SplitRunner {
         updatedAt: at,
       })),
     );
-    const others = (await store.reservations(s.workspaceId)).filter(
-      (x) => x.status === 'ACTIVE' && x.splitId !== s.splitId,
+    const others = (await tx.reservations(this.scope)).filter(
+      (h) => h.status === 'ACTIVE' && h.splitId !== s.splitId,
     );
-    const holds = new CashReservations();
-    const view = {
-      confirmedCash:
-        plan.position.onChainFinalized - plan.position.committedOutgoing,
-      escrow: plan.position.escrowLiabilities + plan.position.refundLiabilities,
-      minimumReserve: 0n,
-    };
+    const holding = sum(plan.legs.filter((l) => l.kind !== 'FREE_CASH'));
+    let free: bigint;
     try {
-      for (const o of others) holds.reserve(o.reservationId, o.amount, view);
-      for (const l of plan.legs)
-        if (l.kind !== 'FREE_CASH') holds.reserve(l.legKey, l.amount, view);
+      free = availableLiquidity({
+        ...plan.position,
+        treasury: this.policy.treasury,
+        reservations: sum(others),
+        workspaceReservations: sum(
+          others.filter((h) => h.workspaceId === s.workspaceId),
+        ),
+        workspaceCash: await this.workspaceCash(s.workspaceId),
+      });
     } catch (e) {
-      if (e instanceof LedgerError)
+      if (e instanceof AllocationError)
         return this.advance(
           s,
           'NEEDS_REVIEW',
           `reservation refused: ${e.message}`,
+          undefined,
+          tx,
         );
       throw e;
     }
-    for (const leg of await store.legs(s.splitId)) {
+    if (holding > free)
+      return this.advance(
+        s,
+        'NEEDS_REVIEW',
+        `reservation refused: ${holding} to hold > ${free} free`,
+        undefined,
+        tx,
+      );
+    for (const leg of await tx.legs(s.splitId)) {
       if (leg.kind === 'FREE_CASH') {
         if (leg.state === 'PLANNED')
-          await store.updateLeg(leg.legKey, 'PLANNED', {
+          await tx.updateLeg(leg.legKey, 'PLANNED', {
             state: 'FREE',
             updatedAt: at,
           });
         continue;
       }
-      await store.reserve({
+      await tx.reserve({
         reservationId: leg.legKey,
+        scope: this.scope,
+        holdKey: leg.holdKey ?? `leg:${leg.legKey}`,
         workspaceId: s.workspaceId,
         splitId: s.splitId,
         purpose: leg.purpose,
@@ -441,7 +686,7 @@ export class SplitRunner {
         updatedAt: at,
       });
       if (leg.state === 'PLANNED')
-        await store.updateLeg(leg.legKey, 'PLANNED', {
+        await tx.updateLeg(leg.legKey, 'PLANNED', {
           state: 'RESERVED',
           updatedAt: at,
         });
@@ -450,21 +695,29 @@ export class SplitRunner {
       s,
       'RESERVATIONS_CREATED',
       `${plan.legs.filter((l) => l.kind !== 'FREE_CASH').length} reservations held`,
+      undefined,
+      tx,
     );
   }
 
   /**
-   * The policy and its mandate are signed by the owner and active, the plan
-   * was computed under this exact policy, every payee is still an allowed
-   * and verified beneficiary, and the frequency and window limits hold.
+   * The policy is signed by a registered owner of the workspace for its
+   * registered treasury, is the latest registered version and is not
+   * revoked; the plan was computed under it; every payee is still allowed
+   * and verified; and, under the policy lock, the frequency and window
+   * limits hold counting every split and leg already admitted.
    */
   private async validatePolicy(s: SplitRecord): Promise<SplitRecord> {
     const { store, books } = this.deps;
     const p = this.policy;
     const now = this.deps.now();
-    let hashes: { policyHash: Hex };
     try {
-      hashes = await verifySignedPolicy(this.deps.signedPolicy, now);
+      await registerPolicy(
+        store,
+        this.deps.registry,
+        this.deps.signedPolicy,
+        now,
+      );
     } catch (e) {
       return this.advance(
         s,
@@ -472,123 +725,161 @@ export class SplitRunner {
         `policy rejected: ${(e as PolicyError).code ?? 'ERROR'} ${(e as Error).message}`,
       );
     }
-    if (hashes.policyHash !== s.plan!.policyHash)
-      return this.advance(
-        s,
-        'NEEDS_REVIEW',
-        'plan was computed under another policy',
-      );
-    const since = now - p.limits.windowSeconds;
-    const recent = (await store.splitsSince(p.policyId, since)).filter(
-      (x) => x.splitId !== s.splitId && x.state !== 'CANCELLED',
-    );
-    if (recent.length + 1 > p.limits.maxSplitsPerWindow)
-      return this.advance(
-        s,
-        'NEEDS_REVIEW',
-        `frequency limit: ${recent.length} split(s) already in this ${p.limits.windowSeconds}s window (max ${p.limits.maxSplitsPerWindow})`,
-      );
     const vendors = await books.vendors();
-    const problems: string[] = [];
-    let windowSpend = (await store.transfersSince(p.policyId, since))
-      .filter((l) => l.splitId !== s.splitId)
-      .reduce((a, l) => a + l.amount, 0n);
-    for (const leg of await store.legs(s.splitId)) {
-      if (leg.kind !== 'TRANSFER' || leg.state !== 'RESERVED') continue;
-      const listed = p.allowedBeneficiaries.find(
-        (b) => b.beneficiaryId === leg.beneficiaryId,
+    return store.atomically([`policy:${p.policyId}`], async (tx) => {
+      const cur = await this.must(tx, s.splitId);
+      if (cur.state !== s.state || cur.rev !== s.rev) return cur;
+      const review = (note: string) =>
+        this.advance(cur, 'NEEDS_REVIEW', note, undefined, tx);
+      const standing = await policyStanding(tx, this.deps.signedPolicy);
+      if (!standing.usable)
+        return review(`policy rejected: ${standing.reason}`);
+      if (policyHash(p) !== cur.plan!.policyHash)
+        return review('plan was computed under another policy');
+      const since = now - p.limits.windowSeconds;
+      const validated = (await tx.validatedSince(p.policyId, since)).filter(
+        (id) => id !== s.splitId,
       );
-      const vendor = vendors.find((v) => v.vendorId === leg.beneficiaryId);
-      const verified = vendor ? verifiedAddress(vendor, p.chainId) : null;
-      if (
-        !listed ||
-        !leg.payTo ||
-        listed.address !== getAddress(leg.payTo) ||
-        !verified ||
-        getAddress(verified) !== listed.address
-      ) {
-        problems.push(
-          `${leg.legKey}: beneficiary ${leg.beneficiaryId} is not an allowed, verified payee (${verified ?? 'unverified'})`,
+      if (validated.length + 1 > p.limits.maxSplitsPerWindow)
+        return review(
+          `frequency limit: ${validated.length} split(s) already validated in this ${p.limits.windowSeconds}s window (max ${p.limits.maxSplitsPerWindow})`,
         );
-        continue;
-      }
-      const overLeg = leg.amount > p.limits.maxAutonomousPerLeg;
-      const overWindow =
-        windowSpend + leg.amount > p.limits.maxAutonomousPerWindow;
-      if (overLeg || overWindow) {
-        await store.updateLeg(leg.legKey, 'RESERVED', {
-          state: 'AWAITING_APPROVAL',
-          autonomy: 'OWNER_APPROVAL_REQUIRED',
-          reasons: [
-            overLeg
-              ? `amount ${leg.amount} above the autonomous per-leg limit ${p.limits.maxAutonomousPerLeg}`
-              : `window spend ${windowSpend + leg.amount} above the autonomous window limit ${p.limits.maxAutonomousPerWindow}`,
-          ],
-          updatedAt: now,
-        });
-        continue;
-      }
-      windowSpend += leg.amount;
-    }
-    if (problems.length)
-      return this.advance(s, 'NEEDS_REVIEW', problems.join('; '));
-    return this.advance(
-      s,
-      'POLICY_VALIDATED',
-      `policy ${p.policyId} v${p.version} signed by ${p.owner}`,
-    );
-  }
-
-  /** One Kernel decision per autonomous transfer leg; each ALLOW is an exact-call grant. */
-  private async authorize(s: SplitRecord): Promise<SplitRecord> {
-    const denied: string[] = [];
-    for (const leg of await this.deps.store.legs(s.splitId)) {
-      if (leg.kind !== 'TRANSFER' || leg.state !== 'RESERVED') continue;
-      const d = await this.decideLeg(leg);
-      if (d.outcome === 'ALLOW')
-        await this.deps.store.updateLeg(leg.legKey, 'RESERVED', {
-          state: 'AUTHORIZED',
-          grant: d.grant,
-          authorizedAt: this.deps.now(),
-          reasons: d.reasons,
-          updatedAt: this.deps.now(),
-        });
-      else {
-        denied.push(`${leg.legKey}: ${d.reasons.join('; ')}`);
-        await this.deps.store.updateLeg(leg.legKey, 'RESERVED', {
-          state: d.outcome === 'DENY' ? 'FAILED' : 'AWAITING_APPROVAL',
-          reasons: d.reasons,
-          updatedAt: this.deps.now(),
-        });
-      }
-    }
-    if (denied.length)
-      return this.advance(
-        s,
-        'NEEDS_REVIEW',
-        `Kernel refused: ${denied.join(' | ')}`,
+      const problems: string[] = [];
+      let windowSpend = sum(
+        (await tx.transfersSince(p.policyId, since)).filter(
+          (l) => l.splitId !== s.splitId,
+        ),
       );
-    return this.advance(
-      s,
-      'SPLIT_AUTHORIZED',
-      'every autonomous leg holds an exact-call grant',
-    );
+      for (const leg of await tx.legs(s.splitId)) {
+        if (leg.kind !== 'TRANSFER' || leg.state !== 'RESERVED') continue;
+        const listed = p.allowedBeneficiaries.find(
+          (b) => b.beneficiaryId === leg.beneficiaryId,
+        );
+        if (
+          !this.payeeOk(vendors, leg.beneficiaryId) ||
+          !leg.payTo ||
+          listed!.address !== getAddress(leg.payTo)
+        ) {
+          problems.push(
+            `${leg.legKey}: beneficiary ${leg.beneficiaryId} is not an allowed, verified payee`,
+          );
+          continue;
+        }
+        const overLeg = leg.amount > p.limits.maxAutonomousPerLeg;
+        const overWindow =
+          windowSpend + leg.amount > p.limits.maxAutonomousPerWindow;
+        if (overLeg || overWindow) {
+          await tx.updateLeg(leg.legKey, 'RESERVED', {
+            state: 'AWAITING_APPROVAL',
+            autonomy: 'OWNER_APPROVAL_REQUIRED',
+            reasons: [
+              overLeg
+                ? `amount ${leg.amount} above the autonomous per-leg limit ${p.limits.maxAutonomousPerLeg}`
+                : `window spend ${windowSpend + leg.amount} above the autonomous window limit ${p.limits.maxAutonomousPerWindow}`,
+            ],
+            updatedAt: now,
+          });
+          continue;
+        }
+        windowSpend += leg.amount;
+      }
+      if (problems.length) return review(problems.join('; '));
+      return this.advance(
+        cur,
+        'POLICY_VALIDATED',
+        `policy ${p.policyId} v${p.version} signed by registered owner ${p.owner}`,
+        undefined,
+        tx,
+      );
+    });
   }
 
-  private async decideLeg(leg: LegRecord) {
+  /**
+   * One Kernel decision per autonomous transfer leg under the policy lock,
+   * so the spend window counts every grant already issued; each ALLOW is a
+   * grant for the exact call and this leg only.
+   */
+  private async authorize(s: SplitRecord): Promise<SplitRecord> {
+    const { store } = this.deps;
+    const sims = new Map<
+      string,
+      Awaited<ReturnType<LegExecutor['simulate']>>
+    >();
+    for (const leg of await store.legs(s.splitId))
+      if (leg.kind === 'TRANSFER' && leg.state === 'RESERVED')
+        sims.set(
+          leg.legKey,
+          await this.deps.executor.simulate(this.callOf(leg)),
+        );
+    return store.atomically([`policy:${this.policy.policyId}`], async (tx) => {
+      const cur = await this.must(tx, s.splitId);
+      if (cur.state !== s.state || cur.rev !== s.rev) return cur;
+      const standing = await policyStanding(tx, this.deps.signedPolicy);
+      if (!standing.usable)
+        return this.advance(
+          cur,
+          'NEEDS_REVIEW',
+          `policy rejected: ${standing.reason}`,
+          undefined,
+          tx,
+        );
+      const denied: string[] = [];
+      for (const leg of await tx.legs(s.splitId)) {
+        if (leg.kind !== 'TRANSFER' || leg.state !== 'RESERVED') continue;
+        const d = await this.decideLeg(tx, leg, sims.get(leg.legKey)!);
+        if (d.outcome === 'ALLOW')
+          await tx.updateLeg(leg.legKey, 'RESERVED', {
+            state: 'AUTHORIZED',
+            grant: d.grant,
+            authorizedAt: this.deps.now(),
+            reasons: d.reasons,
+            updatedAt: this.deps.now(),
+          });
+        else {
+          denied.push(`${leg.legKey}: ${d.reasons.join('; ')}`);
+          await tx.updateLeg(leg.legKey, 'RESERVED', {
+            state: d.outcome === 'DENY' ? 'FAILED' : 'AWAITING_APPROVAL',
+            reasons: d.reasons,
+            updatedAt: this.deps.now(),
+          });
+        }
+      }
+      if (denied.length)
+        return this.advance(
+          cur,
+          'NEEDS_REVIEW',
+          `Kernel refused: ${denied.join(' | ')}`,
+          undefined,
+          tx,
+        );
+      return this.advance(
+        cur,
+        'SPLIT_AUTHORIZED',
+        'every autonomous leg holds an exact-call grant',
+        undefined,
+        tx,
+      );
+    });
+  }
+
+  private async decideLeg(
+    tx: SplitStore,
+    leg: LegRecord,
+    sim: Awaited<ReturnType<LegExecutor['simulate']>>,
+  ): Promise<Decision> {
     const p = this.policy;
-    const { signedPolicy, store } = this.deps;
+    const { signedPolicy } = this.deps;
     const now = this.deps.now();
     const since = now - p.limits.windowSeconds;
-    const spends = (await store.transfersSince(p.policyId, since))
+    const spends = (await tx.transfersSince(p.policyId, since))
       .filter((l) => l.legKey !== leg.legKey)
       .map((l) => ({ amount: l.amount, at: l.authorizedAt ?? now }));
-    const settled = (await store.grantedLegs(p.policyId))
+    const settled = (await tx.grantedLegs(p.policyId))
       .filter((l) => l.legKey !== leg.legKey && l.obligationRef)
       .map((l) => l.obligationRef!);
-    const sim = await this.deps.executor.simulate(this.callOf(leg));
+    const standing = await policyStanding(tx, signedPolicy);
     const intent: PaymentIntent = {
-      intentId: `int_${leg.legKey}`,
+      intentId: legIntentId(leg.legKey),
       mandateId: signedPolicy.mandate.mandateId,
       mandateVersion: signedPolicy.mandate.version,
       chainId: p.chainId,
@@ -596,10 +887,7 @@ export class SplitRunner {
       payer: p.treasury,
       recipient: leg.payTo!,
       amount: leg.amount,
-      purpose:
-        leg.purpose === 'CONTRACTOR_PAYABLE'
-          ? 'CONTRACTOR_PAYOUT'
-          : 'VENDOR_INVOICE',
+      purpose: kernelPurposeOf(leg.purpose),
       obligationRef: leg.obligationRef ?? leg.legKey,
       evidenceHash: legRef(`${leg.legKey}|${leg.splitId}`),
       proposedBy: `allocations:${p.policyId}`,
@@ -609,7 +897,7 @@ export class SplitRunner {
       mandate: signedPolicy.mandate,
       mandateSignature: signedPolicy.mandateSignature,
       state: {
-        revoked: false,
+        revoked: !standing.usable,
         spends,
         settledObligations: settled,
       },
@@ -628,6 +916,65 @@ export class SplitRunner {
     return d;
   }
 
+  /** A fresh grant for a leg that holds none usable (expired or burned) and has no record. */
+  private async reauthorize(
+    s: SplitRecord,
+    leg: LegRecord,
+  ): Promise<LegRecord | string> {
+    const sim = await this.deps.executor.simulate(this.callOf(leg));
+    return this.deps.store.atomically(
+      [`policy:${this.policy.policyId}`],
+      async (tx) => {
+        const cur = (await tx.legs(s.splitId)).find(
+          (l) => l.legKey === leg.legKey,
+        )!;
+        if (cur.state !== 'AUTHORIZED')
+          return `${leg.legKey} is ${cur.state}, not AUTHORIZED`;
+        const d = await this.decideLeg(tx, cur, sim);
+        if (d.outcome !== 'ALLOW') {
+          await tx.updateLeg(leg.legKey, 'AUTHORIZED', {
+            state: 'FAILED',
+            reasons: d.reasons,
+            updatedAt: this.deps.now(),
+          });
+          return `re-authorization refused for ${leg.legKey}: ${d.reasons.join('; ')}`;
+        }
+        return tx.updateLeg(leg.legKey, 'AUTHORIZED', {
+          state: 'AUTHORIZED',
+          grant: d.grant,
+          reasons: d.reasons,
+          updatedAt: this.deps.now(),
+        });
+      },
+    );
+  }
+
+  /**
+   * Right before a new signature, under the split lock: the split is still
+   * EXECUTING, the leg is still AUTHORIZED (not cancelled, not paid), and the
+   * policy is still the latest unrevoked version.
+   */
+  private claim(splitId: string, legKey: string) {
+    return this.deps.store.atomically([`split:${splitId}`], async (tx) => {
+      const split = await this.must(tx, splitId);
+      if (split.state !== 'EXECUTING')
+        throw new AllocationError(
+          'LEG_NOT_PAYABLE',
+          `split is ${split.state}, not EXECUTING`,
+        );
+      const leg = (await tx.legs(splitId)).find((l) => l.legKey === legKey);
+      if (!leg || leg.state !== 'AUTHORIZED')
+        throw new AllocationError(
+          'LEG_NOT_PAYABLE',
+          `${legKey} is ${leg?.state ?? 'missing'}, not AUTHORIZED`,
+        );
+      const standing = await policyStanding(tx, this.deps.signedPolicy);
+      if (!standing.usable)
+        throw new PolicyError('POLICY_REVOKED', standing.reason!);
+      return { mandateRevoked: false };
+    });
+  }
+
   private callOf(leg: LegRecord): LegCall {
     return {
       legKey: leg.legKey,
@@ -637,80 +984,104 @@ export class SplitRunner {
     };
   }
 
+  private async freshLeg(splitId: string, legKey: string) {
+    return (await this.deps.store.legs(splitId)).find(
+      (l) => l.legKey === legKey,
+    )!;
+  }
+
   /**
    * Pays transfer legs in order. A confirmed leg is skipped; a leg with a
-   * durable record is recovered, never re-signed. The first failure stops
-   * the split: FAILED when nothing is unknown (safe to resume), NEEDS_REVIEW
-   * when the chain outcome needs a human.
+   * durable record is recovered, never re-signed; a leg that is no longer
+   * AUTHORIZED or SUBMITTED is never paid and never overwritten. The first
+   * failure stops the split: FAILED when nothing is unknown (safe to
+   * resume), NEEDS_REVIEW when the chain outcome or the authority needs a
+   * human.
    */
   private async execute(s: SplitRecord): Promise<SplitRecord> {
     const { store, executor } = this.deps;
-    for (const leg0 of await store.legs(s.splitId)) {
-      let leg = leg0;
-      if (leg.kind !== 'TRANSFER') continue;
+    legs: for (const { legKey, kind } of await store.legs(s.splitId)) {
+      if (kind !== 'TRANSFER') continue;
+      let leg = await this.freshLeg(s.splitId, legKey);
       if (!['AUTHORIZED', 'SUBMITTED'].includes(leg.state)) continue;
-      const record = await executor.recorded(leg.legKey);
-      if (!record && leg.grant && this.deps.now() >= leg.grant.expiresAt) {
-        // Nothing was signed under the old grant: ask the Kernel again.
-        const d = await this.decideLeg(leg);
-        if (d.outcome !== 'ALLOW') {
-          await store.updateLeg(leg.legKey, leg.state, {
-            state: 'FAILED',
-            reasons: d.reasons,
-            updatedAt: this.deps.now(),
+      let result: LegPayResult | null = null;
+      for (let attempt = 0; !result; attempt++) {
+        const record = await executor.recorded(legKey);
+        if (!record && leg.grant && this.deps.now() >= leg.grant.expiresAt) {
+          const r = await this.reauthorize(s, leg);
+          if (typeof r === 'string') return this.advance(s, 'NEEDS_REVIEW', r);
+          leg = r;
+        }
+        try {
+          result = await executor.pay({
+            ...this.callOf(leg),
+            grant: leg.grant!,
+            claim: () => this.claim(s.splitId, legKey),
+            onRecorded: async (hash) => {
+              const cur = await this.freshLeg(s.splitId, legKey);
+              if (cur.state === 'AUTHORIZED')
+                await store.updateLeg(legKey, 'AUTHORIZED', {
+                  state: 'SUBMITTED',
+                  txHash: hash,
+                  updatedAt: this.deps.now(),
+                });
+            },
           });
+        } catch (e) {
+          const code = (e as { code?: string }).code;
+          this.trace('leg.error', {
+            legKey,
+            code,
+            error: (e as Error).message,
+          });
+          if (
+            e instanceof PolicyError ||
+            (e instanceof AllocationError && e.code === 'LEG_NOT_PAYABLE')
+          ) {
+            if ((await this.freshLeg(s.splitId, legKey)).state === 'CANCELLED')
+              continue legs;
+            return this.advance(
+              s,
+              'NEEDS_REVIEW',
+              `${legKey}: not signed: ${(e as Error).message}`,
+            );
+          }
+          // A grant burned without a record (crash between admission and
+          // recording): nothing was broadcast, so ask the Kernel again.
+          if (
+            attempt === 0 &&
+            (code === 'GRANT_REPLAYED' || code === 'GRANT_EXPIRED') &&
+            !(await executor.recorded(legKey))
+          ) {
+            const r = await this.reauthorize(s, leg);
+            if (typeof r === 'string')
+              return this.advance(s, 'NEEDS_REVIEW', r);
+            leg = r;
+            continue;
+          }
           return this.advance(
             s,
-            'NEEDS_REVIEW',
-            `re-authorization refused for ${leg.legKey}`,
+            'FAILED',
+            `${legKey}: ${(e as Error).message}`.slice(0, 500),
           );
         }
-        leg = await store.updateLeg(leg.legKey, leg.state, {
-          state: leg.state,
-          grant: d.grant,
-          reasons: d.reasons,
-          updatedAt: this.deps.now(),
-        });
       }
-      let result: LegPayResult;
-      try {
-        result = await executor.pay({
-          ...this.callOf(leg),
-          grant: leg.grant!,
-          onRecorded: async (hash) => {
-            const cur = (await store.legs(s.splitId)).find(
-              (l) => l.legKey === leg.legKey,
-            )!;
-            if (cur.state === 'AUTHORIZED')
-              await store.updateLeg(leg.legKey, 'AUTHORIZED', {
-                state: 'SUBMITTED',
-                txHash: hash,
-                updatedAt: this.deps.now(),
-              });
-          },
-        });
-      } catch (e) {
-        this.trace('leg.error', {
-          legKey: leg.legKey,
-          error: (e as Error).message,
-        });
-        return this.advance(
-          s,
-          'FAILED',
-          `${leg.legKey}: ${(e as Error).message}`.slice(0, 500),
-        );
-      }
-      const cur = (await store.legs(s.splitId)).find(
-        (l) => l.legKey === leg.legKey,
-      )!;
+      const cur = await this.freshLeg(s.splitId, legKey);
       this.trace('leg.paid', {
-        legKey: leg.legKey,
+        legKey,
         state: result.state,
         hash: result.hash,
         signedNow: result.signedNow,
       });
+      if (cur.state !== 'AUTHORIZED' && cur.state !== 'SUBMITTED')
+        // Never overwrite a leg that moved on (e.g. CANCELLED) while paying.
+        return this.advance(
+          s,
+          'NEEDS_REVIEW',
+          `${legKey} is ${cur.state} but payment ${result.hash} is ${result.state}`,
+        );
       if (result.state === 'CONFIRMED') {
-        await store.updateLeg(leg.legKey, cur.state, {
+        await store.updateLeg(legKey, cur.state, {
           state: 'CONFIRMED',
           txHash: result.hash,
           evidence: result.evidence,
@@ -718,7 +1089,7 @@ export class SplitRunner {
         });
         continue;
       }
-      await store.updateLeg(leg.legKey, cur.state, {
+      await store.updateLeg(legKey, cur.state, {
         state: result.state === 'FAILED' ? 'FAILED' : 'NEEDS_REVIEW',
         txHash: result.hash,
         note: result.note,
@@ -727,7 +1098,7 @@ export class SplitRunner {
       return this.advance(
         s,
         'NEEDS_REVIEW',
-        `${leg.legKey}: ${result.state} ${result.note ?? ''}`.trim(),
+        `${legKey}: ${result.state} ${result.note ?? ''}`.trim(),
       );
     }
     return this.reconcileLegs(s);
@@ -740,7 +1111,7 @@ export class SplitRunner {
    * so this step is idempotent.
    */
   private async reconcileLegs(s: SplitRecord): Promise<SplitRecord> {
-    const { store, ledger, books } = this.deps;
+    const { store, ledger, books, executor } = this.deps;
     const p = this.policy;
     const at = this.deps.now();
     const vendors = await books.vendors();
@@ -752,7 +1123,10 @@ export class SplitRunner {
         getAddress(ev.from) !== p.treasury && 'payer is not the treasury',
         getAddress(ev.to) !== getAddress(leg.payTo!) && 'recipient differs',
         ev.amount !== leg.amount && 'amount differs',
-        ev.ref !== legRef(leg.legKey) && 'on-chain reference differs',
+        ev.logIndex < 0 && 'no transfer log',
+        executor.onChainReference
+          ? ev.ref !== legRef(leg.legKey) && 'on-chain reference differs'
+          : ev.ref !== null && 'unexpected on-chain reference',
       ].filter(Boolean);
       if (problems.length) {
         await store.updateLeg(leg.legKey, 'CONFIRMED', {
@@ -863,7 +1237,7 @@ function withLegRef(e: JournalEntry, leg: LegRecord): JournalEntry {
 }
 
 export const legsHoldingGrants = (legs: readonly LegRecord[]) =>
-  legs.filter((l) => GRANTED_STATES.includes(l.state));
+  legs.filter(holdsOrSpent);
 
 /** The policy's Kernel mandate (owner signs it together with the policy). */
 export { mandateFromPolicy };

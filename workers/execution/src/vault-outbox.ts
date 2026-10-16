@@ -165,7 +165,13 @@ export async function vaultPayOnce(input: {
   signer: TransferSigner;
   asset: AssetRef;
   call: VaultPayCall;
-  /** Runs only before signing a NEW transaction (e.g. Kernel grant admission). */
+  /**
+   * Runs only for a NEW transaction, after every chain read and gas check
+   * and immediately before signing and recording (e.g. the caller's
+   * re-check under lock and the Kernel grant admission, which consumes the
+   * grant). Nothing but signing and the record write follows it, so a
+   * transient RPC error never burns a grant.
+   */
   authorize: () => Promise<void>;
   now: () => number;
   /** Runs after the record is durable and before broadcast. */
@@ -210,7 +216,6 @@ export async function vaultPayOnce(input: {
       'SIMULATION_FAILED',
       `vault pay reverted in simulation: ${sim.reason}`,
     );
-  await input.authorize();
   const [gasEstimate, nonce, fees, nativeBalance] = await Promise.all([
     chain.client.estimateGas({ account: signer.address, to: policy, data }),
     chain.client.getTransactionCount({
@@ -252,6 +257,7 @@ export async function vaultPayOnce(input: {
   });
   if (vaultPayData(call) !== prepared.data)
     throw new ArcExecutionError('TX_MISMATCH', 'calldata changed');
+  await input.authorize();
   const raw = await signer.signTransaction(transactionOf(prepared));
   const hash = keccak256(raw);
   const record: OutboxRecord = {
@@ -368,9 +374,26 @@ export async function recoverVaultPay(
     };
   if (r.state !== 'SIGNED')
     return { record: r, signedNow: false, evidence: null };
-  const receipt = await chain.client
-    .getTransactionReceipt({ hash: r.hash })
-    .catch(() => null);
+  const readReceipt = async () => {
+    for (let i = 0; i < 3; i++) {
+      const got = await chain.client
+        .getTransactionReceipt({ hash: r.hash })
+        .catch(() => null);
+      if (got) return got;
+      if (i < 2) await new Promise((ok) => setTimeout(ok, 50 * (i + 1)));
+    }
+    return null;
+  };
+  let receipt = await readReceipt();
+  if (!receipt) {
+    const mined = await chain.client.getTransactionCount({
+      address: r.prepared.from,
+      blockTag: 'latest',
+    });
+    // The nonce moved: before blaming another transaction, look for ours again
+    // (it may have been mined between the reads, or a read may have failed).
+    if (mined > r.prepared.nonce) receipt = await readReceipt();
+  }
   let next: OutboxRecord;
   let evidence: VaultPayEvidence | null = null;
   if (receipt) {

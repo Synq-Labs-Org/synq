@@ -42,6 +42,10 @@ export type VendorInvoice = Readonly<{
   /** Address the invoice asks to be paid at (may differ from the master). */
   payTo: Address;
   chainId: number;
+  /** Token the invoice is denominated in; consumers refuse a payable without it. */
+  token?: Address;
+  /** Decimals of `token` (the amount is in its base units). */
+  decimals?: number;
   amount: bigint;
   issuedOn: string;
   dueOn: string;

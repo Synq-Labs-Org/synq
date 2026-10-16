@@ -3,9 +3,12 @@ import pg from 'pg';
 import {
   ALLOCATION_MIGRATIONS,
   PostgresSplitStore,
+  treasuryScope,
   migrateAllocations,
 } from '@synq/allocations';
 import { splitScenarios } from './split-scenarios.js';
+import { criticScenarios } from './critic-scenarios.js';
+import { policy1500 } from './harness.js';
 
 const URL =
   process.env.SYNQ_ALLOCATIONS_TEST_DATABASE_URL ??
@@ -56,6 +59,41 @@ describe('allocation migrations', () => {
     expect(await migrateAllocations(pool)).toBe(top);
   });
 
+  it('upgrading existing holds preserves their treasury scope instead of hiding reserved cash', async () => {
+    await migrateAllocations(pool, 1);
+    const p = policy1500();
+    await pool.query(
+      `INSERT INTO synq_alloc_splits VALUES ('s_upgrade','w','r_upgrade','p','RESERVATIONS_CREATED',1,0,0,$1)`,
+      [
+        JSON.stringify({
+          receipt: {
+            chainId: p.chainId,
+            token: p.token,
+            recipient: p.treasury,
+          },
+        }),
+      ],
+    );
+    await pool.query(
+      `INSERT INTO synq_alloc_legs VALUES ('l_upgrade','s_upgrade',0,'p','TRANSFER','RESERVED','payable:upgrade',NULL,$1)`,
+      [JSON.stringify({ obligationRef: 'payable:upgrade' })],
+    );
+    await pool.query(
+      `INSERT INTO synq_alloc_reservations VALUES ('l_upgrade','w','s_upgrade','CONTRACTOR_PAYABLE',100,'ACTIVE',false,0,0)`,
+    );
+    await migrateAllocations(pool);
+    const rows = await new PostgresSplitStore(pool).reservations(
+      treasuryScope(p),
+    );
+    expect(rows.find((r) => r.reservationId === 'l_upgrade')).toMatchObject({
+      amount: 100n,
+      holdKey: 'payable:upgrade',
+      status: 'ACTIVE',
+    });
+    await migrateAllocations(pool, 0);
+    await migrateAllocations(pool);
+  });
+
   it('a reservation can never be marked remitted', async () => {
     await migrateAllocations(pool);
     await expect(
@@ -74,6 +112,13 @@ describe('allocation migrations', () => {
 });
 
 splitScenarios('postgres', async () => {
+  await migrateAllocations(pool, 0);
+  const store = new PostgresSplitStore(pool);
+  await store.migrate();
+  return store;
+});
+
+criticScenarios('postgres', async () => {
   await migrateAllocations(pool, 0);
   const store = new PostgresSplitStore(pool);
   await store.migrate();
