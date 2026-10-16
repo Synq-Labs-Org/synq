@@ -183,6 +183,72 @@ func runParserChecks(check: (Bool, String) -> Void) {
     check(resolve(oldGift, nil) == .suggestGift(query: "car gifts", maxPrice: "40"), "old gift suggests")
     check(resolve(reply(#"{"reply":"Your balance is 12 AUSD","action":null}"#), nil) == .answer, "plain answer")
 
+    // Business commands open their screen on the device; they never reach Ask Synq.
+    check(BusinessParser.parse("invoice Priya 120 for the logo") == .invoice(payer: "Priya", amount: "120", description: "logo"),
+          "invoice Priya 120 for the logo")
+    check(BusinessParser.parse("Send an invoice to Priya for 120 USDC for the logo design")
+          == .invoice(payer: "Priya", amount: "120", description: "logo design"), "send an invoice to … for … USDC")
+    check(BusinessParser.parse("bill Arjun $45.50 for coffee beans") == .invoice(payer: "Arjun", amount: "45.50", description: "coffee beans"),
+          "bill with dollar sign")
+    check(BusinessParser.parse("invoice 300 to Kite Studio for the website") == .invoice(payer: "Kite Studio", amount: "300", description: "website"),
+          "invoice amount first")
+    check(BusinessParser.parse("split 1500") == .split(amount: "1500"), "split 1500")
+    check(BusinessParser.parse("Split income of $1,500 USDC") == .split(amount: "1500"), "split income with comma")
+    check(BusinessParser.parse("ask CFO and risk whether to pay Sarah") == .team(question: "ask CFO and risk whether to pay Sarah"),
+          "ask CFO and risk")
+    check(BusinessParser.parse("what does my finance team think about paying Bob 40?") != nil, "finance team question")
+    check(BusinessParser.parse("draft a deal: logo for Sarah, 300 USDC total, 150 when concepts are delivered")
+          == .deal(text: "logo for Sarah, 300 USDC total, 150 when concepts are delivered"), "draft a deal strips the command")
+    check(BusinessParser.parse("Please set up a deal room with Sarah for the app") != nil, "set up a deal room")
+    check(BusinessParser.parse("show treasury") == .treasury, "treasury")
+    // Flights, gifts and payments still go the old way.
+    for t in ["book a flight from Delhi to Goa Dec 1-5 for 3", "find a gift for car lovers under $40", "Send 5 to Priya",
+              "split the cost of a gift", "flights to Split dec 3", "what's our balance?"] {
+        check(BusinessParser.parse(t) == nil, "not a business command: \(t)")
+    }
+    check(QuickParser.parse("book a flight from Delhi to Goa Dec 1-5 for 3", today: today, calendar: utc) != nil, "flight still parses")
+
+    // Business payloads decode, and failures stay honest.
+    func biz<T: Decodable>(_ json: String, _ status: Int, _ t: T.Type) -> Result<T, BusinessError> {
+        do { return .success(try BusinessClient.decode(Data(json.utf8), status: status, as: t)) }
+        catch let e as BusinessError { return .failure(e) } catch { return .failure(.unreachable) }
+    }
+    if case .failure(.notEnabled(let m)) = biz("<html>", 404, BusinessCapabilities.self) {
+        check(m == BusinessAvailability.notOnServer, "old server (404) reads as not enabled")
+    } else { check(false, "404 is not enabled") }
+    if case .failure(.notEnabled(let m)) = biz(#"{"error":"NOT_ENABLED","message":"Invoices need SYNQ_PAY_LINK_KEY on the server."}"#, 503, BusinessInvoice.self) {
+        check(m.contains("SYNQ_PAY_LINK_KEY"), "503 NOT_ENABLED keeps the server's reason")
+    } else { check(false, "503 is not enabled") }
+    if case .failure(.api(let m)) = biz(#"{"error":"FORBIDDEN","message":"This link is not valid for the fund."}"#, 403, TeamResult.self) {
+        check(m == "This link is not valid for the fund.", "403 message")
+    } else { check(false, "403 is an api error") }
+    let capsJSON = #"{"network":"Arc testnet","chainId":5042002,"business":"Synq demo business","features":{"deals":{"enabled":true,"reason":null},"invoices":{"enabled":false,"reason":"Invoices need SYNQ_PAY_LINK_KEY on the server."}}}"#
+    if case .success(let caps) = biz(capsJSON, 200, BusinessCapabilities.self) {
+        check(caps.feature(.deals)?.enabled == true && caps.feature(.invoices)?.enabled == false && caps.feature(.team) == nil,
+              "capabilities decode per feature")
+    } else { check(false, "capabilities decode") }
+    let draftInvoice = #"{"invoiceId":"inv_1","number":"SYNQ-0F3A9C","status":"DRAFT","payer":"Priya","description":"Logo","total":"120.00","symbol":"USDC","dueDate":"2026-10-30","issuer":"Synq demo business","payTo":"0x4444444444444444444444444444444444444444","issueUrl":"https://synq.example/invoice/inv_1?t=abc","payUrl":"https://synq.example/pay/inv_1.1.1790000000.mac0123456789","network":"Arc testnet"}"#
+    if case .success(let inv) = biz(draftInvoice, 200, BusinessInvoice.self) {
+        check(inv.payURL == nil && inv.issueURL != nil, "a draft invoice never offers a checkout link")
+        check(InvoiceLink.messageURL(for: inv, allowedHost: "synq.example") == nil, "a draft cannot be shared as a card")
+    } else { check(false, "draft invoice decodes") }
+    let issued = draftInvoice.replacingOccurrences(of: #""status":"DRAFT""#, with: #""status":"ISSUED""#)
+    if case .success(let inv) = biz(issued, 200, BusinessInvoice.self),
+       let url = InvoiceLink.messageURL(for: inv, allowedHost: "synq.example"),
+       let link = InvoiceLink(url: url, allowedHost: "synq.example") {
+        check(link.token == "inv_1.1.1790000000.mac0123456789" && link.amount == "120.00" && link.payer == "Priya",
+              "issued invoice shares a checkout card with hints")
+        check(link.checkoutURL.absoluteString == "https://synq.example/pay/inv_1.1.1790000000.mac0123456789",
+              "checkout URL drops the hints")
+        check(InvoiceLink(url: url, allowedHost: "evil.example") == nil, "invoice card for another host refused")
+    } else { check(false, "issued invoice shares a card") }
+    let teamJSON = #"{"status":"ANSWERED","runId":"r1","sections":[{"persona":"RISK","label":"Risk","stance":"VETO","text":"New wallet","evidence":["a"]},{"persona":"CFO","label":"CFO","stance":"PAY","text":"Cash is fine","evidence":[]},{"persona":"DECISION","label":"Decision (Kernel)","stance":"PAY","text":"Decision (Kernel): ALLOW","evidence":[]}],"decision":{"status":"NOT_SUBMITTED","outcome":null,"reasons":["no active mandate"]},"riskCase":null,"unavailable":[],"approvalUrl":null,"answer":"x","readOnly":true}"#
+    if case .success(let team) = biz(teamJSON, 200, TeamResult.self) {
+        check(team.specialists.map(\.persona) == ["CFO", "RISK"], "specialists in order, decision section excluded")
+        check(team.decision.headline == "Not submitted to the Kernel", "decision headline from structured status only")
+        check(team.approvalURL == nil, "no approval link unless the Kernel proposed one")
+    } else { check(false, "team result decodes") }
+
     // Network labels stay truthful.
     check(SynqNetwork.label(chainId: 10143) == "Monad testnet", "Monad chain id")
     check(SynqNetwork.label(explorer: "https://testnet.monadexplorer.com/tx/0x1") == "Monad testnet", "Monad explorer")

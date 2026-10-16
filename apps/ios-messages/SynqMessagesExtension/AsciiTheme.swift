@@ -77,6 +77,8 @@ struct AsciiTheme: SynqTheme {
         .calendar: "calendar", .people: "person.2", .passkey: "key", .home: "house", .trips: "airplane",
         .group: "person.2", .ask: "sparkle", .search: "magnifyingglass", .receipt: "doc.text", .shield: "lock.shield",
         .vote: "hand.thumbsup", .voted: "hand.thumbsup.fill", .money: "dollarsign.circle",
+        .deal: "signature", .team: "person.3", .split: "chart.pie", .bank: "building.columns",
+        .contractor: "person.crop.circle.badge.checkmark",
     ], weight: .light)
 
     let looks = SynqLooks(panelLabel: .notched, panelFilled: false, avatar: .pixel, progress: .outlined,

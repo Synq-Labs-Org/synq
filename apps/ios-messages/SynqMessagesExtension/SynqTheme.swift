@@ -166,6 +166,7 @@ enum SynqIcon: String, CaseIterable {
     case back, forward, close, more, settings, scan, copy, share, invite, plus, check, clock, warning, refresh
     case external, flight, flightLand, gift, send, grid, swap, pin, calendar, people, passkey
     case home, trips, group, ask, search, receipt, shield, vote, voted, money
+    case deal, team, split, bank, contractor
 }
 
 struct SynqIcons {

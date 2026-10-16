@@ -15,6 +15,8 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         case start
         case fund
         case legacy
+        /// A shared invoice checkout card (Arc testnet).
+        case invoice
     }
 
     /// The one place the look is chosen: every screen and card reads it from the environment.
@@ -28,6 +30,8 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
     private var link: CardLink?
     private var status: CardStatus?
     private var errorText: String?
+    private var invoiceLink: InvoiceLink?
+    private var checkout: CheckoutStatus?
 
     // MARK: Lifecycle
 
@@ -80,7 +84,15 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         status = nil
         errorText = nil
         link = nil
+        invoiceLink = nil
+        checkout = nil
         if let url = conversation.selectedMessage?.url {
+            if let invoice = InvoiceLink(url: url, allowedHost: config.webHost) {
+                mode = .invoice
+                invoiceLink = invoice
+                refreshInvoiceCard()
+                return
+            }
             if let fund = FundLink(url: url, allowedHost: config.webHost) {
                 let ref = book.remember(fundId: fund.fundId, key: fund.key,
                                         name: book.ref(fund.fundId)?.name, conversation: key)
@@ -117,6 +129,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
             insertInvite: { [weak self] ref, view in self?.insertInvite(ref, view: view) },
             insertProposal: { [weak self] ref, proposal in self?.insertProposal(ref, proposal) },
             insertTrip: { [weak self] ref, trip in self?.insertTrip(ref, trip) },
+            insertInvoice: { [weak self] invoice in self?.insertInvoice(invoice) },
             open: { [weak self] url in self?.openSecurely(url) },
             expand: { [weak self] in
                 if self?.presentationStyle == .compact { self?.requestPresentationStyle(.expanded) }
@@ -129,6 +142,8 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         switch mode {
         case .legacy:
             view = legacyView()
+        case .invoice:
+            view = invoiceView()
         case .start:
             view = AnyView(StartFundView(model: model, actions: actions,
                                          onPasteLink: { [weak self] in self?.pasteLink() }))
@@ -217,6 +232,49 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         insert(message, into: conversation)
     }
 
+    /// An issued invoice's checkout link as an INVOICE card. Without a checkout link there is nothing to share.
+    private func insertInvoice(_ invoice: BusinessInvoice) {
+        guard let conversation = activeConversation,
+              let url = InvoiceLink.messageURL(for: invoice, allowedHost: config.webHost)
+        else {
+            model.business.error = "This invoice has no checkout link yet."
+            return
+        }
+        let template = MSMessageTemplateLayout()
+        template.caption = "Invoice \(invoice.number) · \(cardAmount(invoice.total)) \(invoice.symbol)"
+        template.subcaption = "To \(invoice.payer) · pay on Synq · Arc testnet"
+        template.trailingCaption = invoice.statusText
+        let message = MSMessage(session: MSSession())
+        message.layout = MSMessageLiveLayout(alternateLayout: template)
+        message.url = url
+        message.summaryText = "Synq invoice \(invoice.number): \(cardAmount(invoice.total)) \(invoice.symbol)"
+        model.business.sheet = nil
+        insert(message, into: conversation)
+    }
+
+    private func refreshInvoiceCard() {
+        guard let invoiceLink else { return }
+        Task { @MainActor in
+            do {
+                checkout = try await BusinessClient(host: config.webHost).checkout(token: invoiceLink.token)
+                errorText = nil
+            } catch let e as BusinessError {
+                errorText = e.message
+            } catch {
+                errorText = "Could not load the invoice."
+            }
+            if mode == .invoice { render() }
+        }
+    }
+
+    private func invoiceView() -> AnyView {
+        guard let invoiceLink else { return AnyView(EmptyView()) }
+        if presentationStyle == .transcript { return AnyView(InvoiceBubble(link: invoiceLink, status: checkout)) }
+        return AnyView(InvoiceLinkView(link: invoiceLink, status: checkout, error: errorText,
+                                       onCheckout: { [weak self] in self?.openSecurely(invoiceLink.checkoutURL) },
+                                       onRefresh: { [weak self] in self?.refreshInvoiceCard() }))
+    }
+
     private func insert(_ message: MSMessage, into conversation: MSConversation) {
         conversation.insert(message) { [weak self] error in
             if error != nil {
@@ -244,7 +302,9 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
     /// Back from the Synq page: show what changed (joined, activated, sent, approved).
     func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
         model.refresh()
+        model.business.refreshAfterBrowser()
         if mode == .legacy { refreshLegacy() }
+        if mode == .invoice { refreshInvoiceCard() }
     }
 
     private func pasteLink() {
