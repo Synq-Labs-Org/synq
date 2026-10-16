@@ -1,5 +1,6 @@
 import {
   decodeErrorResult,
+  decodeFunctionData,
   encodeFunctionData,
   getAddress,
   hashTypedData,
@@ -449,4 +450,60 @@ export async function verifySafeInfrastructure(chain: ArcChain) {
     };
   }
   return out;
+}
+
+/** Safe self-calls and token calls that change who or what can move funds. */
+const GOVERNANCE_ABI = parseAbi([
+  'function enableModule(address module)',
+  'function disableModule(address prevModule, address module)',
+  'function setGuard(address guard)',
+  'function setFallbackHandler(address handler)',
+  'function addOwnerWithThreshold(address owner, uint256 _threshold)',
+  'function removeOwner(address prevOwner, address owner, uint256 _threshold)',
+  'function swapOwner(address prevOwner, address oldOwner, address newOwner)',
+  'function changeThreshold(uint256 _threshold)',
+  'function approve(address spender, uint256 amount)',
+  'function setOperator(address operator_)',
+  'function setGuardian(address guardian_)',
+]);
+export type QueuedOperationRisk = Readonly<{
+  risk: 'HIGH' | 'NORMAL';
+  reasons: readonly string[];
+}>;
+
+/**
+ * Classifies a timelocked vault operation (an `OperationQueued` event) for
+ * monitoring, so owners see the residual-risk paths of the vault policy
+ * register (R3 allowances, R4 modules/guard, R5 fallback handler, R6
+ * SignMessageLib via DELEGATECALL) during the delay, before they can execute.
+ * Pure: it never reads the chain and never blocks anything by itself.
+ */
+export function classifyQueuedOperation(
+  op: Readonly<{ to: Address; value: bigint; operation: number; data: Hex }>,
+  vault: Readonly<{ safe: Address; policy: Address }>,
+): QueuedOperationRisk {
+  const reasons: string[] = [];
+  const to = op.to.toLowerCase();
+  let call: { functionName: string; args?: readonly unknown[] } | null = null;
+  try {
+    call = decodeFunctionData({ abi: GOVERNANCE_ABI, data: op.data });
+  } catch {
+    call = null;
+  }
+  const name = call?.functionName;
+  if (op.operation !== OPERATION.CALL)
+    reasons.push(
+      'DELEGATECALL runs foreign code as the Safe (e.g. SignMessageLib)',
+    );
+  if (to === vault.safe.toLowerCase() && name && name !== 'approve')
+    reasons.push(`Safe configuration change: ${name}`);
+  if (
+    to === vault.policy.toLowerCase() &&
+    (name === 'setOperator' || name === 'setGuardian')
+  )
+    reasons.push(`policy role change: ${name}`);
+  if (name === 'approve' && (call!.args![1] as bigint) > 0n)
+    reasons.push('non-zero ERC-20 allowance outlives a later pause');
+  if (op.value > 0n) reasons.push('native value transfer');
+  return { risk: reasons.length ? 'HIGH' : 'NORMAL', reasons };
 }
