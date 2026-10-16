@@ -29,7 +29,8 @@
 }
 .workspace-shell button,
 .workspace-shell select,
-.workspace-shell input {
+.workspace-shell input,
+.workspace-shell textarea {
   font: inherit;
   color: var(--workspace-ink);
   background: var(--workspace-bg);

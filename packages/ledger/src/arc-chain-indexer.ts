@@ -716,7 +716,7 @@ export class MemoryArcIndexStore implements ArcIndexStore {
         (r) =>
           r.stream === stream &&
           ((!r.removed && r.effected === null) ||
-            (r.removed && r.effected !== null && r.reversed === null)),
+            (r.removed && r.reversed === null)),
       )
       .slice(0, limit);
   }

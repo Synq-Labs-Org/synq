@@ -9,13 +9,25 @@
     "./finance": "./src/finance.ts",
     "./finance-contracts": "./src/finance-contracts.ts",
     "./payouts": "./src/payouts.ts",
-    "./governance": "./src/governance.ts"
+    "./governance": "./src/governance.ts",
+    "./invoices": "./src/invoices.ts",
+    "./invoice-contracts": "./src/invoice-contracts.ts",
+    "./receipts": "./src/receipts.ts",
+    "./revenue": "./src/revenue.ts",
+    "./revenue-contracts": "./src/revenue-contracts.ts",
+    "./deals": "./src/deals.ts",
+    "./deal-contracts": "./src/deal-contracts.ts"
   },
   "dependencies": {
     "@synq/kernel": "workspace:*",
     "@synq/identity": "workspace:*",
     "pg": "8.18.0",
     "viem": "2.57.4",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/invoices": "workspace:*",
+    "@synq/ledger": "workspace:*",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/allocations": "workspace:*",
+    "@synq/dealroom": "workspace:*"
   }
 }

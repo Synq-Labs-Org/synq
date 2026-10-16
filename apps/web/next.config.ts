@@ -24,6 +24,8 @@ const config: NextConfig = {
     '@synq/schemas',
     '@synq/workspaces',
     '@synq/kernel',
+    '@synq/invoices',
+    '@synq/allocations',
   ],
   webpack(webpackConfig: {
     resolve: { extensionAlias?: Record<string, string[]> };

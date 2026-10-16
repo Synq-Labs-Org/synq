@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./policy-data": "./src/policy-data.ts"
+  },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
@@ -14,6 +17,7 @@
     "@synq/ledger": "workspace:*",
     "@synq/payables": "workspace:*",
     "viem": "2.57.4",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/schemas": "workspace:*"
   }
 }

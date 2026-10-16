@@ -23,6 +23,9 @@ export type InvoiceRouteDeps = {
   client: PublicClient;
   memoContract: Address;
   now(): number;
+  reconciliation?: (
+    invoice: Invoice,
+  ) => Promise<'REVIEW' | 'PENDING' | 'FINALIZED' | 'NOT_PAID'>;
 };
 
 const dec = (i: Invoice, v: bigint) => moneyToDecimal(money(i.asset, v));
@@ -180,6 +183,16 @@ export async function invoiceRoutes(
     verifyPayLink(deps.payLinkKey, token, cur.invoice, deps.now());
     return cur.invoice;
   };
+  const view = async (i: Invoice) => {
+    const reconciliation =
+      (await deps.reconciliation?.(i)) ??
+      (z.uuid().safeParse(i.workspaceId).success ? 'PENDING' : 'NOT_PAID');
+    return {
+      ...checkoutView(i, deps.memoContract),
+      reconciliation,
+      ...(reconciliation === 'REVIEW' ? { call: null } : {}),
+    };
+  };
   const fail = (e: unknown) => {
     if (e instanceof InvoiceError)
       return {
@@ -194,7 +207,7 @@ export async function invoiceRoutes(
     try {
       const i = await load(token);
       if (!i) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return checkoutView(i, deps.memoContract);
+      return view(i);
     } catch (e) {
       const f = fail(e);
       return reply.code(f.status).send(f.body);
@@ -257,6 +270,26 @@ export async function invoiceRoutes(
     try {
       const i = await load(token);
       if (!i) return reply.code(404).send({ error: 'NOT_FOUND' });
+      if (z.uuid().safeParse(i.workspaceId).success) {
+        const booked = i.payments.some(
+          (p) => p.txHash.toLowerCase() === txHash.toLowerCase(),
+        );
+        const current = await view(i);
+        const verified = booked && current.reconciliation === 'FINALIZED';
+        return reply
+          .code(
+            current.reconciliation === 'REVIEW' ? 409 : verified ? 200 : 202,
+          )
+          .send({
+            state:
+              current.reconciliation === 'REVIEW'
+                ? 'REVIEW'
+                : verified
+                  ? 'VERIFIED'
+                  : 'PENDING',
+            invoice: current,
+          });
+      }
       // The payer's hash is only a hint: the receipt decides what was paid.
       const found = await paymentsInTx({
         client: deps.client,
@@ -273,7 +306,7 @@ export async function invoiceRoutes(
       const now = (await deps.invoices.store.get(i.invoiceId))!.invoice;
       return {
         state: mine.length ? 'VERIFIED' : 'NO_MATCHING_PAYMENT',
-        invoice: checkoutView(now, deps.memoContract),
+        invoice: await view(now),
       };
     } catch (e) {
       const f = fail(e);
@@ -309,7 +342,12 @@ export function startMemoWatcher(input: {
       fromBlock: from,
       toBlock: to,
     });
-    for (const p of payments) await input.invoices.settle(p);
+    for (const p of payments) {
+      const known = await input.invoices.store.byPaymentRef(p.paymentRef);
+      if (known && z.uuid().safeParse(known.invoice.workspaceId).success)
+        continue;
+      await input.invoices.settle(p);
+    }
     next = to + 1n;
   };
   const loop = async () => {
@@ -335,6 +373,7 @@ export async function registerInvoiceCheckout(input: {
     ): Promise<{ rows: Record<string, unknown>[] }>;
   };
   env: NodeJS.ProcessEnv;
+  authorizeIssue?: (invoice: Invoice) => Promise<void>;
 }) {
   const raw = input.env.SYNQ_PAY_LINK_KEY;
   if (!raw) return null;
@@ -356,6 +395,17 @@ export async function registerInvoiceCheckout(input: {
     new PostgresInvoiceStore(input.pool),
     new Ledger(new PostgresLedgerStore(input.pool)),
     now,
+    async (invoice) => {
+      if (
+        z.uuid().safeParse(invoice.workspaceId).success &&
+        !input.authorizeIssue
+      )
+        throw new InvoiceError(
+          'NOT_ISSUER',
+          'Workspace authority service unavailable',
+        );
+      await input.authorizeIssue?.(invoice);
+    },
   );
   const memoContract = contract('arc-testnet', 'MEMO').address;
   await input.app.register(invoiceRoutes, {
@@ -364,6 +414,20 @@ export async function registerInvoiceCheckout(input: {
     client,
     memoContract,
     now,
+    reconciliation: async (i) => {
+      if (!z.uuid().safeParse(i.workspaceId).success)
+        return i.paid > 0n ? 'FINALIZED' : 'NOT_PAID';
+      const r = await input.pool.query(
+        'SELECT state FROM synq_ws_receipts WHERE workspace_id=$1 AND invoice_id=$2',
+        [i.workspaceId, i.invoiceId],
+      );
+      if (r.rows.some((v) => v.state === 'REVIEW')) return 'REVIEW';
+      if (i.paid === 0n) return 'NOT_PAID';
+      return r.rows.length === i.payments.length &&
+        r.rows.every((v) => v.state === 'PENDING_POLICY')
+        ? 'FINALIZED'
+        : 'PENDING';
+    },
   });
   const watcher =
     input.env.SYNQ_MEMO_WATCHER === '1'

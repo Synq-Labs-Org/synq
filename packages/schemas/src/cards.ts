@@ -503,7 +503,35 @@ export const FlightComparisonCardSchema = z.strictObject({
   provider: Line(80),
 });
 
+export const AllocationCardSchema = z.strictObject({
+  ...arcBase,
+  type: z.literal('ALLOCATION'),
+  splitId: Ref,
+  invoiceId: Ref,
+  policyVersion: z.number().int().positive(),
+  status: z.enum(['PROCESSING', 'COMPLETED', 'NEEDS_REVIEW']),
+  received: CardMoneySchema,
+  paid: CardMoneySchema,
+  held: CardMoneySchema,
+  free: CardMoneySchema,
+  receiptTx: Hash32,
+  planHash: Hash32.nullable(),
+  legs: z
+    .array(
+      z.strictObject({
+        purpose: Line(80),
+        state: Line(40),
+        amount: CardMoneySchema,
+        recipient: Address.nullable(),
+        txHash: Hash32.nullable(),
+      }),
+    )
+    .max(64),
+  note: Line(300),
+});
+
 export const InteractiveCardSchema = z.discriminatedUnion('type', [
+  AllocationCardSchema,
   GroupTreasuryCardSchema,
   ApprovalProposalCardSchema,
   GroupGiftCardSchema,
@@ -545,6 +573,7 @@ export const CARD_EXECUTION_MODE_LABEL: Record<CardExecutionMode, string> = {
 
 /** Card types that carry `observedAt`, `chainId` and a card execution mode. */
 export const ARC_CARD_TYPES = [
+  'ALLOCATION',
   'DEAL_PROPOSAL',
   'ESCROW_MILESTONE',
   'INVOICE',

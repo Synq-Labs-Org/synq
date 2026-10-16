@@ -1,3 +1,4 @@
+import { WorkspaceSplitWorker } from './workspace-splits.js';
 import { readFileSync, statSync } from 'node:fs';
 import {
   encodeAbiParameters,
@@ -469,6 +470,19 @@ export async function workspaceVaultRuntime(input: {
     grantTtlSeconds: 60,
     riskRequiredAbove: 0n,
   });
+  const splits = new WorkspaceSplitWorker(
+    finance,
+    chain,
+    account,
+    {
+      operator: 'workspace-split-worker',
+      grantKey: Buffer.from(grantHex, 'hex'),
+      grantTtlSeconds: 60,
+      riskRequiredAbove: 0n,
+    },
+    payouts.screening,
+  );
+  await splits.migrate();
   let running = false;
   let stopped = false;
   const pump = async () => {
@@ -555,6 +569,7 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
           );
         }
       }
+      if (!stopped) await splits.pump();
     } finally {
       running = false;
     }

@@ -430,12 +430,18 @@ importers:
       '@category-labs/mera':
         specifier: 0.2.0
         version: 0.2.0(viem@2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5))
+      '@synq/allocations':
+        specifier: workspace:*
+        version: link:../../packages/allocations
       '@synq/dealroom':
         specifier: workspace:*
         version: link:../../packages/dealroom
       '@synq/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../../packages/invoices
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
@@ -546,6 +552,9 @@ importers:
       '@synq/payables':
         specifier: workspace:*
         version: link:../payables
+      '@synq/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       viem:
         specifier: 2.57.4
         version: 2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5)
@@ -885,12 +894,27 @@ importers:
 
   packages/workspaces:
     dependencies:
+      '@synq/allocations':
+        specifier: workspace:*
+        version: link:../allocations
+      '@synq/chain-registry':
+        specifier: workspace:*
+        version: link:../chain-registry
+      '@synq/dealroom':
+        specifier: workspace:*
+        version: link:../dealroom
       '@synq/identity':
         specifier: workspace:*
         version: link:../identity
+      '@synq/invoices':
+        specifier: workspace:*
+        version: link:../invoices
       '@synq/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@synq/ledger':
+        specifier: workspace:*
+        version: link:../ledger
       pg:
         specifier: 8.18.0
         version: 8.18.0
@@ -1224,6 +1248,9 @@ importers:
       '@synq/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@synq/allocations':
+        specifier: workspace:*
+        version: link:../../packages/allocations
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry

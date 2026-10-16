@@ -13,6 +13,7 @@ import {
   type ExecutionGrant,
   type PaymentIntent,
   type PaymentPurpose,
+  type RiskInput,
 } from '@synq/kernel/arc';
 import {
   arcGasEntry,
@@ -167,6 +168,8 @@ export function kernelPurposeOf(purpose: LegPurpose): PaymentPurpose {
 }
 
 export type RunnerDeps = Readonly<{
+  assessLeg?: (leg: LegRecord, intent: PaymentIntent) => Promise<RiskInput>;
+  executionCall?: (call: LegCall) => { to: Address; value: bigint; data: Hex };
   store: SplitStore;
   ledger: Ledger;
   executor: LegExecutor;
@@ -902,7 +905,15 @@ export class SplitRunner {
         settledObligations: settled,
       },
       intent,
-      risk: { flags: leg.flags, available: true },
+      risk: this.deps.assessLeg
+        ? await this.deps.assessLeg(leg, intent)
+        : { flags: leg.flags, available: true },
+      executionCall: this.deps.executionCall?.({
+        legKey: leg.legKey,
+        recipient: leg.payTo!,
+        amount: leg.amount,
+        ref: legRef(leg.legKey),
+      }),
       simulationOk: sim.ok,
       now,
     });

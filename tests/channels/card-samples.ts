@@ -396,6 +396,34 @@ export const ARC_SAMPLES: Record<string, InteractiveCard> = Object.fromEntries(
   (
     [
       [
+        'allocation',
+        {
+          ...arc(108),
+          type: 'ALLOCATION',
+          actions: [],
+          splitId: 'spl_fixture',
+          invoiceId: 'inv_fixture',
+          policyVersion: 1,
+          status: 'COMPLETED',
+          received: { amount: '0.05', symbol: 'USDC' },
+          paid: { amount: '0.04', symbol: 'USDC' },
+          held: { amount: '0.01', symbol: 'USDC' },
+          free: { amount: '0', symbol: 'USDC' },
+          receiptTx: hash(108),
+          planHash: hash(109),
+          legs: [
+            {
+              purpose: 'DISTRIBUTION',
+              state: 'RECONCILED',
+              amount: { amount: '0.04', symbol: 'USDC' },
+              recipient: SAMPLE_CLIENT,
+              txHash: hash(110),
+            },
+          ],
+          note: 'Held amounts stay in the vault. Only receipt-backed transfers moved funds.',
+        },
+      ],
+      [
         'deal',
         {
           ...arc(101),
@@ -684,6 +712,24 @@ const HUGE = '98765432109876543210987654321.123456';
 
 /** Two stress cases per Arc-era type: huge amounts, long names, missing optional fields, terminal states. */
 export const ARC_EDGE_CASES: [string, InteractiveCard][] = [
+  [
+    'allocation: needs review without a computed plan',
+    editArc('allocation', {
+      status: 'NEEDS_REVIEW',
+      legs: [],
+      planHash: null,
+      paid: { amount: '0', symbol: 'USDC' },
+      held: { amount: '0', symbol: 'USDC' },
+    }),
+  ],
+  [
+    'allocation: processing with a large amount and long note',
+    editArc('allocation', {
+      status: 'PROCESSING',
+      received: { amount: HUGE, symbol: 'USDC' },
+      note: LONG,
+    }),
+  ],
   [
     'deal: settled, both signed, huge total, long names',
     editArc('deal', {

@@ -21,7 +21,8 @@
     "./transfer-plugin": "./src/transfer-plugin.ts",
     "./lithic-webhook": "./src/lithic-webhook.ts",
     "./invoice-routes": "./src/invoice-routes.ts",
-    "./deal-routes": "./src/deal-routes.ts"
+    "./deal-routes": "./src/deal-routes.ts",
+    "./arc-indexer": "./src/arc-indexer.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

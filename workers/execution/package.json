@@ -27,7 +27,9 @@
     "./circle-wallets": "./src/circle-wallets.ts",
     "./workspace-payout": "./src/workspace-payout.ts",
     "./workspace-governance": "./src/workspace-governance.ts",
-    "./workspace-authority": "./src/workspace-authority.ts"
+    "./workspace-authority": "./src/workspace-authority.ts",
+    "./split-executor": "./src/split-executor.ts",
+    "./workspace-splits": "./src/workspace-splits.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -45,6 +47,7 @@
     "zod": "4.6.5",
     "@synq/agent-runtime": "workspace:*",
     "@synq/plugin-risk": "workspace:*",
-    "@synq/ledger": "workspace:*"
+    "@synq/ledger": "workspace:*",
+    "@synq/allocations": "workspace:*"
   }
 }

@@ -20,7 +20,9 @@
     "react-dom": "19.3.0",
     "viem": "2.57.4",
     "zod": "4.6.5",
-    "@synq/dealroom": "workspace:*"
+    "@synq/dealroom": "workspace:*",
+    "@synq/invoices": "workspace:*",
+    "@synq/allocations": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.19.7",

@@ -1,3 +1,42 @@
+import { dealRoutes } from '../../apps/api/src/deal-routes.js';
+import { WorkspaceDeals } from '@synq/workspaces/deals';
+import { DealRoomService, PostgresDealRoomStore } from '@synq/dealroom';
+import { readFileSync } from 'node:fs';
+import {
+  encodeAbiParameters,
+  encodeEventTopics,
+  erc20Abi,
+  toHex,
+  type PublicClient,
+} from 'viem';
+import { contract } from '@synq/chain-registry/arc';
+import {
+  InvoiceService,
+  PostgresInvoiceStore,
+  payCall,
+  MEMO_ABI,
+} from '@synq/invoices';
+import { issueTypedData } from '@synq/invoices/invoice-data';
+import { WorkspaceInvoices } from '@synq/workspaces/invoices';
+import { WorkspaceReceipts } from '@synq/workspaces/receipts';
+import { WorkspaceSplitWorker } from '@synq/execution-worker/workspace-splits';
+import {
+  viemIndexerChain,
+  Ledger,
+  PostgresLedgerStore,
+  walletTag,
+} from '@synq/ledger';
+import { allocationCard } from '@synq/allocations';
+import { renderTelegramCard } from '@synq/channels';
+import { WorkspaceRevenue } from '@synq/workspaces/revenue';
+import {
+  RevenuePolicyWireSchema,
+  revenueRevocationTypedData,
+} from '@synq/workspaces/revenue-contracts';
+import {
+  policyTypedData,
+  mandateFromPolicy,
+} from '@synq/allocations/policy-data';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -310,7 +349,7 @@ describe('G5 signed vendor master and policies — LOCAL_FIXTURE with real Postg
   });
 });
 
-async function payoutFixture(clear = true) {
+async function payoutFixture(clear = true, aiDaily = '0') {
   const f = await fixture(),
     vendorId = randomUUID(),
     payee = account();
@@ -327,7 +366,7 @@ async function payoutFixture(clear = true) {
       perPayment: '50000',
       daily: '100000',
       reserve: '10000',
-      aiDaily: '0',
+      aiDaily,
     },
   ]) {
     const c = await f.finance.propose(f.w.id, f.owner.principalId, edit);
@@ -413,6 +452,10 @@ async function payoutFixture(clear = true) {
     });
   return {
     ...f,
+    chain,
+    signer,
+    screening,
+    kernelAuthority: authority,
     vendorId,
     payee,
     executor,
@@ -988,5 +1031,571 @@ describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signe
     expect(
       (await f.govExecutor.outbox.get(`workspace-action:${q.action.id}`))?.hash,
     ).toBe(before?.hash);
+  });
+});
+
+describe('G5/G6 workspace revenue policies — LOCAL_FIXTURE with Postgres', () => {
+  it('requires the current Safe quorum on both the policy and its exact mandate, persists and revokes', async () => {
+    const f = await fixture(),
+      revenue = new WorkspaceRevenue(f.finance);
+    const budget = await f.finance.propose(f.w.id, f.owner.principalId, {
+      kind: 'BUDGET',
+      perPayment: '50000',
+      daily: '200000',
+      aiDaily: '100000',
+      reserve: '10000',
+    });
+    await f.approve(budget);
+    await f.approve(budget, f.coowner);
+    const vendorId = randomUUID();
+    const vendor = await f.finance.propose(f.w.id, f.owner.principalId, {
+      kind: 'VENDOR',
+      vendorId,
+      name: 'Policy supplier',
+      address: account().address,
+      verification: 'OWNER_ATTESTATION',
+    });
+    await f.approve(vendor);
+    await f.approve(vendor, f.coowner);
+    const draft = await revenue.propose(f.w.id, f.owner.principalId, {
+      taxReserveBps: 1000,
+      operatingFloor: '10000',
+      obligationHorizonDays: 7,
+      vendorIds: [vendorId],
+      distributions: [],
+      validForSeconds: 3600,
+      limits: {
+        maxAutonomousPerLeg: '50000',
+        maxAutonomousPerWindow: '100000',
+        windowSeconds: 86400,
+        maxSplitsPerWindow: 10,
+      },
+    });
+    const policy = RevenuePolicyWireSchema.parse(draft.policy);
+    const pair = async (who: typeof f.owner) => ({
+      policy: await who.a.signTypedData(policyTypedData(policy)),
+      mandate: await who.a.signTypedData(
+        mandateTypedData(mandateFromPolicy(policy)),
+      ),
+    });
+    await expect(
+      revenue.approve(
+        f.w.id,
+        f.outsider.principalId,
+        draft.id,
+        await pair(f.outsider),
+      ),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_NOT_FOUND' });
+    expect(
+      (
+        await revenue.approve(
+          f.w.id,
+          f.owner.principalId,
+          draft.id,
+          await pair(f.owner),
+        )
+      ).state,
+    ).toBe('REVIEW');
+    expect(await revenue.active(f.w.id)).toBeNull();
+    expect(
+      (
+        await revenue.approve(
+          f.w.id,
+          f.coowner.principalId,
+          draft.id,
+          await pair(f.coowner),
+        )
+      ).state,
+    ).toBe('ACTIVE');
+    expect(
+      (await new WorkspaceRevenue(f.finance).active(f.w.id))?.signed.policy
+        .version,
+    ).toBe(1);
+    await expect(
+      revenue.revoke(
+        f.w.id,
+        f.owner.principalId,
+        draft.id,
+        await f.outsider.a.signTypedData(revenueRevocationTypedData(policy)),
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_REVENUE_SIGNATURE' });
+    expect(
+      (
+        await revenue.revoke(
+          f.w.id,
+          f.owner.principalId,
+          draft.id,
+          await f.owner.a.signTypedData(revenueRevocationTypedData(policy)),
+        )
+      ).state,
+    ).toBe('ACTIVE');
+    expect(
+      (
+        await revenue.revoke(
+          f.w.id,
+          f.coowner.principalId,
+          draft.id,
+          await f.coowner.a.signTypedData(revenueRevocationTypedData(policy)),
+        )
+      ).state,
+    ).toBe('REVOKED');
+    expect(await revenue.active(f.w.id)).toBeNull();
+  });
+  it('refuses an unsigned policy outside the workspace AI budget', async () => {
+    const f = await fixture(),
+      revenue = new WorkspaceRevenue(f.finance);
+    const vendorId = randomUUID();
+    const vendor = await f.finance.propose(f.w.id, f.owner.principalId, {
+      kind: 'VENDOR',
+      vendorId,
+      name: 'Policy supplier',
+      address: account().address,
+      verification: 'OWNER_ATTESTATION',
+    });
+    await f.approve(vendor);
+    await f.approve(vendor, f.coowner);
+    await expect(
+      revenue.propose(f.w.id, f.owner.principalId, {
+        taxReserveBps: 0,
+        operatingFloor: '0',
+        obligationHorizonDays: 7,
+        vendorIds: [vendorId],
+        distributions: [],
+        validForSeconds: 3600,
+        limits: {
+          maxAutonomousPerLeg: '50000',
+          maxAutonomousPerWindow: '100000',
+          windowSeconds: 86400,
+          maxSplitsPerWindow: 10,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'REVENUE_OUTSIDE_WORKSPACE_BUDGET' });
+  });
+});
+
+async function splitFixture(clear = true) {
+  const f = await payoutFixture(true, '100000');
+  const revenue = new WorkspaceRevenue(f.finance),
+    usdc = token('arc-testnet', 'USDC');
+  const draft = await revenue.propose(f.w.id, f.owner.principalId, {
+    taxReserveBps: 0,
+    operatingFloor: '10000',
+    obligationHorizonDays: 7,
+    vendorIds: [f.vendorId],
+    distributions: [
+      {
+        kind: 'PERCENT_OF_SURPLUS',
+        label: 'Supplier share',
+        beneficiaryId: f.vendorId,
+        bps: 10000,
+      },
+    ],
+    validForSeconds: 3600,
+    limits: {
+      maxAutonomousPerLeg: '50000',
+      maxAutonomousPerWindow: '100000',
+      windowSeconds: 86400,
+      maxSplitsPerWindow: 10,
+    },
+  });
+  const policy = RevenuePolicyWireSchema.parse(draft.policy);
+  for (const actor of [f.owner, f.coowner])
+    await revenue.approve(f.w.id, actor.principalId, draft.id, {
+      policy: await actor.a.signTypedData(policyTypedData(policy)),
+      mandate: await actor.a.signTypedData(
+        mandateTypedData(mandateFromPolicy(policy)),
+      ),
+    });
+  const ledger = new Ledger(new PostgresLedgerStore(pool)),
+    service = new InvoiceService(
+      new PostgresInvoiceStore(pool),
+      ledger,
+      f.store.now,
+    );
+  const invoices = new WorkspaceInvoices(f.finance, service, () => null);
+  const invoiceDraft = await invoices.create(f.w.id, f.owner.principalId, {
+    number: randomUUID(),
+    payerName: 'Outside payer',
+    dueDate: '2033-05-20',
+    lineItems: [
+      { description: 'Accepted work', quantity: 1, unitPrice: '50000' },
+    ],
+  });
+  const invoice = (await service.store.get(invoiceDraft.invoiceId))!.invoice;
+  await invoices.issue(
+    f.w.id,
+    f.owner.principalId,
+    invoice.invoiceId,
+    await f.owner.a.signTypedData(issueTypedData(invoice)),
+  );
+  const issued = (await service.store.get(invoice.invoiceId))!.invoice,
+    call = payCall(issued, 50000n);
+  const hash = keccak256(toHex(randomUUID())),
+    blockHash = keccak256(toHex('incoming-final-block'));
+  const memo = contract('arc-testnet', 'MEMO');
+  const base = {
+    blockNumber: 1000n,
+    blockHash,
+    transactionHash: hash,
+    transactionIndex: 0,
+    removed: false,
+  };
+  const logs = [
+    {
+      ...base,
+      address: usdc.address,
+      logIndex: 0,
+      topics: encodeEventTopics({
+        abi: erc20Abi,
+        eventName: 'Transfer',
+        args: { from: f.outsider.a.address, to: f.authority.vault },
+      }),
+      data: encodeAbiParameters([{ type: 'uint256' }], [50000n]),
+    },
+    {
+      ...base,
+      address: memo.address,
+      logIndex: 1,
+      topics: encodeEventTopics({
+        abi: MEMO_ABI,
+        eventName: 'Memo',
+        args: {
+          sender: f.outsider.a.address,
+          target: usdc.address,
+          memoId: issued.paymentRef!,
+        },
+      }),
+      data: encodeAbiParameters(
+        [{ type: 'bytes32' }, { type: 'bytes' }, { type: 'uint256' }],
+        [keccak256(call.data), call.memoData, 0n],
+      ),
+    },
+  ];
+  const memoCode = (
+    JSON.parse(
+      readFileSync(
+        new URL('./fixtures/memo-code.json', import.meta.url),
+        'utf8',
+      ),
+    ) as string[]
+  ).join('') as Hex;
+  const client = {
+    ...f.chain.client,
+    getCode: async (q: { address: Hex }) =>
+      q.address.toLowerCase() === memo.address.toLowerCase()
+        ? memoCode
+        : f.chain.client.getCode(q),
+    getBlock: async (q: { blockNumber?: bigint }) => ({
+      number: q.blockNumber ?? 3000n,
+      hash: q.blockNumber === 1000n ? blockHash : `0x${'bb'.repeat(32)}`,
+      timestamp: BigInt(f.store.now()),
+    }),
+    getTransactionReceipt: async (q: { hash: Hex }) =>
+      q.hash === hash
+        ? {
+            status: 'success',
+            blockNumber: 1000n,
+            blockHash,
+            logs,
+            from: f.outsider.a.address,
+            gasUsed: 1n,
+            effectiveGasPrice: 1n,
+          }
+        : f.chain.client.getTransactionReceipt(q),
+    readContract: async (q: { functionName: string }) =>
+      q.functionName === 'balanceOf'
+        ? 50000n - f.fake.paid.reduce((a, p) => a + p.amount, 0n)
+        : f.chain.client.readContract(q as never),
+  } as unknown as PublicClient;
+  const chain = { ...f.chain, client };
+  const receipts = new WorkspaceReceipts(f.finance, service, ledger);
+  const receiptId = `chain:5042002:${hash}:0`;
+  await receipts.apply(f.w.id, viemIndexerChain(client), {
+    chainId: 5042002,
+    kind: 'TRANSFER',
+    emitter: usdc.address,
+    blockNumber: 1000n,
+    blockHash,
+    txHash: hash,
+    logIndex: 0,
+    removed: false,
+    data: { from: f.outsider.a.address, to: f.authority.vault, value: '50000' },
+  });
+  const worker = new WorkspaceSplitWorker(
+    f.finance,
+    chain,
+    f.signer,
+    f.kernelAuthority,
+    clear ? f.screening : undefined,
+  );
+  await worker.migrate();
+  return {
+    ...f,
+    revenue,
+    policy,
+    policyId: draft.id,
+    worker,
+    receiptId,
+    ledger,
+  };
+}
+describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable Postgres', () => {
+  it('executes a quorum-signed distribution once and retains the workspace floor', async () => {
+    const f = await splitFixture();
+    await f.worker.pump();
+    expect((await f.worker.store.byReceipt(f.receiptId))?.state).toBe(
+      'COMPLETED',
+    );
+    expect(f.fake.paid.map((p) => p.amount)).toEqual([40000n]);
+    const vaultCash = (await f.ledger.store.entries(f.w.id))
+      .flatMap((e) => e.postings)
+      .filter(
+        (p) =>
+          p.account === 'CASH_ARC_USDC' &&
+          p.counterpartyId === walletTag(f.authority.vault),
+      )
+      .reduce((sum, p) => sum + p.amount, 0n);
+    expect(vaultCash).toBe(10000n);
+    const split = (await f.worker.store.byReceipt(f.receiptId))!;
+    const card = allocationCard(
+      {
+        split,
+        legs: await f.worker.store.legs(split.splitId),
+        reservations: await f.worker.store.reservations(
+          `5042002:${f.policy.token.toLowerCase()}:${f.policy.treasury.toLowerCase()}`,
+        ),
+        receiptReview: false,
+      },
+      {
+        groupId: f.w.id,
+        groupLabel: 'Workspace',
+        issuedAt: f.store.now(),
+        executionMode: 'LOCAL_FIXTURE',
+      },
+    );
+    expect(card).toMatchObject({
+      status: 'COMPLETED',
+      paid: { amount: '0.04' },
+      held: { amount: '0.01' },
+    });
+    expect(renderTelegramCard(card).text).toContain('0.04 USDC');
+    expect(
+      await f.revenue.allocations(f.w.id, f.owner.principalId),
+    ).toHaveLength(1);
+    await expect(
+      f.revenue.allocations(f.w.id, f.outsider.principalId),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_NOT_FOUND' });
+
+    await f.worker.process(f.w.id, f.receiptId);
+    expect(f.signed()).toBe(1);
+    expect(
+      (
+        await pool.query(
+          'SELECT state FROM synq_ws_split_admissions WHERE workspace_id=$1',
+          [f.w.id],
+        )
+      ).rows,
+    ).toEqual([{ state: 'CONFIRMED' }]);
+  });
+  it('fails closed before signing when live screening is unavailable', async () => {
+    const f = await splitFixture(false);
+    const split = await f.worker.process(f.w.id, f.receiptId);
+    expect(split?.state).toBe('NEEDS_REVIEW');
+    expect(f.signed()).toBe(0);
+    expect(f.fake.paid).toHaveLength(0);
+  });
+  it('recovers the same signed bytes after a receipt timeout even if the policy was revoked meanwhile', async () => {
+    const f = await splitFixture();
+    f.fake.fail.wait = 1;
+    expect((await f.worker.process(f.w.id, f.receiptId))?.state).toBe('FAILED');
+    for (const actor of [f.owner, f.coowner])
+      await f.revenue.revoke(
+        f.w.id,
+        actor.principalId,
+        f.policyId,
+        await actor.a.signTypedData(revenueRevocationTypedData(f.policy)),
+      );
+    f.setAuthority({ ...f.authority, owners: [f.outsider.a.address] });
+    expect((await f.worker.process(f.w.id, f.receiptId))?.state).toBe(
+      'COMPLETED',
+    );
+    expect(f.signed()).toBe(1);
+    expect(f.fake.paid).toHaveLength(1);
+  });
+  it('G6/G11 rechecks a persistent vendor hold after grant issuance and before any signature', async () => {
+    const f = await splitFixture();
+    expect(
+      (
+        await f.worker.process(f.w.id, f.receiptId, {
+          stopAt: 'SPLIT_AUTHORIZED',
+        })
+      )?.state,
+    ).toBe('SPLIT_AUTHORIZED');
+    await f.worker.risk.raise({
+      workspaceId: f.w.id,
+      alertKey: 'fresh-vendor-hold',
+      subjectRef: `vendor:${f.vendorId}`,
+      counterparty: `vendor:${f.vendorId}`,
+      flags: [
+        {
+          code: 'PAYOUT_ADDRESS_CHANGED',
+          severity: 'HARD',
+          detail: 'Fixture independent hold after grant',
+        },
+      ],
+      raisedBy: 'fixture',
+      at: f.store.now(),
+    });
+    expect((await f.worker.process(f.w.id, f.receiptId))?.state).toBe('FAILED');
+    expect(f.signed()).toBe(0);
+    expect(f.fake.paid).toHaveLength(0);
+  });
+  it('G4/G6 shares daily budget and reservations between manual payouts and automatic transfers', async () => {
+    const f = await payoutFixture();
+    const draft = await f.propose();
+    await f.approvePayout(draft);
+    await f.approvePayout(draft, f.coowner);
+    await pool.query(
+      "INSERT INTO synq_ws_split_admissions(leg_key,workspace_id,amount,admitted_at,state) VALUES($1,$2,60000,$3,'SIGNED')",
+      [randomUUID(), f.w.id, f.store.now()],
+    );
+    expect(await f.executor.execute(draft.data.id)).toMatchObject({
+      state: 'HOLD',
+      reason: 'DAILY_BUDGET_EXHAUSTED',
+    });
+    expect(f.signed()).toBe(0);
+  });
+});
+
+describe('G7 workspace-selected deal parties — LOCAL_FIXTURE with Postgres', () => {
+  it('selects distinct linked members and arbiter, isolates reads and requires each contracting wallet signature', async () => {
+    const f = await fixture(),
+      usdc = token('arc-testnet', 'USDC');
+    const invite = await f.store.invite(f.w.id, f.owner.principalId, {
+      role: 'MEMBER',
+    });
+    await f.store.accept(f.outsider.principalId, invite.token);
+    const store = new PostgresDealRoomStore(pool);
+    await store.migrate();
+    const service = new DealRoomService(store, {
+      now: f.store.now,
+      chainName: 'arc-testnet',
+      asset: {
+        chainId: usdc.chainId,
+        network: usdc.network,
+        token: usdc.address,
+        symbol: 'USDC',
+        decimals: 6,
+      },
+      books: null,
+      escrow: contract('arc-testnet', 'SYNQ_MILESTONE_ESCROW').address,
+      settings: {
+        disputePeriodSeconds: 86400,
+        refundGraceSeconds: 7 * 86400,
+        offerTtlSeconds: 3 * 86400,
+      },
+    });
+    const deals = new WorkspaceDeals(
+      f.store,
+      service,
+      new Uint8Array(32).fill(9),
+    );
+    const input = {
+      clientId: f.outsider.principalId,
+      freelancerId: f.coowner.principalId,
+      arbiterId: f.owner.principalId,
+      request:
+        'Build a project. 0.05 USDC total. 0.05 USDC when accepted delivery within 7 days.',
+      idempotencyKey: randomUUID(),
+    };
+    const draft = await deals.draft(f.w.id, f.outsider.principalId, input);
+    expect(draft.parties.find((p) => p.role === 'CLIENT')?.wallet).toBe(
+      f.outsider.a.address,
+    );
+    expect(draft.parties.find((p) => p.role === 'ARBITER')?.wallet).toBe(
+      f.owner.a.address,
+    );
+    expect(draft.execution).toBe('BLOCKED_WORKSPACE_ESCROW_EXECUTOR');
+    const raceKey = randomUUID();
+    const race = await Promise.allSettled([
+      deals.draft(f.w.id, f.outsider.principalId, {
+        ...input,
+        idempotencyKey: raceKey,
+      }),
+      deals.draft(f.w.id, f.outsider.principalId, {
+        ...input,
+        request: input.request.replace('project', 'different project'),
+        idempotencyKey: raceKey,
+      }),
+    ]);
+    expect(race.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(race.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    const publicApp = Fastify();
+    await publicApp.register(dealRoutes, {
+      service,
+      linkKey: new Uint8Array(32).fill(9),
+      now: f.store.now,
+    });
+    try {
+      expect(
+        (
+          await publicApp.inject({
+            url: `/v1/deals/${draft.id}?${draft.reviewPath.split('?')[1]}`,
+          })
+        ).statusCode,
+      ).toBe(404);
+    } finally {
+      await publicApp.close();
+    }
+
+    expect((await deals.draft(f.w.id, f.outsider.principalId, input)).id).toBe(
+      draft.id,
+    );
+    await expect(
+      deals.draft(f.w.id, f.owner.principalId, {
+        ...input,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'CONTRACTING_PARTY_REQUIRED' });
+    await expect(
+      deals.draft(f.w.id, f.outsider.principalId, {
+        ...input,
+        arbiterId: f.coowner.principalId,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'INDEPENDENT_ARBITER_REQUIRED' });
+    const view = await service.view(draft.id),
+      typed = service.typedData(view.current);
+    await expect(
+      deals.sign(
+        f.w.id,
+        f.outsider.principalId,
+        draft.id,
+        1,
+        await f.owner.a.signTypedData(typed),
+      ),
+    ).rejects.toMatchObject({ code: 'WRONG_SIGNER' });
+    await deals.sign(
+      f.w.id,
+      f.outsider.principalId,
+      draft.id,
+      1,
+      await f.outsider.a.signTypedData(typed),
+    );
+    expect(
+      (
+        await deals.sign(
+          f.w.id,
+          f.coowner.principalId,
+          draft.id,
+          1,
+          await f.coowner.a.signTypedData(typed),
+        )
+      ).status,
+    ).toBe('ACCEPTED');
+    const other = await fixture();
+    await expect(
+      deals.get(other.w.id, other.owner.principalId, draft.id),
+    ).rejects.toMatchObject({ code: 'DEAL_NOT_FOUND' });
   });
 });

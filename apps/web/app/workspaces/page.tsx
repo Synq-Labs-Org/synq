@@ -17,6 +17,9 @@ import { ChannelPanel } from './channel-panel';
 import { FinancePanel } from './finance-panel';
 import { PayoutPanel } from './payout-panel';
 import { GovernancePanel } from './governance-panel';
+import { InvoicePanel } from './invoice-panel';
+import { RevenuePanel } from './revenue-panel';
+import { DealPanel } from './deal-panel';
 
 type Provider = {
   request(input: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -421,6 +424,29 @@ export default function WorkspacesPage() {
                   workspaceId={view.workspace.id}
                   vault={view.workspace.vault}
                   owner={isOwner}
+                />
+              )}
+              {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
+                <>
+                  <InvoicePanel
+                    key={`invoices-${view.workspace.id}`}
+                    workspaceId={view.workspace.id}
+                    vault={view.workspace.vault}
+                    owner={isOwner}
+                  />
+                  <RevenuePanel
+                    key={`revenue-${view.workspace.id}`}
+                    workspaceId={view.workspace.id}
+                    vault={view.workspace.vault}
+                    owner={isOwner}
+                  />
+                </>
+              )}
+              {principal && (
+                <DealPanel
+                  key={`deals-${view.workspace.id}`}
+                  workspaceId={view.workspace.id}
+                  principalId={principal}
                 />
               )}
               <ChannelPanel

@@ -29,4 +29,31 @@ CREATE FUNCTION synq_ws_action_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BE
 CREATE TRIGGER synq_ws_action_immutable BEFORE UPDATE ON synq_ws_safe_actions FOR EACH ROW EXECUTE FUNCTION synq_ws_action_guard();`,
     down: `DROP TABLE synq_ws_safe_actions; DROP FUNCTION synq_ws_action_guard();`,
   },
+  {
+    version: 4,
+    up: `CREATE TABLE synq_ws_receipts(key text PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),data jsonb NOT NULL,state text NOT NULL CHECK(state IN ('BOOKING','PENDING_POLICY','REVIEW')),invoice_id text,created_at bigint NOT NULL,reason text);
+CREATE INDEX synq_ws_receipts_pending ON synq_ws_receipts(workspace_id,state);
+CREATE FUNCTION synq_ws_receipt_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.key<>OLD.key OR NEW.workspace_id<>OLD.workspace_id OR NEW.data<>OLD.data OR NEW.created_at<>OLD.created_at OR (OLD.state='REVIEW' AND NEW.state<>'REVIEW') THEN RAISE EXCEPTION 'receipt provenance is immutable'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER synq_ws_receipt_immutable BEFORE UPDATE ON synq_ws_receipts FOR EACH ROW EXECUTE FUNCTION synq_ws_receipt_guard();`,
+    down: `DROP TABLE synq_ws_receipts; DROP FUNCTION synq_ws_receipt_guard();`,
+  },
+  {
+    version: 5,
+    up: `CREATE TABLE synq_ws_notification_deferred(event_id text PRIMARY KEY,next_at bigint NOT NULL);`,
+    down: `DROP TABLE synq_ws_notification_deferred;`,
+  },
+  {
+    version: 6,
+    up: `CREATE TABLE synq_ws_revenue_policies(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),version int NOT NULL,data jsonb NOT NULL,signatures jsonb NOT NULL DEFAULT '{}',revocations jsonb NOT NULL DEFAULT '{}',state text NOT NULL CHECK(state IN ('REVIEW','ACTIVE','SUPERSEDED','REVOKED')),created_at bigint NOT NULL,UNIQUE(workspace_id,version));
+CREATE FUNCTION synq_ws_revenue_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id<>OLD.id OR NEW.workspace_id<>OLD.workspace_id OR NEW.version<>OLD.version OR NEW.data<>OLD.data OR NEW.created_at<>OLD.created_at OR (OLD.state<>'REVIEW' AND NEW.signatures<>OLD.signatures) THEN RAISE EXCEPTION 'revenue policy is immutable'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER synq_ws_revenue_immutable BEFORE UPDATE ON synq_ws_revenue_policies FOR EACH ROW EXECUTE FUNCTION synq_ws_revenue_guard();`,
+    down: `DROP TABLE synq_ws_revenue_policies; DROP FUNCTION synq_ws_revenue_guard();`,
+  },
+  {
+    version: 7,
+    up: `ALTER TABLE synq_ws_receipts ADD COLUMN next_at bigint NOT NULL DEFAULT 0, ADD COLUMN last_error text;
+CREATE TABLE synq_ws_split_admissions(leg_key text PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),amount numeric(78,0) NOT NULL CHECK(amount>0),admitted_at bigint NOT NULL,executed_at bigint,state text NOT NULL CHECK(state IN ('SIGNED','CONFIRMED','FAILED','REVIEW')));
+CREATE INDEX synq_ws_split_budget ON synq_ws_split_admissions(workspace_id,state);`,
+    down: `DROP TABLE synq_ws_split_admissions; ALTER TABLE synq_ws_receipts DROP COLUMN next_at,DROP COLUMN last_error;`,
+  },
 ] as const;

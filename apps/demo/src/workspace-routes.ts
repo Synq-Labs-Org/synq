@@ -1,3 +1,4 @@
+import type { WorkspaceDeals } from '@synq/workspaces/deals';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -16,6 +17,8 @@ import { IdentityError } from '@synq/identity';
 import type { WorkspaceFinance } from '@synq/workspaces/finance';
 import type { WorkspacePayouts } from '@synq/workspaces/payouts';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
+import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
+import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
@@ -90,6 +93,9 @@ export function registerWorkspaceRoutes(
   finance?: WorkspaceFinance,
   payouts?: { service: WorkspacePayouts; wake(): void },
   governance?: { service: WorkspaceGovernance; wake(): void },
+  invoices?: () => WorkspaceInvoices | undefined,
+  revenue?: WorkspaceRevenue,
+  deals?: () => WorkspaceDeals | undefined,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -157,14 +163,52 @@ export function registerWorkspaceRoutes(
     await store.throttle(`auth:${address}`, 20);
   };
   app.get('/v2/capabilities', (_req, reply) =>
-    handle(reply, async () =>
-      workspaceCapabilities(
+    handle(reply, async () => ({
+      ...workspaceCapabilities(
         Boolean(vault),
         Boolean(channels),
         Boolean(finance),
         Boolean(payouts),
       ),
-    ),
+      revenuePolicies: revenue
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Current Safe quorum signs exact policy and derived mandate; workspace budgets and verified vendors apply.',
+          }
+        : {
+            status: 'BLOCKED',
+            reason: 'Workspace revenue service unavailable.',
+          },
+      automaticSplits: {
+        status: 'BLOCKED',
+        reason:
+          'Durable receipt-driven runner is test-proven; live transfer screening is unavailable. Noninvoice receipts remain unapplied liabilities.',
+      },
+      dealDrafts: deals?.()
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Select three distinct signed-in workspace members; contracting parties sign their own terms.',
+          }
+        : { status: 'BLOCKED', reason: 'Workspace Deal Room is unavailable.' },
+      dealExecution: {
+        status: 'BLOCKED',
+        reason:
+          'Workspace escrow authorization and executor are not connected yet.',
+      },
+      invoices: invoices?.()
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Workspace issuer, current-owner signature, external-wallet Memo checkout.',
+          }
+        : {
+            status: 'BLOCKED',
+            reason:
+              'Requires the workspace invoice service and configured checkout links.',
+          },
+    })),
   );
   app.post('/v2/auth/challenge', (req, reply) =>
     handle(reply, async () => {
@@ -475,6 +519,165 @@ export function registerWorkspaceRoutes(
           );
           governance.wake();
           return result;
+        }),
+    );
+  }
+  if (deals) {
+    const service = () => {
+      const d = deals();
+      if (!d) throw new WorkspaceError('WORKSPACE_DEALS_BLOCKED', 503);
+      return d;
+    };
+    const params = (req: FastifyRequest) =>
+      z
+        .strictObject({
+          workspaceId: WorkspaceIdSchema,
+          dealId: z.string().regex(/^deal_[0-9a-f]{16,32}$/),
+        })
+        .parse(req.params);
+    app.get('/v2/workspaces/:workspaceId/deal-contacts', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return {
+          contacts: await service().contacts(await id(req), s.principalId),
+        };
+      }),
+    );
+    app.get('/v2/workspaces/:workspaceId/deals', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return { deals: await service().list(await id(req), s.principalId) };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/deals', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return service().draft(await id(req), s.principalId, req.body);
+      }),
+    );
+    app.get('/v2/workspaces/:workspaceId/deals/:dealId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req),
+          p = params(req);
+        await store.throttle(`workspace:${p.workspaceId}`, 240);
+        return service().get(p.workspaceId, s.principalId, p.dealId);
+      }),
+    );
+  }
+  if (revenue) {
+    app.get('/v2/workspaces/:workspaceId/allocations', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return {
+          allocations: await revenue.allocations(await id(req), s.principalId),
+        };
+      }),
+    );
+    const params = (req: FastifyRequest) =>
+      z
+        .strictObject({ workspaceId: WorkspaceIdSchema, policyId: z.uuid() })
+        .parse(req.params);
+    app.get('/v2/workspaces/:workspaceId/revenue-policies', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return { policies: await revenue.list(await id(req), s.principalId) };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/revenue-policies', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return revenue.propose(await id(req), s.principalId, req.body);
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/revenue-policies/:policyId/approve',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const sig = z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+            body = z
+              .strictObject({ policy: sig, mandate: sig })
+              .parse(req.body);
+          return revenue.approve(p.workspaceId, s.principalId, p.policyId, {
+            policy: body.policy as `0x${string}`,
+            mandate: body.mandate as `0x${string}`,
+          });
+        }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/revenue-policies/:policyId/revoke',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const body = z
+            .strictObject({
+              signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+            })
+            .parse(req.body);
+          return revenue.revoke(
+            p.workspaceId,
+            s.principalId,
+            p.policyId,
+            body.signature as `0x${string}`,
+          );
+        }),
+    );
+  }
+  if (invoices) {
+    const service = () => {
+      const s = invoices();
+      if (!s) throw new WorkspaceError('WORKSPACE_INVOICES_BLOCKED', 503);
+      return s;
+    };
+    app.get('/v2/workspaces/:workspaceId/invoices', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return { invoices: await service().list(await id(req), s.principalId) };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/invoices', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return service().create(await id(req), s.principalId, req.body);
+      }),
+    );
+    const params = (req: FastifyRequest) =>
+      z
+        .strictObject({
+          workspaceId: WorkspaceIdSchema,
+          invoiceId: z.string().regex(/^inv_[0-9a-f]{20}$/),
+        })
+        .parse(req.params);
+    app.get('/v2/workspaces/:workspaceId/invoices/:invoiceId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req),
+          p = params(req);
+        await store.throttle(`workspace:${p.workspaceId}`, 240);
+        return service().get(p.workspaceId, s.principalId, p.invoiceId);
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/invoices/:invoiceId/issue',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const body = z
+            .strictObject({
+              signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+            })
+            .parse(req.body);
+          return service().issue(
+            p.workspaceId,
+            s.principalId,
+            p.invoiceId,
+            body.signature as `0x${string}`,
+          );
         }),
     );
   }

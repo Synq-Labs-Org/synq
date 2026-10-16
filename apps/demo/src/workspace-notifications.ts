@@ -1,10 +1,15 @@
+import { PostgresSplitStore, allocationCard } from '@synq/allocations';
 import { formatUnits } from 'viem';
 import { z } from 'zod';
-import { arcCardBase, ContractorPaymentCardSchema } from '@synq/schemas';
+import {
+  arcCardBase,
+  ContractorPaymentCardSchema,
+  InvoiceCardSchema,
+} from '@synq/schemas';
 import { renderTelegramCard } from '@synq/channels/cards';
 import { PostgresDeliveryQueue } from '@synq/channels/durable-delivery';
 import type { ChannelAdapter } from '@synq/channels';
-import { riskHoldCard, type RiskCase } from '@synq/plugin-risk';
+import { riskHoldCard, redact, type RiskCase } from '@synq/plugin-risk';
 import type { WorkspaceChannelLinks } from '@synq/workspaces';
 import type { WorkspacePayouts } from '@synq/workspaces/payouts';
 
@@ -42,6 +47,35 @@ export class WorkspaceNotifications {
         ?.workspaceId === workspaceId
     );
   }
+  async deliveryAuthorized(
+    workspaceId: string,
+    destination: string,
+    eventId: string,
+  ) {
+    if (!(await this.authorized(workspaceId, destination))) return false;
+    if (eventId.startsWith('allocation:')) {
+      const parts = eventId.split(':');
+      const row = await this.links.workspaces.pool.query(
+        'SELECT r.state,s.rev FROM synq_alloc_splits s JOIN synq_ws_receipts r ON r.key=s.receipt_id WHERE s.split_id=$1 AND s.workspace_id=$2',
+        [parts[1], workspaceId],
+      );
+      return (
+        row.rows[0]?.state === parts[3] && String(row.rows[0]?.rev) === parts[2]
+      );
+    }
+    if (!eventId.startsWith('invoice.payment_applied:')) return true;
+    const row = await this.links.workspaces.pool.query(
+      'SELECT state FROM synq_ws_receipts WHERE workspace_id=$1 AND key=$2',
+      [workspaceId, eventId.slice('invoice.payment_applied:'.length)],
+    );
+    return row.rows[0]?.state === 'PENDING_POLICY';
+  }
+  private async defer(eventId: string) {
+    await this.links.workspaces.pool.query(
+      'INSERT INTO synq_ws_notification_deferred(event_id,next_at) VALUES($1,$2) ON CONFLICT(event_id) DO UPDATE SET next_at=EXCLUDED.next_at',
+      [eventId, this.links.workspaces.now() + 60],
+    );
+  }
   private async enqueue(
     eventId: string,
     workspaceId: string,
@@ -66,10 +100,120 @@ export class WorkspaceNotifications {
     }
     return enqueued;
   }
-  async relay() {
+  async relayInvoices() {
     const pool = this.links.workspaces.pool;
     const events = await pool.query(
-      "SELECT o.event_id,o.payload,w.display_name,w.threshold,p.executed_at FROM synq_event_outbox o JOIN synq_workspaces w ON w.id::text=o.payload->>'workspaceId' JOIN synq_ws_payouts p ON p.id::text=o.payload->>'payoutId' WHERE o.published_at IS NULL AND o.topic='workspace.money' AND p.state='PAID' ORDER BY o.seq LIMIT 20",
+      "SELECT o.event_id,o.payload FROM synq_event_outbox o JOIN synq_workspaces w ON w.id::text=o.payload->>'workspaceId' LEFT JOIN synq_ws_notification_deferred d ON d.event_id=o.event_id WHERE o.published_at IS NULL AND o.topic='invoice.payment_applied' AND COALESCE(d.next_at,0)<=$1 ORDER BY o.seq LIMIT 20",
+      [this.links.workspaces.now()],
+    );
+    for (const row of events.rows) {
+      const e = z
+        .object({
+          workspaceId: z.string().uuid(),
+          invoiceId: z.string(),
+          occurredAt: z.number().int().nonnegative(),
+          card: z.record(z.string(), z.unknown()),
+        })
+        .parse(row.payload);
+      const proof = await pool.query(
+        'SELECT state FROM synq_ws_receipts WHERE workspace_id=$1 AND key=$2',
+        [
+          e.workspaceId,
+          String(row.event_id).slice('invoice.payment_applied:'.length),
+        ],
+      );
+      if (proof.rows[0]?.state !== 'PENDING_POLICY') {
+        await this.defer(String(row.event_id));
+        continue;
+      }
+      const content = e.card;
+      const issuer = z
+        .object({ label: z.string(), address: z.string() })
+        .parse(content.issuer);
+      const label = (s: string) => {
+        const clean = redact(s).value;
+        return typeof clean === 'string'
+          ? clean.replace(/[\r\n]/g, ' ').slice(0, 120)
+          : '[REDACTED]';
+      };
+      const card = InvoiceCardSchema.parse({
+        ...arcCardBase(
+          {
+            groupId: e.workspaceId,
+            groupLabel: label(issuer.label),
+            issuedAt: e.occurredAt,
+            executionMode: this.mode,
+            actions: [],
+          },
+          e.occurredAt,
+          'invoice-receipt',
+          row.event_id,
+        ),
+        ...content,
+        issuer: { ...issuer, label: label(issuer.label) },
+        number: label(z.string().parse(content.number)).slice(0, 40),
+        payer: label(z.string().parse(content.payer)),
+      });
+      if (card.invoiceId !== e.invoiceId)
+        throw new Error('INVOICE_EVENT_SCOPE_MISMATCH');
+      if (
+        await this.enqueue(
+          String(row.event_id),
+          e.workspaceId,
+          renderTelegramCard(card),
+        )
+      )
+        await pool.query(
+          'UPDATE synq_event_outbox SET published_at=now() WHERE event_id=$1',
+          [row.event_id],
+        );
+      else await this.defer(String(row.event_id));
+    }
+  }
+  async relayAllocations() {
+    const pool = this.links.workspaces.pool,
+      store = new PostgresSplitStore(pool);
+    const rows = await pool.query(
+      "SELECT s.split_id,s.workspace_id,r.state,w.display_name FROM synq_alloc_splits s JOIN synq_ws_receipts r ON r.key=s.receipt_id JOIN synq_workspaces w ON w.id::text=s.workspace_id LEFT JOIN synq_ws_notification_deferred d ON d.event_id='allocation:'||s.split_id||':'||s.rev::text||':'||r.state WHERE COALESCE(d.next_at,0)<=$1 AND NOT EXISTS(SELECT 1 FROM synq_durable_delivery q WHERE q.event_id='allocation:'||s.split_id||':'||s.rev::text||':'||r.state) ORDER BY s.created_at LIMIT 20",
+      [this.links.workspaces.now()],
+    );
+    for (const row of rows.rows) {
+      const split = await store.get(row.split_id);
+      if (!split) continue;
+      const eventId = `allocation:${split.splitId}:${split.rev}:${row.state}`;
+      const card = allocationCard(
+        {
+          split,
+          legs: await store.legs(split.splitId),
+          reservations: await store.reservations(
+            `${split.receipt.chainId}:${split.receipt.token.toLowerCase()}:${split.receipt.recipient.toLowerCase()}`,
+          ),
+          receiptReview: row.state === 'REVIEW',
+        },
+        {
+          groupId: row.workspace_id,
+          groupLabel: String(row.display_name),
+          issuedAt: split.updatedAt,
+          executionMode: this.mode,
+        },
+      );
+      if (
+        !(await this.enqueue(
+          eventId,
+          row.workspace_id,
+          renderTelegramCard(card),
+        ))
+      )
+        await this.defer(eventId);
+    }
+  }
+  async relay() {
+    await this.relayInvoices();
+    await this.relayAllocations();
+    const pool = this.links.workspaces.pool;
+    const events = await pool.query(
+      "SELECT o.event_id,o.payload,w.display_name,w.threshold,p.executed_at FROM synq_event_outbox o JOIN synq_workspaces w ON w.id::text=o.payload->>'workspaceId' JOIN synq_ws_payouts p ON p.id::text=o.payload->>'payoutId' LEFT JOIN synq_ws_notification_deferred d ON d.event_id=o.event_id WHERE o.published_at IS NULL AND o.topic='workspace.money' AND p.state='PAID' AND COALESCE(d.next_at,0)<=$1 ORDER BY o.seq LIMIT 20",
+      [this.links.workspaces.now()],
     );
     for (const e of events.rows) {
       const payload = z
@@ -141,6 +285,7 @@ export class WorkspaceNotifications {
           'UPDATE synq_event_outbox SET published_at=now() WHERE event_id=$1',
           [e.event_id],
         );
+      else await this.defer(String(e.event_id));
     }
     const cases = await pool.query(
       "SELECT c.data,w.display_name FROM synq_risk_cases c JOIN synq_workspaces w ON w.id::text=c.workspace_id WHERE c.status IN ('HELD','IN_REVIEW','APPEALED','BLOCKED') ORDER BY c.case_id LIMIT 100",
@@ -165,6 +310,8 @@ export class WorkspaceNotifications {
   }
   async pump(adapter: ChannelAdapter) {
     await this.relay();
-    return this.queue.pump(adapter, (ws, dest) => this.authorized(ws, dest));
+    return this.queue.pump(adapter, (ws, dest, eventId) =>
+      this.deliveryAuthorized(ws, dest, eventId),
+    );
   }
 }

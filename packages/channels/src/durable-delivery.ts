@@ -100,7 +100,11 @@ export class PostgresDeliveryQueue {
   }
   async pump(
     adapter: ChannelAdapter,
-    authorized: (workspaceId: string, destination: string) => Promise<boolean>,
+    authorized: (
+      workspaceId: string,
+      destination: string,
+      eventId: string,
+    ) => Promise<boolean>,
   ) {
     const claimed = await withTransaction(this.pool, async (sql) => {
       await sql.query(
@@ -142,6 +146,7 @@ export class PostgresDeliveryQueue {
         !(await authorized(
           String(claimed.workspace_id),
           String(claimed.destination),
+          String(claimed.event_id),
         ))
       ) {
         await finish('REVOKED', 'CHANNEL_PROOF_REVOKED');

@@ -227,7 +227,7 @@ export class PostgresArcIndexStore implements ArcIndexStore {
     const r = await this.pool.query(
       `SELECT ${EVENT_COLUMNS} FROM synq_arc_index_events
        WHERE stream=$1 AND ((NOT removed AND effected_at IS NULL)
-         OR (removed AND effected_at IS NOT NULL AND effect_reversed_at IS NULL))
+         OR (removed AND effect_reversed_at IS NULL))
        ORDER BY id LIMIT $2`,
       [stream, limit],
     );

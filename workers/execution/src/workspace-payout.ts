@@ -1,3 +1,5 @@
+import { PostgresSplitStore } from '@synq/allocations';
+import { boundedWorkspaceSigner } from './workspace-signing.js';
 import { Ledger, PostgresLedgerStore } from '@synq/ledger';
 import {
   erc20Abi,
@@ -75,6 +77,7 @@ export class WorkspacePayoutExecutor {
   }
   async migrate() {
     await this.finance.migrate();
+    await new PostgresSplitStore(this.finance.workspaces.pool).migrate();
     await this.outbox.migrate();
     await migrateFinanceTeam(this.finance.workspaces.pool);
     await migrateRisk(this.finance.workspaces.pool);
@@ -197,7 +200,14 @@ export class WorkspacePayoutExecutor {
         "SELECT COALESCE(sum((data->>'amount')::numeric),0) AS spent FROM synq_ws_payouts WHERE workspace_id=$1 AND state IN ('READY','HOLD','SIGNED','PAID') AND (state<>'PAID' OR executed_at>$2)",
         [p.data.workspaceId, store.now() - 86400],
       );
-      if (BigInt(sum.rows[0].spent) > BigInt(p.data.budget.daily))
+      const splitSpent = await sql.query(
+        "SELECT COALESCE(sum(amount),0) AS spent FROM synq_ws_split_admissions WHERE workspace_id=$1 AND state<>'FAILED' AND (state<>'CONFIRMED' OR executed_at>$2)",
+        [p.data.workspaceId, store.now() - 86400],
+      );
+      if (
+        BigInt(sum.rows[0].spent) + BigInt(splitSpent.rows[0].spent) >
+        BigInt(p.data.budget.daily)
+      )
         hard('DAILY_BUDGET_EXHAUSTED');
       const balance = await this.chain.client.readContract({
         address: asset.address,
@@ -209,9 +219,28 @@ export class WorkspacePayoutExecutor {
         "SELECT COALESCE(sum((data->>'amount')::numeric),0) AS reserved FROM synq_ws_payouts WHERE workspace_id=$1 AND state IN ('READY','HOLD','SIGNED')",
         [p.data.workspaceId],
       );
+      const splitHeld = await sql.query(
+        "SELECT COALESCE(sum(h.amount),0) AS held,COALESCE(sum(h.amount) FILTER(WHERE h.purpose='OPERATING_FLOOR'),0) AS floor FROM synq_alloc_reservations h LEFT JOIN synq_ws_split_admissions a ON a.leg_key=h.reservation_id WHERE h.workspace_id=$1 AND h.status='ACTIVE' AND COALESCE(a.state,'')<>'CONFIRMED'",
+        [p.data.workspaceId],
+      );
+      const liabilities = await new Ledger(
+        new PostgresLedgerStore(sql),
+      ).balances(p.data.workspaceId, asset.assetId);
+      const restricted =
+        -liabilities.REFUND_LIABILITY -
+        liabilities.ESCROW_LIABILITY -
+        liabilities.UNAPPLIED_RECEIPTS;
+      const floor =
+        BigInt(splitHeld.rows[0].floor) > BigInt(p.data.budget.reserve)
+          ? BigInt(splitHeld.rows[0].floor)
+          : BigInt(p.data.budget.reserve);
       if (
-        balance - BigInt(reserved.rows[0].reserved) <
-        BigInt(p.data.budget.reserve)
+        balance -
+          BigInt(reserved.rows[0].reserved) -
+          BigInt(splitHeld.rows[0].held) +
+          BigInt(splitHeld.rows[0].floor) -
+          restricted <
+        floor
       )
         hard('RESERVE_FLOOR');
       const window = await readVaultWindow(this.chain, a);
@@ -298,35 +327,7 @@ export class WorkspacePayoutExecutor {
         mandateRevoked: false,
         executionCall,
       };
-      const exactSigner: TransferSigner = {
-        address: this.signer.address,
-        signTransaction: async (tx) => {
-          if (
-            (tx.gas ?? 0n) * (tx.maxFeePerGas ?? 0n) >
-            50_000_000_000_000_000n
-          )
-            throw new ArcExecutionError('FEE_ABOVE_CAP');
-          const raw = await this.signer.signTransaction(tx),
-            parsed = parseTransaction(raw);
-          if (
-            parsed.chainId !== tx.chainId ||
-            parsed.to?.toLowerCase() !== tx.to?.toLowerCase() ||
-            parsed.data !== tx.data ||
-            (parsed.value ?? 0n) !== (tx.value ?? 0n) ||
-            parsed.nonce !== tx.nonce ||
-            parsed.gas !== tx.gas ||
-            parsed.maxFeePerGas !== tx.maxFeePerGas ||
-            parsed.maxPriorityFeePerGas !== tx.maxPriorityFeePerGas ||
-            (
-              await recoverTransactionAddress({
-                serializedTransaction: raw as TransactionSerialized,
-              })
-            ).toLowerCase() !== this.signer.address.toLowerCase()
-          )
-            throw new ArcExecutionError('TX_MISMATCH');
-          return raw;
-        },
-      };
+      const exactSigner = boundedWorkspaceSigner(this.signer);
       const result = await vaultPayOnce({
         store: this.outbox,
         key,

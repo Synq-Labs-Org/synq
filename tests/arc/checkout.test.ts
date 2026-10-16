@@ -81,14 +81,17 @@ const receiptFor = (ref: Hex, to: Address, value: bigint) => ({
   ],
 });
 
-async function app(receipt: () => unknown) {
+async function app(
+  receipt: () => unknown,
+  reconciliation?: 'REVIEW' | 'PENDING' | 'FINALIZED',
+) {
   const svc = new InvoiceService(
     new MemoryInvoiceStore(),
     new Ledger(new MemoryLedgerStore()),
     () => NOW,
   );
   const d = draftInvoice({
-    workspaceId: 'w',
+    workspaceId: reconciliation ? '12345678-1234-4123-8123-123456789012' : 'w',
     number: 'INV-PAY-1',
     issuer: {
       principalId: 'p',
@@ -117,11 +120,56 @@ async function app(receipt: () => unknown) {
     client,
     memoContract: MEMO,
     now: () => NOW,
+    ...(reconciliation ? { reconciliation: async () => reconciliation } : {}),
   });
   return { a, inv, svc, tokenStr: payLinkToken(KEY, inv, NOW + 3600) };
 }
 
 describe('invoice checkout (P11)', () => {
+  it('G8 waits for the workspace indexer and never calls reviewed or pending proof verified', async () => {
+    for (const state of ['REVIEW', 'PENDING', 'FINALIZED'] as const) {
+      const { a, inv, svc, tokenStr } = await app(() => {
+        throw new Error(
+          'Workspace checkout must never settle from an unverified hint',
+        );
+      }, state);
+      try {
+        const before = await a.inject({
+          method: 'POST',
+          url: `/v1/pay/${tokenStr}/verify`,
+          payload: { txHash: TX },
+        });
+        expect(before.json().state).toBe(
+          state === 'REVIEW' ? 'REVIEW' : 'PENDING',
+        );
+        expect((await svc.store.get(inv.invoiceId))?.invoice.paid).toBe(0n);
+        await svc.settle({
+          chainId: USDC.chainId,
+          txHash: TX,
+          logIndex: 1,
+          paymentRef: inv.paymentRef!,
+          payer,
+          recipient: inv.issuer.payoutAddress,
+          amount: 250000n,
+        });
+        const after = await a.inject({
+          method: 'POST',
+          url: `/v1/pay/${tokenStr}/verify`,
+          payload: { txHash: TX },
+        });
+        expect(after.json().state).toBe(
+          state === 'FINALIZED' ? 'VERIFIED' : state,
+        );
+        expect(after.statusCode).toBe(
+          state === 'REVIEW' ? 409 : state === 'PENDING' ? 202 : 200,
+        );
+        if (state === 'REVIEW') expect(after.json().invoice.call).toBeNull();
+      } finally {
+        await a.close();
+      }
+    }
+  });
+
   it('serves the exact Memo call for the amount due, bound to this version', async () => {
     const { a, inv, tokenStr } = await app(() => null);
     const r = await a.inject({ url: `/v1/pay/${tokenStr}` });

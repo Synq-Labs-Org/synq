@@ -1,4 +1,5 @@
 import { parseAbiItem, type Address, type Hex, type PublicClient } from 'viem';
+import { invoiceCardContent } from './cards.js';
 import { LedgerError, type Ledger, type OutboxEvent } from '@synq/ledger';
 import {
   InvoiceError,
@@ -148,6 +149,7 @@ export class InvoiceService {
     readonly store: InvoiceStore,
     readonly ledger: Ledger,
     readonly now: () => number,
+    readonly authorizeIssue?: (invoice: Invoice) => Promise<void>,
   ) {}
 
   async create(draft: Invoice): Promise<StoredInvoice> {
@@ -160,6 +162,7 @@ export class InvoiceService {
     const cur = await this.store.get(invoiceId);
     if (!cur) throw new InvoiceError('NOT_FOUND', invoiceId);
     if (cur.invoice.status !== 'DRAFT') return cur;
+    await this.authorizeIssue?.(cur.invoice);
     const { invoice, entry } = await issueInvoice(
       cur.invoice,
       signature,
@@ -228,6 +231,9 @@ const event = (key: string, topic: string, i: Invoice): OutboxEvent => ({
   eventId: `${topic}:${key}`,
   topic,
   payload: {
+    workspaceId: i.workspaceId,
+    occurredAt: i.payments.find((p) => p.key === key)?.at ?? i.issuedAt ?? 0,
+    card: invoiceCardContent(i),
     invoiceId: i.invoiceId,
     number: i.number,
     status: i.status,

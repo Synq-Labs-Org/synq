@@ -592,6 +592,47 @@ export function arcContent(card: ArcCard): Body {
       return dealContent(card);
     case 'ESCROW_MILESTONE':
       return escrowContent(card);
+    case 'ALLOCATION':
+      return {
+        section: 'REVENUE ALLOCATION',
+        title: 'Incoming payment allocation',
+        subtitle: `Policy version ${card.policyVersion}`,
+        headline: headlineMoney('RECEIVED', card.received, 14),
+        status: {
+          label: card.status,
+          tone:
+            card.status === 'COMPLETED'
+              ? 'ok'
+              : card.status === 'NEEDS_REVIEW'
+                ? 'bad'
+                : 'pending',
+        },
+        rows: [
+          row({
+            icon: 'settlement',
+            title: 'Paid through vault',
+            value: moneyFit(card.paid, 14),
+          }),
+          row({
+            icon: 'reserve',
+            title: 'Held in vault',
+            value: moneyFit(card.held, 14),
+          }),
+          row({
+            icon: 'balance',
+            title: 'Unallocated',
+            value: moneyFit(card.free, 14),
+          }),
+        ],
+        note: card.note,
+        stats: [stat('LEGS', String(card.legs.length))],
+        refs: [{ label: 'RECEIPT', value: shortHex(card.receiptTx) }],
+        art: {
+          slot: 'treasury',
+          tone: card.status === 'COMPLETED' ? 'ok' : 'pending',
+        },
+        grade: card.status === 'COMPLETED' ? 'HOLO_RARE' : 'COMMON',
+      };
     case 'INVOICE':
       return invoiceContent(card);
     case 'RISK_HOLD':

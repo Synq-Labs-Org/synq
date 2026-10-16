@@ -8,6 +8,9 @@ const Hex = z.string().regex(/^0x[0-9a-fA-F]*$/);
 const CheckoutSchema = z.looseObject({
   number: z.string(),
   status: z.string(),
+  reconciliation: z
+    .enum(['REVIEW', 'PENDING', 'FINALIZED', 'NOT_PAID'])
+    .optional(),
   issuer: z.string(),
   payTo: Hex,
   payer: z.string(),
@@ -197,6 +200,15 @@ export default function PayInvoice({
         </dd>
         <dt>Status</dt>
         <dd>{view.status}</dd>
+        {view.reconciliation === 'REVIEW' && (
+          <dd role="alert">
+            Payment proof requires review after chain reconciliation. Payments
+            are paused.
+          </dd>
+        )}
+        {view.reconciliation === 'PENDING' && (
+          <dd>Waiting for finalized receipt reconciliation.</dd>
+        )}
       </dl>
       {view.call && phase !== 'done' ? (
         <button onClick={pay} disabled={phase !== 'idle'}>

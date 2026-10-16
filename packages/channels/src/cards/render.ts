@@ -56,6 +56,8 @@ export function cardTitle(card: InteractiveCard): string {
       return `Deal: ${card.title} (v${card.version}, ${card.status})`;
     case 'ESCROW_MILESTONE':
       return `Milestone ${card.milestoneIndex + 1}/${card.milestoneCount} ${card.state}: ${card.title}`;
+    case 'ALLOCATION':
+      return `Revenue allocation: ${card.status}`;
     case 'INVOICE':
       return `Invoice ${card.number}: ${card.status}`;
     case 'RISK_HOLD':
@@ -116,6 +118,17 @@ function arcLines(card: ArcCard): string[] {
         `Deal ${card.dealId}${card.escrowDealId !== null ? `, escrow deal #${card.escrowDealId}` : ''}${card.escrow ? ` at ${card.escrow}` : ''}`,
         `Terms ${card.termsHash}`,
         ...card.transactions.map((x) => `${x.label}: tx ${x.hash}`),
+      ];
+    case 'ALLOCATION':
+      return [
+        `Received: ${money(card.received)} · paid: ${money(card.paid)}`,
+        `Held: ${money(card.held)} · unallocated: ${money(card.free)}`,
+        `Policy version ${card.policyVersion}. Receipt ${card.receiptTx}`,
+        ...card.legs.map(
+          (l) =>
+            `${l.purpose}: ${money(l.amount)} · ${l.state}${l.txHash ? ` · tx ${l.txHash}` : ''}`,
+        ),
+        card.note,
       ];
     case 'INVOICE':
       return [

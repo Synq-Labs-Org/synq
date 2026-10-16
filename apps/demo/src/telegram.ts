@@ -1,3 +1,5 @@
+import { WorkspaceDeals } from '@synq/workspaces/deals';
+import { WorkspaceRevenue } from '@synq/workspaces/revenue';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -70,7 +72,9 @@ import { registerProductionSend } from '@synq/api/v1-server';
 import { productionSendPorts } from '@synq/api/send-runtime';
 import { registerChannels } from '@synq/api/channel-server';
 import { registerDealRoom } from '@synq/api/deal-routes';
-import { registerInvoiceCheckout } from '@synq/api/invoice-routes';
+import { registerInvoiceCheckout, payPathFor } from '@synq/api/invoice-routes';
+import { WorkspaceInvoices } from '@synq/workspaces/invoices';
+import type { WorkspaceFinance } from '@synq/workspaces/finance';
 import {
   MandateProposalService,
   PostgresMandateProposalStore,
@@ -107,11 +111,19 @@ import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
 import { registerBusinessRoutes } from './business-routes.js';
 import { registerWorkspaceRoutes } from './workspace-routes.js';
-import { PostgresWorkspaceStore } from '@synq/workspaces';
+import {
+  PostgresWorkspaceStore,
+  WorkspaceIdSchema,
+  WorkspaceError,
+} from '@synq/workspaces';
 import { WorkspaceVaultSetups } from '@synq/workspaces';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
 import { workspaceChannelRuntime } from './workspace-channels.js';
 import { WorkspaceNotifications } from './workspace-notifications.js';
+import { WorkspaceIndexer } from './workspace-indexer.js';
+import { WorkspaceReceipts } from '@synq/workspaces/receipts';
+import { arcProviderClients } from '@synq/api/arc-indexer';
+import { viemIndexerChain } from '@synq/ledger';
 import { workspaceCommandPort } from './workspace-commands.js';
 import { TelegramAdapter, TelegramBotApi } from '@synq/channels';
 import { CardBannerRenderer } from '@synq/channels/cards';
@@ -504,6 +516,9 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     await setup.close();
     const app = newApi();
     let workspaceNotifications: WorkspaceNotifications | undefined;
+    let workspaceFinance: WorkspaceFinance | undefined;
+    let workspaceInvoices: WorkspaceInvoices | undefined;
+    let workspaceDeals: WorkspaceDeals | undefined;
     let workspaceMessage: ReturnType<typeof workspaceCommandPort> | undefined;
     if (process.env.SYNQ_WORKSPACES_ENABLED === '1') {
       if (!process.env.SYNQ_ORIGIN) throw new Error('SYNQ_ORIGIN_REQUIRED');
@@ -540,6 +555,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           : undefined,
       );
       const finance = vault?.finance;
+      workspaceFinance = finance;
       workspaceMessage = workspaceCommandPort({
         links: workspaceChannels,
         finance,
@@ -569,6 +585,9 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         finance,
         vault ? { service: vault.payouts, wake: vault.wake } : undefined,
         vault ? { service: vault.governance, wake: vault.wake } : undefined,
+        () => workspaceInvoices,
+        finance ? new WorkspaceRevenue(finance) : undefined,
+        () => workspaceDeals,
       );
     }
     const readModel = {
@@ -854,12 +873,103 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         app,
         pool,
         env: arcEnv,
+        authorizeView: async (req, view) => {
+          if (!workspaceDeals)
+            throw new WorkspaceError('WORKSPACE_DEALS_BLOCKED', 503);
+          const bearer = req.headers.authorization;
+          const cookies = (req.headers.cookie ?? '')
+            .split(';')
+            .map((v) => v.trim())
+            .filter((v) => v.startsWith('__Host-synq_workspace='));
+          if (bearer !== undefined && !/^Bearer [0-9a-f]{64}$/.test(bearer))
+            throw new WorkspaceError('UNAUTHENTICATED', 401);
+          const audience = bearer ? 'native' : 'web';
+          if (!bearer && cookies.length !== 1)
+            throw new WorkspaceError('UNAUTHENTICATED', 401);
+          const session = await workspaceDeals.workspaces.session(
+            bearer
+              ? bearer.slice(7)
+              : cookies[0]!.slice('__Host-synq_workspace='.length),
+            audience,
+          );
+          if (
+            req.method !== 'GET' &&
+            audience === 'web' &&
+            req.headers.origin !== workspaceDeals.workspaces.origin
+          )
+            throw new WorkspaceError('ORIGIN_MISMATCH', 403);
+          await workspaceDeals.workspaces.throttle(
+            `principal:${session.principalId}`,
+            120,
+          );
+          await workspaceDeals.authorize(
+            view.deal.workspaceId,
+            session.principalId,
+            view.deal.dealId,
+          );
+        },
       }).catch(off('deal room'));
+      if (dealRoom && workspaceFinance)
+        workspaceDeals = new WorkspaceDeals(
+          workspaceFinance.workspaces,
+          dealRoom.service,
+          Buffer.from(arcEnv.SYNQ_DEALROOM_LINK_KEY!, 'hex'),
+        );
       const checkout = await registerInvoiceCheckout({
         app,
         pool,
         env: arcEnv,
+        authorizeIssue: async (invoice) => {
+          if (WorkspaceIdSchema.safeParse(invoice.workspaceId).success) {
+            if (!workspaceInvoices)
+              throw new WorkspaceError('WORKSPACE_INVOICES_BLOCKED', 503);
+            await workspaceInvoices.authorizeIssue(invoice);
+          }
+        },
       }).catch(off('invoices'));
+      if (checkout && workspaceFinance)
+        workspaceInvoices = new WorkspaceInvoices(
+          workspaceFinance,
+          checkout.invoices,
+          (invoice) =>
+            payPathFor(Buffer.from(arcEnv.SYNQ_PAY_LINK_KEY!, 'hex'), invoice),
+        );
+      if (workspaceInvoices && options.telegramMode === 'LIVE') {
+        const indexer = new WorkspaceIndexer(
+          new WorkspaceReceipts(
+            workspaceInvoices.finance,
+            workspaceInvoices.service,
+            workspaceInvoices.service.ledger,
+          ),
+          arcProviderClients().map(viemIndexerChain),
+        );
+        await indexer.migrate();
+        let busy = false,
+          stopped = false;
+        const tick = async () => {
+          if (busy || stopped) return;
+          busy = true;
+          try {
+            const outcomes = await indexer.tick();
+            for (const outcome of outcomes)
+              if (outcome.state !== 'INDEXED')
+                log(
+                  `Workspace indexer ${outcome.workspaceId}: ${outcome.state}`,
+                );
+          } catch {
+            log('Workspace indexer deferred; cursor retained.');
+          } finally {
+            busy = false;
+          }
+        };
+        const timer = setInterval(() => void tick(), 5000);
+        timer.unref();
+        closers.push(async () => {
+          stopped = true;
+          clearInterval(timer);
+          while (busy) await new Promise((resolve) => setTimeout(resolve, 100));
+        });
+      }
       const owner = process.env.SYNQ_ARC_OWNER;
       const floorFrom = (v: string | undefined) => {
         try {

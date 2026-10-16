@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CHAINS } from '@synq/chain-registry/arc';
 import {
@@ -24,6 +24,7 @@ export type DealRouteDeps = {
   service: DealRoomService;
   linkKey: Uint8Array;
   now?: () => number;
+  authorizeView?: (request: FastifyRequest, view: DealView) => Promise<void>;
 };
 
 const EIP712_DOMAIN = [
@@ -131,7 +132,11 @@ const Sig = z.string().regex(/^0x[0-9a-fA-F]{130}$/);
 export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
   const now = deps.now ?? (() => Math.floor(Date.now() / 1000));
   /** Expired, revoked, forged and unknown links all look the same: 404. */
-  const open = async (params: unknown, query: unknown) => {
+  const open = async (
+    params: unknown,
+    query: unknown,
+    request: FastifyRequest,
+  ) => {
     const id = Id.parse((params as { id: string }).id);
     const { t } = Token.parse(query);
     const deal = await deps.service.store.get(id);
@@ -143,6 +148,14 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
       })
     )
       throw new DealRoomError('NOT_FOUND', 'unknown or expired deal link');
+    if (z.uuid().safeParse(deal.workspaceId).success) {
+      if (!deps.authorizeView)
+        throw new DealRoomError(
+          'NOT_FOUND',
+          'Workspace authorization unavailable',
+        );
+      await deps.authorizeView(request, await deps.service.view(id));
+    }
     return id;
   };
   const fail = (e: unknown) => {
@@ -161,7 +174,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.get('/v1/deals/:id', async (req, reply) => {
     try {
-      const id = await open(req.params, req.query);
+      const id = await open(req.params, req.query, req);
       return dealPageView(deps.service, await deps.service.view(id));
     } catch (e) {
       const f = fail(e);
@@ -171,7 +184,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.post('/v1/deals/:id/sign', async (req, reply) => {
     try {
-      const id = await open(req.params, req.query);
+      const id = await open(req.params, req.query, req);
       const body = z
         .object({
           version: z.number().int().positive(),
@@ -194,7 +207,7 @@ export async function dealRoutes(app: FastifyInstance, deps: DealRouteDeps) {
 
   app.post('/v1/deals/:id/decline', async (req, reply) => {
     try {
-      const id = await open(req.params, req.query);
+      const id = await open(req.params, req.query, req);
       const body = z
         .object({
           version: z.number().int().positive(),
@@ -238,6 +251,7 @@ export async function registerDealRoom(input: {
     }>;
   };
   env: NodeJS.ProcessEnv;
+  authorizeView?: (request: FastifyRequest, view: DealView) => Promise<void>;
 }) {
   const raw = input.env.SYNQ_DEALROOM_LINK_KEY;
   if (!raw) return null;
@@ -291,6 +305,7 @@ export async function registerDealRoom(input: {
   await input.app.register(dealRoutes, {
     service,
     linkKey: Buffer.from(raw, 'hex'),
+    authorizeView: input.authorizeView,
   });
   return { service };
 }

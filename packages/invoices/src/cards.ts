@@ -34,11 +34,6 @@ export function invoiceCard(
   invoice: Invoice,
   ctx: ArcCardContext,
 ): CardOf<'INVOICE'> {
-  const a = invoice.asset;
-  const money = (units: bigint) => ({
-    amount: cardDecimal(units, a.decimals),
-    symbol: a.symbol,
-  });
   const last = [...invoice.payments].sort((x, y) => x.at - y.at).at(-1);
   const observed = Math.max(
     invoice.issuedAt ?? 0,
@@ -56,6 +51,19 @@ export function invoiceCard(
       invoice.paid,
       invoice.payments.length,
     ),
+    ...invoiceCardContent(invoice),
+  }) as CardOf<'INVOICE'>;
+}
+
+/** Immutable notification snapshot; no issuer signature, private contact or keys. */
+export function invoiceCardContent(invoice: Invoice) {
+  const a = invoice.asset;
+  const money = (units: bigint) => ({
+    amount: cardDecimal(units, a.decimals),
+    symbol: a.symbol,
+  });
+  const last = [...invoice.payments].sort((x, y) => x.at - y.at).at(-1);
+  return {
     type: 'INVOICE',
     chainId: a.chainId,
     invoiceId: cardRef(invoice.invoiceId),
@@ -76,5 +84,5 @@ export function invoiceCard(
     termsHash: invoice.termsHash,
     paymentCount: invoice.payments.length,
     lastPaymentTx: last?.txHash ?? null,
-  }) as CardOf<'INVOICE'>;
+  };
 }

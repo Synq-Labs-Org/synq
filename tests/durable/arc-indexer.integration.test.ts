@@ -89,6 +89,27 @@ describe('Arc indexer state on Postgres', { timeout: 60_000 }, () => {
     expect(racers.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
   });
 
+  it('reviews removed events even when a crash happened after the sink committed but before markEffected', async () => {
+    const stream = `arc:${runId()}`,
+      { chain, api } = forkableChain();
+    api.mineEmpty(3);
+    api.mine([{ from: them, to: me, value: 9n, sender: them }]);
+    api.mineEmpty(4);
+    const store = new PostgresArcIndexStore(pool),
+      ix = new ArcChainIndexer(chain, store, cfg(stream));
+    await drain(ix);
+    const pending = await store.pendingEffects(stream, 10);
+    expect(pending).toHaveLength(1);
+    // Sink committed externally; process dies before indexer's markEffected.
+    api.reorg(3, [[], [], [], [], [], []], 'crash-fork');
+    await drain(ix);
+    const reviews = await ix.applyEffects({
+      TRANSFER: async (e) => (e.removed ? 'REVIEW_PARTIAL_EFFECT' : 'LIVE'),
+    });
+    expect(reviews.map((r) => r.outcome)).toEqual(['REVIEW_PARTIAL_EFFECT']);
+    expect(await store.pendingEffects(stream, 10)).toHaveLength(0);
+  });
+
   it('a reorg below the cursor marks the orphaned events removed (kept for audit) and their effects reversible', async () => {
     const stream = `arc:${runId()}`;
     const { chain, api } = forkableChain();

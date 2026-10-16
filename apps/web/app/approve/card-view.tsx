@@ -80,6 +80,21 @@ function arcRows(card: ArcCard) {
           ['Terms hash', card.termsHash],
           ...card.transactions.map((t): [string, string] => [t.label, t.hash]),
         ];
+      case 'ALLOCATION':
+        return [
+          ['Allocation', `${card.splitId} (${card.status})`],
+          ['Received', money(card.received)],
+          ['Paid', money(card.paid)],
+          ['Held in vault', money(card.held)],
+          ['Unallocated', money(card.free)],
+          ['Receipt', card.receiptTx],
+          ['Rules', `Version ${card.policyVersion}`],
+          ['Note', card.note],
+          ...card.legs.map((l): [string, string] => [
+            l.purpose,
+            `${money(l.amount)} · ${l.state}${l.txHash ? ` · ${l.txHash}` : ''}`,
+          ]),
+        ];
       case 'INVOICE':
         return [
           ['Invoice', `${card.number} v${card.version} (${card.status})`],
