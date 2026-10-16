@@ -421,3 +421,5 @@ export async function relayOutbox(
 export * from './postgres.js';
 export * from './arc-indexer.js';
 export * from './arc-cash.js';
+export * from './arc-chain-indexer.js';
+export * from './arc-indexer-pg.js';

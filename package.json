@@ -31,6 +31,7 @@
     "stack:prod:up": "docker compose -f infra/compose.prod.yaml up -d --build --wait",
     "tunnel": "sh scripts/tunnel.sh",
     "indexer:start": "node --import tsx scripts/indexer-local.ts",
+    "indexer:arc": "node --import tsx apps/api/src/arc-indexer.ts",
     "indexer:testnet-evidence": "node --import tsx scripts/envio-testnet-evidence.ts",
     "testnet:probe": "node --import tsx scripts/testnet-probe.ts",
     "test:report": "node scripts/test-report.mjs",
