@@ -1,22 +1,27 @@
+import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   BANNER_HEIGHT,
   BANNER_WIDTH,
+  CARD_IMAGE_HEIGHT,
+  CARD_IMAGE_WIDTH,
   CardBannerRenderer,
   ChannelDeliveryError,
   OutboundLimiter,
   TelegramAdapter,
   TelegramBotApi,
+  encodeOpaquePng,
   groupDigits,
   renderTelegramCard,
   splitCaption,
 } from '@synq/channels';
+import { EXECUTION_MODES, type InteractiveCard } from '@synq/schemas';
 import {
-  EXECUTION_MODES,
-  InteractiveCardSchema,
-  type InteractiveCard,
-} from '@synq/schemas';
-import { SAMPLE_CARDS, SAMPLE_SAFE } from './card-samples.js';
+  EDGE_CASES,
+  SAMPLE_CARDS,
+  SAMPLE_SAFE,
+  editSample as edit,
+} from './card-samples.js';
 
 const renderer = new CardBannerRenderer();
 const PNG_SIGNATURE = Buffer.from([
@@ -28,141 +33,20 @@ function expectBanner(png: Buffer) {
   expect(png.readUInt32BE(16)).toBe(BANNER_WIDTH);
   expect(png.readUInt32BE(20)).toBe(BANNER_HEIGHT);
   expect(png.length).toBeGreaterThan(10_000);
+  // Telegram, WhatsApp and iMessage previews: keep each card image small.
+  expect(png.length).toBeLessThan(1_000_000);
 }
-const edit = (name: string, patch: Record<string, unknown>): InteractiveCard =>
-  InteractiveCardSchema.parse({ ...SAMPLE_CARDS[name], ...patch });
-const option = (i: number) => ({
-  optionId: `o${i}`,
-  product: `Very long product name number ${i} with extra words that never fit on one line`,
-  price: { amount: `${i}9999999999.123456789012345678`, symbol: 'USD' },
-  delivery:
-    'Delivered by courier within an unspecified but surely reasonable time',
-  votes: i,
-});
-const hotelOption = (i: number) => ({
-  optionId: `h${i}`,
-  hotel: `The Grand Extraordinarily Long Hotel Name ${i}`,
-  room: 'Deluxe ocean-view suite with two queen beds and a balcony',
-  total: { amount: '1234567890123.99', symbol: 'USD' },
-  cancellation:
-    i % 2 ? 'Non-refundable' : 'Partially refundable before arrival minus fees',
-  preferenceVotes: 0,
-});
-
-const EDGE_CASES: [string, InteractiveCard][] = [
-  [
-    'treasury: huge balance, no members, no activity',
-    edit('treasury', {
-      groupLabel:
-        'An extremely long group label that goes on and on well past any sane width',
-      balance: {
-        amount: '1234567890123456789012345678901.123456789012345678',
-        symbol: 'AUSD',
-      },
-      available: { amount: '0', symbol: 'AUSD' },
-      reserved: { amount: '0', symbol: 'AUSD' },
-      pending: { amount: '0', symbol: 'AUSD' },
-      memberCount: null,
-      activity: [],
-    }),
-  ],
-  [
-    'treasury: zero balance',
-    edit('treasury', {
-      balance: { amount: '0', symbol: 'AUSD' },
-      available: { amount: '0', symbol: 'AUSD' },
-      reserved: { amount: '0', symbol: 'AUSD' },
-      pending: { amount: '0', symbol: 'AUSD' },
-    }),
-  ],
-  [
-    'proposal: mandate without amount or recipient, 0 of 12',
-    edit('proposal', {
-      proposalKind: 'MANDATE',
-      amount: null,
-      recipient: null,
-      reason:
-        'mandate dca_weekly v3 (change) raising the cumulative budget for the next quarter of operations',
-      quorum: { counted: 0, required: 12 },
-    }),
-  ],
-  [
-    'proposal: invalidated with reason',
-    edit('proposal', {
-      status: 'INVALIDATED',
-      statusReason: 'Quote expired before quorum',
-      actions: [],
-    }),
-  ],
-  [
-    'proposal: satisfied, recipient without address',
-    edit('proposal', {
-      status: 'SATISFIED',
-      quorum: { counted: 2, required: 2 },
-      recipient: { label: 'carol', address: null },
-    }),
-  ],
-  [
-    'gift: five options, no final pick',
-    edit('gift', {
-      options: [1, 2, 3, 4, 5].map(option),
-      finalOptionId: null,
-    }),
-  ],
-  [
-    'gift: one option, simulated',
-    edit('gift', {
-      options: [option(1)],
-      finalOptionId: 'o1',
-      executionMode: 'SIMULATION',
-    }),
-  ],
-  [
-    'hotel: five options, no preference',
-    edit('hotel', {
-      options: [1, 2, 3, 4, 5].map(hotelOption),
-      preferredOptionId: null,
-    }),
-  ],
-  [
-    'dca: revoked, nothing scheduled, overspent ratio clamp',
-    edit('dca', {
-      status: 'REVOKED',
-      nextExecutionAt: null,
-      spent: { amount: '500', symbol: 'AUSD' },
-    }),
-  ],
-  [
-    'receipt: failed with no reference',
-    edit('receipt-testnet', {
-      status: 'FAILED',
-      transactionHash: null,
-      orderId: null,
-      explorerUrl: null,
-      settlementStatus: 'UNKNOWN',
-      executionMode: 'SIMULATION',
-      actions: [],
-    }),
-  ],
-  [
-    'receipt: submitted',
-    edit('receipt-testnet', {
-      status: 'SUBMITTED',
-      settlementStatus: 'PENDING',
-    }),
-  ],
-  [
-    'receipt: refunded sandbox order',
-    edit('receipt-sandbox', {
-      status: 'REFUNDED',
-      settlementStatus: 'REFUNDED',
-    }),
-  ],
-];
-
 describe('card banners', () => {
+  it('is a portrait 5:7 trading card', () => {
+    expect([BANNER_WIDTH, BANNER_HEIGHT]).toEqual([
+      CARD_IMAGE_WIDTH,
+      CARD_IMAGE_HEIGHT,
+    ]);
+    expect(CARD_IMAGE_WIDTH * 7).toBe(CARD_IMAGE_HEIGHT * 5);
+  });
+
   it.each(Object.entries(SAMPLE_CARDS))(
-    'renders the %s sample as a 1200x630 PNG',
+    'renders the %s sample as a 1000x1400 PNG',
     async (_, card) => {
       expectBanner(await renderer.render(card));
     },
@@ -173,10 +57,25 @@ describe('card banners', () => {
   });
 
   it('labels every execution mode on receipts', async () => {
-    for (const mode of EXECUTION_MODES)
-      expectBanner(
-        await renderer.render(edit('receipt-testnet', { executionMode: mode })),
-      );
+    const labels = new Set<string>();
+    for (const mode of EXECUTION_MODES) {
+      const card = edit('receipt-testnet', { executionMode: mode });
+      const label = renderer.face(card).mode!.label;
+      expect(JSON.stringify(renderer.tree(card))).toContain(label);
+      labels.add(label);
+    }
+    expect([...labels].sort()).toEqual([
+      'NOT EXECUTED',
+      'READ ONLY',
+      'REAL TESTNET',
+      'SANDBOX',
+      'SIMULATED',
+    ]);
+    expectBanner(
+      await renderer.render(
+        edit('receipt-testnet', { executionMode: 'CANARY_READY' }),
+      ),
+    );
   });
 
   it('carries no data beyond the card: addresses and hashes are shortened', () => {
@@ -195,6 +94,60 @@ describe('card banners', () => {
     expect(tree('gift')).toContain('SANDBOX');
     expect(tree('hotel')).toContain('Non-refundable');
     expect(tree('treasury')).not.toContain(SAMPLE_SAFE);
+  });
+
+  it('always names the network and the execution mode', () => {
+    for (const card of [
+      ...Object.values(SAMPLE_CARDS),
+      ...EDGE_CASES.map(([, c]) => c),
+    ]) {
+      const face = renderer.face(card);
+      expect(face.network).toBe('Monad Testnet');
+      expect(face.mode?.label).toMatch(
+        /^(REAL TESTNET|TESTNET|SANDBOX|SIMULATED|NOT EXECUTED|READ ONLY)$/,
+      );
+      const tree = JSON.stringify(renderer.tree(card));
+      expect(tree).toContain('Monad Testnet');
+      expect(tree).toContain(face.mode!.label);
+    }
+    expect(
+      new CardBannerRenderer({ networkLabel: null }).face(SAMPLE_CARDS.dca!)
+        .mode,
+    ).toBeNull();
+  });
+
+  it('grades rarity by state: pending common, approved rare, settled holo', () => {
+    const rarity = (card: InteractiveCard) => renderer.face(card).rarity;
+    expect(rarity(SAMPLE_CARDS.proposal!)).toBe('COMMON');
+    expect(
+      rarity(
+        edit('proposal', {
+          status: 'SATISFIED',
+          quorum: { counted: 2, required: 2 },
+        }),
+      ),
+    ).toBe('RARE');
+    expect(rarity(SAMPLE_CARDS['receipt-testnet']!)).toBe('HOLO_RARE');
+    expect(
+      rarity(
+        edit('receipt-testnet', {
+          status: 'SUBMITTED',
+          settlementStatus: 'PENDING',
+        }),
+      ),
+    ).toBe('COMMON');
+  });
+
+  it('keeps headline amounts exact when they fit and marks approximations', () => {
+    expect(renderer.face(SAMPLE_CARDS.treasury!).headline).toEqual({
+      label: 'BAL',
+      value: '300',
+      unit: 'AUSD',
+    });
+    const huge = EDGE_CASES.find(([n]) => n.startsWith('treasury: huge'))![1];
+    expect(renderer.face(huge).headline?.value).toBe('≈ 1.23e30');
+    const gift = EDGE_CASES.find(([n]) => n.startsWith('gift: five'))![1];
+    expect(renderer.face(gift).headline).toMatchObject({ label: 'FROM' });
   });
 
   it('groups digits without changing the exact amount', () => {
@@ -380,5 +333,49 @@ describe('banner amounts', () => {
       '≈ 1.23e30',
     );
     expect(displayAmount('0.123456789012345678', 10)).toBe('≈ 0.123456');
+  });
+});
+
+describe('opaque PNG encoder', () => {
+  it('writes an RGB PNG whose filtered rows reconstruct the pixels', () => {
+    const [w, h] = [5, 4];
+    const rgba = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++)
+      rgba.set([(i * 37) % 256, (i * 11) % 256, 255 - i, 255], i * 4);
+    const png = encodeOpaquePng(rgba, w, h);
+    expect(png.readUInt32BE(16)).toBe(w);
+    expect(png.readUInt32BE(20)).toBe(h);
+    expect(png[25]).toBe(2); // colour type: truecolour, no alpha
+    const idatAt = png.indexOf('IDAT');
+    const raw = inflateSync(
+      png.subarray(idatAt + 4, idatAt + 4 + png.readUInt32BE(idatAt - 4)),
+    );
+    const stride = w * 3;
+    const out = Buffer.alloc(w * h * 3);
+    for (let y = 0; y < h; y++) {
+      const filter = raw[y * (stride + 1)]!;
+      for (let x = 0; x < stride; x++) {
+        const v = raw[y * (stride + 1) + 1 + x]!;
+        const a = x >= 3 ? out[y * stride + x - 3]! : 0;
+        const b = y ? out[(y - 1) * stride + x]! : 0;
+        const c = x >= 3 && y ? out[(y - 1) * stride + x - 3]! : 0;
+        const pa = Math.abs(b - c);
+        const pb = Math.abs(a - c);
+        const pc = Math.abs(a + b - 2 * c);
+        const p = [
+          0,
+          a,
+          b,
+          (a + b) >> 1,
+          pa <= pb && pa <= pc ? a : pb <= pc ? b : c,
+        ][filter]!;
+        out[y * stride + x] = (v + p) & 255;
+      }
+    }
+    for (let i = 0; i < w * h; i++)
+      expect([...out.subarray(i * 3, i * 3 + 3)]).toEqual([
+        ...rgba.subarray(i * 4, i * 4 + 3),
+      ]);
+    expect(() => encodeOpaquePng(rgba, w + 1, h)).toThrow();
   });
 });

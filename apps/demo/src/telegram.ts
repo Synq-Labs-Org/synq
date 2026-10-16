@@ -102,6 +102,7 @@ import {
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
 import { FundAssistant } from './fund-assistant.js';
+import { todayIn } from './fund-intents.js';
 import { PostgresTripStore, TripService } from './fund-trips.js';
 import { duffelTripPorts } from './duffel-trips.js';
 import { giftPorts } from './gifts.js';
@@ -696,9 +697,11 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       log,
     });
     const fundReasoner = brainReasonersFromEnv(process.env);
-    const assistant = fundReasoner
-      ? new FundAssistant({
-          complete: async ({ system, user, schema }) =>
+    // Plain instructions work without a model; open questions need one.
+    const assistantTimeZone = process.env.SYNQ_ASSISTANT_TZ ?? 'Asia/Kolkata';
+    const assistant = new FundAssistant({
+      complete: fundReasoner
+        ? async ({ system, user, schema }) =>
             (
               await fundReasoner.structured.complete({
                 role: 'INTENT',
@@ -711,11 +714,12 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
                 responseSchema: schema,
                 maxOutputTokens: 800,
               })
-            ).text,
-          today: () => new Date().toISOString().slice(0, 10),
-          maxPaymentAmount: Number(FUND_LIMITS.perActionCap) / 1e6,
-        })
-      : undefined;
+            ).text
+        : null,
+      today: () => todayIn(assistantTimeZone, clock.now()),
+      timeZone: assistantTimeZone,
+      maxPaymentAmount: Number(FUND_LIMITS.perActionCap) / 1e6,
+    });
     const tripStore = new PostgresTripStore(pool);
     await tripStore.migrate();
     const duffelToken = process.env.DUFFEL_TEST_TOKEN ?? '';
@@ -741,10 +745,10 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         })
       : undefined;
     log(
-      `funds: assistant ${assistant ? 'on' : 'off'}, flights ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}, gifts ${gifts ? 'live search + Lithic sandbox' : 'off'}`,
+      `funds: assistant ${fundReasoner ? 'model + instructions' : 'instructions only (no model)'}, flights ${trips ? 'Duffel test mode' : 'off (no DUFFEL_TEST_TOKEN)'}, gifts ${gifts ? 'live search + Lithic sandbox' : 'off'}`,
     );
     registerFundRoutes(app, funds, {
-      ...(assistant ? { assistant } : {}),
+      assistant,
       ...(trips ? { trips } : {}),
     });
     /** Operator-local view of what the bot sent (not evidence; may hold link codes). */

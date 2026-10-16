@@ -234,3 +234,140 @@ export const SAMPLE_CARDS: Record<string, InteractiveCard> = Object.fromEntries(
     ] as const
   ).map(([k, c]) => [k, InteractiveCardSchema.parse(c)]),
 );
+
+/** A sample card with some fields replaced, re-validated against the schema. */
+export const editSample = (
+  name: string,
+  patch: Record<string, unknown>,
+): InteractiveCard =>
+  InteractiveCardSchema.parse({ ...SAMPLE_CARDS[name], ...patch });
+const edit = editSample;
+const option = (i: number) => ({
+  optionId: `o${i}`,
+  product: `Very long product name number ${i} with extra words that never fit on one line`,
+  price: { amount: `${i}9999999999.123456789012345678`, symbol: 'USD' },
+  delivery:
+    'Delivered by courier within an unspecified but surely reasonable time',
+  votes: i,
+});
+const hotelOption = (i: number) => ({
+  optionId: `h${i}`,
+  hotel: `The Grand Extraordinarily Long Hotel Name ${i}`,
+  room: 'Deluxe ocean-view suite with two queen beds and a balcony',
+  total: { amount: '1234567890123.99', symbol: 'USD' },
+  cancellation:
+    i % 2 ? 'Non-refundable' : 'Partially refundable before arrival minus fees',
+  preferenceVotes: 0,
+});
+
+/** Layout stress cases: huge numbers, long labels, many options, every status. */
+export const EDGE_CASES: [string, InteractiveCard][] = [
+  [
+    'treasury: huge balance, no members, no activity',
+    edit('treasury', {
+      groupLabel:
+        'An extremely long group label that goes on and on well past any sane width',
+      balance: {
+        amount: '1234567890123456789012345678901.123456789012345678',
+        symbol: 'AUSD',
+      },
+      available: { amount: '0', symbol: 'AUSD' },
+      reserved: { amount: '0', symbol: 'AUSD' },
+      pending: { amount: '0', symbol: 'AUSD' },
+      memberCount: null,
+      activity: [],
+    }),
+  ],
+  [
+    'treasury: zero balance',
+    edit('treasury', {
+      balance: { amount: '0', symbol: 'AUSD' },
+      available: { amount: '0', symbol: 'AUSD' },
+      reserved: { amount: '0', symbol: 'AUSD' },
+      pending: { amount: '0', symbol: 'AUSD' },
+    }),
+  ],
+  [
+    'proposal: mandate without amount or recipient, 0 of 12',
+    edit('proposal', {
+      proposalKind: 'MANDATE',
+      amount: null,
+      recipient: null,
+      reason:
+        'mandate dca_weekly v3 (change) raising the cumulative budget for the next quarter of operations',
+      quorum: { counted: 0, required: 12 },
+    }),
+  ],
+  [
+    'proposal: invalidated with reason',
+    edit('proposal', {
+      status: 'INVALIDATED',
+      statusReason: 'Quote expired before quorum',
+      actions: [],
+    }),
+  ],
+  [
+    'proposal: satisfied, recipient without address',
+    edit('proposal', {
+      status: 'SATISFIED',
+      quorum: { counted: 2, required: 2 },
+      recipient: { label: 'carol', address: null },
+    }),
+  ],
+  [
+    'gift: five options, no final pick',
+    edit('gift', {
+      options: [1, 2, 3, 4, 5].map(option),
+      finalOptionId: null,
+    }),
+  ],
+  [
+    'gift: one option, simulated',
+    edit('gift', {
+      options: [option(1)],
+      finalOptionId: 'o1',
+      executionMode: 'SIMULATION',
+    }),
+  ],
+  [
+    'hotel: five options, no preference',
+    edit('hotel', {
+      options: [1, 2, 3, 4, 5].map(hotelOption),
+      preferredOptionId: null,
+    }),
+  ],
+  [
+    'dca: revoked, nothing scheduled, overspent ratio clamp',
+    edit('dca', {
+      status: 'REVOKED',
+      nextExecutionAt: null,
+      spent: { amount: '500', symbol: 'AUSD' },
+    }),
+  ],
+  [
+    'receipt: failed with no reference',
+    edit('receipt-testnet', {
+      status: 'FAILED',
+      transactionHash: null,
+      orderId: null,
+      explorerUrl: null,
+      settlementStatus: 'UNKNOWN',
+      executionMode: 'SIMULATION',
+      actions: [],
+    }),
+  ],
+  [
+    'receipt: submitted',
+    edit('receipt-testnet', {
+      status: 'SUBMITTED',
+      settlementStatus: 'PENDING',
+    }),
+  ],
+  [
+    'receipt: refunded sandbox order',
+    edit('receipt-sandbox', {
+      status: 'REFUNDED',
+      settlementStatus: 'REFUNDED',
+    }),
+  ],
+];

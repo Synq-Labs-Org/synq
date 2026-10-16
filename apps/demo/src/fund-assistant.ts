@@ -1,12 +1,24 @@
 import { z } from 'zod';
 import { FundError, type FundView } from './fund-service.js';
+import {
+  MAX_TRAVELERS,
+  addDays,
+  airportLabel,
+  flightReply,
+  parseInstruction,
+  type Cabin,
+} from './fund-intents.js';
 
 /**
- * "Ask Synq" for a group fund. The model reads the fund's public state and the
- * person's request, answers in plain language and may suggest ONE next step.
- * A suggestion only pre-fills a flow in the Messages app: every payment still
- * goes through the Kernel and member passkey approvals, and hotel searches run
- * in Duffel test mode. Model output is untrusted and validated here.
+ * "Ask Synq" for a group fund. Plain instructions ("book a flight from Delhi
+ * to Goa on Dec 1 to Dec 5 for 3 people", "find a gift for a coffee lover
+ * under $40") are read deterministically first (fund-intents.ts): a complete
+ * one comes back as a search with `autoRun: true`, an incomplete one as a
+ * clarifying question. Anything else goes to the model, which reads the
+ * fund's public state, answers in plain language and may suggest ONE next
+ * step (never auto-run). Searches move no money; every payment still goes
+ * through the Kernel and member passkey approvals, and SEND is only ever a
+ * pre-filled suggestion. Model output is untrusted and validated here.
  */
 
 export type AssistantAction =
@@ -16,22 +28,37 @@ export type AssistantAction =
       origin: string;
       destination: string;
       departureDate: string;
+      returnDate: string | null;
       travelers: number;
+      originLabel: string | null;
+      destinationLabel: string | null;
+      cabin: Cabin | null;
+      /** True only for an explicit, complete instruction: run the search without a tap. */
+      autoRun: boolean;
     }
-  | { kind: 'GIFT_SEARCH'; query: string; maxPrice: string }
+  | { kind: 'GIFT_SEARCH'; query: string; maxPrice: string; autoRun: boolean }
   | { kind: 'TEST_MONEY' };
 
 export type AssistantReply = { reply: string; action: AssistantAction | null };
 
 export type AssistantPorts = {
-  complete(input: {
-    system: string;
-    user: string;
-    schema: { name: string; schema: Record<string, unknown> };
-  }): Promise<string>;
+  /** The model; when absent only plain instructions are understood. */
+  complete:
+    | ((input: {
+        system: string;
+        user: string;
+        schema: { name: string; schema: Record<string, unknown> };
+      }) => Promise<string>)
+    | null;
+  /** Today's date (YYYY-MM-DD) in `timeZone`; relative dates resolve from it. */
   today(): string;
+  timeZone?: string;
   maxPaymentAmount: number;
 };
+
+const CABINS = ['economy', 'premium_economy', 'business', 'first'] as const;
+/** Duffel takes offer requests up to about a year out. */
+const MAX_DAYS_AHEAD = 360;
 
 const ACTION_SCHEMA = {
   type: 'object',
@@ -60,14 +87,18 @@ const ACTION_SCHEMA = {
             'origin',
             'destination',
             'departureDate',
+            'returnDate',
             'travelers',
+            'cabin',
           ],
           properties: {
             kind: { type: 'string', enum: ['FLIGHT_SEARCH'] },
             origin: { type: 'string' },
             destination: { type: 'string' },
             departureDate: { type: 'string' },
+            returnDate: { type: ['string', 'null'] },
             travelers: { type: 'integer' },
+            cabin: { type: ['string', 'null'], enum: [...CABINS, null] },
           },
         },
         {
@@ -105,7 +136,9 @@ const RawReply = z.object({
         origin: z.string(),
         destination: z.string(),
         departureDate: z.string(),
+        returnDate: z.string().nullish(),
         travelers: z.number(),
+        cabin: z.string().nullish(),
       }),
       z.object({
         kind: z.literal('GIFT_SEARCH'),
@@ -159,12 +192,46 @@ export class FundAssistant {
     const question = text.replace(/\s+/g, ' ').trim().slice(0, 500);
     if (!question) throw new FundError('INVALID_REQUEST', 400, 'question');
     this.throttle(fund.fundId, now);
+    const today = this.ports.today();
+    const parsed = parseInstruction(question, {
+      today,
+      maxGiftPrice: this.ports.maxPaymentAmount,
+    });
+    if (parsed.kind === 'CLARIFY')
+      return { reply: parsed.question, action: null };
+    if (parsed.kind === 'FLIGHT' || parsed.kind === 'GIFT') {
+      if (fund.state !== 'ACTIVE')
+        return {
+          reply: `${parsed.kind === 'FLIGHT' ? 'Flight' : 'Gift'} searches open once the fund is live and everyone has joined.`,
+          action: null,
+        };
+      if (parsed.kind === 'FLIGHT')
+        return {
+          reply: flightReply(parsed.request, today),
+          action: {
+            kind: 'FLIGHT_SEARCH',
+            ...parsed.request,
+            autoRun: true,
+          },
+        };
+      const { query, maxPrice } = parsed.request;
+      return {
+        reply: `Searching "${query}" under $${maxPrice}${parsed.budgetDefaulted ? ' (say a budget to change it)' : ''}…`,
+        action: { kind: 'GIFT_SEARCH', query, maxPrice, autoRun: true },
+      };
+    }
+    if (!this.ports.complete)
+      return {
+        reply:
+          'I can search flights and gifts for the group. Try "book a flight from Delhi to Goa on Dec 1 to Dec 5 for 3" or "find a gift for a coffee lover under $40".',
+        action: null,
+      };
     const system = [
       'You are Synq, the assistant inside a group chat that shares a fund on Monad testnet (test money only).',
       'Answer briefly and warmly in plain language using only the FUND facts provided. Never invent balances, members or payments.',
       'You cannot move money. You may suggest exactly one next step in "action", or null:',
       `- SEND: pay a member listed in canPayTo; amount is a decimal string, at most ${this.ports.maxPaymentAmount}. Members confirm and approve it with Face ID.`,
-      `- FLIGHT_SEARCH: when they want to fly somewhere; origin and destination as 3-letter IATA airport codes, departureDate as YYYY-MM-DD after ${this.ports.today()}, travelers 1-4. Results are Duffel test-mode flights the group votes on and pays for together.`,
+      `- FLIGHT_SEARCH: when they want to fly somewhere and said where from, where to and when; origin and destination as 3-letter IATA airport codes, departureDate as YYYY-MM-DD after ${today}${this.ports.timeZone ? ` (today in ${this.ports.timeZone})` : ''}, returnDate as YYYY-MM-DD after departureDate for a return trip or null for one way, travelers 1-${MAX_TRAVELERS}, cabin one of ${CABINS.join(', ')} or null. Never guess a city or date they did not give: ask instead and set action to null. Results are Duffel test-mode flights the group votes on and pays for together.`,
       `- GIFT_SEARCH: when they want to buy a gift or a product; query is a short shopping search (e.g. "car gifts for car lovers"), maxPrice a whole-dollar budget string, at most ${this.ports.maxPaymentAmount}. Default to "50" if no budget is given. The group votes on live product results; the purchase uses a sandbox card.`,
       'Hotels are not available yet (the travel provider has not enabled stays); say so if asked.',
       '- TEST_MONEY: when they need more test money in the fund.',
@@ -178,9 +245,9 @@ export class FundAssistant {
         schema: ACTION_SCHEMA as unknown as Record<string, unknown>,
       },
     });
-    let parsed: z.output<typeof RawReply>;
+    let reply: z.output<typeof RawReply>;
     try {
-      parsed = RawReply.parse(JSON.parse(raw));
+      reply = RawReply.parse(JSON.parse(raw));
     } catch {
       return {
         reply: 'Sorry, I could not work that out. Try asking another way.',
@@ -188,8 +255,8 @@ export class FundAssistant {
       };
     }
     return {
-      reply: parsed.reply.trim().slice(0, 600),
-      action: this.validate(fund, parsed.action),
+      reply: reply.reply.trim().slice(0, 600),
+      action: this.validate(fund, reply.action),
     };
   }
 
@@ -213,7 +280,7 @@ export class FundAssistant {
         !(value >= 1 && value <= this.ports.maxPaymentAmount)
       )
         return null;
-      return { kind: 'GIFT_SEARCH', query, maxPrice };
+      return { kind: 'GIFT_SEARCH', query, maxPrice, autoRun: false };
     }
     if (action.kind === 'SEND') {
       if (fund.state !== 'ACTIVE') return null;
@@ -239,15 +306,30 @@ export class FundAssistant {
     const origin = action.origin.trim().toUpperCase();
     const destination = action.destination.trim().toUpperCase();
     const { departureDate, travelers } = action;
+    const returnDate = action.returnDate?.trim() || null;
+    const cabin = action.cabin
+      ? (CABINS.find((c) => c === action.cabin) ?? undefined)
+      : null;
+    const today = this.ports.today();
+    const horizon = addDays(today, MAX_DAYS_AHEAD);
     if (
+      fund.state !== 'ACTIVE' ||
       !/^[A-Z]{3}$/.test(origin) ||
       !/^[A-Z]{3}$/.test(destination) ||
       origin === destination ||
       !DAY.test(departureDate) ||
-      departureDate <= this.ports.today() ||
+      !realDay(departureDate) ||
+      departureDate <= today ||
+      departureDate > horizon ||
+      (returnDate !== null &&
+        (!DAY.test(returnDate) ||
+          !realDay(returnDate) ||
+          returnDate <= departureDate ||
+          returnDate > horizon)) ||
+      cabin === undefined ||
       !Number.isInteger(travelers) ||
       travelers < 1 ||
-      travelers > 4
+      travelers > MAX_TRAVELERS
     )
       return null;
     return {
@@ -255,9 +337,20 @@ export class FundAssistant {
       origin,
       destination,
       departureDate,
+      returnDate,
       travelers,
+      originLabel: airportLabel(origin),
+      destinationLabel: airportLabel(destination),
+      cabin,
+      // A model suggestion is shown as a button, never run on its own.
+      autoRun: false,
     };
   }
 }
+
+const realDay = (day: string) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
+};
 
 export { ACTION_SCHEMA as ASSISTANT_SCHEMA };
