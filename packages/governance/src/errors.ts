@@ -24,7 +24,11 @@ export type GovernanceErrorCode =
   | 'BAD_ASSENT'
   | 'UNKNOWN_DECISION'
   | 'ALREADY_EXECUTED'
-  | 'POLICY_CHANGED';
+  | 'POLICY_CHANGED'
+  | 'STORE_TAMPERED'
+  | 'CONCURRENT_UPDATE'
+  | 'CUSTODY_MISMATCH'
+  | 'CUSTODY_UNBOUND';
 
 export class GovernanceError extends Error {
   constructor(

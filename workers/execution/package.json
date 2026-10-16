@@ -15,7 +15,8 @@
     "./arc-outbox": "./src/arc-outbox.ts",
     "./vault": "./src/vault.ts",
     "./pg-schema": "./src/pg-schema.ts",
-    "./pg-outbox": "./src/pg-outbox.ts"
+    "./pg-outbox": "./src/pg-outbox.ts",
+    "./council-payout": "./src/council-payout.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -23,6 +24,7 @@
   "dependencies": {
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
+    "@synq/governance": "workspace:*",
     "@synq/kernel": "workspace:*",
     "@synq/plugin-circle-cctp": "workspace:*",
     "@synq/schemas": "workspace:*",

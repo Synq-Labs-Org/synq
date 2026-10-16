@@ -921,6 +921,9 @@ importers:
       '@synq/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@synq/governance':
+        specifier: workspace:*
+        version: link:../../packages/governance
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
