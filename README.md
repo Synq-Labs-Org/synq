@@ -44,7 +44,7 @@ The changed-wallet attack moves no money: Risk emits HARD flags, the Kernel deni
 
 Merged code proves native USDC transfers, Circle CCTP V2 invoice collection, Gateway deposit/spend and governed Safe/escrow contract calls. Arc's ERC-20 USDC uses 6 decimals; native gas accounting uses 18. The native mirror Transfer log is excluded from ERC-20 payment reconciliation.
 
-Additional Circle-workstream evidence exists for **App Kit Swap** (0.02 USDC → 0.022777 EURC), **App Kit Earn** (0.05 USDC deposit and full exit) and **Paymaster v0.8 on Sepolia** (ERC-4337 fee paid in USDC). That workstream's review and merge are pending; these are not yet capabilities of this integrated checkout. Earn is a DeFi vault integration, not a USYC position. USYC's eligibility read returned `canCall=false`; no USYC deposit is claimed.
+Additional Circle-workstream evidence exists for **App Kit Swap** (0.02 USDC → 0.022777 EURC), **App Kit Earn** (0.05 USDC deposit and full exit) and **Paymaster v0.8 on Sepolia** (ERC-4337 fee paid in USDC). The reviewed planners and guarded testnet scripts are merged. They are not yet autonomous checkout actions: standalone Earn deposits refuse missing imported obligations, and SDK scripts have no durable retry journal. Earn is a DeFi vault integration, not a USYC position. USYC's eligibility read returned `canCall=false`; no USYC deposit is claimed.
 
 Circle developer wallets and Gas Station await credentials. The operational wallet here is a local testnet EOA, not a Circle Agent Wallet. Direct transfers and CCTP do not establish App Kit Send/Bridge SDK usage. Live x402, ERC-8004 identity and ERC-8183 jobs remain pending.
 
