@@ -19,6 +19,7 @@
  * Also: a Duffel hold order whose lapse guard is exercised and which is then
  *   cancelled unpaid; and a Stays re-verification.
  *
+ * The Arc deposit goes to a dedicated trip pool (~/.synq/trip-pool.key, mode 600).
  * Writes bounty-evidence/duffel/duffel-booking-<ts>.json (integration
  * worktree when present).
  */
@@ -27,7 +28,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { DefaultLogger, Runtime, Worker } from '@temporalio/worker';
-import { privateKeyToAccount } from 'viem/accounts';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import {
   createWalletClient,
   encodeFunctionData,
@@ -700,10 +701,11 @@ async function main() {
   // Owner and client sign; the owner moves 0.002 USDC into the group's own trip
   // pool with the trip reference. Duffel never receives this money.
   const tripKey = keccak256(toHex(`trip:${GROUP}:${intent.id}`));
-  const poolKey = readFileSync(
-    join(process.env.HOME!, '.synq', 'group-pool.key'),
-    'utf8',
-  ).trim();
+  // A dedicated trip pool: one custody account per fund (never the gift pool).
+  const tripPoolPath = join(process.env.HOME!, '.synq', 'trip-pool.key');
+  if (!existsSync(tripPoolPath))
+    writeFileSync(tripPoolPath, generatePrivateKey() + '\n', { mode: 0o600 });
+  const poolKey = readFileSync(tripPoolPath, 'utf8').trim();
   const pool = privateKeyToAccount(
     (poolKey.startsWith('0x') ? poolKey : `0x${poolKey}`) as Hex,
   ).address;
