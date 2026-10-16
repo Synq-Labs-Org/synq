@@ -3,7 +3,12 @@ import type pg from 'pg';
 import { keccak256, toHex, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { money } from '@synq/domain';
-import { Ledger, PostgresLedgerStore, migrateFinance } from '@synq/ledger';
+import {
+  Ledger,
+  PostgresLedgerStore,
+  migrateFinance,
+  type JournalEntry,
+} from '@synq/ledger';
 import {
   InvoiceService,
   PostgresInvoiceStore,
@@ -287,6 +292,42 @@ describe(
       if (settled.outcome === 'UNMATCHED') expect(after.paid).toBe(0n);
       else expect(after.paid).toBe(1_000_000n);
       expect(['REVISED', 'PAID_FIRST']).toContain(revised);
+    });
+
+    it('X-LOA-07 regression: forty concurrent identical idempotent ledger posts from separate instances all succeed, one entry', async () => {
+      const key = `xloa07-ledger-${runId()}`;
+      const entry: JournalEntry = {
+        entryId: `je_${key}`,
+        workspaceId: 'wsp_xloa07',
+        occurredAt: T0,
+        memo: 'concurrent replay of one receipt entry',
+        source: { kind: 'ADJUSTMENT', ref: key },
+        evidence: null,
+        idempotencyKey: key,
+        reversalOf: null,
+        postings: [
+          { account: 'CASH_ARC_USDC', assetId: USDC.assetId, amount: 5n },
+          { account: 'UNAPPLIED_RECEIPTS', assetId: USDC.assetId, amount: -5n },
+        ],
+      };
+      const results = await Promise.all(
+        Array.from({ length: 40 }, () =>
+          new Ledger(new PostgresLedgerStore(pool)).post(entry),
+        ),
+      );
+      expect(results.filter((r) => r.created)).toHaveLength(1);
+      const rows = await pool.query(
+        'SELECT count(*)::int AS n FROM synq_ledger_entries WHERE idempotency_key=$1',
+        [key],
+      );
+      expect(rows.rows[0]!.n).toBe(1);
+      // Reusing the entry id for another key is refused, never swallowed.
+      await expect(
+        new Ledger(new PostgresLedgerStore(pool)).post({
+          ...entry,
+          idempotencyKey: `${key}:other`,
+        }),
+      ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
     });
 
     it('X-LOA-05 1000 concurrent copies of a provider refund webhook on Postgres record it once', async () => {
