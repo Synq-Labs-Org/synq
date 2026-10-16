@@ -40,7 +40,7 @@ const fixture = JSON.parse(
 ) as { message: Hex };
 const codes = JSON.parse(
   readFileSync(new URL('./fixtures/cctp-codes.json', import.meta.url), 'utf8'),
-) as Record<string, { address: Address; code: Hex }>;
+) as Record<string, Hex>;
 const m = decodeMessage(fixture.message);
 const payer = m.burn.messageSender;
 const recipient = m.burn.mintRecipient;
@@ -207,10 +207,18 @@ const mintLogs = (s: { hash: Hex }): Log[] => [
   receivedLog(s.hash),
 ];
 
+/** Fixture bytecode keyed by registry entry ("chain:KIND" or "chain:USDC"). */
+const addressOf = (key: string): Address => {
+  const [chain, kind] = key.split(':') as [
+    'eth-sepolia' | 'arc-testnet',
+    string,
+  ];
+  return kind === 'USDC'
+    ? token(chain, 'USDC').address
+    : contract(chain, kind as Parameters<typeof contract>[1]).address;
+};
 const codeMap = (...keys: string[]) =>
-  Object.fromEntries(
-    keys.map((k) => [codes[k]!.address.toLowerCase(), codes[k]!.code]),
-  );
+  Object.fromEntries(keys.map((k) => [addressOf(k).toLowerCase(), codes[k]!]));
 
 async function setup(store: CctpSagaStore) {
   const id = `cctp_${runId()}`;

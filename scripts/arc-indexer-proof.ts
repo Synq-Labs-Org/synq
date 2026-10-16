@@ -17,6 +17,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
 import type { Address, Hex } from 'viem';
+import { contract } from '@synq/chain-registry/arc';
 import { migrateFinance, PostgresLedgerStore } from '@synq/ledger';
 import { PostgresInvoiceStore, type Invoice } from '@synq/invoices';
 import {
@@ -40,17 +41,18 @@ const CHECKOUT_TX =
 const PAYOUT_TX =
   '0x5dc5138eb08f9e52245e47bae7ea4db6962fb0e5b44c06dbe4feaf75acf92983' as Hex;
 const INVOICE_ID = 'inv_f9aa042a727d27d402be';
-const wallets: Address[] = [
-  '0x6BD6Db75B56acE65019AA08FCAd4778808Da08bD', // issuer / payout address
-  '0xC597f082c02A3c4Ff2CB8Cf7Fc69Ea59ffc72981', // checkout payer
-  '0x4aD226BDc7964B8B54802436C3D961942b2d58e1', // vault Safe (payout payer)
-];
 
 const client = arcFallbackClient();
 const [checkoutRcpt, payoutRcpt] = await Promise.all([
   client.getTransactionReceipt({ hash: CHECKOUT_TX }),
   client.getTransactionReceipt({ hash: PAYOUT_TX }),
 ]);
+// Watched: the invoice payout address and payer (read from the checkout
+// record and receipt, not hard-coded) and the registry vault Safe.
+const wallets: Address[] = [
+  checkoutRcpt.from,
+  contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE').address,
+];
 const from = checkoutRcpt.blockNumber - 17n;
 const to = payoutRcpt.blockNumber + 5n;
 
@@ -79,6 +81,7 @@ const unpaid: Invoice = Object.freeze({
   payments: [],
 });
 await new PostgresInvoiceStore(pool).save(unpaid, null);
+wallets.unshift(unpaid.issuer.payoutAddress);
 
 const lines: Record<string, unknown>[] = [];
 const run = async (

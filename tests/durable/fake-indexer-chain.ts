@@ -8,13 +8,12 @@ import {
   type Hex,
   type Log,
 } from 'viem';
+import { token } from '@synq/chain-registry/arc';
 import type { ChainBlock, IndexerChain } from '@synq/ledger';
 
-export const TOKEN = '0x3600000000000000000000000000000000000000' as Address;
-export const MIRROR = '0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF'.replace(
-  /F$/,
-  'e',
-) as Address;
+export const TOKEN = token('arc-testnet', 'USDC').address;
+/** Arc's native-mirror Transfer emitter, 0xffff…fffe. */
+export const MIRROR = `0x${'f'.repeat(39)}e` as Address;
 export const TOKEN_CODE = '0x6080604052deadbeef' as Hex;
 
 type Tx = {

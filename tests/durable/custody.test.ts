@@ -7,7 +7,7 @@ import {
   type Hex,
   type PublicClient,
 } from 'viem';
-import { token } from '@synq/chain-registry/arc';
+import { contract, token } from '@synq/chain-registry/arc';
 import {
   MemoryCouncilStore,
   advertisedMoneyPolicy,
@@ -39,8 +39,8 @@ const USDC = token('arc-testnet', 'USDC');
 const CHAIN = USDC.chainId;
 const NOW = 1_790_000_000;
 const DAY = 86_400;
-const SAFE = '0x4aD226BDc7964B8B54802436C3D961942b2d58e1' as Address;
-const POLICY = '0xaD1C4188379001939Fb94d999556292574D1e86c' as Address;
+const SAFE = contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE').address;
+const POLICY = contract('arc-testnet', 'SYNQ_ARC_VAULT_POLICY').address;
 const recipient = '0x00000000000000000000000000000000000beef1' as Address;
 
 const policy: GovernancePolicy = {

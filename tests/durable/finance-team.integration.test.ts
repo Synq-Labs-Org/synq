@@ -247,3 +247,38 @@ describe('finance team durable state on Postgres', { timeout: 60_000 }, () => {
     });
   });
 });
+
+describe('Supervisor on the durable budget ledger', { timeout: 60_000 }, () => {
+  it('carries the session budget across runs and a restart, reserving each run atomically', async () => {
+    const { desk, cleanInvoice } =
+      await import('../arc/finance-team.harness.js');
+    const { superviseFinance } = await import('@synq/agent-runtime');
+    const ws = `wsp_${runId()}`;
+    const ledger = () =>
+      new PostgresFinanceBudgetLedger(
+        pool,
+        { toolCalls: 3, tokens: 100_000, paidMicroUsd: 1_000_000 },
+        { now: () => 1_800_000_000 },
+      );
+    const d1 = {
+      ...(await desk([cleanInvoice], { budget: ledger() })),
+      workspaceId: ws,
+    };
+    expect((await superviseFinance("what's my cash", d1)).status).toBe(
+      'ANSWERED',
+    );
+    // A fresh process (new ledger instance) still sees the spent budget.
+    const d2 = {
+      ...(await desk([cleanInvoice], { budget: ledger() })),
+      workspaceId: ws,
+    };
+    expect((await superviseFinance("what's my cash", d2)).status).toBe(
+      'STOPPED',
+    );
+    const open = await pool.query(
+      'SELECT count(*)::int AS n FROM synq_finance_budget_reservations WHERE workspace_id=$1 AND settled_at IS NULL',
+      [ws],
+    );
+    expect(open.rows[0]!.n).toBe(0);
+  });
+});

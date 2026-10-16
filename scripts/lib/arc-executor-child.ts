@@ -26,11 +26,14 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { contract, token } from '@synq/chain-registry/arc';
+import pg from 'pg';
 import {
   MemoryNonceFence,
   admitGrant,
   type ExecutionGrant,
+  type NonceFence,
 } from '@synq/kernel/arc';
+import { PostgresGrantFence } from '@synq/execution-worker/pg-outbox';
 import { connectChain, verifyContract } from '@synq/execution-worker/arc';
 import { sendCall } from '@synq/execution-worker/cctp';
 import { VAULT_POLICY_ABI, simulate } from '@synq/execution-worker/vault';
@@ -72,7 +75,18 @@ const usdc = token('arc-testnet', 'USDC');
 const policy = contract('arc-testnet', 'SYNQ_ARC_VAULT_POLICY')
   .address as Address;
 const vault = contract('arc-testnet', 'SYNQ_ARC_VAULT_SAFE').address as Address;
-const fence = new MemoryNonceFence();
+// With SYNQ_EXECUTION_DATABASE_URL, consumed grants are durable across
+// executor restarts (unique grant id and nonce); otherwise per-process only.
+const fence: NonceFence = process.env.SYNQ_EXECUTION_DATABASE_URL
+  ? new PostgresGrantFence(
+      new pg.Pool({
+        connectionString: process.env.SYNQ_EXECUTION_DATABASE_URL,
+        max: 2,
+      }),
+    )
+  : new MemoryNonceFence();
+const fenceReady =
+  fence instanceof PostgresGrantFence ? fence.migrate() : Promise.resolve();
 const acks = new Map<number, () => void>();
 let grantKey: Uint8Array | null = null;
 const chainP = connectChain('arc-testnet');
@@ -88,6 +102,7 @@ async function admit(
   call: { recipient: Address; amount: string },
 ) {
   if (!grantKey) throw new Error('executor not initialised');
+  await fenceReady;
   await admitGrant({
     grantKey,
     grant,
