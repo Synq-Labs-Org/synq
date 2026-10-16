@@ -142,6 +142,15 @@ export type GuestReplyInput = {
  * through the Kernel; none can approve, sign or broadcast.
  */
 export interface ChannelPorts {
+  workspaceMessage?(input: {
+    channel: ChannelId;
+    chatId: string;
+    chatKind: 'DIRECT' | 'GROUP';
+    userId: string;
+    text: string;
+    eventId: string;
+    origin: 'CHAT';
+  }): Promise<DirectReply | null>;
   activeMember(
     groupId: string,
     principalId: string,
@@ -560,6 +569,28 @@ export class ChannelGateway {
         return this.result('REFUSED', 'CALLBACK_NOT_AN_APPROVAL');
       }
       case 'MESSAGE_RECEIVED':
+        if (
+          this.options.ports.workspaceMessage &&
+          envelope.externalUserId &&
+          !envelope.verifiedSender.isBot
+        ) {
+          const reply = await this.options.ports.workspaceMessage({
+            channel: envelope.channel,
+            chatId: envelope.externalGroupId,
+            chatKind: envelope.chatKind,
+            userId: envelope.externalUserId,
+            text: envelope.forwarded ? '' : envelope.body,
+            eventId: envelope.eventId,
+            origin: 'CHAT',
+          });
+          if (reply)
+            return this.replyOutcome(
+              envelope,
+              'HANDLED',
+              'WORKSPACE_MESSAGE',
+              reply,
+            );
+        }
         await this.capture(envelope);
         return this.message(envelope);
     }

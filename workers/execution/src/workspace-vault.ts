@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import {
   encodeAbiParameters,
+  erc20Abi,
   encodeFunctionData,
   getAddress,
   keccak256,
@@ -45,6 +46,10 @@ import type { OutboxRecord } from './arc-outbox.js';
 import { PostgresOutboxStore } from './pg-outbox.js';
 import { settleSignedCall } from './cctp.js';
 import { readCustody } from './council-payout.js';
+import { readWorkspaceAuthority } from './workspace-authority.js';
+import { WorkspaceFinance } from '@synq/workspaces/finance';
+import { WorkspacePayoutExecutor } from './workspace-payout.js';
+import { WorkspaceGovernanceExecutor } from './workspace-governance.js';
 import {
   VAULT_FACTORY_ABI,
   readVault,
@@ -448,6 +453,22 @@ export async function workspaceVaultRuntime(input: {
     input.dailyGasLimitWei,
   );
   await executor.outbox.migrate();
+  const finance = new WorkspaceFinance(setups.workspaces, (id) =>
+    readWorkspaceAuthority(chain, setups, id),
+  );
+  const payouts = new WorkspacePayoutExecutor(finance, chain, account, {
+    operator: 'workspace-payout-worker',
+    grantKey: Buffer.from(grantHex, 'hex'),
+    grantTtlSeconds: 60,
+    riskRequiredAbove: 0n,
+  });
+  await payouts.migrate();
+  const governance = new WorkspaceGovernanceExecutor(finance, chain, account, {
+    operator: 'workspace-governance-worker',
+    grantKey: Buffer.from(grantHex, 'hex'),
+    grantTtlSeconds: 60,
+    riskRequiredAbove: 0n,
+  });
   let running = false;
   let stopped = false;
   const pump = async () => {
@@ -484,6 +505,56 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
           );
         }
       }
+      const actions = await setups.workspaces.pool.query(
+        "SELECT a.id FROM synq_ws_safe_actions a LEFT JOIN synq_arc_payout_outbox o ON o.key='workspace-action:'||a.id::text WHERE (a.state='READY' OR (a.state='CONFIRMED' AND o.state='SIGNED')) AND a.next_attempt_at<=$1 ORDER BY a.id LIMIT 5",
+        [setups.workspaces.now()],
+      );
+      for (const action of actions.rows) {
+        if (stopped) break;
+        const claim = await setups.workspaces.pool.query(
+          'UPDATE synq_ws_safe_actions SET next_attempt_at=$2 WHERE id=$1 AND next_attempt_at<=$3 RETURNING id',
+          [action.id, setups.workspaces.now() + 30, setups.workspaces.now()],
+        );
+        if (!claim.rowCount) continue;
+        try {
+          await governance.execute(String(action.id));
+        } catch (error) {
+          const code =
+            error instanceof WorkspaceError ||
+            error instanceof ArcExecutionError
+              ? error.code
+              : 'EXECUTION_UNAVAILABLE';
+          await setups.workspaces.pool.query(
+            'UPDATE synq_ws_safe_actions SET last_error=$2 WHERE id=$1',
+            [action.id, code],
+          );
+        }
+      }
+      const payments = await setups.workspaces.pool.query(
+        "SELECT id FROM synq_ws_payouts WHERE state IN ('READY','SIGNED') AND next_attempt_at<=$1 ORDER BY created_at LIMIT 5",
+        [setups.workspaces.now()],
+      );
+      for (const p of payments.rows) {
+        if (stopped) break;
+        const claim = await setups.workspaces.pool.query(
+          'UPDATE synq_ws_payouts SET attempts=attempts+1,next_attempt_at=$2 WHERE id=$1 AND next_attempt_at<=$3 RETURNING id',
+          [p.id, setups.workspaces.now() + 30, setups.workspaces.now()],
+        );
+        if (!claim.rowCount) continue;
+        try {
+          await payouts.execute(String(p.id));
+        } catch (error) {
+          const code =
+            error instanceof WorkspaceError ||
+            error instanceof ArcExecutionError
+              ? error.code
+              : 'EXECUTION_UNAVAILABLE';
+          await setups.workspaces.pool.query(
+            'UPDATE synq_ws_payouts SET reason=$2 WHERE id=$1',
+            [p.id, code],
+          );
+        }
+      }
     } finally {
       running = false;
     }
@@ -495,6 +566,22 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
   void pump().catch(() => undefined);
   return {
     setups,
+    finance,
+    payouts: payouts.payouts,
+    governance: governance.governance,
+    screening: payouts.screening.status(),
+    readBalance: async (id: string) => {
+      const a = await finance.authority(id);
+      const amount = await chain.client.readContract({
+        address: a.token,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [a.vault],
+        blockNumber: a.blockNumber,
+      });
+      return { amount: String(amount), blockNumber: String(a.blockNumber) };
+    },
+    readAuthority: (id: string) => readWorkspaceAuthority(chain, setups, id),
     execute: (workspaceId: string) => executor.execute(workspaceId),
     wake: () => {
       void pump().catch(() => undefined);

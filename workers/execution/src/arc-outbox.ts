@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Hex } from 'viem';
 import type { Money } from '@synq/domain';
+import type { SqlQueryable } from '@synq/domain/pg';
 import {
   AuthorityError,
   verifyGrant,
@@ -56,6 +57,11 @@ export interface OutboxStore {
    * transaction, so a crash can never leave a consumed grant with no record
    * (or a record whose grant could be admitted again).
    */
+  createAdmittingGrant?(
+    r: OutboxRecord,
+    grant: ExecutionGrant,
+    admit: (fence: NonceFence, sql: SqlQueryable) => Promise<void>,
+  ): Promise<'CREATED' | 'KEY_EXISTS'>;
   createConsumingGrant?(
     r: OutboxRecord,
     grant: ExecutionGrant,

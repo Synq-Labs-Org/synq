@@ -12,8 +12,9 @@ const ProofSchema = z.strictObject({
 export async function workspaceChannelRuntime(
   store: PostgresWorkspaceStore,
   token: string,
+  transport?: { baseUrl?: string; fetch?: typeof fetch },
 ) {
-  const api = new TelegramBotApi({ token });
+  const api = new TelegramBotApi({ token, ...transport });
   const links = new WorkspaceChannelLinks(
     store,
     token.split(':')[0]!,

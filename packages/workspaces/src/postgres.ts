@@ -210,6 +210,9 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
     });
     return { token, principalId, expiresAt };
   }
+  async membership(id: string, principal: string) {
+    return this.member(this.pool, id, principal);
+  }
   private async member(
     sql: Pool | PoolClient,
     id: string,

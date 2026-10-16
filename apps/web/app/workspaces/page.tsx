@@ -14,6 +14,9 @@ import { api, ApiFailure, describeError } from '../../lib/api';
 import './theme.css';
 import { VaultPanel } from './vault-panel';
 import { ChannelPanel } from './channel-panel';
+import { FinancePanel } from './finance-panel';
+import { PayoutPanel } from './payout-panel';
+import { GovernancePanel } from './governance-panel';
 
 type Provider = {
   request(input: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -190,6 +193,13 @@ export default function WorkspacesPage() {
       });
       setPrincipal(session.principalId);
       await refresh();
+      const requested = new URLSearchParams(window.location.search).get(
+        'workspace',
+      );
+      if (requested && z.string().uuid().safeParse(requested).success)
+        setView(
+          await api.get(`/v2/workspaces/${requested}`, WorkspaceViewSchema),
+        );
     });
   }
   const isOwner =
@@ -387,6 +397,30 @@ export default function WorkspacesPage() {
                       await refresh();
                     })
                   }
+                />
+              )}
+              {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
+                <FinancePanel
+                  key={`finance-${view.workspace.id}`}
+                  workspaceId={view.workspace.id}
+                  vault={view.workspace.vault}
+                  owner={isOwner}
+                />
+              )}
+              {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
+                <PayoutPanel
+                  key={`payouts-${view.workspace.id}`}
+                  workspaceId={view.workspace.id}
+                  vault={view.workspace.vault}
+                  owner={isOwner}
+                />
+              )}
+              {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
+                <GovernancePanel
+                  key={`governance-${view.workspace.id}`}
+                  workspaceId={view.workspace.id}
+                  vault={view.workspace.vault}
+                  owner={isOwner}
                 />
               )}
               <ChannelPanel

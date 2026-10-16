@@ -150,7 +150,7 @@ export class PostgresOutboxStore implements OutboxStore {
   async createAdmittingGrant(
     record: OutboxRecord,
     grant: ExecutionGrant,
-    admit: (fence: NonceFence) => Promise<void>,
+    admit: (fence: NonceFence, sql: SqlQueryable) => Promise<void>,
   ): Promise<'CREATED' | 'KEY_EXISTS'> {
     return withTransaction(this.pool, async (sql) => {
       await sql.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
@@ -167,7 +167,7 @@ export class PostgresOutboxStore implements OutboxStore {
           throw new Error('nested transaction');
         },
       };
-      await admit(new PostgresGrantFence(txPool));
+      await admit(new PostgresGrantFence(txPool), sql);
       const consumed = await sql.query(
         'SELECT 1 FROM synq_consumed_grants WHERE grant_id=$1 AND nonce=$2',
         [grant.grantId, grant.nonce.toLowerCase()],

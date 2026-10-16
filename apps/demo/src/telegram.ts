@@ -111,6 +111,10 @@ import { PostgresWorkspaceStore } from '@synq/workspaces';
 import { WorkspaceVaultSetups } from '@synq/workspaces';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
 import { workspaceChannelRuntime } from './workspace-channels.js';
+import { WorkspaceNotifications } from './workspace-notifications.js';
+import { workspaceCommandPort } from './workspace-commands.js';
+import { TelegramAdapter, TelegramBotApi } from '@synq/channels';
+import { CardBannerRenderer } from '@synq/channels/cards';
 import {
   ArcBusiness,
   liveArcReads,
@@ -499,6 +503,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     });
     await setup.close();
     const app = newApi();
+    let workspaceNotifications: WorkspaceNotifications | undefined;
+    let workspaceMessage: ReturnType<typeof workspaceCommandPort> | undefined;
     if (process.env.SYNQ_WORKSPACES_ENABLED === '1') {
       if (!process.env.SYNQ_ORIGIN) throw new Error('SYNQ_ORIGIN_REQUIRED');
       const workspaces = new PostgresWorkspaceStore(
@@ -529,8 +535,41 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       const workspaceChannels = await workspaceChannelRuntime(
         workspaces,
         token,
+        options.telegramBaseUrl
+          ? { baseUrl: options.telegramBaseUrl }
+          : undefined,
       );
-      registerWorkspaceRoutes(app, workspaces, vault, workspaceChannels);
+      const finance = vault?.finance;
+      workspaceMessage = workspaceCommandPort({
+        links: workspaceChannels,
+        finance,
+        payouts: vault?.payouts,
+        origin: workspaces.origin,
+        mode:
+          options.telegramMode === 'LIVE'
+            ? 'LIVE_ARC_TESTNET'
+            : 'LOCAL_FIXTURE',
+        balance: vault?.readBalance,
+      });
+      if (vault) {
+        workspaceNotifications = new WorkspaceNotifications(
+          workspaceChannels,
+          vault.payouts,
+          options.telegramMode === 'LIVE'
+            ? 'LIVE_ARC_TESTNET'
+            : 'LOCAL_FIXTURE',
+        );
+        await workspaceNotifications.queue.migrate();
+      }
+      registerWorkspaceRoutes(
+        app,
+        workspaces,
+        vault,
+        workspaceChannels,
+        finance,
+        vault ? { service: vault.payouts, wake: vault.wake } : undefined,
+        vault ? { service: vault.governance, wake: vault.wake } : undefined,
+      );
     }
     const readModel = {
       reader,
@@ -968,6 +1007,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     const channels = await registerChannels({
       app,
       workspaceOnboarding: process.env.SYNQ_WORKSPACES_ENABLED === '1',
+      ...(workspaceMessage ? { workspaceMessage } : {}),
       env: {
         TELEGRAM_BOT_TOKEN: token,
         SYNQ_TELEGRAM_MODE: 'poll',
@@ -1021,6 +1061,40 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 3200}`,
       adminToken,
     );
+    if (workspaceNotifications) {
+      const notifications = workspaceNotifications,
+        adapter = new TelegramAdapter({
+          api: new TelegramBotApi({
+            token,
+            fetch: recordingFetch,
+            ...(options.telegramBaseUrl
+              ? { baseUrl: options.telegramBaseUrl }
+              : {}),
+          }),
+          maxAttempts: 1,
+          banners: new CardBannerRenderer({ networkLabel: 'Arc Testnet' }),
+        });
+      let busy = false,
+        stopped = false;
+      const send = async () => {
+        if (busy || stopped) return;
+        busy = true;
+        try {
+          await notifications.pump(adapter);
+        } catch {
+          log('Workspace delivery deferred; durable money state unchanged.');
+        } finally {
+          busy = false;
+        }
+      };
+      const timer = setInterval(() => void send(), 5000);
+      timer.unref();
+      closers.push(async () => {
+        stopped = true;
+        clearInterval(timer);
+        while (busy) await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+    }
     channels.start();
     closers.push(() => channels.stop());
 

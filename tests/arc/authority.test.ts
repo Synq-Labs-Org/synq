@@ -94,6 +94,55 @@ const call = (
 });
 
 describe('Arc payment authority', () => {
+  it('G4 binds workspace grants to policy target, calldata and value as well as money', async () => {
+    const executionCall = { to: payer, value: 0n, data: '0x1234' as Hex };
+    const result = await decide({
+      config,
+      mandate,
+      mandateSignature: await sign(mandate),
+      state: { revoked: false, spends: [] },
+      intent: intent(),
+      risk: clean,
+      simulationOk: true,
+      now: NOW,
+      executionCall,
+    });
+    if (result.outcome !== 'ALLOW') throw new Error('expected grant');
+    const check = {
+      grant: result.grant,
+      grantKey: config.grantKey,
+      call: call(),
+      now: NOW,
+      mandateRevoked: false,
+    };
+    for (const changed of [
+      undefined,
+      { ...executionCall, to: attacker },
+      { ...executionCall, data: '0x5678' as Hex },
+      { ...executionCall, value: 1n },
+    ]) {
+      await expect(
+        admitGrant({
+          ...check,
+          executionCall: changed,
+          fence: new MemoryNonceFence(),
+        }),
+      ).rejects.toMatchObject({ code: 'GRANT_MISMATCH' });
+    }
+    const fence = new MemoryNonceFence();
+    await admitGrant({ ...check, executionCall, fence });
+    await expect(
+      admitGrant({ ...check, executionCall, fence }),
+    ).rejects.toMatchObject({ code: 'GRANT_REPLAYED' });
+    await expect(
+      admitGrant({
+        ...check,
+        executionCall,
+        fence: new MemoryNonceFence(),
+        grant: { ...result.grant, executionCallHash: `0x${'ff'.repeat(32)}` },
+      }),
+    ).rejects.toMatchObject({ code: 'GRANT_FORGED' });
+  });
   it('allows the exact bounded payout and admits only that exact call once (P06 PASS shape)', async () => {
     const grant = await allow();
     expect(grant).toMatchObject({

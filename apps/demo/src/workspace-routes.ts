@@ -13,17 +13,39 @@ import {
   type WorkspaceChannelLinks,
 } from '@synq/workspaces';
 import { IdentityError } from '@synq/identity';
+import type { WorkspaceFinance } from '@synq/workspaces/finance';
+import type { WorkspacePayouts } from '@synq/workspaces/payouts';
+import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
   vaultReady = false,
   telegramReady = false,
+  financeReady = false,
+  payoutReady = false,
 ) {
   const blocked = (reason: string) => ({ status: 'BLOCKED' as const, reason });
   return {
     chainId: 5042002,
     network: 'Arc testnet',
     moneyApproval: 'OWNER_EIP712_KERNEL_ONE_USE_GRANT',
+    financeSettings: financeReady
+      ? {
+          status: 'AVAILABLE',
+          reason:
+            'Current Safe quorum signs vendor attestations and versioned budgets; changed destinations wait at least 24 hours.',
+        }
+      : blocked('Workspace finance worker is not configured.'),
+    payoutRequests: payoutReady
+      ? {
+          status: 'AVAILABLE',
+          reason:
+            'Persistent proposals and separate mandate/payment signatures; chat never approves.',
+        }
+      : blocked('Workspace payout worker is not configured.'),
+    payoutExecution: blocked(
+      'Wallet screening is unavailable. Requests can be reviewed, but execution fails closed.',
+    ),
     workspaces: {
       status: 'AVAILABLE',
       scope: vaultReady ? 'SIGNED_VAULT_SETUP' : 'IDENTITY_AND_FORMATION_ONLY',
@@ -65,6 +87,9 @@ export function registerWorkspaceRoutes(
   store: PostgresWorkspaceStore,
   vault?: { setups: WorkspaceVaultSetups; wake(): void },
   channels?: WorkspaceChannelLinks,
+  finance?: WorkspaceFinance,
+  payouts?: { service: WorkspacePayouts; wake(): void },
+  governance?: { service: WorkspaceGovernance; wake(): void },
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -133,7 +158,12 @@ export function registerWorkspaceRoutes(
   };
   app.get('/v2/capabilities', (_req, reply) =>
     handle(reply, async () =>
-      workspaceCapabilities(Boolean(vault), Boolean(channels)),
+      workspaceCapabilities(
+        Boolean(vault),
+        Boolean(channels),
+        Boolean(finance),
+        Boolean(payouts),
+      ),
     ),
   );
   app.post('/v2/auth/challenge', (req, reply) =>
@@ -236,6 +266,218 @@ export function registerWorkspaceRoutes(
       return workspaceView(await store.get(await id(req), session.principalId));
     }),
   );
+  if (finance) {
+    app.get('/v2/workspaces/:workspaceId/finance', (req, reply) =>
+      handle(reply, async () => {
+        const session = await auth(req);
+        return finance.list(await id(req), session.principalId);
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/finance/changes', (req, reply) =>
+      handle(reply, async () => {
+        const session = await auth(req, true);
+        return finance.propose(await id(req), session.principalId, req.body);
+      }),
+    );
+    const changeParams = (req: FastifyRequest) =>
+      z
+        .strictObject({
+          workspaceId: WorkspaceIdSchema,
+          hash: z.string().regex(/^0x[0-9a-f]{64}$/),
+        })
+        .parse(req.params);
+    app.get('/v2/workspaces/:workspaceId/finance/changes/:hash', (req, reply) =>
+      handle(reply, async () => {
+        const session = await auth(req),
+          p = changeParams(req);
+        return finance.change(
+          p.workspaceId,
+          session.principalId,
+          p.hash as `0x${string}`,
+        );
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/finance/changes/:hash/approve',
+      (req, reply) =>
+        handle(reply, async () => {
+          const session = await auth(req, true),
+            p = changeParams(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const body = z
+            .strictObject({
+              signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+            })
+            .parse(req.body);
+          return finance.approve(
+            p.workspaceId,
+            session.principalId,
+            p.hash as `0x${string}`,
+            body.signature as `0x${string}`,
+          );
+        }),
+    );
+  }
+  if (payouts) {
+    app.get('/v2/workspaces/:workspaceId/risk', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req),
+          workspaceId = await id(req);
+        await store.membership(workspaceId, s.principalId);
+        const [cases, audit] = await Promise.all([
+          store.pool.query(
+            'SELECT data FROM synq_risk_cases WHERE workspace_id=$1 ORDER BY case_id LIMIT 100',
+            [workspaceId],
+          ),
+          store.pool.query(
+            'SELECT data FROM synq_risk_audit WHERE workspace_id=$1 ORDER BY seq DESC LIMIT 50',
+            [workspaceId],
+          ),
+        ]);
+        return {
+          cases: cases.rows.map((r) => r.data),
+          audit: audit.rows.map((r) => r.data),
+        };
+      }),
+    );
+    app.get('/v2/workspaces/:workspaceId/payouts', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return {
+          payouts: await payouts.service.list(await id(req), s.principalId),
+        };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/payouts', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return payouts.service.propose(await id(req), s.principalId, req.body);
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/payouts/:payoutId/cancel',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = z
+              .strictObject({
+                workspaceId: WorkspaceIdSchema,
+                payoutId: z.string().uuid(),
+              })
+              .parse(req.params);
+          z.strictObject({}).parse(req.body);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          return payouts.service.cancel(
+            p.workspaceId,
+            s.principalId,
+            p.payoutId,
+          );
+        }),
+    );
+    const paymentParams = (req: FastifyRequest) =>
+      z
+        .strictObject({
+          workspaceId: WorkspaceIdSchema,
+          payoutId: z.string().uuid(),
+        })
+        .parse(req.params);
+    app.get('/v2/workspaces/:workspaceId/payouts/:payoutId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req),
+          p = paymentParams(req);
+        return payouts.service.view(p.workspaceId, s.principalId, p.payoutId);
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/payouts/:payoutId/approve',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = paymentParams(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const hex = z
+            .string()
+            .regex(/^0x[0-9a-fA-F]{130}$/)
+            .transform((v) => v as `0x${string}`);
+          const body = z
+            .strictObject({ signature: hex, mandateSignature: hex.optional() })
+            .parse(req.body);
+          const result = await payouts.service.approve(
+            p.workspaceId,
+            s.principalId,
+            p.payoutId,
+            body,
+          );
+          payouts.wake();
+          return result;
+        }),
+    );
+  }
+  if (governance) {
+    app.get('/v2/workspaces/:workspaceId/vault/actions', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return {
+          actions: await governance.service.list(await id(req), s.principalId),
+        };
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/vault/actions', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true);
+        return governance.service.propose(
+          await id(req),
+          s.principalId,
+          req.body,
+        );
+      }),
+    );
+    const actionParams = (req: FastifyRequest) =>
+      z
+        .strictObject({
+          workspaceId: WorkspaceIdSchema,
+          actionId: z.string().uuid(),
+        })
+        .parse(req.params);
+    app.get(
+      '/v2/workspaces/:workspaceId/vault/actions/:actionId',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req),
+            p = actionParams(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          return governance.service.view(
+            p.workspaceId,
+            s.principalId,
+            p.actionId,
+          );
+        }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/vault/actions/:actionId/approve',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = actionParams(req);
+          await store.throttle(`workspace:${p.workspaceId}`, 240);
+          const hex = z
+            .string()
+            .regex(/^0x[0-9a-fA-F]{130}$/)
+            .transform((v) => v as `0x${string}`);
+          const body = z
+            .strictObject({ approvalSignature: hex, safeSignature: hex })
+            .parse(req.body);
+          const result = await governance.service.approve(
+            p.workspaceId,
+            s.principalId,
+            p.actionId,
+            body,
+          );
+          governance.wake();
+          return result;
+        }),
+    );
+  }
   app.post('/v2/workspaces/:workspaceId/invites', (req, reply) =>
     handle(reply, async () => {
       const session = await auth(req, true);

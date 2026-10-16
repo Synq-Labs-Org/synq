@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./contracts": "./src/contracts.ts"
+    "./contracts": "./src/contracts.ts",
+    "./finance": "./src/finance.ts",
+    "./finance-contracts": "./src/finance-contracts.ts",
+    "./payouts": "./src/payouts.ts",
+    "./governance": "./src/governance.ts"
   },
   "dependencies": {
     "@synq/kernel": "workspace:*",

@@ -1,3 +1,11 @@
+import {
+  mandateTypedData,
+  intentApprovalTypedData,
+} from './arc-payment-data.js';
+export {
+  mandateTypedData,
+  intentApprovalTypedData,
+} from './arc-payment-data.js';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   encodeAbiParameters,
@@ -14,6 +22,15 @@ import {
   type VaultSetup,
   type SetupSignature,
 } from './arc-vault-setup.js';
+import { hashTypedData } from 'viem';
+import {
+  SafeActionSchema,
+  safeActionApprovalTypedData,
+  safeActionTypedData,
+  safeActionExecution,
+  type SafeAction,
+  type SafeActionSignature,
+} from './arc-safe-action.js';
 
 /**
  * Arc payment authority: the deterministic barrier between an agent's proposal
@@ -121,6 +138,10 @@ export type ApprovalTerms = Readonly<{ nonce: Hex; deadline: number }>;
 export type OwnerApproval = ApprovalTerms & Readonly<{ signature: Hex }>;
 /** Default lifetime of an approval request. */
 export const APPROVAL_TTL_SECONDS = 900;
+export const newApprovalTerms = (now: number): ApprovalTerms => ({
+  nonce: `0x${randomBytes(32).toString('hex')}`,
+  deadline: now + APPROVAL_TTL_SECONDS,
+});
 
 export type Decision =
   | {
@@ -149,6 +170,7 @@ export type ExecutionGrant = Readonly<{
   amount: string;
   /** keccak of the exact call; executors recompute it from what they will sign. */
   actionHash: Hex;
+  executionCallHash?: Hex;
   operator: string;
   nonce: Hex;
   issuedAt: number;
@@ -156,6 +178,19 @@ export type ExecutionGrant = Readonly<{
   issuedByKernel: true;
   mac: Hex;
 }>;
+export type ExecutionCall = Readonly<{ to: Address; value: bigint; data: Hex }>;
+export const executionCallHash = (chainId: number, c: ExecutionCall) =>
+  keccak256(
+    encodeAbiParameters(
+      [
+        { type: 'uint256' },
+        { type: 'address' },
+        { type: 'uint256' },
+        { type: 'bytes' },
+      ],
+      [BigInt(chainId), c.to, c.value, c.data],
+    ),
+  );
 
 export class AuthorityError extends Error {
   constructor(
@@ -175,45 +210,6 @@ export class AuthorityError extends Error {
 }
 
 const lower = (a: string) => a.toLowerCase();
-
-export function mandateTypedData(m: PaymentMandate) {
-  return {
-    domain: { name: 'Synq Payment Mandate', version: '1', chainId: m.chainId },
-    types: {
-      PaymentMandate: [
-        { name: 'mandateId', type: 'string' },
-        { name: 'version', type: 'uint256' },
-        { name: 'workspaceId', type: 'string' },
-        { name: 'owner', type: 'address' },
-        { name: 'token', type: 'address' },
-        { name: 'payer', type: 'address' },
-        { name: 'recipients', type: 'address[]' },
-        { name: 'purposes', type: 'string[]' },
-        { name: 'perActionCap', type: 'uint256' },
-        { name: 'periodBudget', type: 'uint256' },
-        { name: 'periodSeconds', type: 'uint256' },
-        { name: 'validFrom', type: 'uint256' },
-        { name: 'validUntil', type: 'uint256' },
-      ],
-    },
-    primaryType: 'PaymentMandate' as const,
-    message: {
-      mandateId: m.mandateId,
-      version: BigInt(m.version),
-      workspaceId: m.workspaceId,
-      owner: m.owner,
-      token: m.token,
-      payer: m.payer,
-      recipients: [...m.recipients],
-      purposes: [...m.purposes],
-      perActionCap: m.perActionCap,
-      periodBudget: m.periodBudget,
-      periodSeconds: BigInt(m.periodSeconds),
-      validFrom: BigInt(m.validFrom),
-      validUntil: BigInt(m.validUntil),
-    },
-  };
-}
 
 export function validateMandate(m: PaymentMandate): void {
   const bad = (why: string) => {
@@ -329,6 +325,7 @@ function macOf(key: Uint8Array, g: Omit<ExecutionGrant, 'mac'>): Hex {
     g.nonce,
     g.issuedAt,
     g.expiresAt,
+    ...(g.executionCallHash ? [g.executionCallHash] : []),
   ]);
   return `0x${createHmac('sha256', key).update(body).digest('hex')}`;
 }
@@ -440,6 +437,118 @@ export async function admitVaultCreationGrant(input: {
   });
 }
 
+/** Safe quorum signatures authorize only this bounded governance call and expiry. */
+export async function decideWorkspaceSafeAction(input: {
+  config: AuthorityConfig;
+  action: SafeAction;
+  signatures: readonly SafeActionSignature[];
+  custody: {
+    safe: Address;
+    policy: Address;
+    owners: readonly Address[];
+    threshold: number;
+    nonce: bigint;
+  };
+  vendor: { address: Address; changeHash: Hex; eligibleAt: number };
+  simulationOk: boolean;
+  now: number;
+}): Promise<Decision> {
+  const parsed = SafeActionSchema.safeParse(input.action);
+  if (!parsed.success) return { outcome: 'DENY', reasons: ['invalid action'] };
+  const a = parsed.data,
+    c = input.custody;
+  const deny = (reason: string): Decision => ({
+    outcome: 'DENY',
+    reasons: [reason],
+  });
+  if (
+    input.config.grantKey.byteLength < 32 ||
+    !Number.isSafeInteger(input.config.grantTtlSeconds) ||
+    input.config.grantTtlSeconds <= 0
+  )
+    return deny('invalid Kernel grant configuration');
+  if (a.expiresAt <= input.now || a.expiresAt > input.now + 900)
+    return deny('action expired or unbounded');
+  if (
+    lower(a.safe) !== lower(c.safe) ||
+    lower(a.policy) !== lower(c.policy) ||
+    BigInt(a.nonce) !== c.nonce
+  )
+    return deny('custody or Safe nonce changed');
+  if (
+    a.vendorChangeHash !== input.vendor.changeHash ||
+    lower(a.vendorAddress) !== lower(input.vendor.address)
+  )
+    return deny('vendor changed');
+  if (a.kind !== 'REMOVE_VENDOR' && input.vendor.eligibleAt > input.now)
+    return deny('vendor cooling');
+  if (
+    !input.simulationOk ||
+    c.threshold < 1 ||
+    c.threshold > c.owners.length ||
+    new Set(c.owners.map(lower)).size !== c.owners.length
+  )
+    return deny('simulation or custody unavailable');
+  const counted = new Set<string>();
+  for (const s of input.signatures) {
+    const [approval, safe] = await Promise.all([
+      recoverTypedDataAddress({
+        ...safeActionApprovalTypedData(a),
+        signature: s.approvalSignature,
+      }).catch(() => null),
+      recoverTypedDataAddress({
+        ...safeActionTypedData(a),
+        signature: s.safeSignature,
+      }).catch(() => null),
+    ]);
+    if (
+      !approval ||
+      !safe ||
+      lower(approval) !== lower(s.owner) ||
+      lower(safe) !== lower(s.owner) ||
+      !c.owners.some((v) => lower(v) === lower(s.owner)) ||
+      counted.has(lower(s.owner))
+    )
+      return deny('invalid or duplicate owner signatures');
+    counted.add(lower(s.owner));
+  }
+  if (counted.size < c.threshold) return deny('current Safe quorum required');
+  const call = {
+    chainId: a.chainId,
+    token: a.token,
+    payer: a.safe,
+    recipient: a.policy,
+    amount: 0n,
+  };
+  const body: Omit<ExecutionGrant, 'mac'> = {
+    grantId: `grt_${randomBytes(12).toString('hex')}`,
+    intentId: `workspace-action:${a.id}`,
+    mandateId: `workspace-action:${a.id}`,
+    mandateVersion: 1,
+    mandateHash: hashTypedData(safeActionApprovalTypedData(a)),
+    chainId: a.chainId,
+    token: a.token,
+    payer: a.safe,
+    recipient: a.policy,
+    amount: '0',
+    actionHash: transferActionHash(call),
+    executionCallHash: executionCallHash(
+      a.chainId,
+      safeActionExecution(a, input.signatures),
+    ),
+    operator: input.config.operator,
+    nonce: `0x${randomBytes(32).toString('hex')}`,
+    issuedAt: input.now,
+    expiresAt: Math.min(a.expiresAt, input.now + input.config.grantTtlSeconds),
+    issuedByKernel: true,
+  };
+  return {
+    outcome: 'ALLOW',
+    reasons: ['current Safe quorum signed exact governance call and deadline'],
+    grant: Object.freeze({ ...body, mac: macOf(input.config.grantKey, body) }),
+  };
+}
+
 /**
  * Decision. `ownerApproval` is the owner's EIP-712 signature over the intent
  * and the approval terms (one-use nonce, deadline) the Kernel issued with its
@@ -462,6 +571,7 @@ export async function decide(input: {
    * step): without it the result is REQUIRE_OWNER_APPROVAL and no grant.
    */
   requireOwnerApproval?: boolean;
+  executionCall?: ExecutionCall;
 }): Promise<Decision> {
   const { mandate: m, intent: i, state, risk, now } = input;
   const deny = (...reasons: string[]): Decision => ({
@@ -521,10 +631,7 @@ export async function decide(input: {
             ? `amount ${i.amount} above per-action cap ${m.perActionCap}`
             : 'owner confirmation required for this payment',
         ],
-        approval: {
-          nonce: `0x${randomBytes(32).toString('hex')}` as Hex,
-          deadline: now + APPROVAL_TTL_SECONDS,
-        },
+        approval: newApprovalTerms(now),
       };
     if (!Number.isSafeInteger(a.deadline) || now > a.deadline)
       return deny('owner approval expired');
@@ -540,7 +647,7 @@ export async function decide(input: {
   }
   return {
     outcome: 'ALLOW',
-    grant: issueGrant(input.config, m, i, now),
+    grant: issueGrant(input.config, m, i, now, input.executionCall),
     reasons,
   };
 }
@@ -549,45 +656,12 @@ export async function decide(input: {
  * What an owner signs to approve one specific intent: its exact terms plus
  * the Kernel-issued one-use nonce and deadline.
  */
-export function intentApprovalTypedData(
-  i: PaymentIntent,
-  terms: ApprovalTerms,
-) {
-  return {
-    domain: { name: 'Synq Payment Approval', version: '1', chainId: i.chainId },
-    types: {
-      PaymentApproval: [
-        { name: 'intentId', type: 'string' },
-        { name: 'mandateId', type: 'string' },
-        { name: 'token', type: 'address' },
-        { name: 'payer', type: 'address' },
-        { name: 'recipient', type: 'address' },
-        { name: 'amount', type: 'uint256' },
-        { name: 'obligationRef', type: 'string' },
-        { name: 'nonce', type: 'bytes32' },
-        { name: 'deadline', type: 'uint64' },
-      ],
-    },
-    primaryType: 'PaymentApproval' as const,
-    message: {
-      intentId: i.intentId,
-      mandateId: i.mandateId,
-      token: i.token,
-      payer: i.payer,
-      recipient: i.recipient,
-      amount: i.amount,
-      obligationRef: i.obligationRef,
-      nonce: terms.nonce,
-      deadline: BigInt(terms.deadline),
-    },
-  };
-}
-
 function issueGrant(
   config: AuthorityConfig,
   m: PaymentMandate,
   i: PaymentIntent,
   now: number,
+  executionCall?: ExecutionCall,
 ): ExecutionGrant {
   const body = {
     grantId: `grt_${randomBytes(12).toString('hex')}`,
@@ -601,6 +675,9 @@ function issueGrant(
     recipient: i.recipient,
     amount: String(i.amount),
     actionHash: transferActionHash(i),
+    ...(executionCall
+      ? { executionCallHash: executionCallHash(i.chainId, executionCall) }
+      : {}),
     operator: config.operator,
     nonce: `0x${randomBytes(32).toString('hex')}` as Hex,
     issuedAt: now,
@@ -643,6 +720,7 @@ type GrantCheck = {
   };
   now: number;
   mandateRevoked: boolean;
+  executionCall?: ExecutionCall;
 };
 
 /**
@@ -664,6 +742,15 @@ export function verifyGrant(input: GrantCheck): void {
     throw new AuthorityError('GRANT_FORGED');
   if (input.now >= g.expiresAt) throw new AuthorityError('GRANT_EXPIRED');
   if (input.mandateRevoked) throw new AuthorityError('GRANT_REVOKED');
+  if (
+    (g.executionCallHash || input.executionCall) &&
+    (!input.executionCall ||
+      g.executionCallHash !== executionCallHash(g.chainId, input.executionCall))
+  )
+    throw new AuthorityError(
+      'GRANT_MISMATCH',
+      'execution target, value or calldata differs from the Kernel grant',
+    );
   if (
     transferActionHash(input.call) !== g.actionHash ||
     transferActionHash({ ...input.call, amount: BigInt(g.amount) }) !==
@@ -693,6 +780,7 @@ export async function admitGrant(input: {
   };
   now: number;
   mandateRevoked: boolean;
+  executionCall?: ExecutionCall;
   fence: NonceFence;
 }): Promise<void> {
   verifyGrant(input);

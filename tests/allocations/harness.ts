@@ -295,8 +295,18 @@ export function position(
  * Transfer and OperatorPaid logs.
  */
 export function fakeVaultChain(
-  opts: { perPaymentCap?: bigint; windowCap?: bigint } = {},
+  opts: {
+    perPaymentCap?: bigint;
+    windowCap?: bigint;
+    vault?: Address;
+    policy?: Address;
+    operator?: Address;
+    now?: number;
+  } = {},
 ) {
+  const vault = opts.vault ?? VAULT,
+    policy = opts.policy ?? POLICY,
+    operatorAddress = opts.operator ?? operator.address;
   const perPaymentCap = opts.perPaymentCap ?? usd('1000');
   const windowCap = opts.windowCap ?? usd('5000');
   let windowSpent = 0n;
@@ -335,18 +345,30 @@ export function fakeVaultChain(
   };
   const client = {
     getChainId: async () => USDC.chainId,
+    getBlock: async () => ({ timestamp: BigInt(opts.now ?? T0) }),
+    getBlockNumber: async () => 2000n,
     getCode: async ({ address }: { address: Address }) =>
       address.toLowerCase() === USDC.address.toLowerCase()
         ? USDC_CODE
         : POLICY_CODE,
     readContract: async ({ functionName }: { functionName: string }) =>
-      functionName === 'safe'
-        ? VAULT
-        : functionName === 'operator'
-          ? operator.address
-          : functionName === 'balanceOf'
-            ? 10n ** 15n
-            : 0n,
+      functionName === 'perPaymentCap'
+        ? perPaymentCap
+        : functionName === 'windowCap'
+          ? windowCap
+          : functionName === 'windowSpent'
+            ? windowSpent
+            : functionName === 'windowStart'
+              ? BigInt(opts.now ?? T0)
+              : functionName === 'paused'
+                ? false
+                : functionName === 'safe'
+                  ? vault
+                  : functionName === 'operator'
+                    ? operatorAddress
+                    : functionName === 'balanceOf'
+                      ? 10n ** 15n
+                      : 0n,
     call: async ({ data }: { data: Hex }) => {
       const c = check(data);
       return {
@@ -407,7 +429,7 @@ export function fakeVaultChain(
               abi: erc20Abi,
               eventName: 'Transfer',
               args: {
-                from: call.ref === null ? operator.address : VAULT,
+                from: call.ref === null ? operatorAddress : vault,
                 to: call.recipient,
               },
             }),
@@ -419,13 +441,13 @@ export function fakeVaultChain(
             : [
                 {
                   ...base,
-                  address: POLICY,
+                  address: policy,
                   topics: encodeEventTopics({
                     abi: VAULT_POLICY_ABI,
                     eventName: 'OperatorPaid',
                     args: {
                       ref: call.ref,
-                      operator: operator.address,
+                      operator: operatorAddress,
                       recipient: call.recipient,
                     },
                   }),

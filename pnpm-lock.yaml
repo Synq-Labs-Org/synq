@@ -573,6 +573,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../chain-registry
+      '@synq/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@synq/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -1218,6 +1221,9 @@ importers:
 
   workers/execution:
     dependencies:
+      '@synq/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../../packages/chain-registry
@@ -1230,12 +1236,18 @@ importers:
       '@synq/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@synq/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@synq/plugin-circle-cctp':
         specifier: workspace:*
         version: link:../../plugins/circle-cctp
       '@synq/plugin-circle-gas':
         specifier: workspace:*
         version: link:../../plugins/circle-gas
+      '@synq/plugin-risk':
+        specifier: workspace:*
+        version: link:../../plugins/risk
       '@synq/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

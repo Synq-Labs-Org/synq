@@ -24,7 +24,10 @@
     "./pg-escrow": "./src/pg-escrow.ts",
     "./agent-stack": "./src/agent-stack.ts",
     "./workspace-vault": "./src/workspace-vault.ts",
-    "./circle-wallets": "./src/circle-wallets.ts"
+    "./circle-wallets": "./src/circle-wallets.ts",
+    "./workspace-payout": "./src/workspace-payout.ts",
+    "./workspace-governance": "./src/workspace-governance.ts",
+    "./workspace-authority": "./src/workspace-authority.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -39,6 +42,9 @@
     "@synq/plugin-circle-gas": "workspace:*",
     "@synq/schemas": "workspace:*",
     "viem": "2.57.4",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/plugin-risk": "workspace:*",
+    "@synq/ledger": "workspace:*"
   }
 }

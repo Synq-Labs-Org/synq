@@ -6,8 +6,13 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { AuthorityError, type ExecutionGrant } from '@synq/kernel/arc';
+import {
+  AuthorityError,
+  type ExecutionGrant,
+  type NonceFence,
+} from '@synq/kernel/arc';
 import { money, type AssetRef } from '@synq/domain';
+import type { SqlQueryable } from '@synq/domain/pg';
 import { contract } from '@synq/chain-registry/arc';
 import {
   ArcExecutionError,
@@ -71,10 +76,21 @@ export const isVaultPayRecord = (r: OutboxRecord) =>
     ref: `0x${'00'.repeat(32)}`,
   }).slice(0, 10);
 
+export type VaultBinding = Readonly<{
+  vault: Address;
+  policy: Address;
+  policyCodeHash: Hex;
+}>;
+const registryBinding = (chain: ArcChain): VaultBinding => ({
+  vault: contract(chain.profile.name, 'SYNQ_ARC_VAULT_SAFE').address,
+  policy: contract(chain.profile.name, 'SYNQ_ARC_VAULT_POLICY').address,
+  policyCodeHash: contract(chain.profile.name, 'SYNQ_ARC_VAULT_POLICY')
+    .codeHash as Hex,
+});
+
 /** Live caps and window of the registry vault policy. */
-export async function readVaultWindow(chain: ArcChain) {
-  const policy = contract(chain.profile.name, 'SYNQ_ARC_VAULT_POLICY')
-    .address as Address;
+export async function readVaultWindow(chain: ArcChain, binding?: VaultBinding) {
+  const policy = (binding ?? registryBinding(chain)).policy;
   const abi = [
     ...VAULT_POLICY_ABI,
     {
@@ -163,6 +179,8 @@ export async function vaultPayOnce(input: {
   key: string;
   /** Atomically consumed with the signed record when supported by the store. */
   grant?: ExecutionGrant;
+  binding?: VaultBinding;
+  admit?: (fence: NonceFence, sql: SqlQueryable) => Promise<void>;
   chain: ArcChain;
   /** The vault operator's signer (transaction sender). */
   signer: TransferSigner;
@@ -181,18 +199,23 @@ export async function vaultPayOnce(input: {
   afterRecord?: (r: OutboxRecord) => Promise<void> | void;
 }): Promise<VaultPayOnceResult> {
   const { chain, store, signer, call } = input;
-  const policyEntry = contract(chain.profile.name, 'SYNQ_ARC_VAULT_POLICY');
-  const policy = policyEntry.address as Address;
-  const vault = contract(chain.profile.name, 'SYNQ_ARC_VAULT_SAFE')
-    .address as Address;
+  const binding = input.binding ?? registryBinding(chain);
+  const { policy, vault } = binding;
   const existing = await store.get(input.key);
   if (existing) {
     assertSameVaultPayment(existing, signer.address, policy, call);
-    return recoverVaultPay(store, chain, existing, input.asset, input.now);
+    return recoverVaultPay(
+      store,
+      chain,
+      existing,
+      input.asset,
+      input.now,
+      binding,
+    );
   }
   if (!chain.profile.mutationEnabled)
     throw new ArcExecutionError('MUTATION_DISABLED', chain.profile.name);
-  const codeHash = await verifyCode(chain, policy, policyEntry.codeHash);
+  const codeHash = await verifyCode(chain, policy, binding.policyCodeHash);
   const [boundSafe, operator] = await Promise.all([
     chain.client.readContract({
       address: policy,
@@ -274,20 +297,29 @@ export async function vaultPayOnce(input: {
     updatedAt: input.now(),
   };
   const outcome =
-    input.grant && store.createConsumingGrant
-      ? await store.createConsumingGrant(record, input.grant, input.now())
-      : (await store.create(record))
-        ? 'CREATED'
-        : 'KEY_EXISTS';
+    input.grant && input.admit && store.createAdmittingGrant
+      ? await store.createAdmittingGrant(record, input.grant, input.admit)
+      : input.grant && store.createConsumingGrant
+        ? await store.createConsumingGrant(record, input.grant, input.now())
+        : (await store.create(record))
+          ? 'CREATED'
+          : 'KEY_EXISTS';
   if (outcome === 'GRANT_REPLAYED') throw new AuthorityError('GRANT_REPLAYED');
   if (outcome === 'KEY_EXISTS') {
     const winner = (await store.get(input.key))!;
     assertSameVaultPayment(winner, signer.address, policy, call);
-    return recoverVaultPay(store, chain, winner, input.asset, input.now);
+    return recoverVaultPay(
+      store,
+      chain,
+      winner,
+      input.asset,
+      input.now,
+      binding,
+    );
   }
   await input.afterRecord?.(record);
   await chain.client.sendRawTransaction({ serializedTransaction: raw });
-  const evidence = await reconcileVaultPay(chain, record, input.asset);
+  const evidence = await reconcileVaultPay(chain, record, input.asset, binding);
   const done: OutboxRecord = {
     ...record,
     state: 'CONFIRMED',
@@ -307,9 +339,9 @@ export async function reconcileVaultPay(
   chain: ArcChain,
   r: OutboxRecord,
   asset: AssetRef,
+  binding?: VaultBinding,
 ): Promise<VaultPayEvidence> {
-  const vault = contract(chain.profile.name, 'SYNQ_ARC_VAULT_SAFE')
-    .address as Address;
+  const vault = (binding ?? registryBinding(chain)).vault;
   const p = r.prepared;
   const receipt = await chain.client.waitForTransactionReceipt({
     hash: r.hash,
@@ -375,12 +407,13 @@ export async function recoverVaultPay(
   r: OutboxRecord,
   asset: AssetRef,
   now: () => number,
+  binding?: VaultBinding,
 ): Promise<VaultPayOnceResult> {
   if (r.state === 'CONFIRMED')
     return {
       record: r,
       signedNow: false,
-      evidence: await reconcileVaultPay(chain, r, asset),
+      evidence: await reconcileVaultPay(chain, r, asset, binding),
     };
   if (r.state !== 'SIGNED')
     return { record: r, signedNow: false, evidence: null };
@@ -408,7 +441,7 @@ export async function recoverVaultPay(
   let evidence: VaultPayEvidence | null = null;
   if (receipt) {
     if (receipt.status === 'success') {
-      evidence = await reconcileVaultPay(chain, r, asset);
+      evidence = await reconcileVaultPay(chain, r, asset, binding);
       next = { ...r, state: 'CONFIRMED', evidence, updatedAt: now() };
     } else
       next = {
@@ -437,7 +470,7 @@ export async function recoverVaultPay(
           if (!/known|already|underpriced|nonce too low/i.test(e.message))
             throw e;
         });
-      evidence = await reconcileVaultPay(chain, r, asset);
+      evidence = await reconcileVaultPay(chain, r, asset, binding);
       next = { ...r, state: 'CONFIRMED', evidence, updatedAt: now() };
     }
   }

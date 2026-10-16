@@ -97,6 +97,7 @@ export async function registerChannels(input: {
   executed?: ChannelExecutionSource;
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
   workspaceOnboarding?: boolean;
+  workspaceMessage?: ChannelPorts['workspaceMessage'];
   brain?: ChannelPorts['brain'];
   mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
   log: ChannelLog;
@@ -216,17 +217,22 @@ export async function registerChannels(input: {
   const gateway = new ChannelGateway({
     store,
     adapters,
-    ports: productionChannelPorts({
-      send: input.send,
-      sends: input.sends,
-      approvals: input.approvals,
-      ...(input.executed ? { executed: input.executed } : {}),
-      executionMode: input.executionMode,
-      ...(input.brain ? { brain: input.brain } : {}),
-      ...(input.mandateProposals
-        ? { mandateProposals: input.mandateProposals }
+    ports: {
+      ...productionChannelPorts({
+        send: input.send,
+        sends: input.sends,
+        approvals: input.approvals,
+        ...(input.executed ? { executed: input.executed } : {}),
+        executionMode: input.executionMode,
+        ...(input.brain ? { brain: input.brain } : {}),
+        ...(input.mandateProposals
+          ? { mandateProposals: input.mandateProposals }
+          : {}),
+      }),
+      ...(input.workspaceMessage
+        ? { workspaceMessage: input.workspaceMessage }
         : {}),
-    }),
+    },
     webBaseUrl,
     workspaceOnboarding: input.workspaceOnboarding,
     explorerTxUrl: env.SYNQ_EXPLORER_TX_URL,

@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./postgres": "./src/postgres.ts",
-    "./cards": "./src/cards/index.ts"
+    "./cards": "./src/cards/index.ts",
+    "./durable-delivery": "./src/durable-delivery.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
@@ -16,6 +17,7 @@
     "@synq/chain-registry": "workspace:*",
     "@synq/schemas": "workspace:*",
     "satori": "0.47.1",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "@synq/domain": "workspace:*"
   }
 }
