@@ -21,7 +21,8 @@
     "./pg-cctp-gateway": "./src/pg-cctp-gateway.ts",
     "./vault-outbox": "./src/vault-outbox.ts",
     "./escrow": "./src/escrow.ts",
-    "./pg-escrow": "./src/pg-escrow.ts"
+    "./pg-escrow": "./src/pg-escrow.ts",
+    "./agent-stack": "./src/agent-stack.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

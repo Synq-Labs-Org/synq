@@ -73,6 +73,13 @@
     { "chain": "base-sepolia", "kind": "CCTP_MESSAGE_TRANSMITTER_V2", "address": "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275", "codeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99", "proxy": true },
     {"chain": "arc-testnet", "kind": "CIRCLE_APP_KIT_FEE_COLLECTOR", "address": "0xf992EFCB5FA2eD7cB48310D9dd8Cb4ce5FB7DdC9", "codeHash": "0x6b37ea169a334620ba5e8f6073e3197f5959cc5d770e31ba8a37db7e0ecb4377", "proxy": true},
     {"chain": "arc-testnet", "kind": "CIRCLE_APP_KIT_SWAP_ROUTER", "address": "0xFf70F4A1d11995621854F3692acF286d8aCd04b2", "codeHash": "0x9a476b17129eb4c3495ca89db1e4db47ca59df3f6dcff8f2225703f2ca24a694", "proxy": true},
-    {"chain": "arc-testnet", "kind": "CIRCLE_APP_KIT_SWAP_EXECUTOR", "address": "0x20F6ee51340aDEed01A59B0e65cB3703f3dc860c", "codeHash": "0xaffe8098fa7a152f718c07de0ea7657382e535a301aaf12f89bbba8f91e4b352", "proxy": false}
+    {"chain": "arc-testnet", "kind": "CIRCLE_APP_KIT_SWAP_EXECUTOR", "address": "0x20F6ee51340aDEed01A59B0e65cB3703f3dc860c", "codeHash": "0xaffe8098fa7a152f718c07de0ea7657382e535a301aaf12f89bbba8f91e4b352", "proxy": false},
+    {"chain": "arc-testnet", "kind": "ERC8004_IDENTITY_REGISTRY_IMPLEMENTATION", "address": "0x7274e874CA62410a93Bd8bf61c69d8045E399c02", "codeHash": "0xa5f9624ea85e45b3f4b8558581f03bfb3e6cefab278d7bf0500ec9bd065dc16f", "proxy": false},
+    {"chain": "arc-testnet", "kind": "ERC8004_REPUTATION", "address": "0x8004B663056A597Dffe9eCcC1965A193B7388713", "codeHash": "0xd0e45b1d89fa9b6cc7e97c1f155d64180e5c232aaccf9900ef9d4fd738c02b41", "proxy": true},
+    {"chain": "arc-testnet", "kind": "ERC8004_REPUTATION_IMPLEMENTATION", "address": "0x16e0FA7f7C56B9a767E34B192B51f921BE31dA34", "codeHash": "0x38602de97f1bd86f0a4729f7f3c0a78b1d27892e6eb581272cce5504a68fd00b", "proxy": false},
+    {"chain": "arc-testnet", "kind": "ERC8004_VALIDATION", "address": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272", "codeHash": "0xd0e45b1d89fa9b6cc7e97c1f155d64180e5c232aaccf9900ef9d4fd738c02b41", "proxy": true},
+    {"chain": "arc-testnet", "kind": "ERC8004_VALIDATION_IMPLEMENTATION", "address": "0xDB31f5d9167f8ebc8B30FbBF814c4d297c2D7F99", "codeHash": "0x14ffccec8b46c9175bb80327a5471b0333596aed02e2ff500d772bd505a303c6", "proxy": false},
+    {"chain": "arc-testnet", "kind": "ERC8183_AGENTIC_COMMERCE_IMPLEMENTATION", "address": "0xA316fd02827242D537F84730F8a37D0BA5fd351a", "codeHash": "0x7054f89cadf92af85003313db92e9b29ef670ee2c7a20b5295cdddf66ecaa4b3", "proxy": false},
+    {"chain": "arc-testnet", "kind": "MULTICALL3_FROM", "address": "0x522fAf9A91c41c443c66765030741e4AaCe147D0", "codeHash": "0xcd143ed09b95ea2c4c85f7c24ffa039cc8914771f62ba584f611358629bed687", "proxy": false}
   ]
 }

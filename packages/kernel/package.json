@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./arc": "./src/arc-authority.ts",
-    "./arc-escrow": "./src/arc-escrow.ts"
+    "./arc-escrow": "./src/arc-escrow.ts",
+    "./arc-agent-jobs": "./src/arc-agent-jobs.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
