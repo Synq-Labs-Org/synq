@@ -48,7 +48,7 @@ Additional Circle-workstream evidence exists for **App Kit Swap** (0.02 USDC →
 
 Circle developer wallets and Gas Station await credentials. The operational wallet here is a local testnet EOA, not a Circle Agent Wallet. Direct transfers and CCTP do not establish App Kit Send/Bridge SDK usage. Live x402, ERC-8004 identity and ERC-8183 jobs remain pending.
 
-Commerce and travel workstreams have provider-sandbox evidence, with review/merge pending. A Lithic sandbox authorization is not an Amazon order. A Duffel cancellation refund receivable is not settled cash. Provider sandbox balances never fund Arc transactions.
+Reviewed commerce, travel and contributor-fund code is merged, with provider-sandbox evidence. Booking mutations require durable attempt storage; unresolved group payments keep funds reserved. A Lithic sandbox authorization is not an Amazon order. A Duffel cancellation refund receivable is not settled cash. Provider sandbox balances never fund Arc transactions.
 
 ## Setup
 
