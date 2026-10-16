@@ -52,11 +52,11 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         render()
     }
 
-    /// Height of the live layout bubble in the transcript.
+    /// Height of the live layout bubble in the transcript: the landscape holo card
+    /// in its dark scene, capped so a bubble never dominates the conversation.
     override func contentSizeThatFits(_ size: CGSize) -> CGSize {
-        // Fund cards keep credit-card proportions (1.586:1).
         CGSize(width: size.width,
-               height: min(mode == .legacy ? 160 : size.width / 1.586 + 4, size.height))
+               height: min(mode == .legacy ? 168 : HoloBubbleScene.height(forWidth: size.width), size.height))
     }
 
     /// Stable per-device identifier for a conversation; the extension cannot read
@@ -134,12 +134,20 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
             }
         }
         if presentationStyle == .transcript {
-            // A live bubble receives its own taps; open this card expanded.
+            // A live bubble receives its own taps; open this card expanded. Tapping
+            // never approves anything: approvals happen on the Synq page.
             view = AnyView(view
                 .contentShape(Rectangle())
-                .onTapGesture { [weak self] in self?.requestPresentationStyle(.expanded) })
+                .onTapGesture { [weak self] in
+                    Haptics.tap()
+                    self?.requestPresentationStyle(.expanded)
+                })
         }
+        view = AnyView(view
+            .environment(\.synqCompact, presentationStyle == .compact)
+            .preferredColorScheme(.dark))
         let controller = UIHostingController(rootView: view)
+        controller.view.backgroundColor = UIColor(red: 0.02, green: 0.02, blue: 0.035, alpha: 1)
         hosted?.willMove(toParent: nil)
         hosted?.view.removeFromSuperview()
         hosted?.removeFromParent()
@@ -299,57 +307,5 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         message.url = link.messageURL
         message.summaryText = "Synq: \(template.caption ?? "proposal")"
         insert(message, into: conversation)
-    }
-}
-
-/// Expanded/compact fund screen: the fund home or one payment.
-struct FundScreen: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-
-    var body: some View {
-        if let tripId = model.selectedTrip {
-            if let trip = model.trips.first(where: { $0.tripId == tripId }) {
-                TripDetailView(model: model, trip: trip, actions: actions)
-            } else if let error = model.error {
-                Text(error).font(.footnote).foregroundStyle(.red).padding()
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        } else if let hash = model.selectedProposal {
-            if let ref = model.ref, let p = model.view?.proposals.first(where: { $0.intentHash == hash }) {
-                ProposalDetailView(
-                    proposal: p,
-                    fundName: model.view?.name ?? ref.name,
-                    onApprove: { actions.open(model.client.approvalPage(p.intentHash)) },
-                    onExplorer: { actions.open($0) },
-                    onShare: { actions.insertProposal(ref, p) },
-                    onBack: { model.selectedProposal = nil }
-                )
-            } else if let error = model.error {
-                Text(error).font(.footnote).foregroundStyle(.red).padding()
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        } else {
-            FundHomeView(model: model, actions: actions)
-        }
-    }
-}
-
-/// The live bubble in the transcript for an invite or a payment card.
-struct FundBubble: View {
-    @ObservedObject var model: FundModel
-
-    var body: some View {
-        if let tripId = model.selectedTrip {
-            FundTripBubble(trip: model.trips.first { $0.tripId == tripId },
-                           fundName: model.view?.name ?? model.ref?.name)
-        } else if let hash = model.selectedProposal {
-            FundProposalBubble(proposal: model.view?.proposals.first { $0.intentHash == hash },
-                               fundName: model.view?.name ?? model.ref?.name)
-        } else {
-            FundInviteBubble(fallbackName: model.ref?.name ?? "Synq fund", view: model.view)
-        }
     }
 }

@@ -17,6 +17,13 @@
 		5E0000000000000000000037 /* Fund.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000028 /* Fund.swift */; };
 		5E0000000000000000000038 /* FundViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000029 /* FundViews.swift */; };
 		5E0000000000000000000039 /* Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E000000000000000000002A /* Chrome.swift */; };
+		5E00000000000000000000B0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A0 /* Theme.swift */; };
+		5E00000000000000000000B1 /* HoloCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A1 /* HoloCard.swift */; };
+		5E00000000000000000000B2 /* FundCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A2 /* FundCards.swift */; };
+		5E00000000000000000000B3 /* QuickParse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A3 /* QuickParse.swift */; };
+		5E00000000000000000000B4 /* FundModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A4 /* FundModel.swift */; };
+		5E00000000000000000000B5 /* DetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A5 /* DetailViews.swift */; };
+		5E00000000000000000000B6 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A6 /* Sheets.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +64,13 @@
 		5E0000000000000000000028 /* Fund.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fund.swift; sourceTree = "<group>"; };
 		5E0000000000000000000029 /* FundViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundViews.swift; sourceTree = "<group>"; };
 		5E000000000000000000002A /* Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Chrome.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A1 /* HoloCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloCard.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A2 /* FundCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundCards.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A3 /* QuickParse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickParse.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A4 /* FundModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundModel.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A5 /* DetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViews.swift; sourceTree = "<group>"; };
+		5E00000000000000000000A6 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +122,13 @@
 				5E000000000000000000002A /* Chrome.swift */,
 				5E0000000000000000000029 /* FundViews.swift */,
 				5E0000000000000000000028 /* Fund.swift */,
+				5E00000000000000000000A0 /* Theme.swift */,
+				5E00000000000000000000A1 /* HoloCard.swift */,
+				5E00000000000000000000A2 /* FundCards.swift */,
+				5E00000000000000000000A3 /* QuickParse.swift */,
+				5E00000000000000000000A4 /* FundModel.swift */,
+				5E00000000000000000000A5 /* DetailViews.swift */,
+				5E00000000000000000000A6 /* Sheets.swift */,
 				5E0000000000000000000025 /* Info.plist */,
 			);
 			path = SynqMessagesExtension;
@@ -216,6 +237,13 @@
 				5E0000000000000000000033 /* CardViews.swift in Sources */,
 				5E0000000000000000000034 /* CardStatusClient.swift in Sources */,
 				5E0000000000000000000039 /* Chrome.swift in Sources */,
+				5E00000000000000000000B0 /* Theme.swift in Sources */,
+				5E00000000000000000000B1 /* HoloCard.swift in Sources */,
+				5E00000000000000000000B2 /* FundCards.swift in Sources */,
+				5E00000000000000000000B3 /* QuickParse.swift in Sources */,
+				5E00000000000000000000B4 /* FundModel.swift in Sources */,
+				5E00000000000000000000B5 /* DetailViews.swift in Sources */,
+				5E00000000000000000000B6 /* Sheets.swift in Sources */,
 				5E0000000000000000000038 /* FundViews.swift in Sources */,
 				5E0000000000000000000037 /* Fund.swift in Sources */,
 			);
