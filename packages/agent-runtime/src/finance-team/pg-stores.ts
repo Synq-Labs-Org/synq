@@ -5,6 +5,7 @@ import {
   withTransaction,
   type Migration,
   type SqlPool,
+  type SqlQueryable,
 } from '@synq/domain/pg';
 import {
   DEFAULT_SESSION_BUDGET,
@@ -54,6 +55,16 @@ export const FINANCE_TEAM_MIGRATIONS: readonly Migration[] = [
     DROP TABLE IF EXISTS synq_finance_budget_reservations;
     DROP TABLE IF EXISTS synq_finance_budget_usage;`,
   },
+  {
+    version: 2,
+    up: `ALTER TABLE synq_finance_budget_reservations ADD COLUMN IF NOT EXISTS expires_at bigint;
+    ALTER TABLE synq_finance_budget_reservations ADD COLUMN IF NOT EXISTS expired boolean NOT NULL DEFAULT false;
+    CREATE INDEX IF NOT EXISTS synq_finance_budget_open_holds
+      ON synq_finance_budget_reservations (workspace_id, expires_at) WHERE settled_at IS NULL;`,
+    down: `DROP INDEX IF EXISTS synq_finance_budget_open_holds;
+    ALTER TABLE synq_finance_budget_reservations DROP COLUMN IF EXISTS expired;
+    ALTER TABLE synq_finance_budget_reservations DROP COLUMN IF EXISTS expires_at;`,
+  },
 ];
 
 export const migrateFinanceTeam = (pool: SqlPool, target?: number) =>
@@ -63,6 +74,12 @@ export const migrateFinanceTeam = (pool: SqlPool, target?: number) =>
     FINANCE_TEAM_MIGRATIONS,
     target,
   );
+
+/** One lock order for every budget write in a workspace (no deadlocks). */
+const lockWorkspace = (c: SqlQueryable, workspaceId: string) =>
+  c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+    `synq_finance_budget:${workspaceId}`,
+  ]);
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 /** Only finite, positive, whole amounts are ever added. */
@@ -76,19 +93,32 @@ const usage = (r: Record<string, unknown> | undefined): FinanceUsage => ({
 
 /**
  * Budget usage that survives restarts and is shared across processes.
+ *
+ * Holds: `reserve` counts a run's whole share as used until the run settles.
+ * The supervisor settles on every in-process exit (reply or thrown error), so
+ * only a process that dies mid-run leaves a hold. Such a hold expires after
+ * `holdTtlSeconds` (default 15 minutes, longer than the 12-minute run
+ * deadline) and is then released in full: the dead run's real consumption is
+ * not known (it was never settled), so at most one run's budget per crashed
+ * run can go uncounted, and only after the TTL. Holding it until the window
+ * rolls over (up to a day) was rejected: a few crashes would lock the team.
  * Usage is counted per fixed window (`windowSeconds`, default one day);
  * `remaining` is the caps minus this window's usage. `reserve` holds a run's
  * share under a row lock, so concurrent runs can never jointly exceed a cap.
  */
 export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
   readonly windowSeconds: number;
+  readonly holdTtlSeconds: number;
   private readonly now: () => number;
   constructor(
     readonly pool: SqlPool,
     readonly caps: FinanceUsage = DEFAULT_SESSION_BUDGET,
-    opts: { windowSeconds?: number; now?: () => number } = {},
+    opts: { windowSeconds?: number; holdTtlSeconds?: number; now?: () => number } = {},
   ) {
     this.windowSeconds = opts.windowSeconds ?? 86_400;
+    this.holdTtlSeconds = opts.holdTtlSeconds ?? 900;
+    if (!Number.isSafeInteger(this.holdTtlSeconds) || this.holdTtlSeconds < 60)
+      throw new Error('hold TTL must be at least 60 seconds');
     if (!Number.isSafeInteger(this.windowSeconds) || this.windowSeconds < 60)
       throw new Error('budget window must be at least 60 seconds');
     this.now = opts.now ?? nowSeconds;
@@ -120,7 +150,28 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
   }
 
   async remaining(workspaceId: string): Promise<FinanceUsage> {
+    await withTransaction(this.pool, (c) => this.expireHolds(c, workspaceId));
     return this.left(await this.used(workspaceId));
+  }
+
+  /** Releases unsettled holds past their TTL (runs whose process died). */
+  private async expireHolds(c: SqlQueryable, workspaceId: string) {
+    await lockWorkspace(c, workspaceId);
+    const r = await c.query(
+      `UPDATE synq_finance_budget_reservations SET settled_at=$2, expired=true
+       WHERE workspace_id=$1 AND settled_at IS NULL AND expires_at <= $2
+       RETURNING window_start, tool_calls, tokens, paid_micro_usd`,
+      [workspaceId, this.now()],
+    );
+    for (const h of r.rows)
+      await c.query(
+        `UPDATE synq_finance_budget_usage SET
+           tool_calls = GREATEST(0, tool_calls - $3),
+           tokens = GREATEST(0, tokens - $4),
+           paid_micro_usd = GREATEST(0, paid_micro_usd - $5)
+         WHERE workspace_id=$1 AND window_start=$2`,
+        [workspaceId, h.window_start, h.tool_calls, h.tokens, h.paid_micro_usd],
+      );
   }
 
   async record(workspaceId: string, used: FinanceUsage): Promise<void> {
@@ -149,6 +200,12 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
          ON CONFLICT DO NOTHING`,
         [workspaceId, windowStart],
       );
+      await lockWorkspace(c, workspaceId);
+      await c.query(
+        `SELECT 1 FROM synq_finance_budget_usage WHERE workspace_id=$1 AND window_start=$2 FOR UPDATE`,
+        [workspaceId, windowStart],
+      );
+      await this.expireHolds(c, workspaceId);
       const r = await c.query(
         `SELECT tool_calls, tokens, paid_micro_usd FROM synq_finance_budget_usage
          WHERE workspace_id=$1 AND window_start=$2 FOR UPDATE`,
@@ -175,8 +232,8 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
       const reservationId = `bud_${randomBytes(12).toString('hex')}`;
       await c.query(
         `INSERT INTO synq_finance_budget_reservations
-           (reservation_id, workspace_id, window_start, run_id, tool_calls, tokens, paid_micro_usd, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           (reservation_id, workspace_id, window_start, run_id, tool_calls, tokens, paid_micro_usd, created_at, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           reservationId,
           workspaceId,
@@ -186,6 +243,7 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
           granted.tokens,
           granted.paidMicroUsd,
           this.now(),
+          this.now() + this.holdTtlSeconds,
         ],
       );
       return { reservationId, granted };
@@ -198,6 +256,7 @@ export class PostgresFinanceBudgetLedger implements FinanceBudgetLedger {
    */
   async settle(workspaceId: string, reservationId: string, used: FinanceUsage) {
     await withTransaction(this.pool, async (c) => {
+      await lockWorkspace(c, workspaceId);
       const r = await c.query(
         `SELECT window_start, tool_calls, tokens, paid_micro_usd FROM synq_finance_budget_reservations
          WHERE reservation_id=$1 AND workspace_id=$2 AND settled_at IS NULL FOR UPDATE`,

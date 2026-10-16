@@ -34,6 +34,7 @@ import {
 import { CHAINS, contract, token, tokenEntry } from '@synq/chain-registry/arc';
 import {
   ArcChainIndexer,
+  FATAL_INDEXER_ERRORS,
   Ledger,
   PostgresArcIndexStore,
   PostgresLedgerStore,
@@ -64,26 +65,50 @@ export type ArcIndexerOptions = {
   toBlock?: bigint;
   /** Stop after this many batches (crash/restart rehearsal). */
   maxBatches?: number;
+  /** Reads for receipts and reconciliation (fallback across RPCs is fine for by-hash reads). */
   client?: PublicClient;
+  /** One client per RPC; each indexer step is pinned to one of them. */
+  providers?: readonly PublicClient[];
+  /** Give up a bounded run after this many failed steps (default: never). */
+  maxRetries?: number;
   log?: (line: Record<string, unknown>) => void;
   signal?: AbortSignal;
   now?: () => number;
 };
 
-/** viem client over the env RPC then every registry RPC, in order. */
-export function arcFallbackClient(): PublicClient {
+/** The env RPC, then every registry RPC, in order, without duplicates. */
+export function arcRpcUrls(): string[] {
   const profile = CHAINS['arc-testnet'];
-  const urls = [
-    ...(process.env[profile.rpcEnvironment]
-      ? [process.env[profile.rpcEnvironment]!]
-      : []),
-    ...profile.rpcUrls,
+  return [
+    ...new Set([
+      ...(process.env[profile.rpcEnvironment]
+        ? [process.env[profile.rpcEnvironment]!]
+        : []),
+      ...profile.rpcUrls,
+    ]),
   ];
+}
+
+const httpFor = (u: string) =>
+  http(u, { retryCount: 2, retryDelay: 300, timeout: 20_000 });
+
+/**
+ * One client per RPC, for the indexer's pinned steps. A step never mixes
+ * providers (a per-request fallback once let a lagging RPC silently truncate
+ * a getLogs answer); the indexer moves to the next provider per step.
+ */
+export function arcProviderClients(): PublicClient[] {
+  return arcRpcUrls().map(
+    (u) => createPublicClient({ transport: httpFor(u) }) as PublicClient,
+  );
+}
+
+/** viem client over the env RPC then every registry RPC, for by-hash reads. */
+export function arcFallbackClient(): PublicClient {
+  const urls = arcRpcUrls();
   return createPublicClient({
     transport: fallback(
-      [...new Set(urls)].map((u) =>
-        http(u, { retryCount: 2, retryDelay: 300, timeout: 20_000 }),
-      ),
+      urls.map(httpFor),
     ),
   }) as PublicClient;
 }
@@ -170,10 +195,13 @@ export async function runArcIndexer(o: ArcIndexerOptions) {
     await migrateFinance(pool);
     const client = o.client ?? arcFallbackClient();
     const chain = viemIndexerChain(client);
+    const providers = (
+      o.providers ?? (o.client ? [o.client] : arcProviderClients())
+    ).map(viemIndexerChain);
     const usdc = token('arc-testnet', 'USDC');
     const memo = contract('arc-testnet', 'MEMO');
     const store = new PostgresArcIndexStore(pool);
-    const indexer = new ArcChainIndexer(chain, store, {
+    const indexer = new ArcChainIndexer(providers, store, {
       stream: o.stream,
       chainId: usdc.chainId,
       token: { address: usdc.address, codeHash: tokenEntry(usdc).codeHash! },
@@ -200,13 +228,39 @@ export async function runArcIndexer(o: ArcIndexerOptions) {
       }),
       TRANSFER: async (e: IndexedEvent) => (e.removed ? 'REMOVED' : 'RECORDED'),
     };
+    const effects = async (recovered: boolean) => {
+      try {
+        for (const d of await indexer.applyEffects(sinks))
+          log({ kind: 'effect', ...d, ...(recovered ? { recovered } : {}) });
+      } catch (e) {
+        // The event stays pending and is retried on the next pass.
+        log({ kind: 'effect-retry', message: String((e as Error).message).slice(0, 200) });
+      }
+    };
     // Effects left pending by a crash run first.
-    for (const d of await indexer.applyEffects(sinks))
-      log({ kind: 'effect', ...d, recovered: true });
+    await effects(true);
     let batches = 0;
+    let failures = 0;
     for (;;) {
       if (o.signal?.aborted) break;
-      const r = await indexer.step(o.toBlock);
+      let r: Awaited<ReturnType<typeof indexer.step>>;
+      try {
+        r = await indexer.step(o.toBlock);
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        // Wrong chain, a changed contract or a reorg past the anchor halt the stream.
+        if (FATAL_INDEXER_ERRORS.includes(code as never)) throw e;
+        failures++;
+        log({
+          kind: 'retry',
+          code: code ?? 'ERROR',
+          message: String((e as Error).message).slice(0, 200),
+          nextProvider: indexer.providers.indexOf(indexer.chain),
+        });
+        if (o.maxRetries !== undefined && failures > o.maxRetries) throw e;
+        await new Promise((res) => setTimeout(res, o.pollMs));
+        continue;
+      }
       if (!r.idle) {
         batches++;
         log({
@@ -219,8 +273,7 @@ export async function runArcIndexer(o: ArcIndexerOptions) {
           rolledBackTo: r.rolledBackTo === null ? null : String(r.rolledBackTo),
           removed: r.removed,
         });
-        for (const d of await indexer.applyEffects(sinks))
-          log({ kind: 'effect', ...d });
+        await effects(false);
         if (o.reconcileEvery > 0 && batches % o.reconcileEvery === 0)
           await reconcileAll();
       }

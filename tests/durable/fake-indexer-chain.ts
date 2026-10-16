@@ -151,6 +151,7 @@ export function forkableChain(chainId = 5042002) {
         }
       return out;
     },
+    hasBlock: async (hash) => blocks.some((x) => x.b.hash === hash),
     code: async (a) =>
       a.toLowerCase() === TOKEN.toLowerCase() ? api.code : undefined,
     receiptLogs: async (hash) => {
@@ -172,4 +173,53 @@ export function forkableChain(chainId = 5042002) {
       block === 0n ? 0 : (nonces.get(a.toLowerCase()) ?? 0),
   };
   return { chain, api };
+}
+
+/**
+ * A load-balanced RPC whose logs backend lags at `lagTo`: it reports the real
+ * head, but `eth_getLogs` silently returns only logs up to `lagTo` (and, like
+ * drpc did live, one stray log from before the requested range), and it does
+ * not know blocks above `lagTo` by hash.
+ */
+export function truncatingProvider(
+  inner: IndexerChain,
+  lagTo: () => bigint,
+): IndexerChain & { calls: number } {
+  const p = {
+    ...inner,
+    calls: 0,
+    logs: async (q: Parameters<IndexerChain['logs']>[0]) => {
+      p.calls++;
+      const all = await inner.logs({ ...q, fromBlock: 0n });
+      const cut = all.filter((l) => l.blockNumber! <= lagTo());
+      // In range and below the lag, plus one stray log from before the range.
+      return cut.filter(
+        (l) => l.blockNumber! >= q.fromBlock || l === cut.at(0),
+      );
+    },
+    hasBlock: async (hash: Hex) => {
+      for (let n = 0n; n <= lagTo(); n++)
+        if ((await inner.block(n)).hash === hash) return true;
+      return false;
+    },
+  };
+  return p;
+}
+
+/** Counts block reads and gives up loudly instead of spinning forever. */
+export function boundedReads(inner: IndexerChain, max = 2_000) {
+  let reads = 0;
+  return {
+    get reads() {
+      return reads;
+    },
+    chain: {
+      ...inner,
+      block: async (n: bigint) => {
+        if (++reads > max)
+          throw new Error(`GAVE_UP_AFTER_${max}_BLOCK_READS`);
+        return inner.block(n);
+      },
+    } as IndexerChain,
+  };
 }

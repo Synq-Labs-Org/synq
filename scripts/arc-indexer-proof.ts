@@ -43,6 +43,8 @@ const PAYOUT_TX =
 const INVOICE_ID = 'inv_f9aa042a727d27d402be';
 
 const client = arcFallbackClient();
+// Each indexer step is pinned to one of these (registry RPC list).
+const providers = arcProviderClients();
 const [checkoutRcpt, payoutRcpt] = await Promise.all([
   client.getTransactionReceipt({ hash: CHECKOUT_TX }),
   client.getTransactionReceipt({ hash: PAYOUT_TX }),
@@ -100,6 +102,8 @@ const run = async (
     toBlock: to,
     ...(extra.maxBatches ? { maxBatches: extra.maxBatches } : {}),
     client,
+    providers,
+    maxRetries: 20,
     log: (l) => {
       lines.push({ run: label, ...l });
       console.log(JSON.stringify({ run: label, ...l }));

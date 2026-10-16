@@ -52,6 +52,12 @@ export interface IndexerChain {
     toBlock: bigint;
   }): Promise<Log[]>;
   code(address: Address): Promise<Hex | undefined>;
+  /**
+   * Whether this provider's log backend knows the block with this hash
+   * (`eth_getLogs` by blockHash). Used to prove a step's logs answer covered
+   * the whole range before the cursor moves.
+   */
+  hasBlock(hash: Hex): Promise<boolean>;
   receiptLogs(
     txHash: Hex,
   ): Promise<{ status: string; from: Address; logs: Log[]; feeWei: bigint }>;
@@ -133,7 +139,9 @@ export class ArcIndexerError extends Error {
       | 'WRONG_CHAIN'
       | 'CODE_HASH_MISMATCH'
       | 'DEEP_REORG'
-      | 'CONCURRENT_INDEXER',
+      | 'CONCURRENT_INDEXER'
+      | 'PROVIDER_INCOMPLETE'
+      | 'PROVIDER_FAILED',
     message: string = code,
   ) {
     super(message);
@@ -163,13 +171,32 @@ export type StepResult = Readonly<{
   idle: boolean;
 }>;
 
+/** Errors that must halt the stream: retrying or switching RPCs cannot fix them. */
+export const FATAL_INDEXER_ERRORS: readonly ArcIndexerError['code'][] = [
+  'WRONG_CHAIN',
+  'CODE_HASH_MISMATCH',
+  'DEEP_REORG',
+];
+
 export class ArcChainIndexer {
   private batches = 0;
+  private current = 0;
+  readonly providers: readonly IndexerChain[];
+  /** Logs a provider returned outside the requested range (dropped). */
+  droppedOutOfRange = 0;
   constructor(
-    readonly chain: IndexerChain,
+    chain: IndexerChain | readonly IndexerChain[],
     readonly store: ArcIndexStore,
     readonly cfg: ArcIndexerConfig,
-  ) {}
+  ) {
+    this.providers = Array.isArray(chain) ? [...chain] : [chain as IndexerChain];
+    if (!this.providers.length) throw new Error('no indexer providers');
+  }
+
+  /** The provider the next step is pinned to. */
+  get chain(): IndexerChain {
+    return this.providers[this.current]!;
+  }
 
   /** Chain id and every emitter's code hash, before any log is trusted. */
   async verify(): Promise<void> {
@@ -193,38 +220,69 @@ export class ArcChainIndexer {
     }
   }
 
-  async horizon(): Promise<bigint> {
-    const [finalized, latest] = await Promise.all([
-      this.chain.finalized(),
-      this.chain.latest(),
-    ]);
+  async horizon(p: IndexerChain = this.chain): Promise<bigint> {
+    const [finalized, latest] = await Promise.all([p.finalized(), p.latest()]);
     const depth = latest - BigInt(this.cfg.confirmations);
     return finalized < depth ? finalized : depth;
   }
 
   /** Walks stored hashes back until one still matches the chain: the fork point. */
-  private async forkPoint(below: bigint): Promise<StreamCursor> {
+  private async forkPoint(
+    p: IndexerChain,
+    below: bigint,
+  ): Promise<StreamCursor> {
+    // Strictly descending: every recorded block is checked at most once, and
+    // when the oldest one (the start anchor) no longer matches, the stream
+    // halts with DEEP_REORG instead of guessing.
+    let next = below;
     for (;;) {
       const rows = await this.store.recordedBlocksDesc(
         this.cfg.stream,
-        below,
+        next,
         64,
       );
       if (!rows.length)
         throw new ArcIndexerError(
           'DEEP_REORG',
-          `no recorded block below ${below} matches the chain`,
+          `no recorded block at or below ${below} matches the chain; the reorg reaches past the stream's start anchor`,
         );
       for (const r of rows) {
-        const onChain = await this.chain.block(r.number);
-        if (onChain.hash === r.hash) return { block: r.number, hash: r.hash };
+        const onChain = await p.block(r.number).catch(() => null);
+        if (onChain?.hash === r.hash) return { block: r.number, hash: r.hash };
       }
-      below = rows.at(-1)!.number;
+      next = rows.at(-1)!.number - 1n;
+      if (next < 0n)
+        throw new ArcIndexerError('DEEP_REORG', 'reorg reaches genesis');
     }
   }
 
-  /** One batch: reorg check, logs up to the horizon, commit. */
+  /**
+   * One batch, every read pinned to one provider. Any provider failure or
+   * incomplete answer aborts the step without moving the cursor and moves
+   * the next step to the next provider in the list; it never switches RPCs
+   * in the middle of a step.
+   */
   async step(limitTo?: bigint): Promise<StepResult> {
+    const p = this.chain;
+    try {
+      return await this.stepOn(p, limitTo);
+    } catch (e) {
+      const code = (e as ArcIndexerError).code;
+      if (
+        e instanceof ArcIndexerError &&
+        (FATAL_INDEXER_ERRORS.includes(code) || code === 'CONCURRENT_INDEXER')
+      )
+        throw e;
+      this.current = (this.current + 1) % this.providers.length;
+      if (e instanceof ArcIndexerError) throw e;
+      throw new ArcIndexerError(
+        'PROVIDER_FAILED',
+        String((e as Error)?.message ?? e).slice(0, 200),
+      );
+    }
+  }
+
+  private async stepOn(p: IndexerChain, limitTo?: bigint): Promise<StepResult> {
     const { stream } = this.cfg;
     if (this.batches++ % (this.cfg.codeCheckEvery ?? 50) === 0)
       await this.verify();
@@ -232,16 +290,16 @@ export class ArcChainIndexer {
     let rolledBackTo: bigint | null = null;
     let removed = 0;
     if (cursor) {
-      const onChain = await this.chain.block(cursor.block);
+      const onChain = await p.block(cursor.block);
       if (onChain.hash !== cursor.hash) {
-        const fork = await this.forkPoint(cursor.block);
+        const fork = await this.forkPoint(p, cursor.block);
         removed = await this.store.rollback(stream, fork);
         rolledBackTo = fork.block;
         cursor = fork;
       }
     }
     const from = cursor ? cursor.block + 1n : this.cfg.startBlock;
-    let to = await this.horizon();
+    let to = await this.horizon(p);
     if (limitTo !== undefined && limitTo < to) to = limitTo;
     if (from + this.cfg.batchSize - 1n < to)
       to = from + this.cfg.batchSize - 1n;
@@ -255,10 +313,19 @@ export class ArcChainIndexer {
         removed,
         idle: true,
       };
-    const first = await this.chain.block(from);
+    const first = await p.block(from);
+    // The first commit also records the block before the start (the anchor),
+    // so a reorg at the start block has a fork point to return to.
+    const anchor =
+      !cursor && from > 0n ? await p.block(from - 1n) : null;
+    if (anchor && first.parentHash !== anchor.hash)
+      throw new ArcIndexerError(
+        'PROVIDER_INCOMPLETE',
+        `block ${from} does not chain to ${from - 1n}`,
+      );
     if (cursor && first.parentHash !== cursor.hash) {
       // The chain moved under us between the check and the read: roll back next step.
-      const fork = await this.forkPoint(cursor.block + 1n);
+      const fork = await this.forkPoint(p, cursor.block);
       removed += await this.store.rollback(stream, fork);
       return {
         from,
@@ -270,8 +337,16 @@ export class ArcChainIndexer {
         idle: false,
       };
     }
-    const events = await this.collect(from, to);
-    const last = await this.chain.block(to);
+    const events = await this.collect(p, from, to);
+    const last = await p.block(to);
+    // Coverage: the provider that answered the logs query must know the last
+    // block of the range; a lagging or truncating backend fails here and the
+    // cursor stays where it was.
+    if (!(await p.hasBlock(last.hash)))
+      throw new ArcIndexerError(
+        'PROVIDER_INCOMPLETE',
+        `logs provider does not hold block ${to} (${last.hash}); refusing to advance`,
+      );
     // Record the blocks that carry events and the batch boundaries, so a
     // later reorg can be walked back to a fork point.
     const needed = new Set<bigint>([
@@ -281,22 +356,16 @@ export class ArcChainIndexer {
     ]);
     const blocks: ChainBlock[] = [];
     for (const n of [...needed].sort((a, b) => (a < b ? -1 : 1)))
-      blocks.push(
-        n === from ? first : n === to ? last : await this.chain.block(n),
-      );
+      blocks.push(n === from ? first : n === to ? last : await p.block(n));
+    if (anchor) blocks.unshift(anchor);
     for (const e of events) {
       const b = blocks.find((x) => x.number === e.blockNumber)!;
       if (b.hash !== e.blockHash)
-        // A log from a block that is no longer canonical: retry the batch.
-        return {
-          from,
-          to: from - 1n,
-          inserted: 0,
-          duplicates: 0,
-          rolledBackTo,
-          removed,
-          idle: false,
-        };
+        // A log whose block hash is not the pinned block: never commit it.
+        throw new ArcIndexerError(
+          'PROVIDER_INCOMPLETE',
+          `log ${e.txHash}:${e.logIndex} names block hash ${e.blockHash}, block ${e.blockNumber} is ${b.hash}`,
+        );
     }
     const r = await this.store.commit(
       stream,
@@ -308,7 +377,11 @@ export class ArcChainIndexer {
     return { from, to, ...r, rolledBackTo, removed, idle: false };
   }
 
-  private async collect(from: bigint, to: bigint): Promise<IndexedEvent[]> {
+  private async collect(
+    p: IndexerChain,
+    from: bigint,
+    to: bigint,
+  ): Promise<IndexedEvent[]> {
     const { token, memo, wallets, chainId } = this.cfg;
     const out = new Map<string, IndexedEvent>();
     const add = (
@@ -316,6 +389,11 @@ export class ArcChainIndexer {
       kind: IndexedEventKind,
       data: Record<string, string>,
     ) => {
+      // Never trust the provider to honour the range.
+      if (l.blockNumber === null || l.blockNumber < from || l.blockNumber > to) {
+        this.droppedOutOfRange++;
+        return;
+      }
       const e: IndexedEvent = {
         chainId,
         kind,
@@ -332,13 +410,13 @@ export class ArcChainIndexer {
     if (wallets.length) {
       const topics = wallets.map(padTopic);
       const [sent, received] = await Promise.all([
-        this.chain.logs({
+        p.logs({
           address: token.address,
           topics: [TRANSFER_TOPIC, topics],
           fromBlock: from,
           toBlock: to,
         }),
-        this.chain.logs({
+        p.logs({
           address: token.address,
           topics: [TRANSFER_TOPIC, null, topics],
           fromBlock: from,
@@ -360,7 +438,7 @@ export class ArcChainIndexer {
       }
     }
     if (memo) {
-      const logs = await this.chain.logs({
+      const logs = await p.logs({
         address: memo.address,
         topics: [MEMO_TOPIC, null, padTopic(token.address)],
         fromBlock: from,
@@ -437,6 +515,21 @@ export function viemIndexerChain(client: PublicClient): IndexerChain {
           ),
         ),
     code: (address) => client.getCode({ address }),
+    hasBlock: (blockHash) =>
+      client
+        .request({
+          method: 'eth_getLogs',
+          params: [
+            {
+              blockHash,
+              address: '0x0000000000000000000000000000000000000000',
+            },
+          ],
+        })
+        .then(
+          () => true,
+          () => false,
+        ),
     receiptLogs: async (hash) => {
       const r = await client.getTransactionReceipt({ hash });
       return {

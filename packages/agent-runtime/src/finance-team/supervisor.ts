@@ -166,12 +166,23 @@ export async function superviseFinance(
   // Budget writes started by the run are awaited before the reply is
   // returned, so a durable ledger has recorded the usage when the caller sees it.
   const writes: Promise<unknown>[] = [];
+  const run: RunBudget = { writes, finish: null };
   try {
-    return await superviseFinanceRun(message, desk, options, writes);
+    return await superviseFinanceRun(message, desk, options, run);
   } finally {
+    // Every exit path (a reply, or an error thrown back to the caller)
+    // settles the run's reservation at what it actually used; only a dead
+    // process leaves a hold, and that hold expires (ledger hold TTL).
+    run.finish?.();
     await Promise.all(writes);
   }
 }
+
+type RunBudget = {
+  writes: Promise<unknown>[];
+  /** Settles or records the run's usage once; set as soon as budget is held. */
+  finish: (() => void) | null;
+};
 
 async function superviseFinanceRun(
   message: string,
@@ -195,8 +206,9 @@ async function superviseFinanceRun(
      */
     origin?: 'CHAT' | 'SYSTEM';
   },
-  writes: Promise<unknown>[],
+  budget: RunBudget,
 ): Promise<SupervisorReply> {
+  const { writes } = budget;
   const runId = options.runId ?? `fin_${desk.now}`;
   // A durable ledger reserves this run's share atomically up front, so
   // concurrent runs cannot each spend the same remaining budget.
@@ -212,13 +224,36 @@ async function superviseFinanceRun(
     reservation?.granted ??
       (desk.budget ? await desk.budget.remaining(desk.workspaceId) : null),
   );
+  let recorded = false;
+  let usedBy: FinanceTeam | null = null;
+  budget.finish = () => {
+    if (recorded || !desk.budget) return;
+    recorded = true;
+    const u = usedBy?.manager.usage() ?? {
+      toolCalls: 0,
+      tokens: 0,
+      paidMicroUsd: 0,
+    };
+    const used = {
+      toolCalls: u.toolCalls,
+      tokens: u.tokens,
+      paidMicroUsd: u.paidMicroUsd,
+    };
+    writes.push(
+      Promise.resolve(
+        reservation && desk.budget.settle
+          ? desk.budget.settle(desk.workspaceId, reservation.reservationId, used)
+          : desk.budget.record(desk.workspaceId, used),
+      ),
+    );
+  };
   const team = new FinanceTeam(runId, limits);
+  usedBy = team;
   const sup = team.supervisor;
   const handledBy: FinanceRole[] = ['SUPERVISOR'];
   let intent = classifyIntent(message);
   let world: ArcWorldSnapshot | null = null;
   let refreshed = false;
-  let recorded = false;
   const reply = (
     status: SupervisorReply['status'],
     answer: string,
@@ -226,27 +261,7 @@ async function superviseFinanceRun(
     paths: string[] = [],
   ): SupervisorReply => {
     team.close();
-    if (!recorded) {
-      recorded = true;
-      const u = team.manager.usage();
-      const used = {
-        toolCalls: u.toolCalls,
-        tokens: u.tokens,
-        paidMicroUsd: u.paidMicroUsd,
-      };
-      if (desk.budget)
-        writes.push(
-          Promise.resolve(
-            reservation && desk.budget.settle
-              ? desk.budget.settle(
-                  desk.workspaceId,
-                  reservation.reservationId,
-                  used,
-                )
-              : desk.budget.record(desk.workspaceId, used),
-          ),
-        );
-    }
+    budget.finish!();
     return {
       runId,
       intent,
