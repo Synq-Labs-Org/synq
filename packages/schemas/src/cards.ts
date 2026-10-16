@@ -487,9 +487,7 @@ export const FlightComparisonCardSchema = z.strictObject({
         /** Flight numbers, e.g. "ZZ 123 / ZZ 456". */
         flights: z.string().max(80).nullable(),
         legs: z
-          .array(
-            z.strictObject({ origin: Iata, destination: Iata, date: Day }),
-          )
+          .array(z.strictObject({ origin: Iata, destination: Iata, date: Day }))
           .min(1)
           .max(2),
         stops: z.number().int().nonnegative(),

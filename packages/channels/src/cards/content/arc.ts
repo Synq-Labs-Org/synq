@@ -14,7 +14,6 @@ import {
   ageLabel,
   clip,
   dayLabel,
-  displayAmount,
   moneyFit,
   plural,
   ratio,

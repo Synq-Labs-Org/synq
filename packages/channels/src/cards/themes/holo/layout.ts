@@ -1,4 +1,4 @@
-import type { CardContent, Tone } from '../../content/model.js';
+import type { CardContent } from '../../content/model.js';
 import { ageLabel, clip, when } from '../../content/text.js';
 import { h, img, svgSrc, t, type Node } from '../kit.js';
 import { holoArtSvg, synqMark, type Energy, type Rarity } from './art.js';
