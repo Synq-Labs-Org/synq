@@ -8,6 +8,8 @@ import {
   type TripPorts,
 } from '../../apps/demo/src/fund-trips.js';
 import { duffelTripPorts } from '../../apps/demo/src/duffel-trips.js';
+import { InteractiveCardSchema } from '@synq/schemas';
+import { duffelOffer } from '../duffel/offer-fixture.js';
 import type {
   FundService,
   FundView,
@@ -316,5 +318,83 @@ describe('Duffel return-trip search (mocked HTTP)', () => {
       currency: 'USD',
       refundable: false,
     });
+  });
+});
+
+describe('GET /v1/funds/:id/trips/:tripId/card', () => {
+  it('returns the flight trip as a FLIGHT_COMPARISON card in provider-sandbox mode', async () => {
+    const ports: TripPorts = {
+      now: () => NOW,
+      fund: async (_id, key) => {
+        if (key !== KEY) throw new Error('forbidden');
+        return fundView;
+      },
+      search: async () => [
+        {
+          optionId: 'aaaaaaaaaaaa',
+          title: 'Duffel Airways ZZ 123 / ZZ 456',
+          detail:
+            'DEL → GOI 2026-12-01 · GOI → DEL 2026-12-05 · nonstop · economy',
+          total: '254.30',
+          currency: 'USD',
+          refundable: false,
+          offer: { intent: {}, offer: duffelOffer('a', 24430, {}, NOW) },
+        },
+      ],
+      book: async () => ({ status: 'FAILED', reason: 'not in this test' }),
+      settlement: { address: '0x0', recipientId: 'contact:0x0', label: 'S' },
+      sends: async () => [],
+      log: () => undefined,
+    };
+    const app = Fastify();
+    registerFundRoutes(
+      app,
+      {
+        view: async () => fundView,
+        ports: { now: () => NOW },
+      } as unknown as FundService,
+      {
+        trips: new TripService(new MemoryTripStore(), ports),
+        webBaseUrl: 'https://synq.example',
+      },
+    );
+    const start = await app.inject({
+      method: 'POST',
+      url: `/v1/funds/${FUND_ID}/trips`,
+      payload: {
+        key: KEY,
+        origin: 'DEL',
+        destination: 'GOI',
+        departureDate: '2026-12-01',
+        returnDate: '2026-12-05',
+        travelers: 3,
+      },
+    });
+    const tripId = start.json().tripId as string;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/funds/${FUND_ID}/trips/${tripId}/card?k=${KEY}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const card = InteractiveCardSchema.parse(res.json().card);
+    expect(card).toMatchObject({
+      type: 'FLIGHT_COMPARISON',
+      groupLabel: 'Goa',
+      executionMode: 'PROVIDER_SANDBOX',
+      chainId: null,
+      origin: 'DEL',
+      returnDate: '2026-12-05',
+      options: [
+        { price: { amount: '254.30', symbol: 'USD' }, refundable: false },
+      ],
+    });
+    expect(card.actions[0]!.url).toBe(
+      `https://synq.example/fund/${FUND_ID}/trips/${tripId}`,
+    );
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/v1/funds/${FUND_ID}/trips/${tripId}/card?k=${'x'.repeat(32)}`,
+    });
+    expect(denied.statusCode).not.toBe(200);
   });
 });
