@@ -7,3 +7,6 @@ export * from './ballot.js';
 export * from './council.js';
 export * from './contributors.js';
 export * from './policy-change.js';
+export * from './delegation-log.js';
+export * from './custody.js';
+export * from './postgres.js';

@@ -282,6 +282,11 @@ export class MemoryPayoutJournal implements PayoutJournal {
 }
 
 export type DemoDeps = {
+  /** Durable obligation / owner-approval fences; in-memory when absent. */
+  fences?: {
+    obligations: import('@synq/agent-runtime').ObligationFence;
+    approvals: import('@synq/agent-runtime').ApprovalNonceFence | null;
+  };
   runId: string;
   parties: {
     /** Freelancer's wallet: signs link, issuance, mandate, approvals (live: its own process). */
@@ -1554,6 +1559,7 @@ export async function runFreelancerDemo(deps: DemoDeps) {
         })
       ).ok,
     now,
+    ...(deps.fences ? { fences: deps.fences } : {}),
   });
   k.kernel = kernel;
   const vendorInvoice = (

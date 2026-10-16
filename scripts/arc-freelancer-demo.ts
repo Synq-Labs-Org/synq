@@ -27,6 +27,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pg from 'pg';
 import {
+  PostgresApprovalNonceFence,
+  PostgresObligationFence,
+  migrateFinanceTeam,
+} from '@synq/agent-runtime';
+import {
   encodeFunctionData,
   erc20Abi,
   parseAbi,
@@ -135,6 +140,10 @@ const url =
 }
 const pool = new pg.Pool({ connectionString: url });
 await migrateFinance(pool);
+// The executor child (forked later, inheriting env) uses the durable grant
+// fence in this same database; obligations and owner approvals are fenced here.
+process.env.SYNQ_EXECUTION_DATABASE_URL ??= url;
+await migrateFinanceTeam(pool);
 await pool.query(`CREATE TABLE IF NOT EXISTS synq_cctp_routes (
   destination_tx text PRIMARY KEY,
   invoice_id text NOT NULL,
@@ -357,6 +366,10 @@ try {
     },
     chain,
     executor,
+    fences: {
+      obligations: new PostgresObligationFence(pool, `demo:${runId}`),
+      approvals: new PostgresApprovalNonceFence(pool, `demo:${runId}`),
+    },
     stores: {
       ledger: new PostgresLedgerStore(pool),
       invoices: new PostgresInvoiceStore(pool),

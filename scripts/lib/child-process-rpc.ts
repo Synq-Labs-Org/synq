@@ -6,8 +6,11 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export function forkChild(relative: string): ChildProcess {
-  return fork(fileURLToPath(new URL(relative, import.meta.url)), [], {
+export function forkChild(
+  relative: string,
+  args: readonly string[] = [],
+): ChildProcess {
+  return fork(fileURLToPath(new URL(relative, import.meta.url)), [...args], {
     execArgv: ['--import', 'tsx'],
     // Structured clone: bigints and nested objects cross the boundary intact.
     serialization: 'advanced',

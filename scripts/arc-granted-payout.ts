@@ -20,7 +20,6 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { moneyFromDecimal, moneyToDecimal } from '@synq/domain';
 import { token } from '@synq/chain-registry/arc';
 import {
-  MemoryNonceFence,
   decide,
   mandateTypedData,
   type PaymentMandate,
@@ -32,6 +31,7 @@ import {
   executeTransfer,
   prepareTransfer,
 } from '@synq/execution-worker/arc';
+import { scriptFences } from './lib/script-fences.js';
 
 const home = `${process.env.HOME}/.synq`;
 const keyOf = (file: string, create = false): Hex => {
@@ -104,7 +104,10 @@ const config = {
   grantTtlSeconds: 120,
   riskRequiredAbove: moneyFromDecimal(usdc, '50').baseUnits,
 };
-const fence = new MemoryNonceFence();
+// Durable (Postgres) when SYNQ_EXECUTION_DATABASE_URL is set; otherwise the
+// script says so and records `fenceDurable: false` in its evidence.
+const fences = await scriptFences('arc-granted-payout', mandate.mandateId);
+const fence = fences.grants;
 const intentFor = (recipient: `0x${string}`, intentId: string) => ({
   intentId,
   mandateId: mandate.mandateId,
@@ -221,6 +224,7 @@ try {
       agentBefore,
   };
 }
+out.fenceDurable = fences.durable;
 out.mandate = {
   ...mandate,
   perActionCap: String(mandate.perActionCap),
@@ -232,3 +236,4 @@ const file = join(dir, `granted-payout-${paid.hash.slice(0, 10)}.json`);
 writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
 console.log(JSON.stringify(out, null, 2));
 console.log(`evidence -> ${file}`);
+await fences.close();

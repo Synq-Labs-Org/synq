@@ -1,6 +1,10 @@
 import type { ChildProcess } from 'node:child_process';
 import type { Hex } from 'viem';
 import type { ExecutorMessage, ExecutorRequest } from './arc-executor-child.js';
+import {
+  DEV_MEMORY_FENCE_FLAG,
+  devMemoryFenceRequested,
+} from './executor-fence.js';
 import { forkChild, nextMessage, stopChild } from './child-process-rpc.js';
 import type { ExecutorPort } from './freelancer-demo.js';
 
@@ -40,7 +44,12 @@ export function liveExecutor(): ExecutorPort {
   return {
     label: 'SEPARATE_PROCESS',
     async start(grantKey) {
-      child = forkChild('./arc-executor-child.ts');
+      // The child refuses to start without a durable grant fence unless the
+      // parent itself was started with the dev-only flag.
+      child = forkChild(
+        './arc-executor-child.ts',
+        devMemoryFenceRequested() ? [DEV_MEMORY_FENCE_FLAG] : [],
+      );
       const ready = nextMessage(child, (m) => {
         const x = m as ExecutorMessage;
         return x.type === 'ready' ? x : undefined;

@@ -8,3 +8,4 @@ export * from './team.js';
 export * from './specialists.js';
 export * from './supervisor.js';
 export * from './settlement-audit.js';
+export * from './pg-stores.js';

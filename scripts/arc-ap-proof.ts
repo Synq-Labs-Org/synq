@@ -14,7 +14,6 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { moneyFromDecimal, moneyToDecimal, money } from '@synq/domain';
 import { token } from '@synq/chain-registry/arc';
 import {
-  MemoryNonceFence,
   decide,
   mandateTypedData,
   type PaymentMandate,
@@ -32,6 +31,7 @@ import {
   type Vendor,
   type VendorInvoice,
 } from '@synq/payables';
+import { scriptFences } from './lib/script-fences.js';
 
 const key = (f: string) => {
   const k = readFileSync(`${process.env.HOME}/.synq/${f}`, 'utf8').trim();
@@ -164,12 +164,15 @@ const d1 = await decide({
   now,
 });
 if (d1.outcome !== 'ALLOW') throw new Error(d1.reasons.join('; '));
+// Durable (Postgres) when SYNQ_EXECUTION_DATABASE_URL is set; otherwise the
+// script says so and records `fenceDurable: false` in its evidence.
+const fences = await scriptFences('arc-ap-proof', mandate.mandateId);
 const paid = await executeGrantedTransfer({
   chain,
   signer: agent,
   grant: d1.grant,
   grantKey: config.grantKey,
-  fence: new MemoryNonceFence(),
+  fence: fences.grants,
   mandateRevoked: false,
   transfer: { from: agent.address, to: sarahWallet, amount },
   now: Math.floor(Date.now() / 1000),
@@ -195,6 +198,7 @@ for (const e of apEntries({
 }))
   await ledger.post(e);
 const b = await ledger.balances('wsp_freelancer_demo', usdc.assetId);
+out.fenceDurable = fences.durable;
 out.payout = {
   softFlags: goodRisk.flags,
   decision: d1.outcome,
@@ -253,3 +257,4 @@ const file = join(dir, `ap-${paid.hash.slice(0, 10)}.json`);
 writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
 console.log(JSON.stringify(out, null, 2));
 console.log(`evidence -> ${file}`);
+await fences.close();

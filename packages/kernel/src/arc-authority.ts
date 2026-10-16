@@ -493,6 +493,11 @@ function issueGrant(
 export interface NonceFence {
   /** Atomically marks the nonce used; false when it already was. */
   consume(nonce: Hex): Promise<boolean>;
+  /**
+   * Optional durable form: atomically records the whole grant as consumed,
+   * unique on both its id and its nonce. `admitGrant` prefers it when present.
+   */
+  consumeGrant?(grant: ExecutionGrant, at: number): Promise<boolean>;
 }
 
 export class MemoryNonceFence implements NonceFence {
@@ -504,12 +509,7 @@ export class MemoryNonceFence implements NonceFence {
   }
 }
 
-/**
- * Executor-side check before signing: the grant is authentic, unexpired, its
- * mandate still live, it matches the exact call about to be signed, and its
- * nonce has never been used. Consumes the nonce.
- */
-export async function admitGrant(input: {
+type GrantCheck = {
   grantKey: Uint8Array;
   grant: ExecutionGrant;
   call: {
@@ -521,8 +521,14 @@ export async function admitGrant(input: {
   };
   now: number;
   mandateRevoked: boolean;
-  fence: NonceFence;
-}): Promise<void> {
+};
+
+/**
+ * Every admission check except consumption: authentic (MAC), unexpired,
+ * mandate live, and the exact call. Executors that record the grant's
+ * consumption atomically with other durable state call this, then consume.
+ */
+export function verifyGrant(input: GrantCheck): void {
   const { grant: g } = input;
   const { mac, ...body } = g;
   const expected = macOf(input.grantKey, body);
@@ -545,6 +551,32 @@ export async function admitGrant(input: {
       'GRANT_MISMATCH',
       'the call differs from the granted chain/token/payer/recipient/amount',
     );
-  if (!(await input.fence.consume(g.nonce)))
-    throw new AuthorityError('GRANT_REPLAYED');
+}
+
+/**
+ * Executor-side check before signing: the grant is authentic, unexpired, its
+ * mandate still live, it matches the exact call about to be signed, and its
+ * nonce has never been used. Consumes the nonce (or, with a durable fence,
+ * the whole grant).
+ */
+export async function admitGrant(input: {
+  grantKey: Uint8Array;
+  grant: ExecutionGrant;
+  call: {
+    chainId: number;
+    token: Address;
+    payer: Address;
+    recipient: Address;
+    amount: bigint;
+  };
+  now: number;
+  mandateRevoked: boolean;
+  fence: NonceFence;
+}): Promise<void> {
+  verifyGrant(input);
+  const g = input.grant;
+  const fresh = input.fence.consumeGrant
+    ? await input.fence.consumeGrant(g, input.now)
+    : await input.fence.consume(g.nonce);
+  if (!fresh) throw new AuthorityError('GRANT_REPLAYED');
 }

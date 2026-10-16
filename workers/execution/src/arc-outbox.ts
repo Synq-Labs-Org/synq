@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import type { Hex } from 'viem';
 import type { Money } from '@synq/domain';
 import {
+  AuthorityError,
+  verifyGrant,
+  type ExecutionGrant,
+  type NonceFence,
+} from '@synq/kernel/arc';
+import {
   ArcExecutionError,
   prepareTransfer,
   reconcileTransfer,
@@ -45,6 +51,16 @@ export interface OutboxStore {
   /** Inserts only if absent; false means another attempt already recorded the key. */
   create(r: OutboxRecord): Promise<boolean>;
   update(r: OutboxRecord): Promise<void>;
+  /**
+   * Optional: records the signed payout AND the grant's consumption in one
+   * transaction, so a crash can never leave a consumed grant with no record
+   * (or a record whose grant could be admitted again).
+   */
+  createConsumingGrant?(
+    r: OutboxRecord,
+    grant: ExecutionGrant,
+    at: number,
+  ): Promise<'CREATED' | 'KEY_EXISTS' | 'GRANT_REPLAYED'>;
 }
 
 export class MemoryOutboxStore implements OutboxStore {
@@ -225,4 +241,100 @@ export async function recover(
   }
   await store.update(next);
   return next;
+}
+
+/** Outbox key of the payout a Kernel grant authorises: one grant, one payout. */
+export const grantOutboxKey = (grantId: string) => `grant:${grantId}`;
+
+/**
+ * The durable executor path for a Kernel-granted Arc transfer. The grant is
+ * verified against the exact prepared transfer, the transaction is signed,
+ * and then the signed bytes and the grant's consumption are recorded together
+ * (atomically when the store supports it) before anything is broadcast. A
+ * restart recovers from the record without re-admitting or re-signing; a
+ * replayed grant is refused before its signature leaves the process.
+ */
+export async function payGrantOnce(input: {
+  store: OutboxStore;
+  fence: NonceFence;
+  grant: ExecutionGrant;
+  grantKey: Uint8Array;
+  mandateRevoked: boolean;
+  chain: ArcChain;
+  signer: TransferSigner;
+  transfer: {
+    from: PreparedTransfer['from'];
+    to: PreparedTransfer['to'];
+    amount: Money;
+  };
+  now: () => number;
+  afterRecord?: (r: OutboxRecord) => Promise<void> | void;
+}): Promise<PayOnceResult> {
+  const key = grantOutboxKey(input.grant.grantId);
+  const existing = await input.store.get(key);
+  if (existing) {
+    assertSamePayment(existing, input.transfer);
+    return {
+      record: await recover(input.store, input.chain, existing, input.now),
+      signedNow: false,
+    };
+  }
+  const prepared = await prepareTransfer(input.chain, input.transfer);
+  const at = input.now();
+  verifyGrant({
+    grantKey: input.grantKey,
+    grant: input.grant,
+    call: {
+      chainId: prepared.chainId,
+      token: prepared.token,
+      payer: prepared.from,
+      recipient: prepared.to,
+      amount: prepared.amount.baseUnits,
+    },
+    now: at,
+    mandateRevoked: input.mandateRevoked,
+  });
+  const { raw, hash } = await signPrepared(input.signer, prepared);
+  const record: OutboxRecord = {
+    key,
+    state: 'SIGNED',
+    prepared,
+    raw,
+    hash,
+    evidence: null,
+    note: null,
+    updatedAt: at,
+  };
+  let outcome: 'CREATED' | 'KEY_EXISTS' | 'GRANT_REPLAYED';
+  if (input.store.createConsumingGrant)
+    outcome = await input.store.createConsumingGrant(record, input.grant, at);
+  else {
+    const fresh = input.fence.consumeGrant
+      ? await input.fence.consumeGrant(input.grant, at)
+      : await input.fence.consume(input.grant.nonce);
+    outcome = !fresh
+      ? 'GRANT_REPLAYED'
+      : (await input.store.create(record))
+        ? 'CREATED'
+        : 'KEY_EXISTS';
+  }
+  if (outcome === 'GRANT_REPLAYED') throw new AuthorityError('GRANT_REPLAYED');
+  if (outcome === 'KEY_EXISTS') {
+    const winner = (await input.store.get(key))!;
+    return {
+      record: await recover(input.store, input.chain, winner, input.now),
+      signedNow: false,
+    };
+  }
+  await input.afterRecord?.(record);
+  await input.chain.client.sendRawTransaction({ serializedTransaction: raw });
+  const evidence = await reconcileTransfer(input.chain, prepared, hash);
+  const done: OutboxRecord = {
+    ...record,
+    state: 'CONFIRMED',
+    evidence,
+    updatedAt: input.now(),
+  };
+  await input.store.update(done);
+  return { record: done, signedNow: true };
 }

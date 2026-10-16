@@ -46,6 +46,15 @@ export class MemoryObligationFence implements ObligationFence {
   }
 }
 
+/**
+ * One-use owner approvals across processes: `redeem` returns false when the
+ * approval nonce was already redeemed. Optional; the port always also keeps
+ * its own in-process set.
+ */
+export interface ApprovalNonceFence {
+  redeem(nonce: Hex): Promise<boolean>;
+}
+
 export function arcPaymentKernel(input: {
   config: AuthorityConfig;
   mandate: PaymentMandate;
@@ -55,6 +64,7 @@ export function arcPaymentKernel(input: {
   simulate: (intent: PaymentIntent) => Promise<boolean>;
   now: () => number;
   obligations?: ObligationFence;
+  approvals?: ApprovalNonceFence;
 }): PaymentKernelPort {
   const fence = input.obligations ?? new MemoryObligationFence();
   // Owner-approval nonces redeemed through this port: each approval works once.
@@ -83,7 +93,14 @@ export function arcPaymentKernel(input: {
         ...(requireOwnerApproval ? { requireOwnerApproval: true } : {}),
       });
       if (decision.outcome !== 'ALLOW') return decision;
-      if (approval) redeemed.add(approval.nonce);
+      if (approval) {
+        if (input.approvals && !(await input.approvals.redeem(approval.nonce)))
+          return {
+            outcome: 'DENY',
+            reasons: ['owner approval already used'],
+          };
+        redeemed.add(approval.nonce);
+      }
       // The minted grant never leaves this closure unless the obligation is new.
       if (!(await fence.reserve(intent.obligationRef)))
         return {

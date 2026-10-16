@@ -13,9 +13,32 @@ export type FinanceUsage = Readonly<{
  * message. Inject a durable implementation through `FinanceDesk.budget`.
  */
 export interface FinanceBudgetLedger {
-  remaining(workspaceId: string): FinanceUsage;
-  record(workspaceId: string, used: FinanceUsage): void;
+  remaining(workspaceId: string): FinanceUsage | Promise<FinanceUsage>;
+  record(workspaceId: string, used: FinanceUsage): void | Promise<void>;
+  /**
+   * Optional atomic form for shared, durable ledgers: holds up to `want` of
+   * the remaining budget for one run (counted as used until settled, so a
+   * crash mid-run never frees budget). `settle` replaces the held amount with
+   * what the run actually used; settling twice is a no-op.
+   */
+  reserve?(
+    workspaceId: string,
+    want: FinanceUsage,
+    runId: string,
+  ): Promise<{ reservationId: string; granted: FinanceUsage }>;
+  settle?(
+    workspaceId: string,
+    reservationId: string,
+    used: FinanceUsage,
+  ): Promise<void>;
 }
+
+/** The three metered quantities of a run's limits. */
+export const usageOf = (l: BudgetLimits): FinanceUsage => ({
+  toolCalls: l.maxToolCalls,
+  tokens: l.maxLlmTokens,
+  paidMicroUsd: l.maxPaidMicroUsd,
+});
 
 /** Default session caps: ten full runs' worth of the per-run budget. */
 export const DEFAULT_SESSION_BUDGET: FinanceUsage = Object.freeze({
