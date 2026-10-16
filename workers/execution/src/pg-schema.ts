@@ -82,6 +82,7 @@ export const EXECUTION_MIGRATIONS: readonly Migration[] = [
       leg text NOT NULL CHECK (leg IN ('APPROVE','BURN','MINT')),
       chain_id int NOT NULL,
       from_address text NOT NULL,
+      to_address text NOT NULL,
       tx_nonce bigint NOT NULL,
       hash text NOT NULL UNIQUE,
       raw text NOT NULL,

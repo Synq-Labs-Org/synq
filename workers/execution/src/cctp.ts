@@ -100,13 +100,23 @@ async function feeFields(chain: ArcChain) {
   return { maxFeePerGas: max * 2n, maxPriorityFeePerGas: tip };
 }
 
-export async function sendCall(
+/** A signed, not yet broadcast, contract call: what a saga records before sending. */
+export type SignedCall = Readonly<{
+  chainId: number;
+  from: Address;
+  to: Address;
+  nonce: number;
+  raw: Hex;
+  hash: Hex;
+}>;
+
+/** Prepares and signs one call at the sender's pending nonce; sends nothing. */
+export async function signCall(
   chain: ArcChain,
   signer: TransferSigner,
   to: Address,
   data: Hex,
-  onHash: (h: Hex) => Promise<void> | void,
-): Promise<Hex> {
+): Promise<SignedCall> {
   if (!chain.profile.mutationEnabled)
     throw new ArcExecutionError('MUTATION_DISABLED', chain.profile.name);
   const gas =
@@ -128,7 +138,55 @@ export async function sendCall(
     ...(await feeFields(chain)),
   };
   const raw = await signer.signTransaction(tx);
-  const hash = keccak256(raw);
+  return Object.freeze({
+    chainId: chain.profile.chainId,
+    from: signer.address,
+    to,
+    nonce,
+    raw,
+    hash: keccak256(raw),
+  });
+}
+
+/**
+ * Settles a recorded signed call without ever signing: an existing receipt
+ * decides; otherwise, if the sender's nonce was consumed by something else,
+ * NONCE_CONSUMED (needs review); otherwise the identical bytes are
+ * (re)broadcast and the receipt awaited.
+ */
+export async function settleSignedCall(
+  chain: ArcChain,
+  s: SignedCall,
+): Promise<'SUCCESS' | 'REVERTED' | 'NONCE_CONSUMED'> {
+  const existing = await chain.client
+    .getTransactionReceipt({ hash: s.hash })
+    .catch(() => null);
+  if (existing) return existing.status === 'success' ? 'SUCCESS' : 'REVERTED';
+  const mined = await chain.client.getTransactionCount({
+    address: s.from,
+    blockTag: 'latest',
+  });
+  if (mined > s.nonce) return 'NONCE_CONSUMED';
+  await chain.client
+    .sendRawTransaction({ serializedTransaction: s.raw })
+    .catch((e: Error) => {
+      if (!/known|already|underpriced|nonce too low/i.test(e.message)) throw e;
+    });
+  const r = await chain.client.waitForTransactionReceipt({
+    hash: s.hash,
+    confirmations: chain.profile.confirmations,
+  });
+  return r.status === 'success' ? 'SUCCESS' : 'REVERTED';
+}
+
+export async function sendCall(
+  chain: ArcChain,
+  signer: TransferSigner,
+  to: Address,
+  data: Hex,
+  onHash: (h: Hex) => Promise<void> | void,
+): Promise<Hex> {
+  const { raw, hash } = await signCall(chain, signer, to, data);
   await onHash(hash);
   await chain.client.sendRawTransaction({ serializedTransaction: raw });
   const r = await chain.client.waitForTransactionReceipt({
@@ -138,6 +196,32 @@ export async function sendCall(
   if (r.status !== 'success')
     throw new ArcExecutionError('RECEIPT_FAILED', hash);
   return hash;
+}
+
+/** Calldata of the source burn for a planned transfer (with or without hookData). */
+export function burnCalldata(t: CctpTransfer): Hex {
+  const dest = CHAINS[t.destination];
+  const usdc = token(t.source, 'USDC');
+  const common = [
+    t.amount,
+    dest.cctpDomain!,
+    pad(t.recipient),
+    usdc.address,
+    pad(zeroAddress),
+    t.maxFee,
+    t.minFinalityThreshold,
+  ] as const;
+  return t.reference
+    ? encodeFunctionData({
+        abi: TOKEN_MESSENGER_V2_ABI,
+        functionName: 'depositForBurnWithHook',
+        args: [...common, t.reference],
+      })
+    : encodeFunctionData({
+        abi: TOKEN_MESSENGER_V2_ABI,
+        functionName: 'depositForBurn',
+        args: common,
+      });
 }
 
 /** Source leg: approve (if needed) then burn. `onBurnHash` must persist before broadcast. */
@@ -161,7 +245,6 @@ export async function burnOnSource(input: {
   const messenger = contract(t.source, 'CCTP_TOKEN_MESSENGER_V2');
   await verifyCode(chain, usdc.address, usdcEntry.codeHash);
   await verifyCode(chain, messenger.address, messenger.codeHash);
-  const dest = CHAINS[t.destination];
   const balance = await chain.client.readContract({
     address: usdc.address,
     abi: erc20Abi,
@@ -192,26 +275,7 @@ export async function burnOnSource(input: {
       }),
       input.onApproveHash ?? (() => undefined),
     );
-  const common = [
-    t.amount,
-    dest.cctpDomain!,
-    pad(t.recipient),
-    usdc.address,
-    pad(zeroAddress),
-    t.maxFee,
-    t.minFinalityThreshold,
-  ] as const;
-  const data = t.reference
-    ? encodeFunctionData({
-        abi: TOKEN_MESSENGER_V2_ABI,
-        functionName: 'depositForBurnWithHook',
-        args: [...common, t.reference],
-      })
-    : encodeFunctionData({
-        abi: TOKEN_MESSENGER_V2_ABI,
-        functionName: 'depositForBurn',
-        args: common,
-      });
+  const data = burnCalldata(t);
   const burnTx = await sendCall(
     chain,
     signer,
