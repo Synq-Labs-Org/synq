@@ -1,13 +1,20 @@
 import pg from 'pg';
 
 /**
- * Integration database for the durable stores. Locally:
- *   SYNQ_DURABLE_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/synq_m2_durable
- * In CI the compose Postgres on 55432 is used.
+ * Test database URL: the named env var, else `SYNQ_TEST_PG_BASE` (for example
+ * postgresql://postgres@127.0.0.1:55433 locally), else the CI compose Postgres.
  */
-export const DURABLE_DATABASE_URL =
-  process.env.SYNQ_DURABLE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_m2_durable';
+export function testDatabaseUrl(envVar: string, database: string): string {
+  const base =
+    process.env.SYNQ_TEST_PG_BASE ??
+    'postgresql://postgres:synq_local@127.0.0.1:55432';
+  return process.env[envVar] ?? `${base.replace(/\/+$/, '')}/${database}`;
+}
+
+export const DURABLE_DATABASE_URL = testDatabaseUrl(
+  'SYNQ_DURABLE_TEST_DATABASE_URL',
+  'synq_m2_durable',
+);
 
 export async function durablePool(url = DURABLE_DATABASE_URL, max = 8) {
   const name = new URL(url).pathname.slice(1);

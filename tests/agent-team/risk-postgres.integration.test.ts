@@ -12,15 +12,14 @@ import {
   RISK_MIGRATIONS,
   migrateRisk,
 } from '@synq/plugin-risk/postgres';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 /**
  * Risk cases, alerts and the audit chain on real Postgres (P20-04, P20-06).
  * Database: SYNQ_RISK_TEST_DATABASE_URL or the local throwaway server
  * (synq_m2_risk). Migrations live in their own table, synq_risk_migrations.
  */
-const URL =
-  process.env.SYNQ_RISK_TEST_DATABASE_URL ??
-  'postgresql://postgres@127.0.0.1:55433/synq_m2_risk';
+const URL = testDatabaseUrl('SYNQ_RISK_TEST_DATABASE_URL', 'synq_m2_risk');
 let pool: pg.Pool;
 
 beforeAll(async () => {

@@ -16,10 +16,12 @@ import {
   transfer,
   usdc,
 } from './helpers.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const URL =
-  process.env.SYNQ_TREASURY_TEST_DATABASE_URL ??
-  'postgresql://postgres@127.0.0.1:55433/synq_m2_treasury_test';
+const URL = testDatabaseUrl(
+  'SYNQ_TREASURY_TEST_DATABASE_URL',
+  'synq_m2_treasury_test',
+);
 
 let pool: pg.Pool;
 beforeAll(async () => {

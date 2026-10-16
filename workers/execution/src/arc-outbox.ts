@@ -117,6 +117,19 @@ export type PayOnceResult = Readonly<{
   signedNow: boolean;
 }>;
 
+/**
+ * Broadcasts recorded bytes. A concurrent recovery may already have sent the
+ * same bytes, so "known" style rejections are not failures; reconciliation
+ * decides whether the transaction actually landed.
+ */
+async function sendSignedBytes(chain: ArcChain, raw: `0x${string}`) {
+  await chain.client
+    .sendRawTransaction({ serializedTransaction: raw })
+    .catch((e: Error) => {
+      if (!/known|already|underpriced|nonce too low/i.test(e.message)) throw e;
+    });
+}
+
 export async function payOnce(input: {
   store: OutboxStore;
   key: string;
@@ -160,7 +173,7 @@ export async function payOnce(input: {
     };
   }
   await input.afterRecord?.(record);
-  await input.chain.client.sendRawTransaction({ serializedTransaction: raw });
+  await sendSignedBytes(input.chain, raw);
   const evidence = await reconcileTransfer(input.chain, prepared, hash);
   const done: OutboxRecord = {
     ...record,
@@ -225,12 +238,7 @@ export async function recover(
       };
     } else {
       // Same signed bytes: if the first broadcast landed in a mempool this is a no-op.
-      await chain.client
-        .sendRawTransaction({ serializedTransaction: r.raw })
-        .catch((e: Error) => {
-          if (!/known|already|underpriced|nonce too low/i.test(e.message))
-            throw e;
-        });
+      await sendSignedBytes(chain, r.raw);
       next = {
         ...r,
         state: 'CONFIRMED',
@@ -329,7 +337,7 @@ export async function payGrantOnce(input: {
     };
   }
   await input.afterRecord?.(record);
-  await input.chain.client.sendRawTransaction({ serializedTransaction: raw });
+  await sendSignedBytes(input.chain, raw);
   const evidence = await reconcileTransfer(input.chain, prepared, hash);
   const done: OutboxRecord = {
     ...record,

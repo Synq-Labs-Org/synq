@@ -14,10 +14,12 @@ import {
 import { splitScenarios } from './split-scenarios.js';
 import { criticScenarios } from './critic-scenarios.js';
 import { policy1500, world } from './harness.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const URL =
-  process.env.SYNQ_ALLOCATIONS_TEST_DATABASE_URL ??
-  'postgresql://postgres@127.0.0.1:55433/synq_m2_allocations_test';
+const URL = testDatabaseUrl(
+  'SYNQ_ALLOCATIONS_TEST_DATABASE_URL',
+  'synq_m2_allocations_test',
+);
 let pool: pg.Pool;
 
 async function ensureDatabase(url: string) {

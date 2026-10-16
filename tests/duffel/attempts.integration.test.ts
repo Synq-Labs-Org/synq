@@ -7,23 +7,13 @@ import {
   type HttpFetch,
 } from '@synq/plugin-duffel';
 import { FakeDuffel } from './fake-duffel.js';
+import { durablePool, testDatabaseUrl } from '../durable/pg.js';
 let pool: pg.Pool;
 beforeAll(async () => {
-  const admin = new pg.Client({
-    connectionString: 'postgresql://postgres@127.0.0.1:55433/postgres',
-  });
-  await admin.connect();
-  const exists = await admin.query(
-    "SELECT 1 FROM pg_database WHERE datname='synq_m2_duffel_test'",
+  pool = await durablePool(
+    testDatabaseUrl('SYNQ_DUFFEL_TEST_DATABASE_URL', 'synq_m2_duffel_test'),
+    4,
   );
-  if (!exists.rows.length)
-    await admin.query('CREATE DATABASE synq_m2_duffel_test');
-  await admin.end();
-  pool = new pg.Pool({
-    connectionString:
-      'postgresql://postgres@127.0.0.1:55433/synq_m2_duffel_test',
-    max: 4,
-  });
   await new PostgresDuffelAttempts(pool).migrate(0);
 });
 afterAll(async () => {

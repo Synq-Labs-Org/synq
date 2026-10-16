@@ -10,14 +10,17 @@ import {
 import { PostgresEscrowJournal } from '@synq/execution-worker/pg-escrow';
 import { PostgresGrantFence } from '@synq/execution-worker/pg-outbox';
 import { migrateExecution } from '@synq/execution-worker/pg-schema';
-import { durablePool, runId } from '../durable/pg.js';
+import { durablePool, runId, testDatabaseUrl } from '../durable/pg.js';
 import { countingSigner, fakeArc, USDC } from '../durable/fake-arc.js';
 import { signedBoth, mandate, kernel, client, ESCROW, T0 } from './harness.js';
 
 let pool: pg.Pool;
 beforeAll(async () => {
   pool = await durablePool(
-    'postgresql://postgres@127.0.0.1:55433/synq_m2_escrow_continuation_test',
+    testDatabaseUrl(
+      'SYNQ_ESCROW_TEST_DATABASE_URL',
+      'synq_m2_escrow_continuation_test',
+    ),
   );
   await migrateExecution(pool);
 });
