@@ -286,6 +286,7 @@ describe('P19 community gifts, trips and expense pooling', () => {
         ),
       'REFUND_NOT_ALLOWED',
     );
+    applyAll(fund, fund.beginRefundExecution('r-ana', NOW));
     expect(fund.refundInstruction('r-ana')).toEqual({
       to: accountFor('ana').address,
       amount: usdc(10),
@@ -517,6 +518,7 @@ describe('P19 community gifts, trips and expense pooling', () => {
         now: snap.closesAt,
       }),
     );
+    applyAll(fund, fund.beginSpendExecution('buy', NOW));
     expect(fund.spendInstruction('buy')).toEqual({
       to: payee,
       amount: usdc(25),
@@ -589,6 +591,7 @@ describe('P19 community gifts, trips and expense pooling', () => {
         now: NOW + 120,
       }),
     );
+    applyAll(fund, fund.beginSpendExecution('deposit', NOW));
     applyAll(
       fund,
       fund.recordSpendExecution(
@@ -674,6 +677,7 @@ describe('P19 community gifts, trips and expense pooling', () => {
           NOW + DAY * 30,
         ),
       );
+      applyAll(fund, fund.beginRefundExecution(`r-${c.memberId}`, NOW));
       // A refund to anyone but the contributor's own wallet is refused.
       await expectCode(
         () =>

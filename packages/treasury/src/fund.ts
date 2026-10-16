@@ -278,6 +278,8 @@ export type FundEvent =
       authorization: SpendAuthorization;
       at: number;
     }
+  | { type: 'SPEND_EXECUTION_STARTED'; spendId: string; at: number }
+  | { type: 'REFUND_EXECUTION_STARTED'; refundId: string; at: number }
   | {
       type: 'SPEND_EXECUTED';
       spendId: string;
@@ -357,7 +359,7 @@ export type SpendRecord = {
   spend: SpendRequest;
   termsHash: Hex;
   proposalHash: Hex;
-  status: 'PROPOSED' | 'AUTHORIZED' | 'EXECUTED' | 'RELEASED';
+  status: 'PROPOSED' | 'AUTHORIZED' | 'EXECUTING' | 'EXECUTED' | 'RELEASED';
   allocation: Record<string, bigint>;
   authorization: SpendAuthorization | null;
   execution: ObservedTransfer | null;
@@ -367,7 +369,7 @@ export type RefundRecord = {
   memberId: string;
   amount: bigint;
   reason: string;
-  status: 'AUTHORIZED' | 'EXECUTED';
+  status: 'AUTHORIZED' | 'EXECUTING' | 'EXECUTED';
   execution: ObservedTransfer | null;
 };
 export type TripRecord = {
@@ -614,6 +616,12 @@ export class GroupFund {
           this.member(id).reserved += v;
         return;
       }
+      case 'SPEND_EXECUTION_STARTED':
+        this.spends.get(e.spendId)!.status = 'EXECUTING';
+        return;
+      case 'REFUND_EXECUTION_STARTED':
+        this.refunds.get(e.refundId)!.status = 'EXECUTING';
+        return;
       case 'SPEND_EXECUTED': {
         const s = this.spends.get(e.spendId)!;
         s.status = 'EXECUTED';
@@ -959,10 +967,23 @@ export class GroupFund {
     ];
   }
 
+  /** Persist before signing; cancellation cannot release an ambiguous transfer. */
+  beginSpendExecution(spendId: string, at: number): FundEvent[] {
+    this.requireOpen();
+    const s = this.spends.get(spendId) ?? fail('UNKNOWN_SPEND', spendId);
+    if (s.status !== 'AUTHORIZED') fail('SPEND_STATE', s.status);
+    return [{ type: 'SPEND_EXECUTION_STARTED', spendId, at }];
+  }
+  beginRefundExecution(refundId: string, at: number): FundEvent[] {
+    const r = this.refunds.get(refundId) ?? fail('UNKNOWN_REFUND', refundId);
+    if (r.status !== 'AUTHORIZED') fail('REFUND_STATE', r.status);
+    return [{ type: 'REFUND_EXECUTION_STARTED', refundId, at }];
+  }
+
   /** The exact transfer the pool signer may make for an authorized spend. */
   spendInstruction(spendId: string): { to: Address; amount: bigint } {
     const s = this.spends.get(spendId) ?? fail('UNKNOWN_SPEND', spendId);
-    if (s.status !== 'AUTHORIZED')
+    if (s.status !== 'EXECUTING')
       fail('SPEND_STATE', `${spendId} is ${s.status}`);
     this.requireOpen();
     return { to: s.spend.payee, amount: s.spend.amount };
@@ -981,7 +1002,7 @@ export class GroupFund {
       transferKey(s.execution) === key
     )
       return [];
-    if (s.status !== 'AUTHORIZED') fail('SPEND_STATE', s.status);
+    if (s.status !== 'EXECUTING') fail('SPEND_STATE', s.status);
     if (this.usedKeys.has(key)) fail('DUPLICATE_CLAIM', key);
     this.checkTransferAsset(t);
     if (
@@ -1027,7 +1048,7 @@ export class GroupFund {
 
   refundInstruction(refundId: string): { to: Address; amount: bigint } {
     const r = this.refunds.get(refundId) ?? fail('UNKNOWN_REFUND', refundId);
-    if (r.status !== 'AUTHORIZED') fail('REFUND_STATE', r.status);
+    if (r.status !== 'EXECUTING') fail('REFUND_STATE', r.status);
     return { to: this.member(r.memberId).wallet, amount: r.amount };
   }
 
@@ -1044,7 +1065,7 @@ export class GroupFund {
       transferKey(r.execution) === key
     )
       return [];
-    if (r.status !== 'AUTHORIZED') fail('REFUND_STATE', r.status);
+    if (r.status !== 'EXECUTING') fail('REFUND_STATE', r.status);
     if (this.usedKeys.has(key)) fail('DUPLICATE_CLAIM', key);
     this.checkTransferAsset(t);
     if (
@@ -1065,6 +1086,11 @@ export class GroupFund {
     now: number;
   }): Promise<FundEvent[]> {
     this.requireOpen();
+    if ([...this.spends.values()].some((s) => s.status === 'EXECUTING'))
+      fail(
+        'SPEND_STATE',
+        'unreconciled spend execution; funds remain reserved',
+      );
     const { authorization } = await this.decide({
       proposalHash: cancelProposalHash(this.fundId, this.termsHash),
       snapshot: input.snapshot,
@@ -1124,6 +1150,12 @@ export class GroupFund {
     if (!ids.length || new Set(ids).size !== ids.length)
       fail('TRIP_INVALID', 'each member holds at most one seat');
     for (const id of ids) this.member(id);
+    if (
+      input.travelers.some(
+        (t) => !/^pv_[A-Za-z0-9_-]{1,160}$/.test(t.travelerRef),
+      )
+    )
+      fail('TRIP_INVALID', 'opaque ProfileVault traveler refs required');
     if (new Set(input.travelers.map((t) => t.travelerRef)).size !== ids.length)
       fail('TRIP_INVALID', 'traveler profiles must be distinct');
     return [{ type: 'TRIP_REGISTERED', ...input, at }];
@@ -1195,10 +1227,12 @@ export class GroupFund {
     }
     let committed = 0n;
     for (const s of this.spends.values())
-      if (s.status === 'AUTHORIZED') committed += s.spend.amount;
+      if (s.status === 'AUTHORIZED' || s.status === 'EXECUTING')
+        committed += s.spend.amount;
     let refundInFlight = 0n;
     for (const r of this.refunds.values())
-      if (r.status === 'AUTHORIZED') refundInFlight += r.amount;
+      if (r.status === 'AUTHORIZED' || r.status === 'EXECUTING')
+        refundInFlight += r.amount;
     let unapplied = 0n;
     for (const d of this.deposits.values())
       if (!d.memberId && d.status !== 'REORGED') unapplied += d.transfer.amount;

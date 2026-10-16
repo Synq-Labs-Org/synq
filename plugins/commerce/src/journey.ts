@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { compare, type EconomicOffer, type Money } from '@synq/offer-exchange';
 import {
   selectExecutionRoute,
@@ -263,19 +264,48 @@ export class CommerceJourney {
   advance(to: JourneyStage, note: string, refs: Record<string, string> = {}) {
     if (!NEXT[this.stage].includes(to))
       throw new JourneyTransitionError(this.stage, to);
+    if (typeof note !== 'string') throw new Error('JOURNEY_UNSAFE_NOTE');
+    const keys = new Set([
+      'recipientRef',
+      'source',
+      'offer',
+      'quote',
+      'path',
+      'requestHash',
+      'grantId',
+      'order',
+      'card',
+      'authorization',
+      'receipt',
+      'return',
+      'rma',
+      'tx',
+    ]);
     for (const [k, v] of Object.entries(refs))
-      if (!SAFE_REF.test(v)) throw new Error(`JOURNEY_UNSAFE_REF: ${k}`);
+      if (!keys.has(k) || !SAFE_REF.test(v))
+        throw new Error('JOURNEY_UNSAFE_REF');
+    // Arbitrary provider ids/free text are not safe PII redaction boundaries.
+    const safeRefs = Object.fromEntries(
+      Object.entries(refs).map(([k, v]) => [
+        k,
+        `ref_${createHash('sha256').update(v).digest('hex')}`,
+      ]),
+    );
     this.stage = to;
     this.facts.push({
       stage: to,
       at: this.now(),
-      note: note.slice(0, 300),
-      refs,
+      note: `Journey stage: ${to}`,
+      refs: safeRefs,
     });
   }
 
   /** What a model may see about this journey. */
   agentView() {
-    return { journeyId: this.journeyId, stage: this.stage, facts: this.facts };
+    return {
+      journeyId: `ref_${createHash('sha256').update(this.journeyId).digest('hex')}`,
+      stage: this.stage,
+      facts: structuredClone(this.facts),
+    };
   }
 }

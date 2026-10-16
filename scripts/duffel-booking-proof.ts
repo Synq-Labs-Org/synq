@@ -1,3 +1,4 @@
+import pg from 'pg';
 /**
  * Group trip booking proof: a real Duffel test-mode order and cancellation,
  * kept truthfully distinct from an independently handled Arc testnet
@@ -56,6 +57,7 @@ import {
 } from '@synq/offer-exchange';
 import {
   DuffelBookingExecutor,
+  PostgresDuffelAttempts,
   DuffelClient,
   DuffelFlightsProvider,
   DuffelHoldExecutor,
@@ -306,7 +308,15 @@ async function main() {
     evidence: 'PROVIDER_SANDBOX',
   });
   const flights = new DuffelFlightsProvider(client, now, { maxOffers: 500 });
-  const executor = new DuffelBookingExecutor(client);
+  const db = process.env.SYNQ_DUFFEL_DATABASE_URL;
+  if (!db)
+    throw new Error(
+      'SYNQ_DUFFEL_DATABASE_URL is required for durable booking attempts',
+    );
+  attemptsPool = new pg.Pool({ connectionString: db });
+  const attempts = new PostgresDuffelAttempts(attemptsPool);
+  await attempts.migrate();
+  const executor = new DuffelBookingExecutor(client, 5, attempts);
   const holds = new DuffelHoldExecutor(client, executor);
   const graph = new ProviderCapabilityGraph(
     travelCapabilities({ DUFFEL_TEST_TOKEN: duffelToken }),
@@ -916,4 +926,5 @@ async function main() {
   );
 }
 
-await main();
+let attemptsPool: pg.Pool | undefined;
+await main().finally(() => attemptsPool?.end());

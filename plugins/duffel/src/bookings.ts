@@ -1,4 +1,9 @@
 import {
+  attemptFingerprint,
+  MemoryDuffelAttempts,
+  type DuffelAttemptStore,
+} from './attempts.js';
+import {
   providerMoney,
   toDecimal,
   type EconomicOffer,
@@ -77,6 +82,12 @@ function stayCharged(booking: Json): Money | null {
 
 function stayOutcome(b: Json): BookingOutcome {
   const status = str(b.status) ?? 'unknown';
+  if (!str(b.id) || !['confirmed', 'cancelled'].includes(status))
+    return {
+      status: 'UNKNOWN',
+      detail: 'stay not confirmed by provider',
+      requestId: null,
+    };
   const common = {
     providerRef: String(b.id),
     reference: str(b.reference) ?? null,
@@ -89,6 +100,12 @@ function stayOutcome(b: Json): BookingOutcome {
 }
 
 function orderOutcome(o: Json): BookingOutcome {
+  if (!str(o.id) || obj(o.payment_status).awaiting_payment === true)
+    return {
+      status: 'UNKNOWN',
+      detail: 'order not confirmed paid by provider',
+      requestId: null,
+    };
   const common = {
     providerRef: String(o.id),
     reference: str(o.booking_reference) ?? null,
@@ -112,7 +129,29 @@ export class DuffelBookingExecutor {
   constructor(
     private readonly client: DuffelClient,
     private readonly maxPages = 5,
+    private readonly attempts: DuffelAttemptStore = new MemoryDuffelAttempts(),
   ) {}
+
+  async acquireAttempt(key: string, binding: unknown): Promise<boolean> {
+    if (this.client.evidence === 'PROVIDER_SANDBOX' && !this.attempts.durable)
+      throw new DuffelError(
+        'DEFINITIVE',
+        null,
+        'DURABLE_STORE_REQUIRED',
+        null,
+        'booking writes require a persistent attempt fence',
+      );
+    const status = await this.attempts.claim(key, attemptFingerprint(binding));
+    if (status === 'CONFLICT')
+      throw new DuffelError(
+        'DEFINITIVE',
+        null,
+        'IDEMPOTENCY_CONFLICT',
+        null,
+        'booking key has different terms',
+      );
+    return status === 'NEW';
+  }
 
   private async findByKey(path: string, key: string): Promise<Json | null> {
     let after: string | undefined;
@@ -147,6 +186,11 @@ export class DuffelBookingExecutor {
     return o ? orderOutcome(o) : null;
   }
 
+  async findHeldOrder(key: string): Promise<HeldOrderState | null> {
+    const o = await this.findByKey('/air/orders', key);
+    return o ? heldState(o) : null;
+  }
+
   async bookStay(input: {
     quoteId: string;
     guests: TravelerPii[];
@@ -154,8 +198,18 @@ export class DuffelBookingExecutor {
   }): Promise<BookingOutcome> {
     const lead = input.guests[0];
     if (!lead) return { status: 'FAILED', code: 'NO_GUESTS', requestId: null };
+    const fresh = await this.acquireAttempt(`stay:${input.idempotencyKey}`, {
+      quoteId: input.quoteId,
+      travelers: input.guests,
+    });
     const existing = await this.findStayBooking(input.idempotencyKey);
     if (existing) return existing;
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior attempt requires provider reconciliation',
+        requestId: null,
+      };
     try {
       const r = await this.client.request<Json>('POST', '/stays/bookings', {
         quote_id: input.quoteId,
@@ -187,8 +241,27 @@ export class DuffelBookingExecutor {
       !input.passengers.length
     )
       return { status: 'FAILED', code: 'PASSENGER_MISMATCH', requestId: null };
+    if (
+      input.amount.amount !==
+        providerMoney(input.amountDecimal, input.amount.currency).amount ||
+      BigInt(input.amount.amount) <= 0n
+    )
+      return { status: 'FAILED', code: 'AMOUNT_MISMATCH', requestId: null };
+    const fresh = await this.acquireAttempt(`order:${input.idempotencyKey}`, {
+      type: 'instant',
+      offerId: input.offerId,
+      passengerIds: input.passengerIds,
+      travelers: input.passengers,
+      amount: input.amount,
+    });
     const existing = await this.findFlightOrder(input.idempotencyKey);
     if (existing) return existing;
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior attempt requires provider reconciliation',
+        requestId: null,
+      };
     try {
       const r = await this.client.request<Json>('POST', '/air/orders', {
         type: 'instant',
@@ -207,7 +280,7 @@ export class DuffelBookingExecutor {
           {
             type: 'balance',
             currency: input.amount.currency,
-            amount: input.amountDecimal,
+            amount: toDecimal(input.amount),
           },
         ],
         metadata: { [IDEMPOTENCY_METADATA_KEY]: input.idempotencyKey },
@@ -352,6 +425,13 @@ export function holdPaymentDecision(input: {
   safetySeconds?: number;
 }): HoldPaymentDecision {
   const { hold, current, approved } = input;
+  if (
+    !Number.isSafeInteger(input.now) ||
+    !Number.isSafeInteger(input.safetySeconds ?? 120) ||
+    (input.safetySeconds ?? 120) < 0 ||
+    !Number.isSafeInteger(hold.paymentRequiredBy)
+  )
+    return { action: 'EXPIRED', reason: 'invalid hold time' };
   if (hold.cancelled || !hold.awaitingPayment)
     return { action: 'EXPIRED', reason: 'hold is no longer awaiting payment' };
   if (hold.paymentRequiredBy === null)
@@ -395,9 +475,23 @@ export class DuffelHoldExecutor {
       !input.passengers.length
     )
       return { status: 'FAILED', code: 'PASSENGER_MISMATCH', requestId: null };
-    const prior = await this.orders.findFlightOrder(input.idempotencyKey);
-    if (prior && prior.status !== 'FAILED' && prior.status !== 'UNKNOWN')
-      return { status: 'HELD', ...(await this.status(prior.providerRef)) };
+    const fresh = await this.orders.acquireAttempt(
+      `order:${input.idempotencyKey}`,
+      {
+        type: 'hold',
+        offerId: input.offerId,
+        passengerIds: input.passengerIds,
+        travelers: input.passengers,
+      },
+    );
+    const prior = await this.orders.findHeldOrder(input.idempotencyKey);
+    if (prior) return { status: 'HELD', ...prior };
+    if (!fresh)
+      return {
+        status: 'UNKNOWN',
+        detail: 'prior hold attempt requires reconciliation',
+        requestId: null,
+      };
     try {
       const r = await this.client.request<Json>('POST', '/air/orders', {
         type: 'hold',
@@ -449,6 +543,18 @@ export class DuffelHoldExecutor {
       now: input.now,
     });
     if (decision.action !== 'PAY') return { decision, paymentId: null };
+    const fresh = await this.orders.acquireAttempt(
+      `payment:${input.orderId}`,
+      input.approved,
+    );
+    if (!fresh)
+      return {
+        decision: {
+          action: 'EXPIRED',
+          reason: 'prior payment attempt requires reconciliation',
+        },
+        paymentId: null,
+      };
     const r = await this.client.request<Json>('POST', '/air/payments', {
       order_id: input.orderId,
       payment: {

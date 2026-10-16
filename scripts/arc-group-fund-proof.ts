@@ -405,6 +405,9 @@ fund = await svc.run(fundId, (f) =>
     now(),
   ),
 );
+fund = await svc.run(fundId, (f) =>
+  f.beginRefundExecution('refund-contractor', now()),
+);
 const refundTo = fund.refundInstruction('refund-contractor');
 const refund = await executeTransfer(chain, poolAccount, {
   from: poolAccount.address,
@@ -518,6 +521,7 @@ step('ballot-authorized', {
 });
 
 // 6. The pool pays exactly the authorized spend.
+fund = await svc.run(fundId, (f) => f.beginSpendExecution('gift', now()));
 const instruction = fund.spendInstruction('gift');
 const pay = await executeTransfer(chain, poolAccount, {
   from: poolAccount.address,
