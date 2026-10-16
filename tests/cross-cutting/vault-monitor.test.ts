@@ -10,6 +10,7 @@ import {
   toHex,
   type Address,
   type Hex,
+  type Log,
 } from 'viem';
 import { contract, token } from '@synq/chain-registry/arc';
 import {
@@ -37,7 +38,12 @@ const EXTRA = parseAbi([
   'function swapOwner(address prevOwner, address oldOwner, address newOwner)',
 ]);
 
-function queuedLog(to: Address, value: bigint, operation: number, data: Hex) {
+function queuedLog(
+  to: Address,
+  value: bigint,
+  operation: number,
+  data: Hex,
+): Log {
   const id = keccak256(toHex(`${to}:${data}:${operation}`));
   return {
     address: POLICY,
@@ -45,7 +51,7 @@ function queuedLog(to: Address, value: bigint, operation: number, data: Hex) {
       abi: VAULT_POLICY_ABI,
       eventName: 'OperationQueued',
       args: { id, to },
-    }),
+    }) as [Hex, ...Hex[]],
     data: encodeAbiParameters(
       [
         { type: 'uint256' },
