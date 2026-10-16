@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./arc": "./src/arc-authority.ts"
+    "./arc": "./src/arc-authority.ts",
+    "./arc-escrow": "./src/arc-escrow.ts"
   },
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"

@@ -31,7 +31,19 @@ export const PAYMENT_PURPOSES = [
   'RECURRING_BILL',
   'GROUP_EXPENSE',
 ] as const;
-export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+/**
+ * Milestone-escrow purposes. Kept apart from PAYMENT_PURPOSES so agent
+ * proposal schemas built from that list cannot name them: escrow intents are
+ * built only from a mutually signed Deal Room agreement (`./arc-escrow`).
+ */
+export const ESCROW_PURPOSES = [
+  'ESCROW_FUNDING',
+  'ESCROW_RELEASE',
+  'ESCROW_REFUND',
+] as const;
+export type PaymentPurpose =
+  | (typeof PAYMENT_PURPOSES)[number]
+  | (typeof ESCROW_PURPOSES)[number];
 
 export type PaymentMandate = Readonly<{
   mandateId: string;

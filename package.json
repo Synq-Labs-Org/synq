@@ -76,6 +76,7 @@
     "@synq/agent-runtime": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/channels": "workspace:*",
+    "@synq/dealroom": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",
     "@synq/funding": "workspace:*",
