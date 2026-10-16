@@ -3,38 +3,39 @@ import SwiftUI
 // Group-bound review cards issued by other Synq channels (`/approve?p&g&n`).
 // The embedded preview is an unverified hint; the Synq page is canonical.
 
+extension CardLink {
+    /// Art for the card's kind.
+    var artSlot: SynqArtSlot {
+        switch preview?.type {
+        case "GROUP_TREASURY": return .fund
+        case "GROUP_GIFT": return .gift
+        case "HOTEL_COMPARISON": return .deal
+        case "DCA_MANDATE": return .agent
+        case "EXECUTION_RECEIPT": return .receipt
+        default: return .risk
+        }
+    }
+
+    func card(status: CardStatus?) -> SynqCardModel {
+        let title = preview?.title ?? "Group proposal"
+        let lines = preview?.lines ?? []
+        return SynqCardModel(art: artSlot, eyebrow: "Review · \(preview?.groupLabel ?? "Synq")", title: title,
+                             amount: nil, unit: "", detail: lines.first ?? "Unverified preview · tap to review",
+                             badge: .pending, status: status.map { $0.state.capitalized } ?? "Review",
+                             progress: status.map { ($0.counted, $0.required) },
+                             network: preview?.executionMode ?? "Synq page",
+                             accessibilityLabel: "Synq review card: \(title). "
+                                 + (status.map { "\($0.counted) of \($0.required) verified approvals." } ?? "Unverified preview.")
+                                 + " Tap to review.")
+    }
+}
+
 /// Transcript (live layout) rendering of a card.
 struct TranscriptCardView: View {
     let link: CardLink
     let status: CardStatus?
 
-    var body: some View {
-        ZStack {
-            Theme.ink
-            RadialGradient(colors: [Theme.blue.opacity(0.35), .clear], center: .topLeading, startRadius: 0, endRadius: 260)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    SynqMark(size: 18, finish: .titanium, showsOrbit: false)
-                    Text("SYNQ · REVIEW").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2)
-                        .foregroundStyle(Theme.blueHi)
-                    Spacer()
-                    if let s = status {
-                        HoloPips(pips: .init(on: s.counted, total: s.required), color: Theme.blueHi, size: 7)
-                        Text("\(s.counted)/\(s.required)").font(.synq(.caption, .bold)).monospacedDigit()
-                            .foregroundStyle(Theme.text)
-                    }
-                }
-                Text(link.preview?.title ?? "Group proposal").font(.synq(.headline, .bold)).foregroundStyle(Theme.text).lineLimit(2)
-                ForEach(Array((link.preview?.lines ?? []).prefix(2).enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.synq(.subheadline)).foregroundStyle(Theme.text2).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Text(status.map { "Current: \($0.state.lowercased())" } ?? "Unverified preview · tap to review")
-                    .font(.synq(.caption2)).foregroundStyle(Theme.text3)
-            }
-            .padding(14)
-        }
-    }
+    var body: some View { SynqCardBubble(model: link.card(status: status)) }
 }
 
 /// Expanded view: current state plus a button that opens the authenticated approval page.
@@ -45,43 +46,44 @@ struct ExpandedCardView: View {
     let onRefresh: () -> Void
     let onReview: () -> Void
     let onShareUpdate: (() -> Void)?
+    @Environment(\.synqTheme) private var theme
 
     var body: some View {
-        SynqScreen(accent: Theme.blue, secondary: Theme.violet) {
-            VStack(alignment: .leading, spacing: Theme.s4) {
-                BrandBar(network: "Review")
-                VStack(alignment: .leading, spacing: Theme.s2) {
-                    Text(link.preview?.title ?? "Group proposal").font(.synq(.title2, .bold)).foregroundStyle(Theme.text)
-                    if let preview = link.preview {
-                        ForEach(Array(preview.lines.enumerated()), id: \.offset) { _, line in
-                            Text(line).font(.synq(.body)).foregroundStyle(Theme.text2)
+        SynqScreen {
+            VStack(alignment: .leading, spacing: theme.space.l) {
+                SynqHeader(title: "Review", actions: [SynqHeaderAction(icon: .refresh, label: "Refresh status", action: onRefresh)])
+                SynqHeroArt(slot: link.artSlot)
+                SynqStack {
+                    SynqPanel(label: link.preview?.groupLabel ?? "Group proposal") {
+                        Text(link.preview?.title ?? "Group proposal").synqType(.headline).fixedSize(horizontal: false, vertical: true)
+                        if let preview = link.preview {
+                            ForEach(Array(preview.lines.enumerated()), id: \.offset) { _, line in
+                                Text(line).synqType(.body, .secondary)
+                            }
                         }
-                        NoteText(text: "Preview sent by a chat member. The Synq page shows the canonical details.")
+                        Text(link.preview == nil ? "No preview attached. The Synq page shows the details."
+                                                 : "Preview sent by a chat member. The Synq page shows the canonical details.")
+                            .synqType(.caption, .tertiary)
                     }
-                }
-                .padding(Theme.s4)
-                .glass(tint: Theme.blue)
-                if let s = status {
-                    HStack(spacing: Theme.s2) {
-                        StatusPill(text: s.state.capitalized, tone: .waiting)
-                        HoloPips(pips: .init(on: s.counted, total: s.required), color: Theme.blueHi, size: 9)
-                        Text("\(s.counted)/\(s.required) verified approvals").font(.synq(.subheadline, .semibold))
-                            .foregroundStyle(Theme.text)
+                    if let s = status {
+                        SynqPanel(label: "Verified approvals") {
+                            HStack {
+                                SynqBadge(kind: .pending, text: s.state.capitalized)
+                                Spacer()
+                            }
+                            SynqProgress(value: s.counted, total: s.required, label: "\(s.counted)/\(s.required)")
+                        }
                     }
-                }
-                if let error { NoteText(text: error, tone: .failed) }
-                Button(action: onReview) { Label("Review and approve securely", systemImage: "faceid") }
-                    .buttonStyle(.glow(Theme.blue, Theme.blueHi))
-                HStack {
-                    Button("Refresh status", action: onRefresh).buttonStyle(.glassCompact)
+                    if let error { SynqNote(text: error, error: true) }
+                    SynqButton(title: "Review and approve securely", icon: .passkey, trailingIcon: .forward, kind: .primary,
+                               action: onReview)
                     if let onShareUpdate {
-                        Button("Share update", action: onShareUpdate).buttonStyle(.glassCompact)
+                        SynqButton(title: "Share update", icon: .share, action: onShareUpdate)
                     }
+                    SynqNote(text: "Cards never approve anything. You approve on the Synq page with your passkey.")
                 }
-                NoteText(text: "Tapping a card never approves anything. You approve on the Synq page with your passkey.")
             }
-            .padding(.horizontal, Theme.s4)
-            .padding(.vertical, Theme.s5)
+            .padding(.vertical, theme.space.m)
             .synqScroll()
         }
     }
@@ -91,15 +93,16 @@ struct ExpandedCardView: View {
 struct ComposeView: View {
     let onPaste: () -> Void
     let message: String?
+    @Environment(\.synqTheme) private var theme
 
     var body: some View {
         SynqScreen {
-            VStack(spacing: 10) {
-                Text("Share a Synq proposal").font(.synq(.headline, .bold)).foregroundStyle(Theme.text)
-                Text("Copy a Synq review link from the group, then tap below.")
-                    .font(.synq(.footnote)).multilineTextAlignment(.center).foregroundStyle(Theme.text2)
-                Button("Paste Synq link", action: onPaste).buttonStyle(.glow)
-                if let message { NoteText(text: message) }
+            VStack(spacing: theme.space.m) {
+                Text("Share a Synq proposal").synqType(.title)
+                Text("Copy a Synq review link from the group, then tap below.").synqType(.caption, .secondary)
+                    .multilineTextAlignment(.center)
+                SynqButton(title: "Paste Synq link", icon: .copy, action: onPaste)
+                if let message { SynqNote(text: message) }
             }
             .padding()
         }
