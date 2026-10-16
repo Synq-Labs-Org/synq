@@ -338,6 +338,18 @@ export function checkMessage(t: CctpTransfer, m: DecodedMessage): void {
     );
   if (m.burn.amount !== t.amount)
     throw new CctpError('BAD_MESSAGE', 'amount differs');
+  // The payer signed the burn with this max fee; a message carrying another
+  // cap, or a fee above it, is not the burn the payer approved.
+  if (m.burn.maxFee !== t.maxFee)
+    throw new CctpError(
+      'FEE_TOO_HIGH',
+      `message max fee ${m.burn.maxFee} != signed ${t.maxFee}`,
+    );
+  if (m.burn.feeExecuted > m.burn.maxFee)
+    throw new CctpError(
+      'FEE_TOO_HIGH',
+      `fee executed ${m.burn.feeExecuted} > max fee ${m.burn.maxFee}`,
+    );
   const ref = m.burn.hookData === '0x' ? null : m.burn.hookData;
   if ((ref ?? '').toLowerCase() !== (t.reference ?? '').toLowerCase())
     throw new CctpError('WRONG_REFERENCE', `hookData ${ref ?? 'none'}`);

@@ -1,10 +1,11 @@
 import { parseAbiItem, type Address, type Hex, type PublicClient } from 'viem';
-import type { Ledger, OutboxEvent } from '@synq/ledger';
+import { LedgerError, type Ledger, type OutboxEvent } from '@synq/ledger';
 import {
   InvoiceError,
   applyPayment,
   extractMemoPayments,
   issueInvoice,
+  paymentEntry,
   type Invoice,
   type MemoPayment,
 } from './index.js';
@@ -129,9 +130,18 @@ export class PostgresInvoiceStore implements InvoiceStore {
 }
 
 /**
- * Persisted invoice lifecycle. Every state change posts its ledger entry
- * (idempotent key, with an outbox event) before saving the document, so a crash
- * in between is repaired by simply running the same step again.
+ * Persisted invoice lifecycle. Issuance posts its ledger entry (idempotent
+ * key, with an outbox event) before saving the document, so a crash in
+ * between is repaired by running the same step again.
+ *
+ * A payment is the other way round: the document is saved first, under its
+ * revision, and only the winning save posts the entry. Concurrent settlers
+ * (checkout verify, watcher, indexer replicas) or a revision racing a payment
+ * therefore never leave an entry booked against a document that did not
+ * record the payment; the loser reloads and applies the payment to the
+ * current document (or finds its reference gone). A crash between the save
+ * and the post is repaired when the payment is seen again: the duplicate
+ * path re-posts the recorded entry, which the ledger accepts once.
  */
 export class InvoiceService {
   constructor(
@@ -168,17 +178,51 @@ export class InvoiceService {
     | { outcome: 'APPLIED' | 'DUPLICATE'; invoice: Invoice }
     | { outcome: 'UNMATCHED'; reason: string }
   > {
-    const cur = await this.store.byPaymentRef(p.paymentRef);
-    if (!cur) return { outcome: 'UNMATCHED', reason: 'unknown reference' };
-    const r = applyPayment(cur.invoice, p, this.now());
-    if (!r.applied) return { outcome: 'DUPLICATE', invoice: cur.invoice };
-    await this.ledger.post(r.entry!, [
-      event(r.entry!.idempotencyKey, 'invoice.payment_applied', r.invoice),
-    ]);
-    await this.store.save(r.invoice, cur.rev);
-    return { outcome: 'APPLIED', invoice: r.invoice };
+    for (let attempt = 1; ; attempt++) {
+      const cur = await this.store.byPaymentRef(p.paymentRef);
+      if (!cur) return { outcome: 'UNMATCHED', reason: 'unknown reference' };
+      const r = applyPayment(cur.invoice, p, this.now());
+      if (!r.applied) {
+        const key = `chain:${p.chainId}:${p.txHash.toLowerCase()}:${p.logIndex}`;
+        const rec = cur.invoice.payments.find((x) => x.key === key);
+        const entry = rec ? paymentEntry(cur.invoice, rec) : null;
+        if (entry)
+          await this.ledger.post(entry, [
+            event(entry.idempotencyKey, 'invoice.payment_applied', cur.invoice),
+          ]);
+        return { outcome: 'DUPLICATE', invoice: cur.invoice };
+      }
+      let rev: number;
+      try {
+        rev = await this.store.save(r.invoice, cur.rev);
+      } catch (e) {
+        if (
+          e instanceof InvoiceError &&
+          e.code === 'CONFLICT' &&
+          attempt < MAX_SETTLE_ATTEMPTS
+        )
+          continue;
+        throw e;
+      }
+      try {
+        await this.ledger.post(r.entry!, [
+          event(r.entry!.idempotencyKey, 'invoice.payment_applied', r.invoice),
+        ]);
+      } catch (e) {
+        // This chain log is already booked with other lines (another
+        // document): take the payment back off this one and refuse. One
+        // transfer never settles two invoices.
+        if (e instanceof LedgerError && e.code === 'IDEMPOTENCY_CONFLICT')
+          await this.store.save(cur.invoice, rev).catch(() => undefined);
+        throw e;
+      }
+      return { outcome: 'APPLIED', invoice: r.invoice };
+    }
   }
 }
+
+/** A settle that keeps losing revision races gives up with CONFLICT. */
+const MAX_SETTLE_ATTEMPTS = 16;
 
 const event = (key: string, topic: string, i: Invoice): OutboxEvent => ({
   eventId: `${topic}:${key}`,

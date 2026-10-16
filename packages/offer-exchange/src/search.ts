@@ -60,8 +60,10 @@ export async function withDeadline<T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      controller.abort();
+      // Settle as a timeout before aborting: a provider that honours the
+      // signal rejects inside abort(), and must not turn into a FAILED outcome.
       reject(new ProviderTimeoutError(label, ms));
+      controller.abort();
     }, ms);
   });
   try {

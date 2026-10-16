@@ -599,11 +599,12 @@ export class ChannelGateway {
     if (!adapter?.answerGuest)
       return this.result('REFUSED', 'GUEST_MODE_UNSUPPORTED');
     const key = `guest:${envelope.channel}:${envelope.externalUserId}`;
-    if (
-      now - (this.lastBrain.get(key) ?? -Infinity) <
-      (this.options.guestCooldownSeconds ?? 5)
-    )
+    const last = this.lastBrain.get(key);
+    if (now - (last ?? -Infinity) < (this.options.guestCooldownSeconds ?? 5))
       return this.result('REFUSED', 'GUEST_RATE_LIMITED');
+    // Take the caller's slot before any await: concurrent pings from one
+    // caller must not all pass the check while the first is still claiming.
+    this.lastBrain.set(key, now);
     if (
       !(await this.options.store.claimNotification(
         envelope.channel,
@@ -611,9 +612,12 @@ export class ChannelGateway {
         `guest:${event.receiver}:${event.guestQueryId}`,
         now,
       ))
-    )
+    ) {
+      // A redelivered query that was already answered gives the slot back.
+      if (last === undefined) this.lastBrain.delete(key);
+      else this.lastBrain.set(key, last);
       return this.result('DUPLICATE', 'GUEST_ALREADY_ANSWERED');
-    this.lastBrain.set(key, now);
+    }
     const dealt = await this.guestDeal(event);
     const { text, trackAs } = dealt ?? (await this.guestText(event));
     let inlineMessageId: string;
@@ -1853,13 +1857,13 @@ export class ChannelGateway {
     const now = this.options.now();
     // Each draft costs a model call and a stored deal: one per user per cooldown.
     const key = `deal:${envelope.channel}:${envelope.externalUserId}`;
-    if (
-      now - (this.lastBrain.get(key) ?? -Infinity) <
-      (this.options.brainCooldownSeconds ?? 10)
-    )
+    const last = this.lastBrain.get(key);
+    if (now - (last ?? -Infinity) < (this.options.brainCooldownSeconds ?? 10))
       return this.replyOutcome(envelope, 'REFUSED', 'DEAL_RATE_LIMITED', {
         text: 'One deal draft at a time: wait a few seconds and try again.',
       });
+    // Take the slot before any await (see the guest path).
+    this.lastBrain.set(key, now);
     if (
       !(await this.options.store.claimNotification(
         envelope.channel,
@@ -1867,9 +1871,11 @@ export class ChannelGateway {
         `effect:deal:${envelope.eventId}`,
         now,
       ))
-    )
+    ) {
+      if (last === undefined) this.lastBrain.delete(key);
+      else this.lastBrain.set(key, last);
       return this.result('IGNORED', 'DEAL_ALREADY_RUN_FOR_EVENT');
-    this.lastBrain.set(key, now);
+    }
     const context = await this.consentedContext(envelope, group, now);
     let reply: DealDraftReply;
     try {

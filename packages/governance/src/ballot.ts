@@ -10,6 +10,7 @@ import {
 import {
   delegationChain,
   delegationConcentration,
+  indexDelegations,
   quarantinedWallets,
   representationError,
   verifyDelegationRecords,
@@ -330,6 +331,7 @@ export async function tally(input: {
   const notVoted = zero();
   const countedFor = new Map<string, string>(); // member -> voter
   let viaDelegate = 0;
+  const index = indexDelegations(input.delegations);
   for (const m of s.members) {
     const key = m.wallet.toLowerCase();
     let vote = byVoter.get(key);
@@ -337,7 +339,7 @@ export async function tally(input: {
     else {
       // Bounded walk: stops at the first voter, never fails on what lies beyond.
       const chain = delegationChain(
-        input.delegations,
+        index,
         m.wallet,
         at,
         policy.maxDelegationDepth,

@@ -174,11 +174,39 @@ export const isActiveAt = (r: DelegationRecord, at: number) =>
   at < r.delegation.expiresAt &&
   (r.revokedAt === null || at < r.revokedAt);
 
-function activeFrom(
+/**
+ * Records grouped by delegator. A tally walks one chain per eligible member;
+ * scanning every record on every hop made a large electorate quadratic
+ * (members x delegations), so walks over many members use this index.
+ */
+export type DelegationIndex = Readonly<{
+  byDelegator: ReadonlyMap<string, readonly DelegationRecord[]>;
+}>;
+
+export function indexDelegations(
   records: readonly DelegationRecord[],
+): DelegationIndex {
+  const byDelegator = new Map<string, DelegationRecord[]>();
+  for (const r of records) {
+    const key = r.delegation.delegator.toLowerCase();
+    const list = byDelegator.get(key);
+    if (list) list.push(r);
+    else byDelegator.set(key, [r]);
+  }
+  return { byDelegator };
+}
+
+/** Either the plain record list or an index built from it. */
+export type DelegationSource = readonly DelegationRecord[] | DelegationIndex;
+
+function activeFrom(
+  source: DelegationSource,
   wallet: Address,
   at: number,
 ): DelegationRecord[] {
+  const records = Array.isArray(source)
+    ? (source as readonly DelegationRecord[])
+    : ((source as DelegationIndex).byDelegator.get(wallet.toLowerCase()) ?? []);
   return records.filter(
     (r) => sameAddress(r.delegation.delegator, wallet) && isActiveAt(r, at),
   );
@@ -212,7 +240,7 @@ export type ChainStop = 'END' | 'DEPTH' | 'CYCLE' | 'BLOCKED' | 'AMBIGUOUS';
  * wallet, or when a wallet has more than one live outgoing delegation.
  */
 export function walkDelegations(
-  records: readonly DelegationRecord[],
+  records: DelegationSource,
   wallet: Address,
   at: number,
   maxDepth: number,
@@ -237,7 +265,7 @@ export function walkDelegations(
 }
 
 export const delegationChain = (
-  records: readonly DelegationRecord[],
+  records: DelegationSource,
   wallet: Address,
   at: number,
   maxDepth: number,
@@ -400,11 +428,12 @@ export function delegationConcentration(input: {
 }): GovernanceFlag[] {
   const { snapshot, policy } = input;
   const blocked = quarantinedWallets(snapshot);
+  const index = indexDelegations(input.records);
   const held = new Map<string, { weight: bigint; memberIds: string[] }>();
   for (const m of snapshot.members) {
     const terminal =
       delegationChain(
-        input.records,
+        index,
         m.wallet,
         input.at,
         policy.maxDelegationDepth,
