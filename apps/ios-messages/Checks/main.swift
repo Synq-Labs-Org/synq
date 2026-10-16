@@ -40,5 +40,7 @@ check(swapped != nil && swapped?.preview == nil, "preview for another group is d
 let noNonce = payload.openUrl!.replacingOccurrences(of: "&n=", with: "&x=")
 check(CardLink(url: URL(string: noNonce)!, allowedHost: "synq.example") == nil, "link without nonce refused")
 
+runParserChecks(check: check)
+
 if failures > 0 { exit(1) }
-print("native card checks passed")
+print("native card and command checks passed")

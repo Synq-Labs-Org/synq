@@ -82,6 +82,20 @@ struct FundView: Codable, Equatable {
     let canRequestTestFunds: Bool
     /// Largest single payment, as a decimal (absent from older servers).
     let maxPayment: String?
+    /// Chain the group wallet lives on, when the server says (newer servers).
+    let network: String?
+    let chainId: Int?
+
+    /// Truthful network label: what the server reports, else what a payment's
+    /// explorer link shows, else the fund backend's chain (Monad testnet).
+    var networkLabel: String {
+        if let network, !network.isEmpty { return network }
+        if let chainId, let known = SynqNetwork.label(chainId: chainId) { return known }
+        for p in proposals {
+            if let e = p.explorer, let known = SynqNetwork.label(explorer: e) { return known }
+        }
+        return SynqNetwork.fundBackend
+    }
 
     var stateText: String {
         switch state {
@@ -100,34 +114,82 @@ struct FundView: Codable, Equatable {
     }
 }
 
+enum SynqNetwork {
+    /// The chain the fund backend (apps/demo fund service) runs group wallets on.
+    static let fundBackend = "Monad testnet"
+
+    static func label(chainId: Int) -> String? {
+        switch chainId {
+        case 10143: return "Monad testnet"
+        case 5042002: return "Arc testnet"
+        case 11155111: return "Sepolia"
+        case 84532: return "Base Sepolia"
+        case 31337: return "Local devnet"
+        default: return nil
+        }
+    }
+
+    static func label(explorer: String) -> String? {
+        let host = URL(string: explorer)?.host?.lowercased() ?? ""
+        if host.contains("monad") { return "Monad testnet" }
+        if host.contains("arc") { return "Arc testnet" }
+        if host.contains("sepolia") { return host.contains("base") ? "Base Sepolia" : "Sepolia" }
+        return nil
+    }
+}
+
 // MARK: - Ask Synq and trips
 
-/// One suggested next step from Ask Synq; it only pre-fills a flow.
+/// A flight search Ask Synq understood. Fields added later decode as absent on
+/// older servers: no return date, no labels, and never auto-run.
+struct AskFlight: Equatable {
+    let origin: String
+    let destination: String
+    let departureDate: String
+    let returnDate: String?
+    let travelers: Int
+    let originLabel: String?
+    let destinationLabel: String?
+    let cabin: String?
+    let autoRun: Bool
+}
+
+/// One suggested next step from Ask Synq. Searches may run on their own when the
+/// server says `autoRun`; a send only ever pre-fills the Send sheet.
 enum AskAction: Decodable, Equatable {
     case send(recipientId: String, recipient: String, amount: String)
-    case flightSearch(origin: String, destination: String, departureDate: String, travelers: Int)
-    case giftSearch(query: String, maxPrice: String)
+    case flightSearch(AskFlight)
+    case giftSearch(query: String, maxPrice: String, autoRun: Bool)
     case testMoney
 
     private enum Keys: String, CodingKey {
-        case kind, recipientId, recipient, amount, origin, destination, departureDate, travelers, query, maxPrice
+        case kind, recipientId, recipient, amount, origin, destination, departureDate, returnDate, travelers
+        case originLabel, destinationLabel, cabin, autoRun, query, maxPrice
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
+        let autoRun = (try? c.decodeIfPresent(Bool.self, forKey: .autoRun)) ?? false
         switch try c.decode(String.self, forKey: .kind) {
         case "SEND":
             self = .send(recipientId: try c.decode(String.self, forKey: .recipientId),
                          recipient: try c.decode(String.self, forKey: .recipient),
                          amount: try c.decode(String.self, forKey: .amount))
         case "FLIGHT_SEARCH":
-            self = .flightSearch(origin: try c.decode(String.self, forKey: .origin),
-                                 destination: try c.decode(String.self, forKey: .destination),
-                                 departureDate: try c.decode(String.self, forKey: .departureDate),
-                                 travelers: try c.decode(Int.self, forKey: .travelers))
+            self = .flightSearch(AskFlight(
+                origin: try c.decode(String.self, forKey: .origin),
+                destination: try c.decode(String.self, forKey: .destination),
+                departureDate: try c.decode(String.self, forKey: .departureDate),
+                returnDate: (try? c.decodeIfPresent(String.self, forKey: .returnDate)) ?? nil,
+                travelers: try c.decode(Int.self, forKey: .travelers),
+                originLabel: (try? c.decodeIfPresent(String.self, forKey: .originLabel)) ?? nil,
+                destinationLabel: (try? c.decodeIfPresent(String.self, forKey: .destinationLabel)) ?? nil,
+                cabin: (try? c.decodeIfPresent(String.self, forKey: .cabin)) ?? nil,
+                autoRun: autoRun))
         case "GIFT_SEARCH":
             self = .giftSearch(query: try c.decode(String.self, forKey: .query),
-                               maxPrice: try c.decode(String.self, forKey: .maxPrice))
+                               maxPrice: try c.decode(String.self, forKey: .maxPrice),
+                               autoRun: autoRun)
         default:
             self = .testMoney
         }
@@ -139,6 +201,19 @@ struct AskReply: Decodable, Equatable {
     let action: AskAction?
 }
 
+/// One flight leg of an option, when the server sends them (round trips).
+/// Every field is optional so a richer or older server never breaks decoding.
+struct TripLeg: Decodable, Equatable {
+    let origin: String?
+    let destination: String?
+    let departAt: String?
+    let arriveAt: String?
+    let date: String?
+    let flightNumber: String?
+    let stops: Int?
+    let duration: String?
+}
+
 struct TripOptionView: Decodable, Equatable, Identifiable {
     let optionId: String
     let title: String
@@ -147,7 +222,36 @@ struct TripOptionView: Decodable, Equatable, Identifiable {
     let currency: String
     let refundable: Bool
     let votes: Int
+    let legs: [TripLeg]?
     var id: String { optionId }
+
+    private enum Keys: String, CodingKey {
+        case optionId, title, detail, total, currency, refundable, votes, legs
+    }
+
+    init(optionId: String, title: String, detail: String, total: String, currency: String,
+         refundable: Bool, votes: Int, legs: [TripLeg]? = nil) {
+        self.optionId = optionId
+        self.title = title
+        self.detail = detail
+        self.total = total
+        self.currency = currency
+        self.refundable = refundable
+        self.votes = votes
+        self.legs = legs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        optionId = try c.decode(String.self, forKey: .optionId)
+        title = try c.decode(String.self, forKey: .title)
+        detail = try c.decode(String.self, forKey: .detail)
+        total = try c.decode(String.self, forKey: .total)
+        currency = try c.decode(String.self, forKey: .currency)
+        refundable = try c.decode(Bool.self, forKey: .refundable)
+        votes = try c.decode(Int.self, forKey: .votes)
+        legs = (try? c.decodeIfPresent([TripLeg].self, forKey: .legs)) ?? nil
+    }
 }
 
 struct TripPayment: Decodable, Equatable {
@@ -172,6 +276,8 @@ struct TripView: Decodable, Equatable, Identifiable {
     let origin: String?
     let destination: String?
     let departureDate: String?
+    /// Present for return flights (newer servers).
+    let returnDate: String?
     let travelers: Int?
     let query: String?
     let maxPrice: String?
@@ -293,12 +399,13 @@ struct FundClient {
     let host: String
     var session: URLSession = .shared
 
-    private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) -> URLRequest {
+    private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
+                         timeout: TimeInterval = 15) -> URLRequest {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
         c.path = "/api/v1\(path)"
-        var r = URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        var r = URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         r.httpMethod = method
         if let body {
             r.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -340,17 +447,29 @@ struct FundClient {
                        as: AskReply.self)
     }
 
-    func startTrip(fundId: String, key: String, origin: String, destination: String,
-                   departureDate: String, travelers: Int) async throws -> TripView {
-        try await send(request("/funds/\(fundId)/trips", method: "POST", body: [
-            "key": key, "origin": origin, "destination": destination,
-            "departureDate": departureDate, "travelers": travelers,
-        ]), as: TripView.self)
+    /// Live provider searches can take most of a minute, so these wait longer.
+    static let searchTimeout: TimeInterval = 100
+
+    func startTrip(fundId: String, key: String, plan: FlightPlan) async throws -> TripView {
+        try await send(request("/funds/\(fundId)/trips", method: "POST",
+                               body: Self.tripBody(key: key, plan: plan), timeout: Self.searchTimeout),
+                       as: TripView.self)
+    }
+
+    /// `returnDate` is sent only when present, so older servers see the same body as before.
+    static func tripBody(key: String, plan: FlightPlan) -> [String: Any] {
+        var body: [String: Any] = [
+            "key": key, "origin": plan.origin, "destination": plan.destination,
+            "departureDate": plan.departureDate, "travelers": plan.travelers,
+        ]
+        if let r = plan.returnDate { body["returnDate"] = r }
+        return body
     }
 
     func startGift(fundId: String, key: String, query: String, maxPrice: String) async throws -> TripView {
         try await send(request("/funds/\(fundId)/gifts", method: "POST",
-                               body: ["key": key, "query": query, "maxPrice": maxPrice]), as: TripView.self)
+                               body: ["key": key, "query": query, "maxPrice": maxPrice],
+                               timeout: Self.searchTimeout), as: TripView.self)
     }
 
     private func readRequest(_ path: String, key: String, voter: String) -> URLRequest {
@@ -421,6 +540,8 @@ struct FundRef: Codable, Equatable {
     var adminKey: String?
     var conversations: [String]
     var lastUsed: Date
+    /// A flight typed on the Start screen, searched once the fund goes live.
+    var pendingFlight: FlightPlan?
 }
 
 /// Local memory of which fund belongs to which conversation. The extension cannot
@@ -460,6 +581,15 @@ struct FundBook {
         refs.append(ref)
         save(refs)
         return ref
+    }
+
+    @discardableResult
+    func setPendingFlight(_ plan: FlightPlan?, for fundId: String) -> FundRef? {
+        var refs = all()
+        guard let i = refs.firstIndex(where: { $0.fundId == fundId }) else { return nil }
+        refs[i].pendingFlight = plan
+        save(refs)
+        return refs[i]
     }
 }
 
