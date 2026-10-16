@@ -285,6 +285,7 @@ describe('Arc gas and Circle Paymaster scope (P16)', () => {
             { type: 'uint256' },
             { type: 'uint256' },
           ],
+          // nonce, success, actualGasCost (live); actualGasUsed is illustrative (unused)
           [0n, true, 291_029_657_679_710n, 400_000n],
         ),
       ),
