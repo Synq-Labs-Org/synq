@@ -159,7 +159,14 @@ export type EscrowStep =
   | 'RELEASE'
   | 'WITHDRAW'
   | 'REFUND'
-  | 'DISPUTE';
+  | 'DISPUTE'
+  | 'IDENTITY_REGISTER'
+  | 'JOB_CREATE'
+  | 'JOB_BUDGET'
+  | 'JOB_APPROVE'
+  | 'JOB_FUND'
+  | 'JOB_SUBMIT'
+  | 'JOB_COMPLETE';
 
 /** One transaction recorded before its broadcast. */
 export type EscrowBroadcast = Readonly<{
