@@ -9,11 +9,15 @@ set -euo pipefail
 export SYNQ_DYNAMIC_RUN_ID
 cd "$(dirname "$0")/.."
 tsx() { corepack pnpm exec tsx "$@"; }
+done_file="bounty-evidence/arc/dynamic-e2e-${SYNQ_DYNAMIC_RUN_ID}.steps"
+touch "$done_file"
 step() {
   local name=$1; shift
+  # A completed step is not re-run: its proof reconciled balances at the time it ran.
+  if grep -qx "$name" "$done_file"; then echo "== skip $name (done)"; return 0; fi
   for attempt in 1 2 3 4; do
     echo "== $(date -u +%H:%M:%S) $name (attempt $attempt)"
-    if env "$@"; then return 0; fi
+    if env "$@"; then echo "$name" >> "$done_file"; return 0; fi
     sleep 20
   done
   echo "FAILED $name"; exit 1

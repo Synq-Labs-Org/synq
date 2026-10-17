@@ -121,7 +121,14 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
   const save = () =>
     writeFileSync(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
   const evidencePath = `bounty-evidence/arc/dynamic-invoice-${runId}${suffix}.json`;
+  // A resumed run keeps the proof an earlier run already wrote.
   const evidence: Record<string, unknown> = {
+    ...(existsSync(evidencePath)
+      ? (JSON.parse(readFileSync(evidencePath, 'utf8')) as Record<
+          string,
+          unknown
+        >)
+      : {}),
     runId,
     workspaceId,
     mode: 'LIVE_ARC_TESTNET',

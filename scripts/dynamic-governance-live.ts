@@ -155,7 +155,13 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
       manifest.operatorBefore = String(balance);
       save();
     }
-    const perAction = kind === 'QUEUE_CAPS' || kind === 'SET_CAPS';
+    // Each action reconciles only its own gas; the operator pays for other steps in between.
+    // The original run kept one cumulative baseline for the vendor actions.
+    const perAction =
+      kind === 'QUEUE_CAPS' ||
+      kind === 'SET_CAPS' ||
+      !!manifest.beforeByKind?.[kind] ||
+      !manifest.actions[kind];
     if (perAction && !manifest.beforeByKind?.[kind]) {
       manifest.beforeByKind = {
         ...manifest.beforeByKind,
@@ -220,6 +226,17 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
       save();
     }
     const record = await service.record(id);
+    const proven = (
+      evidence.actions as Record<string, { state?: string }> | undefined
+    )?.[kind];
+    if (record?.state === 'CONFIRMED' && proven?.state === 'CONFIRMED') {
+      // Already broadcast, confirmed and reconciled by an earlier run of this step.
+      process.stdout.write(
+        `LIVE_ARC_TESTNET ${evidencePath}; ${kind} already confirmed\n`,
+      );
+      await pool.end();
+      process.exit(0);
+    }
     if (!record) throw new Error('ACTION_MISSING');
     if (record.state === 'REVIEW')
       for (const [index, a] of [owner, coowner].entries())
