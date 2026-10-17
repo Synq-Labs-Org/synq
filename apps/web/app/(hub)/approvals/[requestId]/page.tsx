@@ -89,8 +89,8 @@ export default function ApprovalDetailPage() {
               </ol>
               <Notice tone="info">
                 Signing in to Synq never approves money. Only these signatures
-                do. Your wallet shows the exact data; check it matches before
-                you confirm.
+                do. Your wallet shows the exact data; check it matches what you
+                see here before approving it.
               </Notice>
               {error && <Notice tone="danger">{error}</Notice>}
               {result && (

@@ -5,8 +5,14 @@
   "license": "MIT",
   "scope": "Restricted singleton PAY on Arc testnet; everything else unsupported (see the Amane release manifest).",
   "packages": {
-    "amane-arc-0.2.0.tgz": "f6ec1d83cb1b058c9b10c808b20dc339be538e3d5bd1b2d7c2832b76b7665c7a",
-    "amane-policy-0.2.0.tgz": "ae2b0fcc174163003c3478ed3fe6c6aebb6e02dbed7a15273bf02f9b02c2400f",
-    "amane-verify-0.2.0.tgz": "70ae08acb096ff0ae16941e01eeefdb775d5696227d8460b8fadd3c72ac20436"
+    "amane-arc-0.2.0.tgz": {
+      "sha256Hash": "f6ec1d83cb1b058c9b10c808b20dc339be538e3d5bd1b2d7c2832b76b7665c7a"
+    },
+    "amane-policy-0.2.0.tgz": {
+      "sha256Hash": "ae2b0fcc174163003c3478ed3fe6c6aebb6e02dbed7a15273bf02f9b02c2400f"
+    },
+    "amane-verify-0.2.0.tgz": {
+      "sha256Hash": "70ae08acb096ff0ae16941e01eeefdb775d5696227d8460b8fadd3c72ac20436"
+    }
   }
 }

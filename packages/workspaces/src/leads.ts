@@ -111,6 +111,8 @@ export class WorkspaceLeads {
         workspaceId: string,
         leadId: string,
       ) => Promise<void>;
+      /** A lead was created for the first time (after commit). */
+      onCreated?: (workspaceId: string, leadId: string) => Promise<void>;
     },
   ) {}
 
@@ -293,8 +295,12 @@ export class WorkspaceLeads {
       await this.focus(sql, input.channel, who, leadId, now);
       return { leadId, workspaceId, workspaceName, bound: true, created };
     });
-    if (result.created)
+    if (result.created) {
       await this.publish('LEAD_UPDATED', result.workspaceId, result.leadId);
+      await this.options
+        .onCreated?.(result.workspaceId, result.leadId)
+        .catch(() => undefined);
+    }
     return result;
   }
 
