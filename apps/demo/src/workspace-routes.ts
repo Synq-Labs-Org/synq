@@ -21,6 +21,7 @@ import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
 import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
+import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
@@ -112,6 +113,7 @@ export function registerWorkspaceRoutes(
   deals?: () => WorkspaceDeals | undefined,
   team?: WorkspaceTeam,
   books?: WorkspaceBooks,
+  escrow?: () => WorkspaceDealEscrow | undefined,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -229,11 +231,17 @@ export function registerWorkspaceRoutes(
               'Select three distinct signed-in workspace members; contracting parties sign their own terms.',
           }
         : { status: 'BLOCKED', reason: 'Workspace Deal Room is unavailable.' },
-      dealExecution: {
-        status: 'BLOCKED',
-        reason:
-          'Workspace escrow authorization and executor are not connected yet.',
-      },
+      dealExecution: escrow?.()
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Each party funds, releases, refunds or disputes from its own wallet. The server prepares the exact escrow call, the party signs a bounded mandate and an approval, the Kernel grants it once, and the broadcast transaction is proven on chain before the deal records it.',
+          }
+        : {
+            status: 'BLOCKED',
+            reason:
+              'Workspace escrow authorization and executor are not connected yet.',
+          },
       invoices: invoices?.()
         ? {
             status: 'AVAILABLE',
@@ -624,6 +632,106 @@ export function registerWorkspaceRoutes(
           p = params(req);
         await store.throttle(`workspace:${p.workspaceId}`, 240);
         return service().get(p.workspaceId, s.principalId, p.dealId);
+      }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/deals/:dealId/attestations/prepare',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req);
+          return service().attestationRequest(
+            p.workspaceId,
+            s.principalId,
+            p.dealId,
+            req.body,
+          );
+        }),
+    );
+    app.post(
+      '/v2/workspaces/:workspaceId/deals/:dealId/attestations',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req);
+          return service().attest(
+            p.workspaceId,
+            s.principalId,
+            p.dealId,
+            req.body,
+          );
+        }),
+    );
+    const escrowService = () => {
+      const e = escrow?.();
+      if (!e) throw new WorkspaceError('WORKSPACE_ESCROW_BLOCKED', 503);
+      return e;
+    };
+    const Hash = z.string().regex(/^0x[0-9a-fA-F]{64}$/);
+    const Sig = z.string().regex(/^0x[0-9a-fA-F]{130}$/);
+    app.post(
+      '/v2/workspaces/:workspaceId/deals/:dealId/escrow/prepare',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true),
+            p = params(req),
+            b = z
+              .strictObject({
+                op: z.enum(['FUND', 'RELEASE', 'REFUND', 'DISPUTE']),
+                milestone: z.number().int().min(0).max(31).nullable(),
+              })
+              .parse(req.body);
+          return escrowService().prepare(
+            p.workspaceId,
+            s.principalId,
+            p.dealId,
+            b.op,
+            b.milestone,
+          );
+        }),
+    );
+    app.post('/v2/workspaces/:workspaceId/escrow/authorize', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true),
+          b = z
+            .strictObject({
+              key: z.string().min(1).max(200),
+              mandateSignature: Sig,
+              approvalSignature: Sig.optional(),
+            })
+            .parse(req.body);
+        return escrowService().authorize(await id(req), s.principalId, b.key, {
+          mandateSignature: b.mandateSignature as `0x${string}`,
+          ...(b.approvalSignature
+            ? { approvalSignature: b.approvalSignature as `0x${string}` }
+            : {}),
+        });
+      }),
+    );
+    app.post('/v2/workspaces/:workspaceId/escrow/submit', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req, true),
+          b = z
+            .strictObject({
+              key: z.string().min(1).max(200),
+              hashes: z
+                .strictObject({
+                  APPROVE: Hash.optional(),
+                  OPEN: Hash.optional(),
+                  RELEASE: Hash.optional(),
+                  WITHDRAW: Hash.optional(),
+                  REFUND: Hash.optional(),
+                  DISPUTE: Hash.optional(),
+                })
+                .refine((v) => Object.keys(v).length > 0, 'no hashes'),
+            })
+            .parse(req.body);
+        return escrowService().submit(
+          await id(req),
+          s.principalId,
+          b.key,
+          b.hashes as Record<string, `0x${string}`>,
+        );
       }),
     );
   }

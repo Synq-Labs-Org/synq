@@ -1,14 +1,22 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { getAddress, type Hex } from 'viem';
+import { randomBytes } from 'node:crypto';
 import {
+  ATTESTATION_KINDS,
+  EvidenceSchema,
+  attestationTypedData,
+  checkEvidence,
   contextFromEnrolled,
   sha256Hex,
   dealLinkToken,
+  evidenceHashOf,
+  type AttestationKind,
   type DealRoomService,
   type DealView,
   type Party,
   type Role,
 } from '@synq/dealroom';
+import { z } from 'zod';
 import { WorkspaceError } from './contracts.js';
 import type { PostgresWorkspaceStore } from './postgres.js';
 
@@ -93,7 +101,26 @@ export class WorkspaceDeals {
         label: p.displayName,
       })),
       reviewPath: `/deal/${v.deal.dealId}?t=${dealLinkToken(this.linkKey, v.deal.dealId, { expiresAt: this.workspaces.now() + 900, epoch: v.deal.linkEpoch ?? 0 })}`,
-      execution: 'BLOCKED_WORKSPACE_ESCROW_EXECUTOR',
+      execution: 'PARTY_WALLET_ESCROW',
+      escrow: v.deal.escrow
+        ? {
+            address: v.deal.escrow.escrow,
+            escrowDealId: v.deal.escrow.escrowDealId,
+          }
+        : null,
+      milestones: v.deal.milestones.map((m, i) => ({
+        index: i,
+        title: t.milestones[i]?.title ?? '',
+        amount: String(t.milestones[i]?.amount ?? 0n),
+        evidenceType: t.milestones[i]?.evidenceType ?? null,
+        status: m.status,
+      })),
+      dispute: v.deal.dispute
+        ? {
+            raisedBy: v.deal.dispute.raisedBy,
+            deadline: v.deal.dispute.deadline,
+          }
+        : null,
     };
   }
   async draft(workspaceId: string, principalId: string, raw: unknown) {
@@ -188,4 +215,124 @@ export class WorkspaceDeals {
       await this.service.sign({ dealId: id, version, role, signature }),
     );
   }
+  /** The caller's role in a deal it belongs to, with its verified wallet. */
+  async role(workspaceId: string, principalId: string, dealId: string) {
+    const view = await this.permitted(workspaceId, principalId, dealId);
+    const t = view.current.terms;
+    const role: Role =
+      t.client.principalId === principalId
+        ? 'CLIENT'
+        : t.freelancer.principalId === principalId
+          ? 'FREELANCER'
+          : 'ARBITER';
+    const party =
+      role === 'CLIENT'
+        ? t.client
+        : role === 'FREELANCER'
+          ? t.freelancer
+          : t.arbiter;
+    return { view, role, wallet: getAddress(party.wallet) };
+  }
+  /**
+   * The exact milestone statement the caller's wallet signs. The evidence hash
+   * is computed here from the claim (never trusted from the client); an
+   * acceptance signs over the evidence the payee delivered.
+   */
+  async attestationRequest(
+    workspaceId: string,
+    principalId: string,
+    dealId: string,
+    raw: unknown,
+  ) {
+    const b = AttestationRequestSchema.parse(raw);
+    const { view, role } = await this.role(workspaceId, principalId, dealId);
+    const term = view.current.terms.milestones[b.milestone];
+    const ms = view.deal.milestones[b.milestone];
+    if (!term || !ms) throw new WorkspaceError('MILESTONE_NOT_FOUND', 404);
+    const evidenceHash =
+      b.kind === 'ACCEPT_RELEASE'
+        ? (ms.evidenceHash as Hex)
+        : evidenceHashOf(
+            b.kind === 'DELIVERED'
+              ? {
+                  ...checkEvidence(
+                    b.evidence
+                      ? { ...b.evidence, verifiedBy: null, checkedAt: 0 }
+                      : null,
+                    term.evidenceType,
+                  ),
+                  verifiedBy: null,
+                  checkedAt: 0,
+                }
+              : null,
+          );
+    if (!evidenceHash) throw new WorkspaceError('NOTHING_DELIVERED');
+    const nonce = `0x${randomBytes(32).toString('hex')}` as Hex,
+      deadline = this.workspaces.now() + 900;
+    const typedData = attestationTypedData({
+      chainId: view.current.terms.asset.chainId,
+      escrow: view.current.terms.escrow,
+      dealId,
+      version: view.current.version,
+      termsHash: view.current.termsHash,
+      milestone: b.milestone,
+      kind: b.kind,
+      role,
+      evidenceHash,
+      nonce,
+      deadline,
+    });
+    return {
+      role,
+      nonce,
+      deadline,
+      evidenceHash,
+      typedData: JSON.parse(
+        JSON.stringify(typedData, (_k, v: unknown) =>
+          typeof v === 'bigint' ? String(v) : v,
+        ),
+      ) as unknown,
+    };
+  }
+  async attest(
+    workspaceId: string,
+    principalId: string,
+    dealId: string,
+    raw: unknown,
+  ) {
+    const b = AttestationSchema.parse(raw);
+    const { role } = await this.role(workspaceId, principalId, dealId);
+    return this.view(
+      await this.service.attest({
+        dealId,
+        milestone: b.milestone,
+        kind: b.kind,
+        role,
+        evidence:
+          b.kind === 'DELIVERED' && b.evidence
+            ? { ...b.evidence, verifiedBy: null, checkedAt: 0 }
+            : null,
+        nonce: b.nonce as Hex,
+        deadline: b.deadline,
+        signature: b.signature as Hex,
+      }),
+    );
+  }
 }
+
+const EvidenceClaimSchema = EvidenceSchema.omit({
+  verifiedBy: true,
+  checkedAt: true,
+});
+export const AttestationRequestSchema = z.strictObject({
+  milestone: z.number().int().min(0).max(31),
+  kind: z.enum(
+    ATTESTATION_KINDS as unknown as [AttestationKind, ...AttestationKind[]],
+  ),
+  evidence: EvidenceClaimSchema.nullable().default(null),
+});
+export const AttestationSchema = AttestationRequestSchema.extend({
+  nonce: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+  deadline: z.number().int().positive(),
+  signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+});

@@ -119,6 +119,7 @@ import {
 } from '@synq/workspaces';
 import { WorkspaceVaultSetups } from '@synq/workspaces';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
+import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 import { workspaceChannelRuntime } from './workspace-channels.js';
 import { WorkspaceNotifications } from './workspace-notifications.js';
 import { WorkspaceIndexer } from './workspace-indexer.js';
@@ -520,6 +521,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     let workspaceFinance: WorkspaceFinance | undefined;
     let workspaceInvoices: WorkspaceInvoices | undefined;
     let workspaceDeals: WorkspaceDeals | undefined;
+    let workspaceEscrow: WorkspaceDealEscrow | undefined;
     let workspaceMessage: ReturnType<typeof workspaceCommandPort> | undefined;
     if (process.env.SYNQ_WORKSPACES_ENABLED === '1') {
       if (!process.env.SYNQ_ORIGIN) throw new Error('SYNQ_ORIGIN_REQUIRED');
@@ -610,6 +612,11 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         () => workspaceDeals,
         workspaceTeam,
         vault?.books,
+        () =>
+          (workspaceEscrow ??=
+            workspaceDeals && vault
+              ? vault.escrowFor(workspaceDeals)
+              : undefined),
       );
     }
     const readModel = {

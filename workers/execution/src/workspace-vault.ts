@@ -1,5 +1,7 @@
 import { WorkspaceSplitWorker } from './workspace-splits.js';
 import { WorkspaceBooks } from '@synq/workspaces/books';
+import type { WorkspaceDeals } from '@synq/workspaces/deals';
+import { WorkspaceDealEscrow } from './workspace-escrow.js';
 import { readFileSync, statSync } from 'node:fs';
 import {
   encodeAbiParameters,
@@ -630,6 +632,19 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
     governance: governance.governance,
     screening: () => payouts.screening.status(),
     books,
+    /** Party-wallet deal escrow under the same Kernel key and recipient screening. */
+    escrowFor: (deals: WorkspaceDeals) =>
+      new WorkspaceDealEscrow(
+        deals,
+        chain,
+        {
+          operator: 'workspace-escrow',
+          grantKey: Buffer.from(grantHex, 'hex'),
+          grantTtlSeconds: 900,
+          riskRequiredAbove: 0n,
+        },
+        screening,
+      ),
     readBalance: async (id: string) => {
       const a = await finance.authority(id);
       const amount = await chain.client.readContract({

@@ -30,6 +30,7 @@
     "./workspace-authority": "./src/workspace-authority.ts",
     "./split-executor": "./src/split-executor.ts",
     "./workspace-splits": "./src/workspace-splits.ts",
+    "./workspace-escrow": "./src/workspace-escrow.ts",
     "./workspace-signing": "./src/workspace-signing.ts"
   },
   "scripts": {

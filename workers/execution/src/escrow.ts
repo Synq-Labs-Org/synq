@@ -211,7 +211,7 @@ export class MemoryEscrowBroadcastJournal implements EscrowBroadcastJournal {
   }
 }
 
-const calldata = {
+export const escrowCalldata = {
   open: (c: EscrowOpenCall) =>
     encodeFunctionData({
       abi: MILESTONE_ESCROW_ABI,
@@ -248,8 +248,19 @@ export async function sendEscrowCall(
     journal: EscrowBroadcastJournal;
     grantId: string | null;
     step: EscrowStep;
+    /**
+     * A transaction the party's own wallet already broadcast. It is never
+     * signed here: it must come from the party, to the exact target with the
+     * exact calldata and no value, and succeed on this chain.
+     */
+    submitted?: Hex;
   },
 ): Promise<{ tx: EscrowTx; receipt: TransactionReceipt }> {
+  if (record.submitted)
+    return verifySubmittedCall(chain, signer.address, label, to, data, {
+      ...record,
+      submitted: record.submitted,
+    });
   const key = `${record.grantId ?? `dispute:${signer.address}:${keccak256(data)}`}:${record.step}`;
   let signed = await record.journal.signed(key);
   if (!signed) {
@@ -314,6 +325,63 @@ export async function sendEscrowCall(
   };
 }
 
+async function verifySubmittedCall(
+  chain: ArcChain,
+  from: Address,
+  label: string,
+  to: Address,
+  data: Hex,
+  record: {
+    journal: EscrowBroadcastJournal;
+    grantId: string | null;
+    step: EscrowStep;
+    submitted: Hex;
+  },
+): Promise<{ tx: EscrowTx; receipt: TransactionReceipt }> {
+  const hash = record.submitted;
+  if (!/^0x[0-9a-f]{64}$/i.test(hash))
+    throw new ArcExecutionError('TX_MISMATCH', `${label}: invalid hash`);
+  const tx = await chain.client.getTransaction({ hash }).catch(() => null);
+  if (!tx)
+    throw new ArcExecutionError('TX_MISMATCH', `${label}: ${hash} not found`);
+  if (
+    lower(tx.from) !== lower(from) ||
+    lower(tx.to ?? '0x') !== lower(to) ||
+    lower(tx.input) !== lower(data) ||
+    (tx.value ?? 0n) !== 0n ||
+    (tx.chainId !== undefined && tx.chainId !== chain.profile.chainId)
+  )
+    throw new ArcExecutionError(
+      'TX_MISMATCH',
+      `${label}: the submitted transaction is not the prepared call`,
+    );
+  await record.journal.record({
+    grantId: record.grantId,
+    step: record.step,
+    label,
+    hash,
+    from,
+    chainId: chain.profile.chainId,
+  });
+  const receipt = await chain.client.waitForTransactionReceipt({ hash });
+  if (receipt.status !== 'success')
+    throw new ArcExecutionError('TX_MISMATCH', `${label}: reverted`);
+  const feeWei = receipt.gasUsed * receipt.effectiveGasPrice;
+  return {
+    receipt,
+    tx: {
+      label,
+      hash,
+      from,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed,
+      effectiveGasPrice: receipt.effectiveGasPrice,
+      feeWei,
+      explorer: `${chain.profile.explorer}/tx/${hash}`,
+    },
+  };
+}
+
 /** Registry-token Transfer logs only (Arc's 0xffff…fffe native mirror is ignored). */
 function usdcTransfers(receipt: TransactionReceipt, tokenAddress: Address) {
   return parseEventLogs({
@@ -367,6 +435,8 @@ type Granted<C extends EscrowCall> = {
   now: number;
   /** Pre-broadcast record store; written before every broadcast. */
   journal: EscrowBroadcastJournal;
+  /** Party-wallet mode: hashes the party broadcast for each step; nothing is signed here. */
+  submitted?: Partial<Record<EscrowStep, Hex>>;
 };
 
 async function admit<C extends EscrowCall>(input: Granted<C>) {
@@ -417,6 +487,7 @@ export async function executeEscrowOpen(
     args: [signer.address],
   });
   if (
+    !input.submitted &&
     balance < total &&
     !(await input.journal.signed(`${input.grant.grantId}:OPEN`))
   )
@@ -431,15 +502,25 @@ export async function executeEscrowOpen(
       functionName: 'approve',
       args: [escrow.address, total],
     }),
-    { journal: input.journal, grantId: input.grant.grantId, step: 'APPROVE' },
+    {
+      journal: input.journal,
+      grantId: input.grant.grantId,
+      step: 'APPROVE',
+      submitted: input.submitted?.APPROVE,
+    },
   );
   const opened = await sendEscrowCall(
     chain,
     signer,
     'escrow open',
     escrow.address,
-    calldata.open(call),
-    { journal: input.journal, grantId: input.grant.grantId, step: 'OPEN' },
+    escrowCalldata.open(call),
+    {
+      journal: input.journal,
+      grantId: input.grant.grantId,
+      step: 'OPEN',
+      submitted: input.submitted?.OPEN,
+    },
   );
   const events = parseEventLogs({
     abi: MILESTONE_ESCROW_ABI,
@@ -535,8 +616,13 @@ export async function executeEscrowRelease(
     signer,
     `escrow release milestone ${call.index}`,
     escrow.address,
-    calldata.milestone('release', call.escrowDealId, call.index),
-    { journal: input.journal, grantId: input.grant.grantId, step: 'RELEASE' },
+    escrowCalldata.milestone('release', call.escrowDealId, call.index),
+    {
+      journal: input.journal,
+      grantId: input.grant.grantId,
+      step: 'RELEASE',
+      submitted: input.submitted?.RELEASE,
+    },
   );
   const rel = parseEventLogs({
     abi: MILESTONE_ESCROW_ABI,
@@ -558,8 +644,13 @@ export async function executeEscrowRelease(
     signer,
     `escrow withdraw milestone ${call.index} to payee`,
     escrow.address,
-    calldata.milestone('withdraw', call.escrowDealId, call.index),
-    { journal: input.journal, grantId: input.grant.grantId, step: 'WITHDRAW' },
+    escrowCalldata.milestone('withdraw', call.escrowDealId, call.index),
+    {
+      journal: input.journal,
+      grantId: input.grant.grantId,
+      step: 'WITHDRAW',
+      submitted: input.submitted?.WITHDRAW,
+    },
   );
   const wd = parseEventLogs({
     abi: MILESTONE_ESCROW_ABI,
@@ -606,8 +697,13 @@ export async function executeEscrowRefund(
     signer,
     `escrow refund milestone ${call.index} to funder`,
     escrow.address,
-    calldata.milestone('refund', call.escrowDealId, call.index),
-    { journal: input.journal, grantId: input.grant.grantId, step: 'REFUND' },
+    escrowCalldata.milestone('refund', call.escrowDealId, call.index),
+    {
+      journal: input.journal,
+      grantId: input.grant.grantId,
+      step: 'REFUND',
+      submitted: input.submitted?.REFUND,
+    },
   );
   const ev = parseEventLogs({
     abi: MILESTONE_ESCROW_ABI,
@@ -643,6 +739,7 @@ export async function executeEscrowDispute(input: {
   signer: TransferSigner;
   escrowDealId: bigint;
   journal: EscrowBroadcastJournal;
+  submitted?: Hex;
 }): Promise<EscrowExecution> {
   const escrow = await verifyEscrow(input.chain);
   const d = await sendEscrowCall(
@@ -650,8 +747,13 @@ export async function executeEscrowDispute(input: {
     input.signer,
     'escrow dispute',
     escrow.address,
-    calldata.dispute(input.escrowDealId),
-    { journal: input.journal, grantId: null, step: 'DISPUTE' },
+    escrowCalldata.dispute(input.escrowDealId),
+    {
+      journal: input.journal,
+      grantId: null,
+      step: 'DISPUTE',
+      submitted: input.submitted,
+    },
   );
   const ev = parseEventLogs({
     abi: MILESTONE_ESCROW_ABI,
@@ -729,7 +831,7 @@ export async function simulateEscrow(
     chain,
     from,
     escrow,
-    calldata.milestone(fn, escrowDealId, index),
+    escrowCalldata.milestone(fn, escrowDealId, index),
   );
 }
 

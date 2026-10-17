@@ -70,4 +70,10 @@ CREATE TABLE synq_ws_obligations(workspace_id uuid NOT NULL REFERENCES synq_work
 CREATE TABLE synq_ws_bills(workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),id uuid NOT NULL,data jsonb NOT NULL,active boolean NOT NULL,change_hash text NOT NULL,PRIMARY KEY(workspace_id,id));`,
     down: `DROP TABLE synq_ws_bills; DROP TABLE synq_ws_obligations; DROP TABLE synq_ws_payables; DROP FUNCTION synq_ws_payable_guard();`,
   },
+  {
+    version: 10,
+    up: `CREATE TABLE synq_ws_escrow_ops(key text PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),deal_id text NOT NULL,op text NOT NULL CHECK(op IN ('FUND','RELEASE','REFUND','DISPUTE')),milestone int,principal_id text NOT NULL,sender text NOT NULL,data jsonb NOT NULL,state text NOT NULL CHECK(state IN ('MANDATE','APPROVAL','GRANTED','DONE','FAILED')),last_error text,created_at bigint NOT NULL,updated_at bigint NOT NULL);
+CREATE INDEX synq_ws_escrow_ops_deal ON synq_ws_escrow_ops(deal_id,op,milestone);`,
+    down: `DROP TABLE synq_ws_escrow_ops;`,
+  },
 ] as const;
