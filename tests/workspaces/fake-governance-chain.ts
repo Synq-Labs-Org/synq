@@ -22,6 +22,8 @@ import proxyCode from './fixtures/safe-proxy-code.json' with { type: 'json' };
 const policyAbi = parseAbi([
   'function addRecipient(address recipient)',
   'function removeRecipient(address recipient)',
+  'function setCaps(uint256 perPaymentCap,uint256 windowCap)',
+  'event CapsChanged(uint256 perPaymentCap,uint256 windowCap)',
   'function queue(address to,uint256 value,bytes data,uint8 operation) returns(bytes32)',
   'event RecipientSet(address indexed recipient,bool allowed)',
 ]);
@@ -36,6 +38,7 @@ export function fakeGovernanceChain(input: {
 }) {
   let safeNonce = 0n,
     senderNonce = 0;
+  let caps = { perPaymentCap: 5000000n, windowCap: 20000000n };
   const queued = new Map<Hex, number>(),
     allowed = new Set<string>(),
     receipts = new Map<Hex, Record<string, unknown>>();
@@ -126,6 +129,25 @@ export function fakeGovernanceChain(input: {
             { type: 'uint256' },
           ],
           [0n, 0, call, BigInt(eta)],
+        ),
+      });
+    } else if (action.functionName === 'setCaps') {
+      const id = operationId(inner),
+        eta = queued.get(id);
+      if (eta === undefined || input.now() < eta) throw new Error('NotReady');
+      if (apply) {
+        queued.delete(id);
+        caps = { perPaymentCap: action.args[0], windowCap: action.args[1] };
+      }
+      logs.push({
+        address: input.policy,
+        topics: encodeEventTopics({
+          abi: policyAbi,
+          eventName: 'CapsChanged',
+        }) as Hex[],
+        data: encodeAbiParameters(
+          [{ type: 'uint256' }, { type: 'uint256' }],
+          [...action.args],
         ),
       });
     } else {
@@ -226,6 +248,9 @@ export function fakeGovernanceChain(input: {
     broadcasts,
     failure,
     allowed,
+    get caps() {
+      return caps;
+    },
     get safeNonce() {
       return safeNonce;
     },

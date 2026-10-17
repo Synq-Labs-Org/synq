@@ -1,5 +1,7 @@
 import {
   encodeFunctionData,
+  encodeAbiParameters,
+  keccak256,
   hashTypedData,
   getAddress,
   isAddress,
@@ -13,23 +15,40 @@ const wallet = z
   .string()
   .refine((v) => isAddress(v) && BigInt(v) > 1n)
   .transform((v) => getAddress(v));
-export const SafeActionSchema = z.strictObject({
+const units = z
+  .string()
+  .regex(/^(0|[1-9][0-9]{0,77})$/)
+  .refine((v) => BigInt(v) < 2n ** 256n);
+const actionBase = {
   id: z.string().uuid(),
   workspaceId: z.string().uuid(),
   chainId: z.literal(5042002),
   safe: wallet,
   policy: wallet,
   token: wallet,
-  kind: z.enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR']),
-  vendorId: z.string().uuid(),
-  vendorAddress: wallet,
-  vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
-  nonce: z
-    .string()
-    .regex(/^(0|[1-9][0-9]{0,77})$/)
-    .refine((v) => BigInt(v) < 2n ** 256n),
+  nonce: units,
   expiresAt: z.number().int().positive().safe(),
-});
+};
+export const SafeActionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    ...actionBase,
+    kind: z.enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR']),
+    vendorId: z.string().uuid(),
+    vendorAddress: wallet,
+    vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
+  }),
+  z
+    .strictObject({
+      ...actionBase,
+      kind: z.enum(['QUEUE_CAPS', 'SET_CAPS']),
+      perPaymentCap: units,
+      windowCap: units,
+    })
+    .refine(
+      (v) => BigInt(v.perPaymentCap) <= BigInt(v.windowCap),
+      'per-payment cap exceeds window cap',
+    ),
+]);
 export type SafeAction = z.output<typeof SafeActionSchema>;
 export const SafeActionViewSchema = z.strictObject({
   action: SafeActionSchema,
@@ -45,6 +64,7 @@ export type SafeActionSignature = Readonly<{
 }>;
 const policyAbi = parseAbi([
   'function addRecipient(address recipient)',
+  'function setCaps(uint256 perPaymentCap,uint256 windowCap)',
   'function removeRecipient(address recipient)',
   'function queue(address to,uint256 value,bytes data,uint8 operation) returns(bytes32)',
 ]);
@@ -52,17 +72,24 @@ const safeAbi = parseAbi([
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns(bool)',
 ]);
 export function safeActionCall(a: SafeAction) {
-  const inner = encodeFunctionData({
-    abi: policyAbi,
-    functionName:
-      a.kind === 'REMOVE_VENDOR' ? 'removeRecipient' : 'addRecipient',
-    args: [a.vendorAddress],
-  });
+  const inner =
+    'perPaymentCap' in a
+      ? encodeFunctionData({
+          abi: policyAbi,
+          functionName: 'setCaps',
+          args: [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+        })
+      : encodeFunctionData({
+          abi: policyAbi,
+          functionName:
+            a.kind === 'REMOVE_VENDOR' ? 'removeRecipient' : 'addRecipient',
+          args: [a.vendorAddress],
+        });
   return {
     to: a.policy,
     value: 0n,
     data:
-      a.kind === 'QUEUE_VENDOR'
+      a.kind === 'QUEUE_VENDOR' || a.kind === 'QUEUE_CAPS'
         ? encodeFunctionData({
             abi: policyAbi,
             functionName: 'queue',
@@ -124,7 +151,15 @@ export function safeActionApprovalTypedData(a: SafeAction) {
       actionId: a.id,
       workspaceId: a.workspaceId,
       safeTxHash: hashTypedData(safeActionTypedData(a)),
-      vendorChangeHash: a.vendorChangeHash as Hex,
+      vendorChangeHash:
+        'vendorChangeHash' in a
+          ? (a.vendorChangeHash as Hex)
+          : keccak256(
+              encodeAbiParameters(
+                [{ type: 'uint256' }, { type: 'uint256' }],
+                [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+              ),
+            ),
       expiresAt: BigInt(a.expiresAt),
     },
   };

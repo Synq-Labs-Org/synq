@@ -38,6 +38,7 @@ import { signCall, settleSignedCall } from './cctp.js';
 import { SAFE_ABI, VAULT_POLICY_ABI, simulate } from './vault.js';
 const recipientAbi = parseAbi([
   'event RecipientSet(address indexed recipient,bool allowed)',
+  'event CapsChanged(uint256 perPaymentCap,uint256 windowCap)',
 ]);
 export class WorkspaceGovernanceExecutor {
   readonly governance: WorkspaceGovernance;
@@ -114,11 +115,17 @@ export class WorkspaceGovernanceExecutor {
           inTx = false;
           return { state: 'FAILED', reason };
         }
-        const v = await sql.query(
-          'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
-          [a.workspaceId, a.vendorId],
-        );
-        if (!v.rows[0]) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+        const vendor =
+          'vendorId' in a
+            ? (
+                await sql.query(
+                  'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+                  [a.workspaceId, a.vendorId],
+                )
+              ).rows[0]
+            : null;
+        if ('vendorId' in a && !vendor)
+          throw new WorkspaceError('VENDOR_NOT_VERIFIED');
         const call = safeActionExecution(a, p.signatures);
         const sim = await simulate(
           this.chain,
@@ -137,11 +144,13 @@ export class WorkspaceGovernanceExecutor {
             threshold: custody.threshold,
             nonce: custody.nonce,
           },
-          vendor: {
-            address: v.rows[0].address,
-            changeHash: v.rows[0].change_hash,
-            eligibleAt: Number(v.rows[0].eligible_at),
-          },
+          vendor: vendor
+            ? {
+                address: vendor.address,
+                changeHash: vendor.change_hash,
+                eligibleAt: Number(vendor.eligible_at),
+              }
+            : null,
           simulationOk: sim.ok,
           now: store.now(),
         });
@@ -288,8 +297,11 @@ export class WorkspaceGovernanceExecutor {
         kind: a.kind,
         blockNumber: String(receipt.blockNumber),
       };
-      if (a.kind === 'QUEUE_VENDOR') {
-        const expected = safeActionCall({ ...a, kind: 'ALLOW_VENDOR' });
+      if (a.kind === 'QUEUE_VENDOR' || a.kind === 'QUEUE_CAPS') {
+        const expected =
+          'perPaymentCap' in a
+            ? safeActionCall({ ...a, kind: 'SET_CAPS' })
+            : safeActionCall({ ...a, kind: 'ALLOW_VENDOR' });
         const queued = parseEventLogs({
           abi: VAULT_POLICY_ABI,
           eventName: 'OperationQueued',
@@ -311,6 +323,27 @@ export class WorkspaceGovernanceExecutor {
           ...evidence,
           readyAt: String(queued[0]!.args.eta),
           operationId: queued[0]!.args.id,
+        };
+      } else if ('perPaymentCap' in a) {
+        const set = parseEventLogs({
+          abi: recipientAbi,
+          eventName: 'CapsChanged',
+          logs: receipt.logs,
+        }).filter(
+          (e) =>
+            e.address.toLowerCase() === a.policy.toLowerCase() &&
+            e.args.perPaymentCap === BigInt(a.perPaymentCap) &&
+            e.args.windowCap === BigInt(a.windowCap),
+        );
+        if (set.length !== 1)
+          throw new ArcExecutionError(
+            'TRANSFER_MISMATCH',
+            'cap change receipt is missing',
+          );
+        evidence = {
+          ...evidence,
+          perPaymentCap: a.perPaymentCap,
+          windowCap: a.windowCap,
         };
       } else {
         const set = parseEventLogs({

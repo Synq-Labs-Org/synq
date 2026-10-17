@@ -970,6 +970,90 @@ async function governanceFixture() {
   };
 }
 describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signed EVM bytes', () => {
+  it('G5 changes exact on-chain caps only after queue, delay and a fresh current Safe quorum', async () => {
+    const f = await governanceFixture();
+    const propose = (
+      kind: 'QUEUE_CAPS' | 'SET_CAPS',
+      perPaymentCap = '60000',
+    ) =>
+      f.gov.propose(f.w.id, f.owner.principalId, {
+        kind,
+        perPaymentCap,
+        windowCap: '200000',
+      });
+    const queue = await propose('QUEUE_CAPS');
+    expect((await propose('QUEUE_CAPS')).action.id).toBe(queue.action.id);
+    await f.approveAction(queue);
+    await expect(f.govExecutor.execute(queue.action.id)).rejects.toMatchObject({
+      code: 'ACTION_NOT_READY',
+    });
+    await f.approveAction(queue, f.coowner);
+    expect((await f.govExecutor.execute(queue.action.id)).state).toBe(
+      'CONFIRMED',
+    );
+    expect(f.govFake.caps.perPaymentCap).toBe(5000000n);
+    f.authority.nonce = f.govFake.safeNonce;
+    const early = await propose('SET_CAPS');
+    await f.approveAction(early);
+    await f.approveAction(early, f.coowner);
+    await expect(f.govExecutor.execute(early.action.id)).rejects.toMatchObject({
+      code: 'KERNEL_ACTION_DENIED',
+    });
+    expect(f.govSigned()).toBe(1);
+    f.advance(3600);
+    const changed = await propose('SET_CAPS', '70000');
+    await f.approveAction(changed);
+    await f.approveAction(changed, f.coowner);
+    await expect(
+      f.govExecutor.execute(changed.action.id),
+    ).rejects.toMatchObject({ code: 'KERNEL_ACTION_DENIED' });
+    const ready = await propose('SET_CAPS');
+    await f.approveAction(ready);
+    await f.approveAction(ready, f.coowner);
+    expect((await f.govExecutor.execute(ready.action.id)).state).toBe(
+      'CONFIRMED',
+    );
+    expect(f.govFake.caps).toEqual({
+      perPaymentCap: 60000n,
+      windowCap: 200000n,
+    });
+    expect(f.govSigned()).toBe(2);
+    await expect(
+      f.gov.propose(f.w.id, f.outsider.principalId, {
+        kind: 'QUEUE_CAPS',
+        perPaymentCap: '1',
+        windowCap: '2',
+      }),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_NOT_FOUND' });
+    await expect(propose('QUEUE_CAPS', '200001')).rejects.toThrow();
+  });
+
+  it('G5 recovers an already recorded cap queue after authority drift without resigning', async () => {
+    const f = await governanceFixture();
+    const q = await f.gov.propose(f.w.id, f.owner.principalId, {
+      kind: 'QUEUE_CAPS',
+      perPaymentCap: '0',
+      windowCap: '0',
+    });
+    await f.approveAction(q);
+    await f.approveAction(q, f.coowner);
+    await expect(
+      f.govExecutor.execute(q.action.id, async () => {
+        throw new Error('disconnected after record');
+      }),
+    ).rejects.toThrow('disconnected after record');
+    const before = await f.govExecutor.outbox.get(
+      `workspace-action:${q.action.id}`,
+    );
+    f.setAuthority({ ...f.authority, owners: [f.outsider.a.address] });
+    expect((await f.restartGov().execute(q.action.id)).state).toBe('CONFIRMED');
+    expect((await f.restartGov().execute(q.action.id)).state).toBe('CONFIRMED');
+    expect(f.govSigned()).toBe(1);
+    expect(f.govFake.broadcasts).toHaveLength(1);
+    expect(
+      (await f.govExecutor.outbox.get(`workspace-action:${q.action.id}`))?.hash,
+    ).toBe(before?.hash);
+  });
   it('queues with the Safe quorum, refuses an early addition, then permits a fresh signed addition after the delay', async () => {
     const f = await governanceFixture(),
       q = await f.proposeAction('QUEUE_VENDOR');

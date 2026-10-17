@@ -449,7 +449,7 @@ export async function decideWorkspaceSafeAction(input: {
     threshold: number;
     nonce: bigint;
   };
-  vendor: { address: Address; changeHash: Hex; eligibleAt: number };
+  vendor: { address: Address; changeHash: Hex; eligibleAt: number } | null;
   simulationOk: boolean;
   now: number;
 }): Promise<Decision> {
@@ -475,13 +475,16 @@ export async function decideWorkspaceSafeAction(input: {
     BigInt(a.nonce) !== c.nonce
   )
     return deny('custody or Safe nonce changed');
-  if (
-    a.vendorChangeHash !== input.vendor.changeHash ||
-    lower(a.vendorAddress) !== lower(input.vendor.address)
-  )
-    return deny('vendor changed');
-  if (a.kind !== 'REMOVE_VENDOR' && input.vendor.eligibleAt > input.now)
-    return deny('vendor cooling');
+  if ('vendorChangeHash' in a) {
+    if (
+      !input.vendor ||
+      a.vendorChangeHash !== input.vendor.changeHash ||
+      lower(a.vendorAddress) !== lower(input.vendor.address)
+    )
+      return deny('vendor changed');
+    if (a.kind !== 'REMOVE_VENDOR' && input.vendor.eligibleAt > input.now)
+      return deny('vendor cooling');
+  }
   if (
     !input.simulationOk ||
     c.threshold < 1 ||

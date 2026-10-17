@@ -22,7 +22,7 @@ async function fixture() {
   const owners = [actor(), actor()],
     outsider = actor(),
     now = 2_000_000_000;
-  const action = SafeActionSchema.parse({
+  const parsed = SafeActionSchema.parse({
     id: randomUUID(),
     workspaceId: randomUUID(),
     chainId: 5042002,
@@ -36,6 +36,8 @@ async function fixture() {
     nonce: '0',
     expiresAt: now + 900,
   });
+  if (!('vendorAddress' in parsed)) throw new Error('expected vendor action');
+  const action = parsed;
   const sign = async (a = action, who = owners) =>
     Promise.all(
       who.map(async (o) => ({

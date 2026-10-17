@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getAddress } from 'viem';
+import { getAddress, parseUnits, formatUnits } from 'viem';
 import { z } from 'zod';
 import {
   SafeActionViewSchema,
@@ -26,6 +26,8 @@ export function GovernancePanel({
     >([]),
     [selected, setSelected] = useState<Action | null>(null),
     [vendor, setVendor] = useState('');
+  const [perPayment, setPerPayment] = useState(''),
+    [windowCap, setWindowCap] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null),
     [reviewed, setReviewed] = useState(false);
@@ -83,6 +85,28 @@ export function GovernancePanel({
   ) {
     setSelected(
       await api.post(base, SafeActionViewSchema, { kind, vendorId: vendor }),
+    );
+    setReviewed(false);
+    setItems((await api.get(base, List)).actions);
+  }
+  async function proposeCaps(kind: 'QUEUE_CAPS' | 'SET_CAPS') {
+    const amount = (v: string) => {
+      if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,6})?$/.test(v))
+        throw new Error(
+          'Enter exact USDC amounts with at most six decimal places.',
+        );
+      return String(parseUnits(v, 6));
+    };
+    const perPaymentCap = amount(perPayment),
+      dailyCap = amount(windowCap);
+    if (BigInt(perPaymentCap) > BigInt(dailyCap))
+      throw new Error('Per-payment cap must not exceed the 24-hour cap.');
+    setSelected(
+      await api.post(base, SafeActionViewSchema, {
+        kind,
+        perPaymentCap,
+        windowCap: dailyCap,
+      }),
     );
     setReviewed(false);
     setItems((await api.get(base, List)).actions);
@@ -146,7 +170,7 @@ export function GovernancePanel({
   }
   return (
     <section>
-      <h2>Vault vendor allowlist</h2>
+      <h2>Vault governance</h2>
       <p>
         Adding a vendor needs two Safe transactions: queue the exact address,
         wait the vault’s governance delay, then sign and execute the addition.
@@ -201,6 +225,47 @@ export function GovernancePanel({
           </button>
         </>
       )}
+      {owner && (
+        <section>
+          <h3>Operator payment caps</h3>
+          <p>
+            Changing either on-chain limit requires the Safe quorum to queue the
+            exact values, wait for the policy delay, then sign a fresh
+            transaction to apply them. Setting zero disables operator payments.
+            Signed workspace budgets remain separate limits.
+          </p>
+          <label>
+            Per-payment cap (USDC)
+            <input
+              value={perPayment}
+              disabled={busy}
+              inputMode="decimal"
+              onChange={(e) => setPerPayment(e.target.value)}
+            />
+          </label>
+          <label>
+            24-hour cap (USDC)
+            <input
+              value={windowCap}
+              disabled={busy}
+              inputMode="decimal"
+              onChange={(e) => setWindowCap(e.target.value)}
+            />
+          </label>
+          <button
+            disabled={busy || !perPayment || !windowCap}
+            onClick={() => void run(() => proposeCaps('QUEUE_CAPS'))}
+          >
+            Review cap queue transaction
+          </button>
+          <button
+            disabled={busy || !perPayment || !windowCap}
+            onClick={() => void run(() => proposeCaps('SET_CAPS'))}
+          >
+            Review cap application after delay
+          </button>
+        </section>
+      )}
       {items.length === 0 && <p>No vault governance actions.</p>}
       {items.map((v) => (
         <button
@@ -218,7 +283,10 @@ export function GovernancePanel({
         <section>
           <h3>Review exact governance call</h3>
           <p>
-            {selected.action.kind} · recipient {selected.action.vendorAddress}
+            {selected.action.kind} ·{' '}
+            {'vendorAddress' in selected.action
+              ? `recipient ${selected.action.vendorAddress}`
+              : `per-payment ${formatUnits(BigInt(selected.action.perPaymentCap), 6)} USDC · 24-hour ${formatUnits(BigInt(selected.action.windowCap), 6)} USDC`}
           </p>
           <p>
             Safe {selected.action.safe} · policy {selected.action.policy} ·
@@ -254,7 +322,7 @@ export function GovernancePanel({
                   checked={reviewed}
                   onChange={(e) => setReviewed(e.target.checked)}
                 />
-                I reviewed this exact address and governance operation. The
+                I reviewed these exact values and governance operation. The
                 wallet will ask for a bounded Synq approval and a Safe
                 transaction signature.
               </label>

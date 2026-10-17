@@ -8,12 +8,25 @@ import {
   type SafeAction,
   type SafeActionSignature,
 } from '@synq/kernel/arc-safe-action';
+import { UnitsSchema } from './finance-contracts.js';
 import { WorkspaceError } from './contracts.js';
 import type { WorkspaceFinance } from './finance.js';
-export const ProposeSafeActionSchema = z.strictObject({
-  kind: z.enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR']),
-  vendorId: z.string().uuid(),
-});
+export const ProposeSafeActionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR']),
+    vendorId: z.uuid(),
+  }),
+  z
+    .strictObject({
+      kind: z.enum(['QUEUE_CAPS', 'SET_CAPS']),
+      perPaymentCap: UnitsSchema,
+      windowCap: UnitsSchema,
+    })
+    .refine(
+      (v) => BigInt(v.perPaymentCap) <= BigInt(v.windowCap),
+      'per-payment cap exceeds window cap',
+    ),
+]);
 export type SafeActionRecord = {
   action: SafeAction;
   signatures: SafeActionSignature[];
@@ -74,17 +87,28 @@ export class WorkspaceGovernance {
       await sql.query('SELECT id FROM synq_workspaces WHERE id=$1 FOR UPDATE', [
         workspaceId,
       ]);
-      const vendor = await sql.query(
-        'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
-        [workspaceId, b.vendorId],
-      );
-      const v = vendor.rows[0];
-      if (!v) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
-      if (
-        b.kind !== 'REMOVE_VENDOR' &&
-        Number(v.eligible_at) > this.workspaces.now()
-      )
-        throw new WorkspaceError('VENDOR_COOLING');
+      const fields =
+        'vendorId' in b
+          ? await (async () => {
+              const vendor = await sql.query(
+                'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+                [workspaceId, b.vendorId],
+              );
+              const v = vendor.rows[0];
+              if (!v) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+              if (
+                b.kind !== 'REMOVE_VENDOR' &&
+                Number(v.eligible_at) > this.workspaces.now()
+              )
+                throw new WorkspaceError('VENDOR_COOLING');
+              return {
+                kind: b.kind,
+                vendorId: b.vendorId,
+                vendorAddress: v.address,
+                vendorChangeHash: v.change_hash,
+              };
+            })()
+          : b;
       const action = SafeActionSchema.parse({
         id: randomUUID(),
         workspaceId,
@@ -92,10 +116,7 @@ export class WorkspaceGovernance {
         safe: a.vault,
         policy: a.policy,
         token: a.token,
-        kind: b.kind,
-        vendorId: b.vendorId,
-        vendorAddress: v.address,
-        vendorChangeHash: v.change_hash,
+        ...fields,
         nonce: String(a.nonce),
         expiresAt: this.workspaces.now() + 900,
       });
@@ -104,16 +125,29 @@ export class WorkspaceGovernance {
         [action.id, workspaceId, action],
       );
       if (inserted.rows[0]) return action.id;
-      const existing = await sql.query(
-        "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'vendorChangeHash'=$3 AND data->>'nonce'=$4 AND data->>'expiresAt'=$5",
-        [
-          workspaceId,
-          b.kind,
-          v.change_hash,
-          String(a.nonce),
-          String(action.expiresAt),
-        ],
-      );
+      const existing =
+        'vendorChangeHash' in action
+          ? await sql.query(
+              "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'vendorChangeHash'=$3 AND data->>'nonce'=$4 AND data->>'expiresAt'=$5",
+              [
+                workspaceId,
+                action.kind,
+                action.vendorChangeHash,
+                action.nonce,
+                String(action.expiresAt),
+              ],
+            )
+          : await sql.query(
+              "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'perPaymentCap'=$3 AND data->>'windowCap'=$4 AND data->>'nonce'=$5 AND data->>'expiresAt'=$6",
+              [
+                workspaceId,
+                action.kind,
+                action.perPaymentCap,
+                action.windowCap,
+                action.nonce,
+                String(action.expiresAt),
+              ],
+            );
       if (!existing.rows[0]) throw new WorkspaceError('ACTION_CONFLICT');
       return String(existing.rows[0].id);
     });

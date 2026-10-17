@@ -56,4 +56,9 @@ CREATE TABLE synq_ws_split_admissions(leg_key text PRIMARY KEY,workspace_id uuid
 CREATE INDEX synq_ws_split_budget ON synq_ws_split_admissions(workspace_id,state);`,
     down: `DROP TABLE synq_ws_split_admissions; ALTER TABLE synq_ws_receipts DROP COLUMN next_at,DROP COLUMN last_error;`,
   },
+  {
+    version: 8,
+    up: `CREATE UNIQUE INDEX synq_ws_caps_action_unique ON synq_ws_safe_actions(workspace_id,(data->>'kind'),(data->>'perPaymentCap'),(data->>'windowCap'),(data->>'nonce'),(data->>'expiresAt')) WHERE data->>'kind' IN ('QUEUE_CAPS','SET_CAPS');`,
+    down: `DROP INDEX synq_ws_caps_action_unique;`,
+  },
 ] as const;
