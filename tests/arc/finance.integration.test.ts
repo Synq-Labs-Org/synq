@@ -20,10 +20,12 @@ import {
 import { PostgresVendorStore, VendorConflictError } from '@synq/payables';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ensureP08Database } from '../treasury/pg.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const URL =
-  process.env.SYNQ_ARC_FINANCE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_arc_finance';
+const URL = testDatabaseUrl(
+  'SYNQ_ARC_FINANCE_TEST_DATABASE_URL',
+  'synq_p08_arc_finance',
+);
 const USDC = token('arc-testnet', 'USDC');
 let pool: pg.Pool;
 

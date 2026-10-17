@@ -12,10 +12,9 @@ import {
   PostgresChatContextStore,
 } from '@synq/channels/postgres';
 import { freshChannelDatabase } from '../channels/db.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_CHANNELS_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_test';
+const url = testDatabaseUrl('SYNQ_CHANNELS_DATABASE_URL', 'synq_channels_test');
 const NOW = 1_800_000_000;
 const DAY = 86_400;
 const CHAT = '-1001';
