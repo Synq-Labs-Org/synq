@@ -56,6 +56,15 @@ const recipientAbi = parseAbi([
   'event RecipientSet(address indexed recipient,bool allowed)',
   'event CapsChanged(uint256 perPaymentCap,uint256 windowCap)',
 ]);
+/**
+ * Most native-USDC gas the operator may commit to relaying one vault action.
+ * A Safe calling Circle's App Kit adapter runs a multi-step swap, so it gets a
+ * larger (still bounded) ceiling than allowlist, cap and transfer actions.
+ */
+export const relayFeeCap = (a: { kind: string }) =>
+  a.kind === 'TREASURY_EXECUTE'
+    ? 150_000_000_000_000_000n
+    : 50_000_000_000_000_000n;
 export class WorkspaceGovernanceExecutor {
   readonly governance: WorkspaceGovernance;
   readonly outbox: PostgresOutboxStore;
@@ -80,7 +89,7 @@ export class WorkspaceGovernanceExecutor {
       tx.data !== call.data ||
       (tx.value ?? 0n) !== 0n ||
       tx.nonce !== r.prepared.nonce ||
-      (tx.gas ?? 0n) * (tx.maxFeePerGas ?? 0n) > 50_000_000_000_000_000n ||
+      (tx.gas ?? 0n) * (tx.maxFeePerGas ?? 0n) > relayFeeCap(p.action) ||
       (
         await recoverTransactionAddress({
           serializedTransaction: r.raw as TransactionSerialized,
@@ -278,7 +287,7 @@ export class WorkspaceGovernanceExecutor {
           address: this.signer.address,
           signTransaction: async (tx) => {
             const cost = (tx.gas ?? 0n) * (tx.maxFeePerGas ?? 0n);
-            if (cost > 50_000_000_000_000_000n)
+            if (cost > relayFeeCap(a))
               throw new ArcExecutionError('FEE_ABOVE_CAP');
             if (
               (await this.chain.client.getBalance({

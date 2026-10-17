@@ -11,6 +11,7 @@ import {
 } from '@synq/kernel/arc-safe-action';
 import { appKitAdapter } from '@synq/plugin-circle-app-kit';
 import { assertTreasuryAction } from '@synq/execution-worker/workspace-treasury';
+import { relayFeeCap } from '@synq/execution-worker/workspace-governance';
 
 const usdc = token('arc-testnet', 'USDC'),
   eurc = token('arc-testnet', 'EURC');
@@ -112,5 +113,17 @@ describe('G9 treasury steps are exact vault actions', () => {
       await expect(
         assertTreasuryAction(sqlWith(row), action),
       ).rejects.toBeDefined();
+  });
+  it('lets only a treasury swap relay use the larger, still bounded gas ceiling', () => {
+    expect(relayFeeCap({ kind: 'TREASURY_EXECUTE' })).toBe(
+      150_000_000_000_000_000n,
+    );
+    for (const kind of [
+      'PAY_VENDOR',
+      'REFUND_MEMBER',
+      'TREASURY_APPROVE',
+      'SET_CAPS',
+    ])
+      expect(relayFeeCap({ kind })).toBe(50_000_000_000_000_000n);
   });
 });

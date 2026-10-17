@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { privateKeyToAccount } from 'viem/accounts';
 import { erc20Abi, type Hex } from 'viem';
 import { token } from '@synq/chain-registry/arc';
+import { PostgresSplitStore } from '@synq/allocations';
 import { connectChain } from '@synq/execution-worker/arc';
 import { readWorkspaceAuthority } from '@synq/execution-worker/workspace-authority';
 import { WorkspaceGovernanceExecutor } from '@synq/execution-worker/workspace-governance';
@@ -108,6 +109,8 @@ if (process.env.SYNQ_DYNAMIC_TREASURY_LIVE !== '1') {
       readWorkspaceAuthority(chain, setups, id),
     );
     await finance.migrate();
+    // The server creates these at startup; a fresh proof database may not have them yet.
+    await new PostgresSplitStore(pool).migrate();
     const a = await finance.authority(workspaceId);
     const bal = (sym: 'USDC' | 'EURC') =>
       chain.client.readContract({
@@ -198,11 +201,21 @@ if (process.env.SYNQ_DYNAMIC_TREASURY_LIVE !== '1') {
         : null;
     op = (await treasury.record(manifest.opId))!;
     if (op.state === 'EXECUTE') {
-      op = (await treasury.prepareExecution(
-        workspaceId,
-        p0!.principalId,
-        op.id,
-      ))!;
+      for (let i = 0; ; i++) {
+        try {
+          op = (await treasury.prepareExecution(
+            workspaceId,
+            p0!.principalId,
+            op.id,
+          ))!;
+          break;
+        } catch (e) {
+          // The vault's nonce read lags the confirmed allowance briefly.
+          if ((e as { code?: string }).code !== 'SAFE_NONCE_PENDING' || i > 20)
+            throw e;
+          await new Promise((res) => setTimeout(res, 3000));
+        }
+      }
       await signAndRun(op.executeActionId!);
     }
     op = (await treasury.record(manifest.opId))!;
