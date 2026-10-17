@@ -15,7 +15,7 @@ export default function NotificationsPage() {
     NotificationPageSchema,
   );
   const count = useV3('/v3/notifications?limit=1', NotificationPageSchema);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const refresh = async () => {
     await Promise.all([list.reload(), count.reload()]);
@@ -25,14 +25,14 @@ export default function NotificationsPage() {
   const markRead = async (ids: string[]) => {
     if (!ids.length) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await v3.post('/v3/notifications/read', OkSchema, {
         notificationIds: ids.slice(0, 200),
       });
       await refresh();
     } catch (e) {
-      setError(describeV3(e));
+      setActionError(describeV3(e));
     } finally {
       setBusy(false);
     }
@@ -68,7 +68,7 @@ export default function NotificationsPage() {
         title="Inbox"
         note="Titles are generic on purpose. Open an item to see its details after the same access checks as the rest of the hub."
       >
-        {error && <Notice tone="danger">{error}</Notice>}
+        {actionError && <Notice tone="danger">{actionError}</Notice>}
         {list.error && <Notice tone="danger">{list.error}</Notice>}
         {list.loading && !list.items.length && <p role="status">Loading…</p>}
         {!list.loading && !list.error && !list.items.length && (
