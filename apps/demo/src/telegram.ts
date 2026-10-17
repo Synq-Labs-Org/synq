@@ -538,7 +538,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
                 new WorkspaceVaultSetups(workspaces, defaults),
               operatorKeyFile: process.env.SYNQ_WORKSPACE_OPERATOR_KEY_FILE,
               grantKeyFile: process.env.SYNQ_WORKSPACE_GRANT_KEY_FILE,
-              rpcUrl: process.env.SYNQ_ARC_RPC_URL,
+              // Compose forwards an unset variable as an empty string.
+              rpcUrl: process.env.SYNQ_ARC_RPC_URL || undefined,
               dailyGasLimitWei: BigInt(
                 process.env.SYNQ_WORKSPACE_DAILY_GAS_WEI ??
                   '1000000000000000000',

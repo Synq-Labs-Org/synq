@@ -448,7 +448,7 @@ export async function workspaceVaultRuntime(input: {
   const grantHex = secret(input.grantKeyFile);
   if (!/^[0-9a-fA-F]{64}$/.test(grantHex))
     throw new Error('WORKSPACE_GRANT_KEY_FORMAT');
-  const chain = await connectChain('arc-testnet', input.rpcUrl);
+  const chain = await connectChain('arc-testnet', input.rpcUrl || undefined);
   const defaults: VaultSetupDefaults = {
     factory: contract('arc-testnet', 'SYNQ_ARC_VAULT_FACTORY').address,
     token: token('arc-testnet', 'USDC').address as Address,
@@ -520,7 +520,7 @@ export async function workspaceVaultRuntime(input: {
   const treasury = new WorkspaceTreasury(
     finance,
     chain,
-    input.rpcUrl ?? chain.profile.rpcUrls[0]!,
+    input.rpcUrl || chain.profile.rpcUrls[0]!,
     books,
   );
   const splits = new WorkspaceSplitWorker(
