@@ -129,6 +129,8 @@ import {
 import { CONSENT_SCOPE, WorkspaceLeads } from '@synq/workspaces/leads';
 import { WorkspaceOffers } from '@synq/workspaces/offers';
 import { SalesAgent } from '@synq/workspaces/sales-agent';
+import { AgentEvents } from '@synq/workspaces/agent-events';
+import { chainProfile } from '@synq/chain-registry/arc';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 import { workspaceChannelRuntime } from './workspace-channels.js';
@@ -651,6 +653,16 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         vault?.contributions,
       );
       const devices = new WorkspaceDeviceSessions(workspaces);
+      const agentEvents = new AgentEvents(workspaces, {
+        explorerTxUrl:
+          process.env.SYNQ_ARC_EXPLORER_TX_URL ??
+          `${chainProfile('arc-testnet').explorer}/tx/`,
+      });
+      await agentEvents.migrate();
+      // Revenue splits become agent runs from their stored states and tx hashes.
+      setInterval(() => {
+        agentEvents.projectSplits().catch(() => undefined);
+      }, 60_000).unref();
       const leads = new WorkspaceLeads(workspaces, {
         webOrigin: process.env.SYNQ_WEB_BASE_URL ?? workspaces.origin,
         telegramBot: () => leadTelegram?.username ?? null,
@@ -658,9 +670,14 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           if (t.channel === 'telegram' && leadTelegram)
             await leadTelegram.send(t.deliveryRef, t.text);
         },
+        publish: (type, workspaceId, leadId) =>
+          agentEvents.publish(type, { workspaceId }, leadId),
       });
       await leads.migrate();
-      const offers = new WorkspaceOffers(workspaces);
+      const offers = new WorkspaceOffers(workspaces, {
+        publish: (workspaceId, leadId) =>
+          agentEvents.publish('OFFER_UPDATED', { workspaceId }, leadId),
+      });
       await offers.migrate();
       const sales = new SalesAgent(
         leads,
@@ -675,6 +692,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               )
             ).rows[0]?.display_name ?? 'the business',
           ),
+        agentEvents,
       );
       leadPorts = {
         leadStart: async (input) => {
@@ -705,7 +723,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           });
           if (!r) return null;
           if (r.message.duplicate) return { text: '' };
-          const reply = await sales.respond(r.lead);
+          const reply = await sales.respond(r.lead, r.message.messageId);
           return { text: reply?.text ?? '' };
         },
       };
@@ -719,6 +737,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           : undefined,
         leads,
         offers,
+        events: agentEvents,
         approvals: new AppApprovals(workspaces, {
           setups: vault
             ? { service: vault.setups, wake: vault.wake }

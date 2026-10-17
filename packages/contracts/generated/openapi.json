@@ -1107,7 +1107,7 @@
         "summary": "Agent runs, newest first.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1168,7 +1168,7 @@
         "summary": "Typed events and chain receipts of one run.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1677,7 +1677,7 @@
         "summary": "Server-sent StreamEvent records; replay from a cursor.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal; events filtered to their contexts",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1720,7 +1720,7 @@
         "summary": "Same events as the stream, for clients that cannot hold a connection.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",

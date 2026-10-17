@@ -15,6 +15,7 @@ import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceLeads } from '@synq/workspaces/leads';
 import type { WorkspaceOffers } from '@synq/workspaces/offers';
+import type { AgentEvents } from '@synq/workspaces/agent-events';
 import type { AppApprovals } from './app-approvals.js';
 import { workspaceHttp } from './workspace-http.js';
 
@@ -45,6 +46,11 @@ export type AppRouteDeps = {
   capabilities?: () => Record<string, unknown>;
   leads?: WorkspaceLeads;
   offers?: WorkspaceOffers;
+  events?: AgentEvents;
+  /** How long one event-stream connection stays open (default 10 minutes). */
+  streamWindowMs?: number;
+  /** Poll interval of the event stream (default 2 seconds). */
+  streamPollMs?: number;
 };
 
 const USDC = {
@@ -590,10 +596,16 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
             status: 'NOT_CONFIGURED',
             reason: 'The private lead inbox is not configured on this server.',
           };
-      capabilities.agentRuns = {
-        status: 'NOT_CONFIGURED',
-        reason: 'Agent run history is not recorded yet.',
-      };
+      capabilities.agentRuns = deps.events
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Typed agent steps with the actor, status and proof level of each; final only from chain evidence.',
+          }
+        : {
+            status: 'NOT_CONFIGURED',
+            reason: 'Agent run history is not configured on this server.',
+          };
       return {
         workspaceId: w.id,
         displayName: w.displayName,
@@ -615,7 +627,7 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
           : { open: 0, needsOwner: 0 },
         pendingApprovals: pending.filter((p) => p.item.workspaceId === w.id)
           .length,
-        agentHighlights: [],
+        agentHighlights: deps.events ? await deps.events.highlights(w.id) : [],
         capabilities,
         freshness: {
           observedAt: iso(now()),
@@ -793,6 +805,117 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
         return offers.proposePolicy(workspaceId, s.principalId, req.body);
       }),
     );
+  }
+
+  // MARK: Agent runs and the event stream
+
+  const events = deps.events;
+  if (events) {
+    route('workspace.agentRuns');
+    app.get('/v3/workspaces/:workspaceId/agent-runs', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const { workspaceId } = z
+          .strictObject({ workspaceId: z.uuid() })
+          .parse(req.params);
+        return events.runs(
+          workspaceId,
+          s.principalId,
+          PageQuery.parse(req.query),
+        );
+      }),
+    );
+    route('workspace.agentRun');
+    app.get('/v3/workspaces/:workspaceId/agent-runs/:runId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const p = z
+          .strictObject({ workspaceId: z.uuid(), runId: z.uuid() })
+          .parse(req.params);
+        return events.detail(p.workspaceId, s.principalId, p.runId);
+      }),
+    );
+    const Cursor = z.string().regex(/^[0-9]{1,20}$/);
+    route('events.poll');
+    app.get('/v3/events/since', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const q = z
+          .strictObject({ cursor: Cursor.optional() })
+          .parse(req.query);
+        const page = await events.since(
+          s.principalId,
+          q.cursor ?? (await events.head()),
+        );
+        return {
+          items: page.items,
+          nextCursor: page.more ? page.nextCursor : null,
+        };
+      }),
+    );
+    route('events.stream');
+    app.get('/v3/events', async (req, reply) => {
+      let session: Awaited<ReturnType<typeof auth>>;
+      let start: string;
+      try {
+        session = await auth(req);
+        const q = z
+          .strictObject({ cursor: Cursor.optional() })
+          .parse(req.query);
+        const last = req.headers['last-event-id'];
+        start =
+          q.cursor ??
+          (typeof last === 'string' && Cursor.safeParse(last).success
+            ? last
+            : await events.head());
+      } catch (error) {
+        return handle(reply, async () => {
+          throw error;
+        });
+      }
+      const t = token(req);
+      reply.hijack();
+      const res = reply.raw;
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      let closed = false;
+      req.raw.on('close', () => {
+        closed = true;
+      });
+      const until = Date.now() + (deps.streamWindowMs ?? 600_000);
+      const poll = deps.streamPollMs ?? 2000;
+      let cursor = start;
+      let beat = Date.now();
+      res.write(`retry: ${poll}\n\n`);
+      while (!closed && Date.now() < until) {
+        try {
+          // Each poll re-checks the session; membership is re-checked by the query.
+          await store.session(t.value, t.audience);
+        } catch {
+          res.write(
+            `event: CONTEXT_REVOKED\ndata: ${JSON.stringify({ type: 'CONTEXT_REVOKED' })}\n\n`,
+          );
+          break;
+        }
+        const page = await events.since(session.principalId, cursor, 100);
+        for (const item of page.items) {
+          res.write(
+            `id: ${item.cursor}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`,
+          );
+          cursor = item.cursor;
+        }
+        if (Date.now() - beat > 15_000) {
+          res.write(': keep-alive\n\n');
+          beat = Date.now();
+        }
+        if (!page.more) await new Promise((r) => setTimeout(r, poll));
+      }
+      res.end();
+    });
   }
 
   return { implemented };

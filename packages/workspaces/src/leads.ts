@@ -105,11 +105,28 @@ export class WorkspaceLeads {
       telegramBot: () => string | null;
       /** Sends staff messages to the lead's private chat, when a channel is bound. */
       deliver?: LeadDelivery;
+      /** Change markers for the live stream (ids only, after commit). */
+      publish?: (
+        type: 'LEAD_UPDATED' | 'LEAD_MESSAGE',
+        workspaceId: string,
+        leadId: string,
+      ) => Promise<void>;
     },
   ) {}
 
   private now() {
     return this.store.now();
+  }
+
+  private async publish(
+    type: 'LEAD_UPDATED' | 'LEAD_MESSAGE',
+    workspaceId: string,
+    leadId: string,
+  ) {
+    // The stream is a hint to refetch; a lost marker never loses data.
+    await this.options
+      .publish?.(type, workspaceId, leadId)
+      .catch(() => undefined);
   }
 
   async migrate(target: number = LEAD_MIGRATIONS.length) {
@@ -206,7 +223,7 @@ export class WorkspaceLeads {
     if (!TOKEN.test(input.token))
       throw new WorkspaceError('INVITE_INVALID', 404);
     const who = digest(`${input.channel}:${input.identity}`);
-    return this.store.transaction(async (sql) => {
+    const result = await this.store.transaction(async (sql) => {
       const now = this.now();
       const r = await sql.query(
         'SELECT i.*, w.display_name FROM synq_lead_invites i JOIN synq_workspaces w ON w.id=i.workspace_id WHERE i.token_digest=$1 FOR UPDATE OF i',
@@ -276,6 +293,9 @@ export class WorkspaceLeads {
       await this.focus(sql, input.channel, who, leadId, now);
       return { leadId, workspaceId, workspaceName, bound: true, created };
     });
+    if (result.created)
+      await this.publish('LEAD_UPDATED', result.workspaceId, result.leadId);
+    return result;
   }
 
   private async focus(
@@ -333,6 +353,8 @@ export class WorkspaceLeads {
       `lead:${input.dedupeKey}`,
       null,
     );
+    if (!message.duplicate)
+      await this.publish('LEAD_MESSAGE', current.workspaceId, current.leadId);
     return { lead: (await this.row(current.leadId))!, message };
   }
 
@@ -390,7 +412,7 @@ export class WorkspaceLeads {
     dedupeKey: string,
     offerVersion: number | null = null,
   ) {
-    return this.append(
+    const m = await this.append(
       leadId,
       workspaceId,
       'AGENT',
@@ -402,6 +424,8 @@ export class WorkspaceLeads {
           throw new WorkspaceError('AGENT_NOT_HANDLING', 409);
       },
     );
+    if (!m.duplicate) await this.publish('LEAD_MESSAGE', workspaceId, leadId);
+    return m;
   }
 
   /** A staff message, only after a human takeover. Delivered to the lead's chat. */
@@ -439,6 +463,7 @@ export class WorkspaceLeads {
           text,
         });
     }
+    if (!m.duplicate) await this.publish('LEAD_MESSAGE', workspaceId, leadId);
     const { duplicate: _d, ...view } = m;
     return view;
   }
@@ -451,48 +476,53 @@ export class WorkspaceLeads {
   ) {
     const body = Takeover.parse(raw);
     await this.staff(workspaceId, principalId);
-    return this.store.transaction(async (sql) => {
-      const r = await sql.query(
-        'SELECT * FROM synq_leads WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
-        [leadId, workspaceId],
-      );
-      if (!r.rows[0]) throw new WorkspaceError('NOT_FOUND', 404);
-      const row = lead(r.rows[0]);
-      if (row.handlingVersion !== body.expectedVersion)
-        throw new WorkspaceError('VERSION_CONFLICT', 409);
-      const handling: LeadHandling =
-        body.action === 'HUMAN_TAKEOVER'
-          ? 'HUMAN'
-          : body.action === 'HAND_BACK_TO_AGENT'
-            ? 'AGENT'
-            : body.action === 'FREEZE_OFFERS'
-              ? 'FROZEN'
-              : row.handling;
-      const version = row.handlingVersion + 1;
-      await sql.query(
-        'UPDATE synq_leads SET handling=$2, handling_version=$3, needs_owner=$4 WHERE id=$1',
-        [
+    return this.store
+      .transaction(async (sql) => {
+        const r = await sql.query(
+          'SELECT * FROM synq_leads WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
+          [leadId, workspaceId],
+        );
+        if (!r.rows[0]) throw new WorkspaceError('NOT_FOUND', 404);
+        const row = lead(r.rows[0]);
+        if (row.handlingVersion !== body.expectedVersion)
+          throw new WorkspaceError('VERSION_CONFLICT', 409);
+        const handling: LeadHandling =
+          body.action === 'HUMAN_TAKEOVER'
+            ? 'HUMAN'
+            : body.action === 'HAND_BACK_TO_AGENT'
+              ? 'AGENT'
+              : body.action === 'FREEZE_OFFERS'
+                ? 'FROZEN'
+                : row.handling;
+        const version = row.handlingVersion + 1;
+        await sql.query(
+          'UPDATE synq_leads SET handling=$2, handling_version=$3, needs_owner=$4 WHERE id=$1',
+          [
+            leadId,
+            handling,
+            version,
+            body.action === 'ESCALATE_TO_OWNER'
+              ? true
+              : body.action === 'HUMAN_TAKEOVER'
+                ? false
+                : row.needsOwner,
+          ],
+        );
+        await this.audit(
+          sql,
           leadId,
-          handling,
+          workspaceId,
+          body.action,
+          principalId,
           version,
-          body.action === 'ESCALATE_TO_OWNER'
-            ? true
-            : body.action === 'HUMAN_TAKEOVER'
-              ? false
-              : row.needsOwner,
-        ],
-      );
-      await this.audit(
-        sql,
-        leadId,
-        workspaceId,
-        body.action,
-        principalId,
-        version,
-        this.now(),
-      );
-      return { handling, handlingVersion: version };
-    });
+          this.now(),
+        );
+        return { handling, handlingVersion: version };
+      })
+      .then(async (r) => {
+        await this.publish('LEAD_UPDATED', workspaceId, leadId);
+        return r;
+      });
   }
 
   /** Marks the lead as needing a human, from the agent side (no version needed). */

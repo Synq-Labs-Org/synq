@@ -276,7 +276,17 @@ const USDC = {
 };
 
 export class WorkspaceOffers {
-  constructor(readonly store: PostgresWorkspaceStore) {}
+  constructor(
+    readonly store: PostgresWorkspaceStore,
+    private readonly options: {
+      /** Change markers for the live stream (ids only, after commit). */
+      publish?: (workspaceId: string, leadId: string) => Promise<void>;
+    } = {},
+  ) {}
+
+  private async publish(workspaceId: string, leadId: string) {
+    await this.options.publish?.(workspaceId, leadId).catch(() => undefined);
+  }
 
   private now() {
     return this.store.now();
@@ -438,7 +448,7 @@ export class WorkspaceOffers {
         ? (await this.role(input.workspaceId, input.actor.principalId)).role ===
           'OWNER'
         : false;
-    return this.store.transaction(async (sql) => {
+    const result = await this.store.transaction(async (sql) => {
       const now = this.now();
       const l = await sql.query(
         'SELECT handling, stage FROM synq_leads WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
@@ -531,6 +541,8 @@ export class WorkspaceOffers {
         ),
       };
     });
+    if (result.sent) await this.publish(input.workspaceId, input.leadId);
+    return result;
   }
 
   view(r: Record<string, unknown>) {
@@ -630,7 +642,7 @@ export class WorkspaceOffers {
    * accepted, and only by quoting its exact version. This is not a signature.
    */
   async accept(leadId: string, offerId: string, version: number) {
-    return this.store.transaction(async (sql) => {
+    const accepted = await this.store.transaction(async (sql) => {
       const now = this.now();
       const r = await sql.query(
         'SELECT * FROM synq_offers WHERE offer_id=$1 AND lead_id=$2 ORDER BY version DESC LIMIT 1 FOR UPDATE',
@@ -661,5 +673,12 @@ export class WorkspaceOffers {
         ).rows[0],
       );
     });
+    const owner = await this.store.pool.query(
+      'SELECT workspace_id FROM synq_leads WHERE id=$1',
+      [leadId],
+    );
+    if (owner.rows[0])
+      await this.publish(String(owner.rows[0].workspace_id), leadId);
+    return accepted;
   }
 }

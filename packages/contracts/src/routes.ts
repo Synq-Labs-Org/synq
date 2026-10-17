@@ -298,7 +298,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'OWNER, ADMIN, MEMBER',
     query: PageQuery,
     response: business.AgentRunPageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Agent runs, newest first.',
   },
   {
@@ -308,7 +308,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'OWNER, ADMIN, MEMBER',
     response: business.AgentRunDetailSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Typed events and chain receipts of one run.',
   },
   {
@@ -417,7 +417,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal; events filtered to their contexts',
     query: z.strictObject({ cursor: common.CursorSchema.optional() }),
     response: 'text/event-stream',
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Server-sent StreamEvent records; replay from a cursor.',
   },
   {
@@ -428,7 +428,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal',
     query: z.strictObject({ cursor: common.CursorSchema.optional() }),
     response: notifications.StreamEventPageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary:
       'Same events as the stream, for clients that cannot hold a connection.',
   },

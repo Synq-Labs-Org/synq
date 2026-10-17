@@ -25,7 +25,8 @@
     "./team-contracts": "./src/team-contracts.ts",
     "./leads": "./src/leads.ts",
     "./offers": "./src/offers.ts",
-    "./sales-agent": "./src/sales-agent.ts"
+    "./sales-agent": "./src/sales-agent.ts",
+    "./agent-events": "./src/agent-events.ts"
   },
   "dependencies": {
     "@synq/agent-runtime": "workspace:*",

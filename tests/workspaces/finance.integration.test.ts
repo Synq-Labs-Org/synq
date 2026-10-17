@@ -43,6 +43,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
+import { AgentEvents } from '../../packages/workspaces/src/agent-events.js';
 import { walletTypedData } from '@synq/contracts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -1935,6 +1936,27 @@ describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable P
     expect((await books.view(f.w.id, f.owner.principalId)).payables).toEqual([
       expect.objectContaining({ id: payableId, status: 'PAID' }),
     ]);
+    // The completed split shows as an agent run with each transfer on chain.
+    const agentEvents = new AgentEvents(f.finance.workspaces);
+    await agentEvents.migrate();
+    expect(await agentEvents.projectSplits(f.w.id)).toBeGreaterThan(0);
+    expect(await agentEvents.projectSplits(f.w.id)).toBe(0);
+    const runs = await agentEvents.runs(f.w.id, f.owner.principalId);
+    expect(runs.items).toHaveLength(1);
+    const run = await agentEvents.detail(
+      f.w.id,
+      f.owner.principalId,
+      runs.items[0]!.runId,
+    );
+    expect(run.events.map((e) => `${e.kind}:${e.actor}`)).toContain(
+      'DECISION:DETERMINISTIC',
+    );
+    expect(
+      run.events
+        .filter((e) => e.kind === 'BROADCAST')
+        .map((e) => e.amount!.units)
+        .sort(),
+    ).toEqual(['15000', '25000']);
     expect(await books.reader(f.w.id).payables()).toEqual([]);
   });
   it('G6 holds the whole receipt for an unaccepted milestone instead of distributing it', async () => {

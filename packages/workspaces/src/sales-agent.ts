@@ -9,6 +9,7 @@ import {
 } from '@synq/agent-runtime';
 import { WorkspaceError } from './contracts.js';
 import type { LeadRow, WorkspaceLeads } from './leads.js';
+import type { AgentEvents } from './agent-events.js';
 import {
   OfferTermsSchema,
   type CommercialPolicy,
@@ -130,7 +131,43 @@ export class SalesAgent {
     private readonly offers: WorkspaceOffers,
     private readonly reasoner: () => StructuredReasoner | undefined,
     private readonly businessName: (workspaceId: string) => Promise<string>,
+    private readonly events?: AgentEvents,
   ) {}
+
+  /** Records one step of this conversation as a typed agent event. */
+  private async step(
+    lead: LeadRow,
+    turn: string,
+    key: string,
+    e: {
+      kind: 'DECISION' | 'ESCALATED';
+      actor: 'MODEL' | 'DETERMINISTIC';
+      status: 'PENDING' | 'AUTHORIZED' | 'BLOCKED' | 'REQUIRES_OWNER';
+      summary: string;
+      amountUnits?: string | null;
+    },
+  ) {
+    if (!this.events) return;
+    const runId = await this.events.run(
+      lead.workspaceId,
+      `lead:${lead.leadId}`,
+      {
+        title: `Sales conversation · ${lead.label}`,
+        trigger: 'LEAD_MESSAGE',
+      },
+    );
+    await this.events.record(runId, {
+      semanticKey: `lead:${lead.leadId}:${turn}:${key}`,
+      kind: e.kind,
+      actor: e.actor,
+      status: e.status,
+      summary: e.summary.slice(0, 400),
+      sourceKind: e.actor === 'MODEL' ? 'SALES_AGENT' : 'OFFER_VALIDATOR',
+      proofLevel: 'NOT_VERIFIED',
+      correlationId: `lead:${lead.leadId}`,
+      amountUnits: e.amountUnits ?? null,
+    });
+  }
 
   private prompt(name: string, policy: CommercialPolicy, latest: unknown) {
     return [
@@ -200,7 +237,10 @@ export class SalesAgent {
    * Answers the lead's latest message. Returns the text to send (already
    * stored as an agent message), or null when the agent must stay silent.
    */
-  async respond(lead: LeadRow): Promise<SalesReply> {
+  async respond(
+    lead: LeadRow,
+    turn: string = randomUUID(),
+  ): Promise<SalesReply> {
     if (lead.handling !== 'AGENT') return null;
     const name = await this.businessName(lead.workspaceId);
     const store = async (text: string, offerVersion: number | null) => {
@@ -225,6 +265,12 @@ export class SalesAgent {
     };
     const handOver = async (reason: string) => {
       await this.leads.escalate(lead.leadId, lead.workspaceId, reason);
+      await this.step(lead, turn, 'handover', {
+        kind: 'ESCALATED',
+        actor: 'DETERMINISTIC',
+        status: 'REQUIRES_OWNER',
+        summary: `Handed the conversation to a person: ${reason}.`,
+      });
       return store(
         `Thanks. Someone from ${name} will reply here shortly.`,
         null,
@@ -251,6 +297,19 @@ export class SalesAgent {
     for (let attempt = 0; attempt < 2; attempt++) {
       const d = await this.decide(reasoner, lead, system, feedback);
       if (!d) return handOver('unreadable model output');
+      await this.step(lead, turn, `model:${attempt}`, {
+        kind: 'DECISION',
+        actor: 'MODEL',
+        status: 'PENDING',
+        summary:
+          d.action === 'OFFER'
+            ? 'Proposed offer terms for the business rules to check.'
+            : d.action === 'ACCEPT_LATEST'
+              ? 'Read the client message as accepting the latest offer.'
+              : d.action === 'ESCALATE'
+                ? `Asked for a person: ${d.escalationReason ?? 'no reason given'}.`
+                : 'Asked the client a question.',
+      });
       if (d.action === 'ESCALATE')
         return handOver(d.escalationReason ?? 'agent asked for a person');
       if (d.action === 'ASK') {
@@ -268,6 +327,13 @@ export class SalesAgent {
             latest.offerId,
             latest.version,
           );
+          await this.step(lead, turn, 'accepted', {
+            kind: 'DECISION',
+            actor: 'DETERMINISTIC',
+            status: 'REQUIRES_OWNER',
+            summary: `Offer v${accepted.version} accepted in chat; signatures and payment are still pending.`,
+            amountUnits: accepted.total.units,
+          });
           return store(
             `Accepted offer v${accepted.version}. ${name} will now send the agreement for you to sign; payment is made separately from your own wallet.`,
             accepted.version,
@@ -301,6 +367,18 @@ export class SalesAgent {
           return null;
         throw error;
       }
+      await this.step(lead, turn, `rules:${attempt}`, {
+        kind: 'DECISION',
+        actor: 'DETERMINISTIC',
+        status: sent.sent ? 'AUTHORIZED' : 'BLOCKED',
+        summary: sent.sent
+          ? `Business rules allowed offer v${sent.offer.version}; it was sent.`
+          : `Business rules refused the terms: ${sent.validation.checks
+              .filter((c) => !c.passed)
+              .map((c) => c.rule)
+              .join(', ')}.`,
+        amountUnits: sent.validation.totalUnits,
+      });
       if (sent.sent) {
         const intro = withoutAmounts(d.reply);
         return store(
