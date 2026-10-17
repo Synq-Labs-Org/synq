@@ -53,7 +53,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'none',
     roles: 'anyone',
     response: MetaSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Contract version and which routes this server implements.',
   },
   // Auth (sign-in challenge stays POST /v2/auth/challenge with audience "native").
@@ -65,7 +65,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'wallet that signed the /v2 login challenge',
     request: auth.DeviceSessionRequestSchema,
     response: auth.DeviceSessionSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Exchange a signed native login challenge for a device session.',
   },
   {
@@ -76,7 +76,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'holder of a fresh one-time code from a signed-in web session',
     request: auth.DeviceCodeSessionRequestSchema,
     response: auth.DeviceSessionSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary:
       'Exchange a one-time web sign-in code for a device session (no wallet on the phone).',
   },
@@ -88,7 +88,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'holder of the current refresh token for that device',
     request: auth.RefreshRequestSchema,
     response: auth.DeviceSessionSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Rotate tokens. Reusing an old refresh token revokes the session.',
   },
   {
@@ -98,7 +98,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'principal',
     response: auth.SessionListSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: "The principal's signed-in devices.",
   },
   {
@@ -108,7 +108,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'mutation',
     roles: 'principal',
     response: common.OkSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'End this device session.',
   },
   {
@@ -118,7 +118,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'mutation',
     roles: 'principal',
     response: auth.RevokeAllSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'End every session of this principal, including this one.',
   },
   // Contexts and personal
@@ -129,7 +129,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'principal',
     response: contexts.ContextsSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Personal context plus one context per business workspace.',
   },
   {
@@ -139,7 +139,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'principal',
     response: contexts.PersonalOverviewSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Own wallets, personal vaults, circles and recent activity.',
   },
   {
@@ -150,7 +150,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal',
     query: PageQuery,
     response: contexts.CirclePageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Group circles the principal is a verified member of.',
   },
   {
@@ -160,7 +160,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'circle member',
     response: contexts.CircleDetailSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Members, attributed contributions, proposals and rules.',
   },
   // Business

@@ -42,4 +42,18 @@ ALTER TABLE synq_ws_vault_setups ADD COLUMN next_attempt_at bigint NOT NULL DEFA
     up: `ALTER TABLE synq_ws_channel_bindings ADD COLUMN destination jsonb NOT NULL, ADD COLUMN identity_link_id text NOT NULL;`,
     down: `ALTER TABLE synq_ws_channel_bindings DROP COLUMN destination, DROP COLUMN identity_link_id;`,
   },
+  {
+    // Device sessions: a rotating refresh token per signed-in device. Access
+    // tokens stay in synq_ws_sessions so every existing route accepts them.
+    version: 5,
+    up: `
+CREATE TABLE synq_ws_device_sessions (id uuid PRIMARY KEY, principal_id text NOT NULL REFERENCES synq_ws_principals(id), device_id uuid NOT NULL, device_name text NOT NULL, platform text NOT NULL CHECK(platform IN ('ios','web')), refresh_digest text NOT NULL UNIQUE, refresh_expires_at bigint NOT NULL, created_at bigint NOT NULL, last_seen_at bigint NOT NULL, revoked_at bigint);
+CREATE UNIQUE INDEX synq_ws_device_sessions_active ON synq_ws_device_sessions(principal_id, device_id) WHERE revoked_at IS NULL;
+CREATE TABLE synq_ws_refresh_used (digest text PRIMARY KEY, session_id uuid NOT NULL REFERENCES synq_ws_device_sessions(id), used_at bigint NOT NULL);
+ALTER TABLE synq_ws_sessions ADD COLUMN device_session_id uuid REFERENCES synq_ws_device_sessions(id);
+CREATE INDEX synq_ws_sessions_device ON synq_ws_sessions(device_session_id);
+CREATE INDEX synq_ws_sessions_principal ON synq_ws_sessions(principal_id);
+`,
+    down: `DROP INDEX synq_ws_sessions_principal; ALTER TABLE synq_ws_sessions DROP COLUMN device_session_id; DROP TABLE synq_ws_refresh_used, synq_ws_device_sessions;`,
+  },
 ] as const;

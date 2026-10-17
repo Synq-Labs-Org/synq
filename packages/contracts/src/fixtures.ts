@@ -85,14 +85,6 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
       { id: 'workspace.inbox', status: 'PLANNED' },
     ],
   },
-  DeviceSession: {
-    principalId: 'principal-example',
-    sessionId: uuid(10),
-    accessToken: '0'.repeat(64).replace(/^0/, 'a'),
-    accessExpiresAt: at(15),
-    refreshToken: '0'.repeat(64).replace(/^0/, 'b'),
-    refreshExpiresAt: at(60 * 24 * 7),
-  },
   Contexts: {
     principalId: 'principal-example',
     walletHint: hint(me),

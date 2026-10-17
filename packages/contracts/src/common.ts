@@ -68,15 +68,16 @@ export const MoneySchema = z.strictObject({
 });
 
 /**
- * Where an asset's money stands. Only `settled` is spendable; pending deposits,
- * CCTP burns and unfinalized mints are never counted as settled.
+ * Where an asset's money stands. Spendable is `settled - reserved`; pending
+ * deposits, CCTP burns and unfinalized mints are never counted as settled, and
+ * quarantined funds are never spendable.
  */
 export const BalanceSchema = z.strictObject({
   assetId: z.string().max(64),
   symbol: z.string().max(12),
   chainId: z.number().int(),
   decimals: z.number().int().min(0).max(36),
-  settled: UnitsSchema,
+  settled: UnitsSchema.describe('Final on chain; includes reserved'),
   reserved: UnitsSchema.describe(
     'Settled but held for bills, deals or members',
   ),

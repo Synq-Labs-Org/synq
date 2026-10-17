@@ -72,7 +72,7 @@ describe('G1 durable workspace isolation and membership', () => {
             'SELECT version FROM synq_workspaces_migrations',
           )
         ).rows.map((r) => r.version),
-      ).toEqual([1, 2, 3, 4]);
+      ).toEqual([1, 2, 3, 4, 5]);
     } finally {
       await migrationPool.end();
     }

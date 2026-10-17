@@ -21,6 +21,8 @@ type Session = {
   principalId: string;
   wallet: string;
   audience: 'web' | 'native';
+  /** Set when the token belongs to a device session (v3 sign-in). */
+  deviceSessionId: string | null;
 };
 const workspace = (r: Record<string, unknown>): Workspace => ({
   id: String(r.id),
@@ -118,7 +120,11 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
     );
     return c;
   }
-  async login(id: string, signature: Hex) {
+  /**
+   * Checks a login challenge's signature without consuming it. The caller
+   * consumes it with `consumeChallenge` inside its own transaction.
+   */
+  async verifyLogin(id: string, signature: Hex) {
     const r = await this.pool.query(
       'SELECT data FROM synq_ws_challenges WHERE id=$1 AND NOT consumed AND expires_at>$2',
       [id, this.now()],
@@ -142,19 +148,34 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
     }
     if (signer.toLowerCase() !== c.wallet.toLowerCase())
       throw new WorkspaceError('INVALID_LOGIN', 401);
+    return {
+      challenge: c,
+      principalId: `wallet:${digest(c.wallet.toLowerCase())}`,
+    };
+  }
+  /** Marks a verified challenge used and records its principal; once only. */
+  async consumeChallenge(
+    sql: PoolClient,
+    verified: { challenge: LoginChallenge; principalId: string },
+  ) {
+    const used = await sql.query(
+      'UPDATE synq_ws_challenges SET consumed=true WHERE id=$1 AND NOT consumed AND expires_at>$2 RETURNING id',
+      [verified.challenge.id, this.now()],
+    );
+    if (!used.rowCount) throw new WorkspaceError('INVALID_LOGIN', 401);
+    await sql.query(
+      'INSERT INTO synq_ws_principals(id,wallet) VALUES($1,$2) ON CONFLICT DO NOTHING',
+      [verified.principalId, verified.challenge.wallet.toLowerCase()],
+    );
+  }
+  async login(id: string, signature: Hex) {
+    const verified = await this.verifyLogin(id, signature);
+    const c = verified.challenge;
+    const principalId = verified.principalId;
     const token = randomBytes(32).toString('hex');
-    const principalId = `wallet:${digest(c.wallet.toLowerCase())}`;
     const expiresAt = this.now() + 900;
     await this.transaction(async (sql) => {
-      const used = await sql.query(
-        'UPDATE synq_ws_challenges SET consumed=true WHERE id=$1 AND NOT consumed AND expires_at>$2 RETURNING id',
-        [id, this.now()],
-      );
-      if (!used.rowCount) throw new WorkspaceError('INVALID_LOGIN', 401);
-      await sql.query(
-        'INSERT INTO synq_ws_principals(id,wallet) VALUES($1,$2) ON CONFLICT DO NOTHING',
-        [principalId, c.wallet.toLowerCase()],
-      );
+      await this.consumeChallenge(sql, verified);
       await sql.query(
         'INSERT INTO synq_ws_sessions(digest,principal_id,audience,expires_at) VALUES($1,$2,$3,$4)',
         [digest(token), principalId, c.audience, expiresAt],
@@ -169,12 +190,18 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
     if (!/^[0-9a-f]{64}$/.test(token))
       throw new WorkspaceError('UNAUTHENTICATED', 401);
     const r = await this.pool.query(
-      'SELECT p.id,p.wallet,s.audience FROM synq_ws_sessions s JOIN synq_ws_principals p ON p.id=s.principal_id WHERE s.digest=$1 AND s.audience=$2 AND s.expires_at>$3',
+      'SELECT p.id,p.wallet,s.audience,s.device_session_id FROM synq_ws_sessions s JOIN synq_ws_principals p ON p.id=s.principal_id WHERE s.digest=$1 AND s.audience=$2 AND s.expires_at>$3',
       [digest(token), audience, this.now()],
     );
     const p = r.rows[0];
     if (!p) throw new WorkspaceError('UNAUTHENTICATED', 401);
-    return { principalId: p.id, wallet: p.wallet, audience: p.audience };
+    return {
+      principalId: p.id,
+      wallet: p.wallet,
+      audience: p.audience,
+      deviceSessionId:
+        p.device_session_id === null ? null : String(p.device_session_id),
+    };
   }
   async logout(token: string) {
     await this.pool.query('DELETE FROM synq_ws_sessions WHERE digest=$1', [
@@ -279,6 +306,17 @@ WHERE synq_ws_rate_limits.window_id<>EXCLUDED.window_id OR synq_ws_rate_limits.h
       "INSERT INTO synq_ws_membership_log(workspace_id,principal_id,action,role,actor,occurred_at) VALUES($1,$2,'JOIN',$3,$4,$5)",
       [id, principal, role, actor, this.now()],
     );
+  }
+  /** Workspaces the principal belongs to, with their role in each. */
+  async listWithRoles(principal: string) {
+    const r = await this.pool.query(
+      'SELECT w.*, m.role AS member_role FROM synq_workspaces w JOIN synq_ws_members m ON m.workspace_id=w.id WHERE m.principal_id=$1 ORDER BY w.id',
+      [principal],
+    );
+    return r.rows.map((row) => ({
+      workspace: workspace(row),
+      role: row.member_role as Role,
+    }));
   }
   async list(principal: string) {
     const r = await this.pool.query(

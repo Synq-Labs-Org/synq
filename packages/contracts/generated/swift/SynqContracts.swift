@@ -165,7 +165,7 @@ public struct Balance: Codable, Sendable, Equatable {
     public var symbol: String
     public var chainId: Int
     public var decimals: Int
-    /// Integer token base units as a decimal string
+    /// Final on chain; includes reserved
     public var settled: String
     /// Settled but held for bills, deals or members
     public var reserved: String
@@ -655,6 +655,7 @@ public struct CircleProposal: Codable, Sendable, Equatable {
         case submitted = "SUBMITTED"
         case confirmed = "CONFIRMED"
         case failed = "FAILED"
+        case needsReview = "NEEDS_REVIEW"
         case cancelled = "CANCELLED"
         case expired = "EXPIRED"
         /// A value this client version does not know yet.

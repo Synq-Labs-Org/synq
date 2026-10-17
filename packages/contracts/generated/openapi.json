@@ -12,7 +12,7 @@
         "summary": "Contract version and which routes this server implements.",
         "x-synq-auth": "none",
         "x-synq-roles": "anyone",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -44,7 +44,7 @@
         "summary": "Exchange a signed native login challenge for a device session.",
         "x-synq-auth": "none",
         "x-synq-roles": "wallet that signed the /v2 login challenge",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -86,7 +86,7 @@
         "summary": "Exchange a one-time web sign-in code for a device session (no wallet on the phone).",
         "x-synq-auth": "none",
         "x-synq-roles": "holder of a fresh one-time code from a signed-in web session",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -128,7 +128,7 @@
         "summary": "Rotate tokens. Reusing an old refresh token revokes the session.",
         "x-synq-auth": "none",
         "x-synq-roles": "holder of the current refresh token for that device",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -170,7 +170,7 @@
         "summary": "The principal's signed-in devices.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -202,7 +202,7 @@
         "summary": "End this device session.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -244,7 +244,7 @@
         "summary": "End every session of this principal, including this one.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -286,7 +286,7 @@
         "summary": "Personal context plus one context per business workspace.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -318,7 +318,7 @@
         "summary": "Own wallets, personal vaults, circles and recent activity.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -350,7 +350,7 @@
         "summary": "Group circles the principal is a verified member of.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -403,7 +403,7 @@
         "summary": "Members, attributed contributions, proposals and rules.",
         "x-synq-auth": "session",
         "x-synq-roles": "circle member",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "circleId",
@@ -1753,7 +1753,7 @@
           "settled": {
             "type": "string",
             "pattern": "^(0|[1-9][0-9]{0,77})$",
-            "description": "Integer token base units as a decimal string"
+            "description": "Final on chain; includes reserved"
           },
           "reserved": {
             "type": "string",
@@ -2620,6 +2620,7 @@
               "SUBMITTED",
               "CONFIRMED",
               "FAILED",
+              "NEEDS_REVIEW",
               "CANCELLED",
               "EXPIRED"
             ]
