@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { MeraCredential } from '@synq/identity/mera-browser';
-import { clearCredential, loadCredential } from '../lib/session';
+import { clearCredential, loadCredential } from '../../lib/session';
 
 export default function Home() {
   const [record, setRecord] = useState<MeraCredential | null>(null);
