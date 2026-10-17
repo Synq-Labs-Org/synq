@@ -45,8 +45,11 @@ struct BusinessSection: View {
                     .accessibilityHint(business.availability(tile.kind).reason ?? "Opens \(tile.title)")
                 }
             }
-            if let off = business.offServer {
-                SynqNote(text: "\(off) These run on \(networkTitle(BusinessNetwork.label)) once the Synq server is updated.")
+            if business.offServer != nil {
+                SynqNote(text: "Business features now run in your own Arc workspace: a vault your owners sign for, with vendors, bills, invoices, deals and splits.")
+                if let url = URL(string: "https://\(business.client.host)/workspaces") {
+                    SynqButton(title: "Open my Arc workspace", trailingIcon: .forward, kind: .compact) { actions.open(url) }
+                }
             }
         }
     }
