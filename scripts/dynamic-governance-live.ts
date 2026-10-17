@@ -36,8 +36,16 @@ const runId = z
   .regex(/^[a-z0-9-]{1,64}$/)
   .parse(process.env.SYNQ_DYNAMIC_RUN_ID);
 const kind = z
-  .enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR'])
+  .enum([
+    'QUEUE_VENDOR',
+    'ALLOW_VENDOR',
+    'REMOVE_VENDOR',
+    'QUEUE_CAPS',
+    'SET_CAPS',
+  ])
   .parse(process.env.SYNQ_DYNAMIC_GOV_ACTION ?? 'QUEUE_VENDOR');
+// Cap proof lowers the fresh vault's operator caps to 0.01 per payment and 0.02 per window.
+const CAPS = { perPaymentCap: '10000', windowCap: '20000' } as const;
 if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
   process.stdout.write(
     'Read-only mode: no files, signatures or transactions created. Set SYNQ_DYNAMIC_GOV_LIVE=1 for the authorized Arc testnet proof.\n',
@@ -83,6 +91,8 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
     actions: Partial<Record<typeof kind, string>>;
     operatorBefore: string | null;
     hashes: Hex[];
+    /** Operator balance just before each later action, so earlier outflows (invoice funding, payouts) do not enter this action's reconciliation. */
+    beforeByKind?: Partial<Record<typeof kind, string>>;
   };
   const manifest: Manifest = existsSync(path)
     ? (JSON.parse(secret(path)) as Manifest)
@@ -145,6 +155,14 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
       manifest.operatorBefore = String(balance);
       save();
     }
+    const perAction = kind === 'QUEUE_CAPS' || kind === 'SET_CAPS';
+    if (perAction && !manifest.beforeByKind?.[kind]) {
+      manifest.beforeByKind = {
+        ...manifest.beforeByKind,
+        [kind]: String(balance),
+      };
+      save();
+    }
     const login = async (a: typeof owner) => {
       const c = await store.challenge({
         wallet: a.address,
@@ -193,7 +211,9 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
       const proposed = await service.propose(
         workspaceId,
         principals[0]!.principalId,
-        { kind, vendorId: manifest.vendorId },
+        kind === 'QUEUE_CAPS' || kind === 'SET_CAPS'
+          ? { kind, ...CAPS }
+          : { kind, vendorId: manifest.vendorId },
       );
       id = proposed.action.id;
       manifest.actions[kind] = id;
@@ -230,12 +250,17 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
       save();
     }
     let gas = 0n;
-    for (const hash of manifest.hashes) {
+    for (const hash of perAction ? [outbox.hash] : manifest.hashes) {
       const receipt = await chain.client.getTransactionReceipt({ hash });
       gas += receipt.gasUsed * receipt.effectiveGasPrice;
     }
     const after = await chain.client.getBalance({ address: operator.address }),
-      difference = BigInt(manifest.operatorBefore) - after - gas;
+      difference =
+        BigInt(
+          perAction ? manifest.beforeByKind![kind]! : manifest.operatorBefore,
+        ) -
+        after -
+        gas;
     if (difference !== 0n)
       throw new Error('GOVERNANCE_GAS_RECONCILIATION_MISMATCH');
     Object.assign(evidence, {
@@ -257,8 +282,9 @@ if (process.env.SYNQ_DYNAMIC_GOV_LIVE !== '1') {
         kind === 'QUEUE_VENDOR'
           ? 'PASS_VENDOR_QUEUE_ONLY'
           : `PASS_${kind}_ONLY`,
+      ...(kind === 'QUEUE_CAPS' || kind === 'SET_CAPS' ? { caps: CAPS } : {}),
       limits:
-        'Payout screening is unavailable; no live payout is claimed. No independent human onboarding proof.',
+        'Screened payout proof is separate (dynamic-payout evidence). No independent human onboarding proof.',
     });
     persist();
     process.stdout.write(
