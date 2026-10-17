@@ -81,7 +81,7 @@ export function renderCoin(yaw: number, pitch: number): string {
   const sy = Math.sin(yaw);
   const cp = Math.cos(pitch);
   const sp = Math.sin(pitch);
-  // Light from above-left-front.
+  // Direction toward the light: above, left and in front of the coin.
   const lx = -0.35;
   const ly = 0.6;
   const lz = -0.72;
@@ -106,9 +106,9 @@ export function renderCoin(yaw: number, pitch: number): string {
     const nz1 = -nx * sy + nz * cy;
     const ny2 = ny * cp - nz1 * sp;
     const nz2 = ny * sp + nz1 * cp;
-    const lum = -(nx1 * lx + ny2 * ly + nz2 * lz) + data[i + 6]!;
+    const lum = nx1 * lx + ny2 * ly + nz2 * lz + data[i + 6]!;
     zBuffer[at] = depth;
-    const idx = Math.max(1, Math.min(RAMP.length - 1, Math.round(lum * 9) + 2));
+    const idx = Math.max(1, Math.min(RAMP.length - 1, Math.round(lum * 8) + 1));
     cells[at] = RAMP[idx]!;
   }
   let out = '';

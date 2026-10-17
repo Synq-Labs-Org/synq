@@ -572,12 +572,10 @@ html:has(.lp-shell) {
   from {
     opacity: 0;
     transform: translateY(56px) scale(0.96);
-    clip-path: inset(0 0 14% 0);
   }
   to {
     opacity: 1;
     transform: none;
-    clip-path: inset(0);
   }
 }
 .lp-reveal[data-mode='io'] {
@@ -598,7 +596,6 @@ html:has(.lp-shell) {
     animation: none;
     opacity: 1;
     transform: none;
-    clip-path: none;
     transition: none;
   }
   .lp-hero-art-slot {
@@ -610,9 +607,7 @@ html:has(.lp-shell) {
 .lp-story {
   max-width: 1180px;
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0 56px;
+  display: block;
 }
 .lp-section:has(.lp-story) {
   padding-bottom: 0;
@@ -635,15 +630,15 @@ html:has(.lp-shell) {
 }
 .lp-story-step {
   min-height: 62vh;
-  padding: 28px 0;
-  opacity: 0.45;
-  transition: opacity 0.4s ease;
+  padding: 28px 0 28px 18px;
+  border-left: 2px solid var(--lp-line);
+  transition: border-color 0.4s ease;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 .lp-story-step[data-active='true'] {
-  opacity: 1;
+  border-left-color: var(--lp-ink);
 }
 .lp-story-step h3 {
   font-size: clamp(26px, 3.6vw, 40px);
@@ -655,7 +650,9 @@ html:has(.lp-shell) {
 }
 @media (min-width: 900px) {
   .lp-story {
+    display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+    gap: 0 56px;
   }
   .lp-story-pin {
     grid-column: 2;
@@ -674,7 +671,7 @@ html:has(.lp-shell) {
   }
   .lp-story-step {
     min-height: 82vh;
-    opacity: 0.35;
+    padding-left: 28px;
   }
 }
 
@@ -764,14 +761,10 @@ html:has(.lp-shell) {
   border: 1px solid var(--lp-line);
   border-radius: var(--lp-radius);
   padding: 16px;
-  opacity: 0.55;
-  transition:
-    opacity 0.35s ease,
-    border-color 0.35s ease;
+  transition: border-color 0.35s ease;
 }
 .lp-flow-steps li.on {
-  opacity: 1;
-  border-color: color-mix(in srgb, var(--lp-ink) 45%, var(--lp-line));
+  border-color: color-mix(in srgb, var(--lp-ink) 55%, var(--lp-line));
 }
 .lp-step-n {
   font: 12px var(--lp-mono);
