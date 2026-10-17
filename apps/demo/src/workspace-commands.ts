@@ -8,6 +8,12 @@ import type { ChannelPorts, DirectReply } from '@synq/channels';
 import { WorkspaceError, type WorkspaceChannelLinks } from '@synq/workspaces';
 import type { WorkspaceFinance } from '@synq/workspaces/finance';
 import type { WorkspacePayouts } from '@synq/workspaces/payouts';
+import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
+import type { WorkspaceBooks } from '@synq/workspaces/books';
+import type { WorkspaceDeals } from '@synq/workspaces/deals';
+import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
+import type { WorkspaceTreasury } from '@synq/execution-worker/workspace-treasury';
+import { parseWorkspaceInvoice } from '@synq/workspaces/invoice-command';
 
 const safeText = (text: string) => {
   const clean = redact(text).value;
@@ -25,6 +31,11 @@ export function workspaceCommandPort(input: {
   finance?: WorkspaceFinance;
   payouts?: WorkspacePayouts;
   team?: WorkspaceTeam;
+  invoices?: () => WorkspaceInvoices | undefined;
+  books?: WorkspaceBooks;
+  deals?: () => WorkspaceDeals | undefined;
+  revenue?: WorkspaceRevenue;
+  treasury?: WorkspaceTreasury;
   origin: string;
   mode: 'LIVE_ARC_TESTNET' | 'LOCAL_FIXTURE';
   balance?: (
@@ -121,7 +132,10 @@ export function workspaceCommandPort(input: {
             amount: formatUnits(BigInt(p.data.amount), 6),
             symbol: 'USDC',
           },
-          route: 'VAULT_POLICY_PAY',
+          route:
+            p.data.route === 'SAFE_QUORUM'
+              ? 'SAFE_QUORUM_TRANSFER'
+              : 'VAULT_POLICY_PAY',
           obligationRef: null,
           approvals: {
             counted: p.signedBy.length,
@@ -171,6 +185,123 @@ export function workspaceCommandPort(input: {
             : 'No verified vendors yet. Add one with the owner quorum on the secure page.',
         );
       }
+      const draft = parseWorkspaceInvoice(text);
+      const invoices = input.invoices?.();
+      if (draft) {
+        if (!invoices)
+          return review('Invoices are not connected on this server yet.');
+        const day = new Date(store.now() * 1000)
+          .toISOString()
+          .slice(0, 10)
+          .replaceAll('-', '');
+        const inv = await invoices.create(ws, sender.principalId, {
+          number: `TG-${day}-${commandKey(`${ws}:${q.chatId}:${q.eventId}`).slice(0, 6).toUpperCase()}`,
+          payerName: draft.payerName,
+          dueDate: draft.dueDate,
+          lineItems: [
+            {
+              description: draft.description,
+              quantity: 1,
+              unitPrice: draft.amount,
+            },
+          ],
+        });
+        url.searchParams.set('invoice', inv.invoiceId);
+        return review(
+          `Draft invoice ${safeText(inv.number)} for ${formatUnits(BigInt(draft.amount), 6)} USDC to ${safeText(draft.payerName)}, due ${draft.dueDate}. Nothing is sent until an owner issues it with a wallet signature on the secure page.`,
+        );
+      }
+      if (/^\/?invoices(?:@[a-z0-9_]+)?$/i.test(text) && invoices) {
+        const rows = await invoices.list(ws, sender.principalId);
+        return review(
+          rows.length
+            ? rows
+                .slice(0, 8)
+                .map(
+                  (i) =>
+                    `${safeText(i.number)} · ${safeText(i.payer.name)} · ${formatUnits(BigInt(i.total), 6)} USDC · ${i.status}${i.reconciliation === 'FINALIZED' ? ' · settled on chain' : ''}`,
+                )
+                .join('\n')
+            : 'No invoices yet. Draft one: invoice <payer> <amount> USDC due <YYYY-MM-DD> for <work>.',
+        );
+      }
+      if (/^\/?bills(?:@[a-z0-9_]+)?$/i.test(text) && input.books) {
+        const b = await input.books.view(ws, sender.principalId);
+        const open = b.payables.filter((p) => p.status === 'OPEN');
+        return review(
+          [
+            open.length
+              ? `Open vendor bills:\n${open
+                  .slice(0, 8)
+                  .map(
+                    (p) =>
+                      `${safeText(p.number)} · ${formatUnits(BigInt(p.amount), 6)} USDC · due ${p.dueOn}`,
+                  )
+                  .join('\n')}`
+              : 'No open vendor bills recorded.',
+            b.bills.length
+              ? `Recurring:\n${b.bills
+                  .map(
+                    (r) =>
+                      `${safeText(r.label)} · ${formatUnits(BigInt(r.amount), 6)} USDC every ${r.cadenceDays} days`,
+                  )
+                  .join('\n')}`
+              : 'No recurring bills recorded.',
+            'Bills count only after the owner quorum signs them on the secure page.',
+          ].join('\n\n'),
+        );
+      }
+      const deals = input.deals?.();
+      if (/^\/?deals(?:@[a-z0-9_]+)?$/i.test(text) && deals) {
+        const rows = await deals.list(ws, sender.principalId);
+        return review(
+          rows.length
+            ? rows
+                .slice(0, 8)
+                .map(
+                  (d) =>
+                    `${safeText(d.title)} · ${formatUnits(BigInt(d.total), 6)} USDC · ${d.status}${d.escrow ? ` · escrow ${d.escrow.escrowDealId}` : ''}`,
+                )
+                .join('\n')
+            : 'No deals involving your wallet. Each party signs and moves escrow from their own wallet on the secure page.',
+        );
+      }
+      if (/^\/?splits(?:@[a-z0-9_]+)?$/i.test(text) && input.revenue) {
+        const rows = await input.revenue.allocations(ws, sender.principalId);
+        return review(
+          rows.length
+            ? rows
+                .slice(0, 5)
+                .map(
+                  (a) =>
+                    `${formatUnits(BigInt(a.received), 6)} USDC received · ${a.state} · ${
+                      a.legs
+                        .filter((l) => l.kind === 'TRANSFER')
+                        .map(
+                          (l) =>
+                            `${l.purpose.toLowerCase().replaceAll('_', ' ')} ${formatUnits(BigInt(l.amount), 6)}`,
+                        )
+                        .join(', ') || 'no transfers'
+                    }`,
+                )
+                .join('\n')
+            : 'No automatic splits yet. They run when an invoice payment settles under the signed revenue policy.',
+        );
+      }
+      if (/^\/?swaps?(?:@[a-z0-9_]+)?$/i.test(text) && input.treasury) {
+        const ops = await input.treasury.list(ws, sender.principalId);
+        return review(
+          ops.length
+            ? ops
+                .slice(0, 5)
+                .map(
+                  (o) =>
+                    `${formatUnits(BigInt(o.data.amountIn), 6)} ${o.data.from} → ${o.data.to} · ${o.state}${o.evidence?.received ? ` · received ${formatUnits(BigInt(String(o.evidence.received)), 6)}` : ''}`,
+                )
+                .join('\n')
+            : 'No treasury swaps yet. Owners propose and sign them on the secure page.',
+        );
+      }
       const ask = /^\/?(?:team|ask)(?:@[a-z0-9_]+)?\s+(.+)$/is.exec(text);
       if (ask && input.team) {
         const reply = await input.team.ask(ws, sender.principalId, {
@@ -190,7 +321,7 @@ export function workspaceCommandPort(input: {
         );
       }
       return review(
-        'Workspace commands: /vendors, /pay status, /treasury, /team <question>. To propose a payout: pay <vendor name> <amount> USDC for <purpose> ref <invoice reference>. Only verified vendors are accepted. Chat never approves or signs.',
+        'Workspace commands: /vendors, /pay status, /bills, /invoices, /deals, /splits, /swaps, /treasury, /team <question>. Propose a payout: pay <vendor name> <amount> USDC for <purpose> ref <invoice reference>. Draft an invoice: invoice <payer> <amount> USDC due <YYYY-MM-DD> for <work>. Only verified vendors are accepted. Chat never approves or signs.',
       );
     } catch (error) {
       return review(

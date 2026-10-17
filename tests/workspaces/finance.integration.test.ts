@@ -694,6 +694,74 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
       (await f.payouts.list(f.w.id, f.owner.principalId))[0]?.signedBy,
     ).toEqual([]);
   });
+  it('G14 drafts invoices and reads bills from verified chat without approving anything', async () => {
+    const f = await payoutFixture();
+    let code = '';
+    const links = new WorkspaceChannelLinks(
+      f.store,
+      '123456',
+      {
+        verifiers: { telegram: () => ({ channelUserId: '91002' }) },
+        deliverCode: async (q) => {
+          code = q.code;
+        },
+      },
+      async () => true,
+    );
+    await links.migrate();
+    const c = await links.request(f.w.id, f.owner.principalId, {
+      channel: 'telegram',
+      proof: { mode: 'LOCAL_FIXTURE', nonce: randomUUID() },
+    });
+    await links.complete(f.w.id, f.owner.principalId, {
+      challengeId: c.challenge.challengeId,
+      channelCode: code,
+      signature: await f.owner.a.signTypedData(
+        channelLinkTypedData(c.challenge),
+      ),
+    });
+    await links.bind(f.w.id, f.owner.principalId, { kind: 'DIRECT' });
+    const ledger = new Ledger(new PostgresLedgerStore(pool));
+    const invoices = new WorkspaceInvoices(
+      f.finance,
+      new InvoiceService(new PostgresInvoiceStore(pool), ledger, f.store.now),
+      () => null,
+    );
+    const port = workspaceCommandPort({
+      links,
+      finance: f.finance,
+      payouts: f.payouts,
+      invoices: () => invoices,
+      books: new WorkspaceBooks(f.finance),
+      origin: f.store.origin,
+      mode: 'LOCAL_FIXTURE',
+    });
+    const event = {
+      channel: 'telegram' as const,
+      chatId: '91002',
+      chatKind: 'DIRECT' as const,
+      userId: '91002',
+      eventId: randomUUID(),
+      origin: 'CHAT' as const,
+      text: 'invoice Acme Studio 0.75 USDC due 2033-06-01 for logo design',
+    };
+    const drafted = await port(event);
+    expect(drafted?.text).toContain('Draft invoice');
+    expect(drafted?.text).toContain('owner issues it with a wallet signature');
+    const list = await invoices.list(f.w.id, f.owner.principalId);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ status: 'DRAFT', total: '750000' });
+    expect(
+      (await port({ ...event, eventId: randomUUID(), text: '/invoices' }))
+        ?.text,
+    ).toContain('Acme Studio · 0.75 USDC · DRAFT');
+    expect(
+      (await port({ ...event, eventId: randomUUID(), text: '/bills' }))?.text,
+    ).toContain('No open vendor bills recorded.');
+    expect(
+      (await port({ ...event, eventId: randomUUID(), text: 'help' }))?.text,
+    ).toContain('/invoices');
+  });
   it('cancels only before signed bytes exist and prevents a worker from using a stale READY read', async () => {
     const f = await payoutFixture(),
       obligation = randomUUID(),

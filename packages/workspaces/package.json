@@ -20,6 +20,7 @@
     "./deal-contracts": "./src/deal-contracts.ts",
     "./team": "./src/team.ts",
     "./payout-command": "./src/payout-command.ts",
+    "./invoice-command": "./src/invoice-command.ts",
     "./team-contracts": "./src/team-contracts.ts"
   },
   "dependencies": {

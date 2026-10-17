@@ -583,6 +583,11 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
             : 'LOCAL_FIXTURE',
         balance: vault?.readBalance,
         team: workspaceTeam,
+        invoices: () => workspaceInvoices,
+        books: vault?.books,
+        deals: () => workspaceDeals,
+        revenue: finance ? new WorkspaceRevenue(finance) : undefined,
+        treasury: vault?.treasury,
       });
       if (vault) {
         workspaceNotifications = new WorkspaceNotifications(
