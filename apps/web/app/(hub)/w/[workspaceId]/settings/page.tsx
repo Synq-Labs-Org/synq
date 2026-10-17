@@ -12,6 +12,7 @@ import {
 } from '@synq/contracts';
 import { formatAmount, shortDate, toBaseUnits } from '../../../../../lib/money';
 import { describeV3, seg, v3 } from '../../../../../lib/v3';
+import { AgentPayments } from './agent-payments';
 import { ThemePicker } from '../../../../workspaces/theme-picker';
 import { useHub } from '../../../../_hub/provider';
 import { useLiveRefresh, useV3 } from '../../../../_hub/hooks';
@@ -497,6 +498,7 @@ export default function SettingsPage() {
           )}
         </Async>
       </Panel>
+      <AgentPayments workspaceId={workspaceId} />
       <Panel title="Appearance" id="appearance">
         <ThemePicker value={theme} onChange={setTheme} />
       </Panel>

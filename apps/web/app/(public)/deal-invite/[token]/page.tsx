@@ -1,6 +1,7 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ContextsSchema, LeadInviteRedeemResultSchema } from '@synq/contracts';
 import { useWorkspaceTheme } from '../../../workspaces/theme-picker';
@@ -21,6 +22,8 @@ type Phase =
 
 export default function DealInvitePage() {
   const { token } = useParams<{ token: string }>();
+  const router = useRouter();
+  const [leadId, setLeadId] = useState<string | null>(null);
   const [theme] = useWorkspaceTheme();
   const valid = TOKEN.test(token);
   const [phase, setPhase] = useState<Phase>(valid ? 'checking' : 'invalid');
@@ -44,10 +47,12 @@ export default function DealInvitePage() {
   function redeem() {
     setPhase('working');
     v3.post('/v3/lead-invites/redeem', LeadInviteRedeemResultSchema, { token })
-      .then(() => {
-        // The link is single-use; take the token out of the address bar.
-        window.history.replaceState(null, '', '/deal-invite/accepted');
+      .then((result) => {
+        // The link is single-use; move to the private conversation page so the
+        // token leaves the address bar and history.
+        setLeadId(result.leadId);
         setPhase('done');
+        router.replace(`/lead/${encodeURIComponent(result.leadId)}`);
       })
       .catch((e: unknown) => {
         if (e instanceof V3Error && e.kind === 'AUTH') setPhase('signedOut');
@@ -101,7 +106,12 @@ export default function DealInvitePage() {
         {phase === 'done' && (
           <Notice tone="positive" live>
             Done. Your private conversation is ready. The business can now reply
-            to you where you came from.
+            to you where you came from.{' '}
+            {leadId && (
+              <Link href={`/lead/${encodeURIComponent(leadId)}`}>
+                Open the conversation
+              </Link>
+            )}
           </Notice>
         )}
         {phase === 'invalid' && (
