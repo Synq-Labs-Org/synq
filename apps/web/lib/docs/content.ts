@@ -197,7 +197,7 @@ export function renderMarkdown(body: string): {
             kind = (m[1] ?? '').toLowerCase();
             const rest = first.text.slice(m[0].length);
             const lead: Tokens.Paragraph = {
-              ...first,
+              type: 'paragraph',
               raw: rest,
               text: rest,
               tokens: marked.Lexer.lexInline(rest),
