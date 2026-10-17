@@ -9,9 +9,11 @@ import pg from 'pg';
 import { RiskCaseService, type RiskAlert } from '@synq/plugin-risk';
 import {
   PostgresRiskCaseStore,
+  PostgresSdnSnapshotStore,
   RISK_MIGRATIONS,
   migrateRisk,
 } from '@synq/plugin-risk/postgres';
+import { OfacSdnScreening, sdnSnapshotFromText } from '@synq/plugin-risk';
 import { testDatabaseUrl } from '../durable/pg.js';
 
 /**
@@ -182,5 +184,51 @@ describe('Postgres risk store', () => {
     expect(
       await new PostgresFinanceBudgetLedger(pool, caps).remaining(workspaceId),
     ).toEqual(await budget.remaining(workspaceId));
+  });
+  it('G11 persists OFAC SDN snapshots and a restarted screener reloads the newest one', async () => {
+    await migrateRisk(pool);
+    const text = Array.from(
+      { length: 21 },
+      (_, i) =>
+        `Digital Currency Address - ETH 0x${(i + 1).toString(16).padStart(40, '0')};`,
+    ).join('\n');
+    const store = new PostgresSdnSnapshotStore(pool);
+    const old = sdnSnapshotFromText(text, {
+      fetchedAt: 1_000,
+      publishedOn: '2026-10-14',
+      source: 'test',
+    });
+    const fresh = sdnSnapshotFromText(
+      `${text}\nDigital Currency Address - ETH 0x${'ab'.repeat(20)};`,
+      {
+        fetchedAt: 2_000,
+        publishedOn: '2026-10-15',
+        source: 'test',
+      },
+    );
+    await store.save(old);
+    await store.save(fresh);
+    await store.save({ ...old, fetchedAt: 1_500 });
+    const latest = await store.latest();
+    expect(latest).toMatchObject({ sha256: fresh.sha256, fetchedAt: 2_000 });
+    expect(latest!.addresses).toHaveLength(22);
+    const restarted = new OfacSdnScreening(
+      store,
+      () => 2_100,
+      async () => {
+        throw new Error('offline');
+      },
+    );
+    await restarted.load();
+    expect(restarted.status().status).toBe('AVAILABLE');
+    expect(
+      (
+        await restarted.screen({
+          address: `0x${'AB'.repeat(20)}`,
+          chainId: 5042002,
+          now: 2_100,
+        })
+      ).verdict,
+    ).toBe('HIT');
   });
 });

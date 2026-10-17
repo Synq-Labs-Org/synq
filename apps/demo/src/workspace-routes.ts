@@ -27,6 +27,7 @@ export function workspaceCapabilities(
   telegramReady = false,
   financeReady = false,
   payoutReady = false,
+  screening?: { status: string; providerId: string; reason: string },
 ) {
   const blocked = (reason: string) => ({ status: 'BLOCKED' as const, reason });
   return {
@@ -47,9 +48,16 @@ export function workspaceCapabilities(
             'Persistent proposals and separate mandate/payment signatures; chat never approves.',
         }
       : blocked('Workspace payout worker is not configured.'),
-    payoutExecution: blocked(
-      'Wallet screening is unavailable. Requests can be reviewed, but execution fails closed.',
-    ),
+    payoutExecution:
+      payoutReady && screening?.status === 'AVAILABLE'
+        ? {
+            status: 'AVAILABLE',
+            screening: screening.providerId,
+            reason: `Executes only after the owner quorum signs and the Kernel issues a one-use grant. Recipient screening: ${screening.reason}.`,
+          }
+        : blocked(
+            `Wallet screening is unavailable${screening ? ` (${screening.reason})` : ''}. Requests can be reviewed, but execution fails closed.`,
+          ),
     workspaces: {
       status: 'AVAILABLE',
       scope: vaultReady ? 'SIGNED_VAULT_SETUP' : 'IDENTITY_AND_FORMATION_ONLY',
@@ -92,7 +100,11 @@ export function registerWorkspaceRoutes(
   vault?: { setups: WorkspaceVaultSetups; wake(): void },
   channels?: WorkspaceChannelLinks,
   finance?: WorkspaceFinance,
-  payouts?: { service: WorkspacePayouts; wake(): void },
+  payouts?: {
+    service: WorkspacePayouts;
+    wake(): void;
+    screening?: () => { status: string; providerId: string; reason: string };
+  },
   governance?: { service: WorkspaceGovernance; wake(): void },
   invoices?: () => WorkspaceInvoices | undefined,
   revenue?: WorkspaceRevenue,
@@ -171,6 +183,7 @@ export function registerWorkspaceRoutes(
         Boolean(channels),
         Boolean(finance),
         Boolean(payouts),
+        payouts?.screening?.(),
       ),
       workspaceTeam: team
         ? {

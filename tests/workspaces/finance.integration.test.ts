@@ -9,6 +9,7 @@ import {
   encodeEventTopics,
   erc20Abi,
   toHex,
+  type Address,
   type PublicClient,
 } from 'viem';
 import { contract } from '@synq/chain-registry/arc';
@@ -55,7 +56,12 @@ import {
   payoutIntent,
   payoutMandate,
 } from '@synq/workspaces/finance-contracts';
-import type { WalletScreeningPort } from '@synq/plugin-risk';
+import {
+  OfacSdnScreening,
+  sdnSnapshotFromText,
+  type SdnSnapshot,
+  type WalletScreeningPort,
+} from '@synq/plugin-risk';
 import { fakeVaultChain } from '../allocations/harness.js';
 import { WorkspaceNotifications } from '../../apps/demo/src/workspace-notifications.js';
 import { WorkspaceChannelLinks } from '@synq/workspaces';
@@ -351,7 +357,11 @@ describe('G5 signed vendor master and policies — LOCAL_FIXTURE with real Postg
   });
 });
 
-async function payoutFixture(clear = true, aiDaily = '0') {
+async function payoutFixture(
+  clear = true,
+  aiDaily = '0',
+  screeningFor?: (payee: Address) => WalletScreeningPort,
+) {
   const f = await fixture(),
     vendorId = randomUUID(),
     payee = account();
@@ -404,6 +414,11 @@ async function payoutFixture(clear = true, aiDaily = '0') {
       screenedAt: q.now,
     }),
   };
+  const port = screeningFor
+    ? screeningFor(payee.address)
+    : clear
+      ? screening
+      : undefined;
   const signer = {
     address: operator.address,
     signTransaction: async (
@@ -424,7 +439,7 @@ async function payoutFixture(clear = true, aiDaily = '0') {
     chain,
     signer,
     authority,
-    clear ? screening : undefined,
+    port,
   );
   await executor.migrate();
   const payouts = new WorkspacePayouts(f.finance);
@@ -467,13 +482,7 @@ async function payoutFixture(clear = true, aiDaily = '0') {
     fake,
     signed: () => signed,
     restart: () =>
-      new WorkspacePayoutExecutor(
-        f.finance,
-        chain,
-        signer,
-        authority,
-        clear ? screening : undefined,
-      ),
+      new WorkspacePayoutExecutor(f.finance, chain, signer, authority, port),
   };
 }
 describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
@@ -866,6 +875,55 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
     expect((await f.executor.risk.store.audit(f.w.id)).length).toBeGreaterThan(
       0,
     );
+  });
+  it('G11 refuses a payout to an OFAC SDN-listed vendor before signing, and pays an unlisted one', async () => {
+    const now = 2_000_000_000;
+    const sdn = (listed: Address) => {
+      const filler = Array.from(
+        { length: 24 },
+        (_, i) =>
+          `Digital Currency Address - ETH 0x${(i + 1).toString(16).padStart(40, '0')};`,
+      );
+      const snap = sdnSnapshotFromText(
+        [...filler, `Digital Currency Address - USDC ${listed};`].join('\n'),
+        { fetchedAt: now - 60, publishedOn: '2026-10-15', source: 'test' },
+      );
+      let saved: SdnSnapshot | null = snap;
+      const port = new OfacSdnScreening(
+        { latest: async () => saved, save: async (x) => void (saved = x) },
+        () => now,
+        async () => {
+          throw new Error('offline');
+        },
+      );
+      ports.push(port);
+      return port;
+    };
+    const ports: OfacSdnScreening[] = [];
+    const hit = await payoutFixture(true, '0', (payee) => sdn(payee));
+    await ports[0]!.load();
+    expect(ports[0]!.status().status).toBe('AVAILABLE');
+    const p = await hit.propose();
+    await hit.approvePayout(p);
+    await hit.approvePayout(p, hit.coowner);
+    expect(await hit.executor.execute(p.data.id)).toMatchObject({
+      state: 'HOLD',
+      reason: 'SCREENING_HIT',
+    });
+    expect(hit.signed()).toBe(0);
+    expect(hit.fake.broadcasts).toHaveLength(0);
+    const clear = await payoutFixture(true, '0', () =>
+      sdn('0x00000000000000000000000000000000000000ff'),
+    );
+    await ports[1]!.load();
+    const q = await clear.propose();
+    await clear.approvePayout(q);
+    await clear.approvePayout(q, clear.coowner);
+    expect(await clear.executor.execute(q.data.id)).toHaveProperty(
+      'record.state',
+      'CONFIRMED',
+    );
+    expect(clear.signed()).toBe(1);
   });
   it('refuses a previously approved payout after a signed address change', async () => {
     const f = await payoutFixture(),

@@ -57,6 +57,33 @@ describe('G2 onboarding capability truth', () => {
         reason: expect.any(String),
       });
   });
+  it('G11 reports payout execution available only with a payout worker and an AVAILABLE screener, naming its scope', () => {
+    const sdn = {
+      status: 'AVAILABLE',
+      providerId: 'OFAC_SDN_LIST_ONLY',
+      reason: 'OFAC SDN list only (not full wallet screening)',
+    };
+    expect(
+      workspaceCapabilities(true, true, true, false, sdn).payoutExecution,
+    ).toMatchObject({ status: 'BLOCKED' });
+    expect(
+      workspaceCapabilities(true, true, true, true, {
+        ...sdn,
+        status: 'UNAVAILABLE',
+        reason: 'snapshot is stale',
+      }).payoutExecution,
+    ).toMatchObject({
+      status: 'BLOCKED',
+      reason: expect.stringMatching(/stale/),
+    });
+    expect(
+      workspaceCapabilities(true, true, true, true, sdn).payoutExecution,
+    ).toMatchObject({
+      status: 'AVAILABLE',
+      screening: 'OFAC_SDN_LIST_ONLY',
+      reason: expect.stringMatching(/not full wallet screening/),
+    });
+  });
   it('signs the intended origin, audience, chain, expiry and no-money statement', () => {
     const typed = loginTypedData({
       id: 'challenge',

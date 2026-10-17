@@ -14,6 +14,12 @@ import {
   type TransactionSerialized,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import {
+  OfacSdnScreening,
+  unavailableScreening,
+  type WalletScreeningPort,
+} from '@synq/plugin-risk';
+import { PostgresSdnSnapshotStore } from '@synq/plugin-risk/postgres';
 import { contract, token, chainProfile } from '@synq/chain-registry/arc';
 import { money } from '@synq/domain';
 import { advertisedMoneyPolicy } from '@synq/governance';
@@ -416,6 +422,12 @@ export async function workspaceVaultRuntime(input: {
   rpcUrl?: string;
   dailyGasLimitWei: bigint;
   maxCreationGasWei: bigint;
+  /**
+   * `OFAC_SDN_LIST_ONLY` screens payout and split recipients against the US
+   * Treasury SDN list (list-only, not full wallet screening). Anything else
+   * leaves screening UNAVAILABLE, so execution fails closed.
+   */
+  screening?: string;
 }) {
   const secret = (path: string) => {
     const stat = statSync(path);
@@ -457,12 +469,35 @@ export async function workspaceVaultRuntime(input: {
   const finance = new WorkspaceFinance(setups.workspaces, (id) =>
     readWorkspaceAuthority(chain, setups, id),
   );
-  const payouts = new WorkspacePayoutExecutor(finance, chain, account, {
-    operator: 'workspace-payout-worker',
-    grantKey: Buffer.from(grantHex, 'hex'),
-    grantTtlSeconds: 60,
-    riskRequiredAbove: 0n,
-  });
+  let screening: WalletScreeningPort = unavailableScreening();
+  let sdnTimer: ReturnType<typeof setInterval> | undefined;
+  if (input.screening === 'OFAC_SDN_LIST_ONLY') {
+    const store = new PostgresSdnSnapshotStore(setups.workspaces.pool);
+    await store.migrate();
+    const sdn = new OfacSdnScreening(store, setups.workspaces.now);
+    await sdn.load();
+    // A failed download keeps the persisted snapshot while it is fresh; the
+    // port reports UNAVAILABLE (fail closed) once it is stale or absent.
+    await sdn.refresh();
+    sdnTimer = setInterval(
+      () => void sdn.refresh().catch(() => undefined),
+      12 * 3600 * 1000,
+    );
+    sdnTimer.unref();
+    screening = sdn;
+  }
+  const payouts = new WorkspacePayoutExecutor(
+    finance,
+    chain,
+    account,
+    {
+      operator: 'workspace-payout-worker',
+      grantKey: Buffer.from(grantHex, 'hex'),
+      grantTtlSeconds: 60,
+      riskRequiredAbove: 0n,
+    },
+    screening,
+  );
   await payouts.migrate();
   const governance = new WorkspaceGovernanceExecutor(finance, chain, account, {
     operator: 'workspace-governance-worker',
@@ -584,7 +619,7 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
     finance,
     payouts: payouts.payouts,
     governance: governance.governance,
-    screening: payouts.screening.status(),
+    screening: () => payouts.screening.status(),
     readBalance: async (id: string) => {
       const a = await finance.authority(id);
       const amount = await chain.client.readContract({
@@ -634,6 +669,7 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
     stop: async () => {
       stopped = true;
       clearInterval(timer);
+      if (sdnTimer) clearInterval(sdnTimer);
       while (running) await new Promise((resolve) => setTimeout(resolve, 100));
     },
   };

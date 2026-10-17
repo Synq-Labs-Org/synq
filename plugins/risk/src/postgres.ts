@@ -1,4 +1,5 @@
 import type { AuditAnchor, AuditRecord } from './audit.js';
+import type { SdnSnapshot, SdnSnapshotStore } from './ofac.js';
 import {
   ACTIVE_CASE_STATUSES,
   type RiskAlert,
@@ -65,6 +66,19 @@ export const RISK_MIGRATIONS: readonly {
       mac text NOT NULL,
       PRIMARY KEY (workspace_id, seq));`,
     down: `DROP TABLE IF EXISTS synq_risk_audit_anchors;`,
+  },
+  {
+    version: 3,
+    up: `CREATE TABLE IF NOT EXISTS synq_screening_sdn_snapshots (
+      sha256 text PRIMARY KEY,
+      published_on text,
+      fetched_at bigint NOT NULL,
+      source text NOT NULL,
+      address_count int NOT NULL,
+      addresses jsonb NOT NULL);
+    CREATE INDEX IF NOT EXISTS synq_screening_sdn_latest
+      ON synq_screening_sdn_snapshots (fetched_at DESC);`,
+    down: `DROP TABLE IF EXISTS synq_screening_sdn_snapshots;`,
   },
 ];
 
@@ -237,5 +251,42 @@ export class PostgresRiskCaseStore implements RiskCaseStore {
       [ws],
     );
     return r.rows.map((x) => parse<AuditRecord>(x.data));
+  }
+}
+
+/** Persisted OFAC SDN snapshots; a re-download of identical bytes only refreshes `fetched_at`. */
+export class PostgresSdnSnapshotStore implements SdnSnapshotStore {
+  constructor(readonly sql: Sql) {}
+  async migrate() {
+    await migrateRisk(this.sql);
+  }
+  async save(s: SdnSnapshot) {
+    await this.sql.query(
+      `INSERT INTO synq_screening_sdn_snapshots (sha256, published_on, fetched_at, source, address_count, addresses)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (sha256) DO UPDATE SET fetched_at=GREATEST(synq_screening_sdn_snapshots.fetched_at, EXCLUDED.fetched_at)`,
+      [
+        s.sha256,
+        s.publishedOn,
+        s.fetchedAt,
+        s.source,
+        s.addresses.length,
+        JSON.stringify(s.addresses),
+      ],
+    );
+  }
+  async latest(): Promise<SdnSnapshot | null> {
+    const r = await this.sql.query(
+      'SELECT sha256, published_on, fetched_at, source, addresses FROM synq_screening_sdn_snapshots ORDER BY fetched_at DESC LIMIT 1',
+    );
+    const x = r.rows[0];
+    if (!x) return null;
+    return {
+      sha256: String(x.sha256),
+      publishedOn: x.published_on == null ? null : String(x.published_on),
+      fetchedAt: Number(x.fetched_at),
+      source: String(x.source),
+      addresses: parse<string[]>(x.addresses),
+    };
   }
 }

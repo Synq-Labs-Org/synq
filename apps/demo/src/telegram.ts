@@ -545,6 +545,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
                 process.env.SYNQ_WORKSPACE_CREATION_GAS_WEI ??
                   '200000000000000000',
               ),
+              screening: process.env.SYNQ_SCREENING_PROVIDER,
             })
           : undefined;
       if (vault) closers.push(() => vault.stop());
@@ -596,7 +597,13 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         vault,
         workspaceChannels,
         finance,
-        vault ? { service: vault.payouts, wake: vault.wake } : undefined,
+        vault
+          ? {
+              service: vault.payouts,
+              wake: vault.wake,
+              screening: vault.screening,
+            }
+          : undefined,
         vault ? { service: vault.governance, wake: vault.wake } : undefined,
         () => workspaceInvoices,
         finance ? new WorkspaceRevenue(finance) : undefined,
