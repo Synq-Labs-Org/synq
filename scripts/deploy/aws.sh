@@ -83,6 +83,14 @@ config)
   put env "$body"
   put testnet-key "$(tr -d '[:space:]' <"${SYNQ_TESTNET_KEY_FILE:-$HOME/.synq/testnet.key}")"
   echo "stored /synq/prod/env ($(wc -l <<<"$body" | tr -d ' ') keys) and /synq/prod/testnet-key"
+  # Workspace worker keys (ADR-009): a dedicated operator EOA and the Kernel grant HMAC key, each in its own file.
+  for k in workspace-operator workspace-grant; do
+    f="$HOME/.synq/$k.key"
+    if [ -f "$f" ]; then
+      put "$k-key" "$(tr -d '[:space:]' <"$f")"
+      echo "stored /synq/prod/$k-key"
+    fi
+  done
   ;;
 deploy-key)
   dir=$(mktemp -d)

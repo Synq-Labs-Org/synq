@@ -44,6 +44,14 @@ secret env "$BASE/.env"
 secret testnet-key "$BASE/secrets/testnet.key"
 chown 1000:1000 "$BASE/secrets/testnet.key"
 chmod 400 "$BASE/secrets/testnet.key"
+# Workspace worker keys exist only once the owner provisions them (ADR-009).
+for k in workspace-operator workspace-grant; do
+  if aws ssm get-parameter --region "$REGION" --name "/synq/prod/$k-key" >/dev/null 2>&1; then
+    secret "$k-key" "$BASE/secrets/$k.key"
+    chown 1000:1000 "$BASE/secrets/$k.key"
+    chmod 400 "$BASE/secrets/$k.key"
+  fi
+done
 
 compose() { docker compose --env-file "$BASE/.env" -f "$REPO/infra/compose.aws.yaml" "$@"; }
 # One image at a time keeps peak memory inside a small host.
