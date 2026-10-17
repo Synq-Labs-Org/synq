@@ -12,7 +12,7 @@ import {
 } from '@synq/plugin-risk';
 
 const NOW = 2_000_000_000;
-const LISTED = '0x8589427373d6d84e98730d7795d8f6f8731fda16';
+const LISTED = '0x8888888888888888888888888888888888888888';
 const filler = Array.from(
   { length: 24 },
   (_, i) =>

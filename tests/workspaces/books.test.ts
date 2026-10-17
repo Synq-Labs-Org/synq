@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { token } from '@synq/chain-registry/arc';
 import {
   FinanceChangeSchema,
   describeFinanceEdit,
@@ -9,9 +10,9 @@ import {
 
 const base = {
   workspaceId: randomUUID(),
-  vault: '0x1d0e2c82771deFB96750C6478F109EDc39Ea6BEc',
+  vault: '0x1111111111111111111111111111111111111111',
   chainId: 5042002,
-  token: '0x3600000000000000000000000000000000000000',
+  token: token('arc-testnet', 'USDC').address,
   revision: 3,
   nonce: randomUUID(),
   expiresAt: 2_000_000_900,
