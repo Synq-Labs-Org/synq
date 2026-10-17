@@ -45,18 +45,3 @@ it('CI pins third-party actions by commit SHA, needs no secrets and runs every s
   ])
     expect(scripts[script], script).toBeDefined();
 });
-
-it('the AWS host only pulls images that CI built and pushed before promoting', () => {
-  const promote = workflow.slice(workflow.indexOf('\n  promote:'));
-  expect(promote).toMatch(/needs: \[[^\]]*\bimages\b[^\]]*\]/);
-  expect(workflow).toMatch(/\n {2}images:[\s\S]*runs-on: ubuntu-24\.04-arm/);
-  const compose = readFileSync('infra/compose.aws.yaml', 'utf8');
-  expect(compose).not.toMatch(/^\s+build:/m);
-  for (const app of ['bot', 'web'])
-    expect(compose).toContain(
-      `ghcr.io/synq-labs-org/synq-${app}:\${SYNQ_IMAGE_TAG:?`,
-    );
-  const host = readFileSync('scripts/deploy/host-deploy.sh', 'utf8');
-  expect(host).not.toMatch(/compose build/);
-  expect(host).toMatch(/compose pull[\s\S]*compose up/);
-});

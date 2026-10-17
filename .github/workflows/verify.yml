@@ -151,50 +151,13 @@ jobs:
       - run: corepack pnpm infra:up
       - name: Anvil, Postgres and Redis integration
         run: corepack pnpm test:integration
-  # Deploy images for main, built natively on arm64 like the Graviton host, which
-  # only pulls them (scripts/deploy/host-deploy.sh). They are public, like the
-  # source they are built from; runtime config and keys never enter an image.
-  images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      # actions/checkout v4.4.0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Sign in to GHCR
-        env:
-          # The job's own short-lived token (packages: write above), not a stored secret.
-          TOKEN: ${{ github.token }}
-        run: echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Builder with a registry layer cache
-        run: docker buildx create --use --driver docker-container
-      - name: Build and push bot and web for this commit
-        run: |
-          for app in bot web; do
-            image=ghcr.io/synq-labs-org/synq-$app
-            args=()
-            # Next.js fixes the /api rewrites at build time.
-            if [ "$app" = web ]; then args+=(--build-arg SYNQ_API_ORIGIN=http://bot:3292); fi
-            docker buildx build --platform linux/arm64 \
-              -f "infra/docker/$app.Dockerfile" "${args[@]}" \
-              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-              --cache-from "type=registry,ref=$image:buildcache" \
-              --cache-to "type=registry,ref=$image:buildcache,mode=max" \
-              --tag "$image:$GITHUB_SHA" --push .
-          done
-  # Continuous delivery: a green main whose images are pushed is fast-forwarded
-  # to `deploy`, which the AWS host polls, pulls and restarts.
+  # Continuous delivery: a green main is fast-forwarded to `deploy`, which the
+  # AWS host polls and builds (scripts/deploy/host-deploy.sh).
   promote:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [typescript, sast, contracts, integration, images]
+    needs: [typescript, sast, contracts, integration]
     permissions:
       contents: write
     concurrency:
