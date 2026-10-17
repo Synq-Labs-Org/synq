@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "requestId": "00000000-0000-4000-8000-000000000006",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "workspaceName": "Example Studio",
+      "purpose": "PAYOUT",
+      "summary": "Pay 40 USDC to an allowlisted contractor",
+      "amount": {
+        "assetId": "arc-testnet:USDC",
+        "symbol": "USDC",
+        "chainId": 5042002,
+        "decimals": 6,
+        "units": "40000000"
+      },
+      "recipientHint": "0x3333…3333",
+      "approvals": 1,
+      "threshold": 2,
+      "expiresAt": "2026-10-17T11:00:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}

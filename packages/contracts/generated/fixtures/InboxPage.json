@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "leadId": "00000000-0000-4000-8000-000000000003",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "label": "Telegram lead · 4F2A",
+      "source": "TELEGRAM",
+      "stage": "NEGOTIATING",
+      "handling": "AGENT",
+      "needsOwner": false,
+      "unread": 2,
+      "lastActivityAt": "2026-10-17T10:03:00.000Z"
+    }
+  ],
+  "nextCursor": null
+}

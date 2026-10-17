@@ -1,0 +1,13 @@
+{
+  "contractVersion": "3.0.0",
+  "routes": [
+    {
+      "id": "me.contexts",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "id": "workspace.inbox",
+      "status": "PLANNED"
+    }
+  ]
+}

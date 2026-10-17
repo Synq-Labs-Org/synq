@@ -118,6 +118,7 @@
     "@synq/profile-vault": "workspace:*",
     "@synq/read-model": "workspace:*",
     "@synq/risk-engine": "workspace:*",
+    "@synq/contracts": "workspace:*",
     "@synq/schemas": "workspace:*",
     "@synq/settlement": "workspace:*",
     "@synq/strategies": "workspace:*",

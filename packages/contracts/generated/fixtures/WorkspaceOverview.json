@@ -1,0 +1,65 @@
+{
+  "workspaceId": "00000000-0000-4000-8000-000000000001",
+  "displayName": "Example Studio",
+  "status": "ACTIVE",
+  "role": "OWNER",
+  "balances": [
+    {
+      "assetId": "arc-testnet:USDC",
+      "symbol": "USDC",
+      "chainId": 5042002,
+      "decimals": 6,
+      "settled": "250000000",
+      "reserved": "40000000",
+      "pending": "10000000",
+      "quarantined": "0"
+    }
+  ],
+  "receivables": {
+    "open": 2,
+    "units": "120000000"
+  },
+  "payables": {
+    "open": 1,
+    "units": "40000000"
+  },
+  "leads": {
+    "open": 4,
+    "needsOwner": 1
+  },
+  "pendingApprovals": 1,
+  "agentHighlights": [
+    {
+      "runId": "00000000-0000-4000-8000-000000000004",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "title": "Pay the design contractor after the client deposit",
+      "trigger": "DEPOSIT_FINALIZED",
+      "status": "RECONCILED",
+      "amount": {
+        "assetId": "arc-testnet:USDC",
+        "symbol": "USDC",
+        "chainId": 5042002,
+        "decimals": 6,
+        "units": "40000000"
+      },
+      "proofLevel": "LOCAL_FIXTURE",
+      "startedAt": "2026-10-17T10:01:00.000Z",
+      "updatedAt": "2026-10-17T10:04:00.000Z"
+    }
+  ],
+  "capabilities": {
+    "leads": {
+      "status": "AVAILABLE",
+      "reason": "Private Telegram sessions."
+    },
+    "agentLeases": {
+      "status": "NOT_CONFIGURED",
+      "reason": "No Amane lease is installed for this workspace."
+    }
+  },
+  "freshness": {
+    "observedAt": "2026-10-17T10:00:00.000Z",
+    "source": "CHAIN",
+    "stale": false
+  }
+}

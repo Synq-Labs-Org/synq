@@ -1,0 +1,4490 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Synq app API",
+    "version": "3.0.0",
+    "description": "One backend for the iOS app, web hub and channel bots. Money is integer base units in decimal strings; times are UTC ISO-8601. Login never approves payments."
+  },
+  "paths": {
+    "/v3/meta": {
+      "get": {
+        "operationId": "meta",
+        "summary": "Contract version and which routes this server implements.",
+        "x-synq-auth": "none",
+        "x-synq-roles": "anyone",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Meta"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/device-session": {
+      "post": {
+        "operationId": "auth.deviceSession",
+        "summary": "Exchange a signed native login challenge for a device session.",
+        "x-synq-auth": "none",
+        "x-synq-roles": "wallet that signed the /v2 login challenge",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSession"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceSessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/device-session/code": {
+      "post": {
+        "operationId": "auth.deviceSessionFromCode",
+        "summary": "Exchange a one-time web sign-in code for a device session (no wallet on the phone).",
+        "x-synq-auth": "none",
+        "x-synq-roles": "holder of a fresh one-time code from a signed-in web session",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSession"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCodeSessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/refresh": {
+      "post": {
+        "operationId": "auth.refresh",
+        "summary": "Rotate tokens. Reusing an old refresh token revokes the session.",
+        "x-synq-auth": "none",
+        "x-synq-roles": "holder of the current refresh token for that device",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceSession"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/sessions": {
+      "get": {
+        "operationId": "auth.sessions",
+        "summary": "The principal's signed-in devices.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/logout": {
+      "post": {
+        "operationId": "auth.logout",
+        "summary": "End this device session.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/auth/revoke-all": {
+      "post": {
+        "operationId": "auth.revokeAll",
+        "summary": "End every session of this principal, including this one.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAll"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/me/contexts": {
+      "get": {
+        "operationId": "me.contexts",
+        "summary": "Personal context plus one context per business workspace.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Contexts"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/personal/overview": {
+      "get": {
+        "operationId": "personal.overview",
+        "summary": "Own wallets, personal vaults, circles and recent activity.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/personal/circles": {
+      "get": {
+        "operationId": "personal.circles",
+        "summary": "Group circles the principal is a verified member of.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CirclePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/personal/circles/{circleId}": {
+      "get": {
+        "operationId": "personal.circle",
+        "summary": "Members, attributed contributions, proposals and rules.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "circle member",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "circleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CircleDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/overview": {
+      "get": {
+        "operationId": "workspace.overview",
+        "summary": "Balances, receivables, payables, leads, approvals, agent highlights.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN, MEMBER, VIEWER",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceOverview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/inbox": {
+      "get": {
+        "operationId": "workspace.inbox",
+        "summary": "Private leads, newest activity first.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LEAD_OPEN",
+                "DISCOVERY",
+                "QUALIFIED",
+                "OFFER_DRAFTED",
+                "OFFER_VALIDATED",
+                "OFFER_SENT",
+                "NEGOTIATING",
+                "AGREED_PENDING_SIGNATURES",
+                "SIGNED",
+                "FUNDING_PENDING",
+                "FUNDED",
+                "ACTIVE",
+                "DELIVERED",
+                "ACCEPTANCE_PENDING",
+                "RELEASED",
+                "REFUNDED",
+                "DISPUTED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "handling",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "AGENT",
+                "HUMAN",
+                "FROZEN"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}": {
+      "get": {
+        "operationId": "workspace.lead",
+        "summary": "Lead summary, consented transcript and offer versions.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}/message": {
+      "post": {
+        "operationId": "workspace.leadMessage",
+        "summary": "Staff message to the lead.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN (only while handling is HUMAN)",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadMessageRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}/takeover": {
+      "post": {
+        "operationId": "workspace.leadTakeover",
+        "summary": "Take over, hand back, freeze offers or escalate; 409 on a stale version.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoverResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoverRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/lead-invites": {
+      "post": {
+        "operationId": "workspace.leadInvite",
+        "summary": "Single-use private invitation link for a prospect.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadInvite"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadInviteRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/lead-invites/redeem": {
+      "post": {
+        "operationId": "leadInvite.redeem",
+        "summary": "Bind a private session to the redeeming identity, once.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "external lead with a provider-verified identity",
+        "x-synq-status": "PLANNED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadInviteRedeemResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadInviteRedeem"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/offers/{offerId}/versions/{version}/validate": {
+      "post": {
+        "operationId": "workspace.offerValidate",
+        "summary": "Run the deterministic commercial policy checks on one offer version.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferValidation"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/agent-runs": {
+      "get": {
+        "operationId": "workspace.agentRuns",
+        "summary": "Agent runs, newest first.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN, MEMBER",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/agent-runs/{runId}": {
+      "get": {
+        "operationId": "workspace.agentRun",
+        "summary": "Typed events and chain receipts of one run.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN, MEMBER",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/mandates": {
+      "get": {
+        "operationId": "workspace.mandates",
+        "summary": "Agent leases with on-chain remaining limits.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mandates"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/mandates/{leaseId}/revoke-intent": {
+      "post": {
+        "operationId": "workspace.mandateRevoke",
+        "summary": "Prepare a revoke for the issuer to sign; not revoked until on chain.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER with lease-issuer authority",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigningRequest"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/approvals": {
+      "get": {
+        "operationId": "approvals.list",
+        "summary": "Requests waiting for this wallet's signature, across workspaces.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/approvals/{requestId}": {
+      "get": {
+        "operationId": "approvals.get",
+        "summary": "Exact typed data to sign.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "a required signer",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigningRequest"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/approvals/{requestId}/signature": {
+      "post": {
+        "operationId": "approvals.sign",
+        "summary": "Submit a wallet signature; the server verifies the signer.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "a required signer",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignatureSubmit"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/notifications": {
+      "get": {
+        "operationId": "notifications.list",
+        "summary": "Redacted notification inbox.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/notifications/read": {
+      "post": {
+        "operationId": "notifications.read",
+        "summary": "Mark notifications read.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkRead"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/devices": {
+      "post": {
+        "operationId": "devices.register",
+        "summary": "Register or update an APNs token and preferences.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "native session of that device",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceRegistered"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/devices/{deviceId}/revoke": {
+      "post": {
+        "operationId": "devices.revoke",
+        "summary": "Stop pushes to a device.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/events": {
+      "get": {
+        "operationId": "events.stream",
+        "summary": "Server-sent StreamEvent records; replay from a cursor.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal; events filtered to their contexts",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-sent events; each data line is a StreamEvent",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamEvent"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/events/since": {
+      "get": {
+        "operationId": "events.poll",
+        "summary": "Same events as the stream, for clients that cannot hold a connection.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "principal",
+        "x-synq-status": "PLANNED",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamEventPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "Ok": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "ProofLevel": {
+        "type": "string",
+        "enum": [
+          "LIVE_ARC_TESTNET",
+          "LIVE_ARC_MAINNET",
+          "PROVIDER_SANDBOX",
+          "LOCAL_FIXTURE",
+          "NOT_VERIFIED",
+          "BLOCKED"
+        ]
+      },
+      "CapabilityStatus": {
+        "type": "string",
+        "enum": [
+          "AVAILABLE",
+          "BLOCKED",
+          "NOT_CONFIGURED",
+          "UNSUPPORTED",
+          "OFFCHAIN_ONLY",
+          "ONCHAIN_AUTHENTICATED",
+          "VERIFIED_TESTNET"
+        ]
+      },
+      "Capability": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/CapabilityStatus"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceKind": {
+        "type": "string",
+        "enum": [
+          "PERSONAL",
+          "GROUP",
+          "BUSINESS"
+        ]
+      },
+      "WorkspaceStatus": {
+        "type": "string",
+        "enum": [
+          "FORMING",
+          "LAUNCHING",
+          "ACTIVE"
+        ]
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "MEMBER",
+          "VIEWER"
+        ]
+      },
+      "Money": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Registry id such as arc-testnet:USDC"
+          },
+          "symbol": {
+            "type": "string",
+            "maxLength": 12
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "decimals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 36
+          },
+          "units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          }
+        },
+        "required": [
+          "assetId",
+          "symbol",
+          "chainId",
+          "decimals",
+          "units"
+        ],
+        "additionalProperties": false
+      },
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "symbol": {
+            "type": "string",
+            "maxLength": 12
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "decimals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 36
+          },
+          "settled": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "reserved": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Settled but held for bills, deals or members"
+          },
+          "pending": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Seen but not final"
+          },
+          "quarantined": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Arrived without a matching authorization"
+          }
+        },
+        "required": [
+          "assetId",
+          "symbol",
+          "chainId",
+          "decimals",
+          "settled",
+          "reserved",
+          "pending",
+          "quarantined"
+        ],
+        "additionalProperties": false
+      },
+      "Freshness": {
+        "type": "object",
+        "properties": {
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "CHAIN",
+              "PROVIDER",
+              "LEDGER",
+              "CACHE"
+            ]
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observedAt",
+          "source",
+          "stale"
+        ],
+        "additionalProperties": false
+      },
+      "MetaRoute": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PLANNED",
+              "IMPLEMENTED"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "string"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetaRoute"
+            }
+          }
+        },
+        "required": [
+          "contractVersion",
+          "routes"
+        ],
+        "additionalProperties": false
+      },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "Random per-install id kept in the Keychain"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "web"
+            ]
+          }
+        },
+        "required": [
+          "deviceId",
+          "name",
+          "platform"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceSessionRequest": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{130}$"
+          },
+          "device": {
+            "$ref": "#/components/schemas/Device"
+          }
+        },
+        "required": [
+          "challengeId",
+          "signature",
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceCodeSessionRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{48}$"
+          },
+          "device": {
+            "$ref": "#/components/schemas/Device"
+          }
+        },
+        "required": [
+          "code",
+          "device"
+        ],
+        "additionalProperties": false
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "refreshToken": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "deviceId",
+          "refreshToken"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceSession": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "accessToken": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "accessExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "refreshToken": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "refreshExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "principalId",
+          "sessionId",
+          "accessToken",
+          "accessExpiresAt",
+          "refreshToken",
+          "refreshExpiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "SessionSummary": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "deviceName": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "web"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sessionId",
+          "deviceName",
+          "platform",
+          "createdAt",
+          "lastSeenAt",
+          "current"
+        ],
+        "additionalProperties": false
+      },
+      "SessionList": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            }
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "additionalProperties": false
+      },
+      "RevokeAll": {
+        "type": "object",
+        "properties": {
+          "revoked": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "additionalProperties": false
+      },
+      "Context": {
+        "type": "object",
+        "properties": {
+          "contextId": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "\"personal\" or a business workspace id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "PERSONAL",
+              "BUSINESS"
+            ]
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workspaceStatus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "contextId",
+          "kind",
+          "workspaceId",
+          "displayName",
+          "role",
+          "workspaceStatus",
+          "unreadCount"
+        ],
+        "additionalProperties": false
+      },
+      "Contexts": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "walletHint": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "Shortened address for display, such as 0x12ab…9f3c"
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Context"
+            }
+          }
+        },
+        "required": [
+          "principalId",
+          "walletHint",
+          "contexts"
+        ],
+        "additionalProperties": false
+      },
+      "WalletBalance": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        },
+        "required": [
+          "address",
+          "label",
+          "balances",
+          "freshness"
+        ],
+        "additionalProperties": false
+      },
+      "CircleSummary": {
+        "type": "object",
+        "properties": {
+          "circleId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "description": "The group workspace id"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceStatus"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vault": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{40}$",
+                "description": "EVM address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "myContribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "held": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Balance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "openProposals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        },
+        "required": [
+          "circleId",
+          "displayName",
+          "status",
+          "role",
+          "memberCount",
+          "threshold",
+          "vault",
+          "myContribution",
+          "held",
+          "openProposals",
+          "freshness"
+        ],
+        "additionalProperties": false
+      },
+      "PersonalVault": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceStatus"
+          },
+          "vault": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{40}$",
+                "description": "EVM address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          }
+        },
+        "required": [
+          "workspaceId",
+          "displayName",
+          "kind",
+          "status",
+          "vault",
+          "balances"
+        ],
+        "additionalProperties": false
+      },
+      "ActivityItem": {
+        "type": "object",
+        "properties": {
+          "activityId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "CONTRIBUTION",
+              "REFUND",
+              "PAYMENT",
+              "PROPOSAL",
+              "INVOICE_PAID",
+              "DEAL",
+              "OTHER"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 140
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "FINAL",
+              "FAILED",
+              "REFUNDED"
+            ]
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "activityId",
+          "kind",
+          "title",
+          "workspaceId",
+          "amount",
+          "status",
+          "txHash",
+          "occurredAt"
+        ],
+        "additionalProperties": false
+      },
+      "PersonalOverview": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "wallets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WalletBalance"
+            }
+          },
+          "circles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CircleSummary"
+            }
+          },
+          "vaults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonalVault"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            }
+          }
+        },
+        "required": [
+          "principalId",
+          "wallets",
+          "circles",
+          "vaults",
+          "recent"
+        ],
+        "additionalProperties": false
+      },
+      "CirclePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CircleSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "CircleMember": {
+        "type": "object",
+        "properties": {
+          "principalId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "walletHint": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "Shortened address for display, such as 0x12ab…9f3c"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "contributed": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "refunded": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          }
+        },
+        "required": [
+          "principalId",
+          "walletHint",
+          "role",
+          "contributed",
+          "refunded"
+        ],
+        "additionalProperties": false
+      },
+      "CircleContribution": {
+        "type": "object",
+        "properties": {
+          "contributionId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "payerHint": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "Shortened address for display, such as 0x12ab…9f3c"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REQUESTED",
+              "PENDING",
+              "CREDITED",
+              "REFUNDED",
+              "EXPIRED"
+            ]
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "contributionId",
+          "payerHint",
+          "amount",
+          "status",
+          "txHash",
+          "observedAt"
+        ],
+        "additionalProperties": false
+      },
+      "CircleProposal": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "PAYMENT",
+              "REFUND",
+              "SETTINGS",
+              "OTHER"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 140
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipientHint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16,
+                "description": "Shortened address for display, such as 0x12ab…9f3c"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "threshold": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "REVIEW",
+              "READY",
+              "SUBMITTED",
+              "CONFIRMED",
+              "FAILED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "proposalId",
+          "kind",
+          "title",
+          "amount",
+          "recipientHint",
+          "approvals",
+          "threshold",
+          "status",
+          "txHash"
+        ],
+        "additionalProperties": false
+      },
+      "CircleDetail": {
+        "type": "object",
+        "properties": {
+          "circle": {
+            "$ref": "#/components/schemas/CircleSummary"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CircleMember"
+            }
+          },
+          "contributions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CircleContribution"
+            }
+          },
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CircleProposal"
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Capability"
+            }
+          }
+        },
+        "required": [
+          "circle",
+          "members",
+          "contributions",
+          "proposals",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "RunStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "REQUIRES_OWNER",
+          "AUTHORIZED",
+          "BROADCAST",
+          "FINALIZED",
+          "RECONCILED",
+          "BLOCKED",
+          "REJECTED",
+          "TIMED_OUT",
+          "REORG_PENDING",
+          "REVOKED",
+          "QUARANTINED"
+        ]
+      },
+      "EventActor": {
+        "type": "string",
+        "enum": [
+          "MODEL",
+          "DETERMINISTIC",
+          "HUMAN",
+          "CHAIN",
+          "PROVIDER"
+        ]
+      },
+      "AgentRunSummary": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 140
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "INVOICE_SETTLED",
+              "DEPOSIT_FINALIZED",
+              "SCHEDULE",
+              "OWNER_REQUEST",
+              "LEAD_MESSAGE",
+              "OTHER"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proofLevel": {
+            "$ref": "#/components/schemas/ProofLevel"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "runId",
+          "workspaceId",
+          "title",
+          "trigger",
+          "status",
+          "amount",
+          "proofLevel",
+          "startedAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AgentEconomicEvent": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "sequence": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$",
+            "description": "Monotonic per workspace"
+          },
+          "correlationId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "causationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "DECISION",
+              "INTENT",
+              "GRANT",
+              "BROADCAST",
+              "FINALIZED",
+              "REJECTED",
+              "RECONCILED",
+              "ESCALATED"
+            ]
+          },
+          "actor": {
+            "$ref": "#/components/schemas/EventActor"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "Redacted explanation; never model reasoning"
+          },
+          "sourceKind": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "effectiveAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidenceHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proofLevel": {
+            "$ref": "#/components/schemas/ProofLevel"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipientHint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16,
+                "description": "Shortened address for display, such as 0x12ab…9f3c"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "txHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chainId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "eventId",
+          "workspaceId",
+          "runId",
+          "sequence",
+          "correlationId",
+          "causationId",
+          "kind",
+          "actor",
+          "status",
+          "summary",
+          "sourceKind",
+          "observedAt",
+          "effectiveAt",
+          "evidenceHash",
+          "proofLevel",
+          "amount",
+          "recipientHint",
+          "txHash",
+          "chainId"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "txHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "blockNumber": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finality": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "FINALIZED",
+              "REORGED"
+            ]
+          },
+          "explorerUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ledgerEntryId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "chainId",
+          "txHash",
+          "blockNumber",
+          "finality",
+          "explorerUrl",
+          "ledgerEntryId"
+        ],
+        "additionalProperties": false
+      },
+      "AgentRunPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "AgentRunDetail": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AgentRunSummary"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentEconomicEvent"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Receipt"
+            }
+          }
+        },
+        "required": [
+          "run",
+          "events",
+          "receipts"
+        ],
+        "additionalProperties": false
+      },
+      "AgentLease": {
+        "type": "object",
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "policyHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "agentId": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            }
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16,
+              "description": "Shortened address for display, such as 0x12ab…9f3c"
+            }
+          },
+          "assetIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "perActionUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "availableUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "revokedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enforcingContract": {
+            "type": "string",
+            "maxLength": 42
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "proofLevel": {
+            "$ref": "#/components/schemas/ProofLevel"
+          }
+        },
+        "required": [
+          "leaseId",
+          "policyHash",
+          "agentId",
+          "actions",
+          "recipients",
+          "assetIds",
+          "perActionUnits",
+          "availableUnits",
+          "expiresAt",
+          "revokedAt",
+          "enforcingContract",
+          "chainId",
+          "proofLevel"
+        ],
+        "additionalProperties": false
+      },
+      "Mandates": {
+        "type": "object",
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "leases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentLease"
+            }
+          }
+        },
+        "required": [
+          "capability",
+          "leases"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceOverview": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceStatus"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          },
+          "receivables": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "units": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,77})$",
+                "description": "Integer token base units as a decimal string"
+              }
+            },
+            "required": [
+              "open",
+              "units"
+            ],
+            "additionalProperties": false
+          },
+          "payables": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "units": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,77})$",
+                "description": "Integer token base units as a decimal string"
+              }
+            },
+            "required": [
+              "open",
+              "units"
+            ],
+            "additionalProperties": false
+          },
+          "leads": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "needsOwner": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "open",
+              "needsOwner"
+            ],
+            "additionalProperties": false
+          },
+          "pendingApprovals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "agentHighlights": {
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunSummary"
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Capability"
+            }
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "displayName",
+          "status",
+          "role",
+          "balances",
+          "receivables",
+          "payables",
+          "leads",
+          "pendingApprovals",
+          "agentHighlights",
+          "capabilities",
+          "freshness"
+        ],
+        "additionalProperties": false
+      },
+      "LeadStage": {
+        "type": "string",
+        "enum": [
+          "LEAD_OPEN",
+          "DISCOVERY",
+          "QUALIFIED",
+          "OFFER_DRAFTED",
+          "OFFER_VALIDATED",
+          "OFFER_SENT",
+          "NEGOTIATING",
+          "AGREED_PENDING_SIGNATURES",
+          "SIGNED",
+          "FUNDING_PENDING",
+          "FUNDED",
+          "ACTIVE",
+          "DELIVERED",
+          "ACCEPTANCE_PENDING",
+          "RELEASED",
+          "REFUNDED",
+          "DISPUTED",
+          "CANCELLED"
+        ]
+      },
+      "LeadHandling": {
+        "type": "string",
+        "enum": [
+          "AGENT",
+          "HUMAN",
+          "FROZEN"
+        ]
+      },
+      "LeadSource": {
+        "type": "string",
+        "enum": [
+          "TELEGRAM",
+          "WEB",
+          "IMESSAGE"
+        ]
+      },
+      "LeadSummary": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Redacted display label, never a full name"
+          },
+          "source": {
+            "$ref": "#/components/schemas/LeadSource"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/LeadStage"
+          },
+          "handling": {
+            "$ref": "#/components/schemas/LeadHandling"
+          },
+          "needsOwner": {
+            "type": "boolean"
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "leadId",
+          "workspaceId",
+          "label",
+          "source",
+          "stage",
+          "handling",
+          "needsOwner",
+          "unread",
+          "lastActivityAt"
+        ],
+        "additionalProperties": false
+      },
+      "InboxPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "LeadMessage": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "author": {
+            "type": "string",
+            "enum": [
+              "LEAD",
+              "AGENT",
+              "STAFF",
+              "SYSTEM"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "offerVersion": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "messageId",
+          "author",
+          "text",
+          "offerVersion",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "OfferLine": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "quantity": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unitUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "totalUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          }
+        },
+        "required": [
+          "description",
+          "quantity",
+          "unitUnits",
+          "totalUnits"
+        ],
+        "additionalProperties": false
+      },
+      "OfferMilestone": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "units": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,77})$",
+            "description": "Integer token base units as a decimal string"
+          },
+          "dueAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "units",
+          "dueAt"
+        ],
+        "additionalProperties": false
+      },
+      "OfferVersion": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "previousTermsHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policyVersion": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFTED",
+              "VALIDATED",
+              "SENT",
+              "ACCEPTED",
+              "REJECTED",
+              "COUNTERED",
+              "EXPIRED",
+              "WITHDRAWN"
+            ]
+          },
+          "createdBy": {
+            "type": "string",
+            "enum": [
+              "AGENT",
+              "STAFF"
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferLine"
+            }
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferMilestone"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "offerId",
+          "version",
+          "termsHash",
+          "previousTermsHash",
+          "policyVersion",
+          "status",
+          "createdBy",
+          "total",
+          "lines",
+          "milestones",
+          "expiresAt",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "LeadDetail": {
+        "type": "object",
+        "properties": {
+          "lead": {
+            "$ref": "#/components/schemas/LeadSummary"
+          },
+          "handlingVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "consent": {
+            "type": "object",
+            "properties": {
+              "granted": {
+                "type": "boolean"
+              },
+              "grantedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "description": "UTC ISO-8601 timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "granted",
+              "grantedAt",
+              "scope"
+            ],
+            "additionalProperties": false
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadMessage"
+            }
+          },
+          "olderMessagesCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferVersion"
+            }
+          }
+        },
+        "required": [
+          "lead",
+          "handlingVersion",
+          "consent",
+          "messages",
+          "olderMessagesCursor",
+          "offers"
+        ],
+        "additionalProperties": false
+      },
+      "LeadMessageRequest": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "TakeoverRequest": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "HUMAN_TAKEOVER",
+              "HAND_BACK_TO_AGENT",
+              "FREEZE_OFFERS",
+              "ESCALATE_TO_OWNER"
+            ]
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "action",
+          "expectedVersion"
+        ],
+        "additionalProperties": false
+      },
+      "TakeoverResult": {
+        "type": "object",
+        "properties": {
+          "handling": {
+            "$ref": "#/components/schemas/LeadHandling"
+          },
+          "handlingVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "handling",
+          "handlingVersion"
+        ],
+        "additionalProperties": false
+      },
+      "LeadInviteRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "TELEGRAM",
+              "WEB"
+            ]
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "minimum": 300,
+            "maximum": 604800
+          }
+        },
+        "required": [
+          "source",
+          "expiresInSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "LeadInvite": {
+        "type": "object",
+        "properties": {
+          "inviteId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "telegramUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "webUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "inviteId",
+          "telegramUrl",
+          "webUrl",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "LeadInviteRedeem": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{16,64}$"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "LeadInviteRedeemResult": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "bound": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leadId",
+          "bound"
+        ],
+        "additionalProperties": false
+      },
+      "OfferValidation": {
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "policyVersion": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rule": {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                "passed": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "rule",
+                "passed",
+                "detail"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "allowed",
+          "policyVersion",
+          "checks"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovalPurpose": {
+        "type": "string",
+        "enum": [
+          "VAULT_SETUP",
+          "VAULT_ACTION",
+          "PAYOUT",
+          "FINANCE_CHANGE",
+          "REVENUE_POLICY",
+          "DEAL_TERMS",
+          "ESCROW",
+          "LEASE_ISSUE",
+          "LEASE_REVOKE",
+          "CIRCLE_REFUND"
+        ]
+      },
+      "ApprovalItem": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/ApprovalPurpose"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipientHint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16,
+                "description": "Shortened address for display, such as 0x12ab…9f3c"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "threshold": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "requestId",
+          "workspaceId",
+          "workspaceName",
+          "purpose",
+          "summary",
+          "amount",
+          "recipientHint",
+          "approvals",
+          "threshold",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovalPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalItem"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "TypedData": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "types": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "type"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "primaryType": {
+            "type": "string"
+          },
+          "message": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "domain",
+          "types",
+          "primaryType",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "SigningRequest": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/ApprovalItem"
+          },
+          "signer": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "The wallet that must sign"
+          },
+          "enforcedBy": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Contract or service that enforces it"
+          },
+          "typedData": {
+            "$ref": "#/components/schemas/TypedData"
+          }
+        },
+        "required": [
+          "request",
+          "signer",
+          "enforcedBy",
+          "typedData"
+        ],
+        "additionalProperties": false
+      },
+      "SignatureSubmit": {
+        "type": "object",
+        "properties": {
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{130}$"
+          }
+        },
+        "required": [
+          "signature"
+        ],
+        "additionalProperties": false
+      },
+      "SignatureResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "RECORDED",
+              "READY",
+              "SUBMITTED",
+              "REJECTED"
+            ]
+          },
+          "approvals": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "threshold": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "status",
+          "approvals",
+          "threshold"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationCategory": {
+        "type": "string",
+        "enum": [
+          "NEW_LEAD",
+          "OFFER_ACCEPTED",
+          "CLIENT_DEPOSIT_FINALIZED",
+          "AGENT_PAYMENT_FINALIZED",
+          "PAYMENT_BLOCKED",
+          "RISK_REVIEW",
+          "ESCROW_DISPUTED",
+          "CIRCLE_CONTRIBUTION_RECEIVED",
+          "FUND_PROPOSAL",
+          "APPROVAL_REQUESTED",
+          "LEASE_EXPIRING",
+          "SECURITY_PAUSE"
+        ]
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "notificationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "category": {
+            "$ref": "#/components/schemas/NotificationCategory"
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Generic; never a name, price or address"
+          },
+          "deepLink": {
+            "type": "string",
+            "pattern": "^\\/[A-Za-z0-9/_-]{1,200}$",
+            "description": "Path on the web host"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "readAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "notificationId",
+          "eventId",
+          "category",
+          "workspaceId",
+          "title",
+          "deepLink",
+          "createdAt",
+          "readAt"
+        ],
+        "additionalProperties": false
+      },
+      "NotificationPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "unreadCount"
+        ],
+        "additionalProperties": false
+      },
+      "MarkRead": {
+        "type": "object",
+        "properties": {
+          "notificationIds": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": [
+          "notificationIds"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceRegistration": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "apnsToken": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64,200}$"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ]
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "mutedCategories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationCategory"
+            }
+          },
+          "quietHours": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "string",
+                    "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "end": {
+                    "type": "string",
+                    "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                },
+                "required": [
+                  "start",
+                  "end",
+                  "timeZone"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "deviceId",
+          "apnsToken",
+          "environment",
+          "locale",
+          "mutedCategories",
+          "quietHours"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceRegistered": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "registeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "deviceId",
+          "registeredAt"
+        ],
+        "additionalProperties": false
+      },
+      "StreamEvent": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "LEAD_UPDATED",
+              "LEAD_MESSAGE",
+              "OFFER_UPDATED",
+              "AGENT_EVENT",
+              "APPROVAL_CHANGED",
+              "BALANCE_CHANGED",
+              "NOTIFICATION",
+              "CONTEXT_REVOKED"
+            ]
+          },
+          "workspaceId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "cursor",
+          "eventId",
+          "type",
+          "workspaceId",
+          "entityId",
+          "observedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StreamEventPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamEvent"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
