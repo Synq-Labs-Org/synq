@@ -76,4 +76,9 @@ CREATE TABLE synq_ws_bills(workspace_id uuid NOT NULL REFERENCES synq_workspaces
 CREATE INDEX synq_ws_escrow_ops_deal ON synq_ws_escrow_ops(deal_id,op,milestone);`,
     down: `DROP TABLE synq_ws_escrow_ops;`,
   },
+  {
+    version: 11,
+    up: `CREATE TABLE synq_ws_treasury_ops(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),kind text NOT NULL CHECK(kind IN ('SWAP')),data jsonb NOT NULL,state text NOT NULL CHECK(state IN ('APPROVE','EXECUTE','DONE','FAILED')),approve_action_id uuid,execute_action_id uuid,evidence jsonb,last_error text,created_at bigint NOT NULL,updated_at bigint NOT NULL);`,
+    down: `DROP TABLE synq_ws_treasury_ops;`,
+  },
 ] as const;

@@ -26,6 +26,10 @@ export const ACCOUNTS = [
   'CONTRACTOR_EXPENSE',
   'NETWORK_FEES',
   'OWNER_EQUITY',
+  /** Non-USDC treasury holdings (EURC, Earn vault shares), per asset id. */
+  'TREASURY_HOLDINGS',
+  /** Bridges the two legs of a same-chain conversion so each asset balances. */
+  'FX_CLEARING',
 ] as const;
 export type Account = (typeof ACCOUNTS)[number];
 

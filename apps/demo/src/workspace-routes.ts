@@ -22,6 +22,7 @@ import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
 import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
+import type { WorkspaceTreasury } from '@synq/execution-worker/workspace-treasury';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
@@ -114,6 +115,7 @@ export function registerWorkspaceRoutes(
   team?: WorkspaceTeam,
   books?: WorkspaceBooks,
   escrow?: () => WorkspaceDealEscrow | undefined,
+  treasury?: WorkspaceTreasury,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -189,6 +191,20 @@ export function registerWorkspaceRoutes(
         Boolean(payouts),
         payouts?.screening?.(),
       ),
+      ...(treasury
+        ? {
+            swap: {
+              status: 'AVAILABLE',
+              reason:
+                'USDC/EURC through Circle App Kit on Arc testnet, at most 0.05 per swap. The Safe owner quorum signs the exact allowance and the checked adapter call; USDC leaves only from free cash after reserves and bills due in 30 days. Testnet liquidity can be unavailable.',
+            },
+            earn: {
+              status: 'BLOCKED',
+              reason:
+                'Earn deposits from a workspace Safe are not connected yet; the vault share position needs its own books and withdrawal path.',
+            },
+          }
+        : {}),
       workspaceTeam: team
         ? {
             status: 'AVAILABLE',
@@ -362,6 +378,37 @@ export function registerWorkspaceRoutes(
         return finance.list(await id(req), session.principalId);
       }),
     );
+    if (treasury) {
+      const op = (req: FastifyRequest) =>
+        z
+          .strictObject({ workspaceId: WorkspaceIdSchema, opId: z.uuid() })
+          .parse(req.params);
+      app.get('/v2/workspaces/:workspaceId/treasury/ops', (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req);
+          return { ops: await treasury.list(await id(req), s.principalId) };
+        }),
+      );
+      app.post('/v2/workspaces/:workspaceId/treasury/swaps', (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true);
+          return treasury.proposeSwap(await id(req), s.principalId, req.body);
+        }),
+      );
+      app.post(
+        '/v2/workspaces/:workspaceId/treasury/ops/:opId/prepare',
+        (req, reply) =>
+          handle(reply, async () => {
+            const s = await auth(req, true),
+              p = op(req);
+            return treasury.prepareExecution(
+              p.workspaceId,
+              s.principalId,
+              p.opId,
+            );
+          }),
+      );
+    }
     if (books)
       app.get('/v2/workspaces/:workspaceId/books', (req, reply) =>
         handle(reply, async () => {

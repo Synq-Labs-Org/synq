@@ -29,8 +29,9 @@ import {
   type WalletScreeningPort,
 } from '@synq/plugin-risk';
 import { WorkspacePayouts } from '@synq/workspaces/payouts';
-import { Ledger, PostgresLedgerStore } from '@synq/ledger';
+import { Ledger, PostgresLedgerStore, walletTag } from '@synq/ledger';
 import { bookWorkspacePayout } from './workspace-payout.js';
+import { assertTreasuryAction } from './workspace-treasury.js';
 import { WorkspaceError } from '@synq/workspaces';
 import {
   WorkspaceGovernance,
@@ -138,6 +139,7 @@ export class WorkspaceGovernanceExecutor {
             : null;
         if ('vendorId' in a && !vendor)
           throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+        await assertTreasuryAction(sql, a);
         if (a.kind === 'PAY_VENDOR') {
           const refuse = async (reason: string) => {
             await sql.query(
@@ -452,6 +454,131 @@ export class WorkspaceGovernanceExecutor {
             grantKey: this.authority.grantKey,
           }),
         );
+      } else if (a.kind === 'TREASURY_APPROVE') {
+        const ok = parseEventLogs({
+          abi: erc20Abi,
+          eventName: 'Approval',
+          logs: receipt.logs,
+        }).filter(
+          (e) =>
+            e.address.toLowerCase() === a.approveToken.toLowerCase() &&
+            getAddress(e.args.owner) === getAddress(a.safe) &&
+            getAddress(e.args.spender) === getAddress(a.spender) &&
+            e.args.value === BigInt(a.amount),
+        );
+        if (ok.length !== 1)
+          throw new ArcExecutionError(
+            'TRANSFER_MISMATCH',
+            'treasury approval receipt is missing',
+          );
+        await store.pool.query(
+          "UPDATE synq_ws_treasury_ops SET state='EXECUTE',updated_at=$2 WHERE id=$1 AND state='APPROVE'",
+          [a.treasuryOpId, store.now()],
+        );
+      } else if (a.kind === 'TREASURY_EXECUTE') {
+        const transfers = parseEventLogs({
+          abi: erc20Abi,
+          eventName: 'Transfer',
+          logs: receipt.logs,
+        });
+        const safe = getAddress(a.safe);
+        const out = transfers.filter((e) => getAddress(e.args.from) === safe);
+        const spent = out
+          .filter((e) => getAddress(e.address) === getAddress(a.tokenIn))
+          .reduce((n, e) => n + e.args.value, 0n);
+        const received = transfers
+          .filter(
+            (e) =>
+              getAddress(e.args.to) === safe &&
+              getAddress(e.address) === getAddress(a.tokenOut),
+          )
+          .reduce((n, e) => n + e.args.value, 0n);
+        // Arc's native-USDC mirror log (0xffff…fffe) is not a second asset.
+        const foreign = out.filter(
+          (e) =>
+            getAddress(e.address) !== getAddress(a.tokenIn) &&
+            !e.address
+              .toLowerCase()
+              .startsWith('0xffffffffffffffffffffffffffffffffffff'),
+        );
+        if (
+          spent === 0n ||
+          spent > BigInt(a.amountIn) ||
+          received < BigInt(a.minOut) ||
+          foreign.length
+        )
+          throw new ArcExecutionError(
+            'TRANSFER_MISMATCH',
+            `treasury execution moved ${spent} in and ${received} out outside its terms`,
+          );
+        evidence = {
+          ...evidence,
+          treasuryOpId: a.treasuryOpId,
+          spent: String(spent),
+          received: String(received),
+        };
+        const assetOf = (address: string) => {
+          for (const symbol of ['USDC', 'EURC'] as const) {
+            const t = token('arc-testnet', symbol);
+            if (getAddress(t.address) === getAddress(address)) return t;
+          }
+          throw new ArcExecutionError('TRANSFER_MISMATCH', 'unknown asset');
+        };
+        const tin = assetOf(a.tokenIn),
+          tout = assetOf(a.tokenOut),
+          id = `treasury-op:${a.treasuryOpId}:settled`,
+          tag = walletTag(safe);
+        const leg = (t: typeof tin, amount: bigint) =>
+          t.symbol === 'USDC'
+            ? {
+                account: 'CASH_ARC_USDC' as const,
+                assetId: t.assetId,
+                amount,
+                counterpartyId: tag,
+              }
+            : {
+                account: 'TREASURY_HOLDINGS' as const,
+                assetId: t.assetId,
+                amount,
+              };
+        await store.transaction(async (sql) => {
+          await new Ledger(new PostgresLedgerStore(sql)).post({
+            entryId: id,
+            workspaceId: a.workspaceId,
+            occurredAt: store.now(),
+            memo: `Treasury swap ${tin.symbol} to ${tout.symbol}`,
+            source: { kind: 'CHAIN_TX', ref: a.treasuryOpId },
+            evidence: {
+              chainId: 5042002,
+              txHash: record!.hash,
+              logIndex: out[0]!.logIndex,
+            },
+            idempotencyKey: id,
+            reversalOf: null,
+            postings: [
+              leg(tin, -spent),
+              { account: 'FX_CLEARING', assetId: tin.assetId, amount: spent },
+              leg(tout, received),
+              {
+                account: 'FX_CLEARING',
+                assetId: tout.assetId,
+                amount: -received,
+              },
+            ],
+          });
+          await sql.query(
+            "UPDATE synq_ws_treasury_ops SET state='DONE',evidence=$2,updated_at=$3 WHERE id=$1",
+            [
+              a.treasuryOpId,
+              {
+                hash: record!.hash,
+                spent: String(spent),
+                received: String(received),
+              },
+              store.now(),
+            ],
+          );
+        });
       } else if ('perPaymentCap' in a) {
         const set = parseEventLogs({
           abi: recipientAbi,

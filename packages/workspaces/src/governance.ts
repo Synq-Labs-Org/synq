@@ -192,21 +192,69 @@ export class WorkspaceGovernance {
                   String(action.expiresAt),
                 ],
               )
-            : await sql.query(
-                "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'perPaymentCap'=$3 AND data->>'windowCap'=$4 AND data->>'nonce'=$5 AND data->>'expiresAt'=$6",
-                [
-                  workspaceId,
-                  action.kind,
-                  action.perPaymentCap,
-                  action.windowCap,
-                  action.nonce,
-                  String(action.expiresAt),
-                ],
-              );
+            : 'perPaymentCap' in action
+              ? await sql.query(
+                  "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'perPaymentCap'=$3 AND data->>'windowCap'=$4 AND data->>'nonce'=$5 AND data->>'expiresAt'=$6",
+                  [
+                    workspaceId,
+                    action.kind,
+                    action.perPaymentCap,
+                    action.windowCap,
+                    action.nonce,
+                    String(action.expiresAt),
+                  ],
+                )
+              : { rows: [] };
       if (!existing.rows[0]) throw new WorkspaceError('ACTION_CONFLICT');
       return String(existing.rows[0].id);
     });
     return this.view(workspaceId, principalId, id);
+  }
+  /**
+   * A treasury step for a treasury operation the caller already validated.
+   * Not reachable from the raw proposal API: only WorkspaceTreasury builds it.
+   */
+  async proposeTreasury(
+    workspaceId: string,
+    principalId: string,
+    fields:
+      | {
+          kind: 'TREASURY_APPROVE';
+          treasuryOpId: string;
+          spender: string;
+          approveToken: string;
+          amount: string;
+        }
+      | {
+          kind: 'TREASURY_EXECUTE';
+          treasuryOpId: string;
+          target: string;
+          data: string;
+          tokenIn: string;
+          amountIn: string;
+          tokenOut: string;
+          minOut: string;
+        },
+  ) {
+    const m = await this.workspaces.membership(workspaceId, principalId);
+    if (m.role !== 'OWNER') throw new WorkspaceError('OWNER_REQUIRED', 403);
+    const a = await this.finance.authority(workspaceId);
+    const action = SafeActionSchema.parse({
+      id: randomUUID(),
+      workspaceId,
+      chainId: 5042002,
+      safe: a.vault,
+      policy: a.policy,
+      token: a.token,
+      ...fields,
+      nonce: String(a.nonce),
+      expiresAt: this.workspaces.now() + 900,
+    });
+    await this.workspaces.pool.query(
+      "INSERT INTO synq_ws_safe_actions(id,workspace_id,data,state) VALUES($1,$2,$3,'REVIEW')",
+      [action.id, workspaceId, action],
+    );
+    return this.view(workspaceId, principalId, action.id);
   }
   async approve(
     workspaceId: string,

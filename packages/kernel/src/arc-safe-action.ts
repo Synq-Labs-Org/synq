@@ -46,6 +46,27 @@ export const SafeActionSchema = z.discriminatedUnion('kind', [
     vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
     amount: units.refine((v) => BigInt(v) > 0n, 'amount must be positive'),
   }),
+  // Treasury: the Safe allows the registry App Kit adapter to take an exact amount.
+  z.strictObject({
+    ...actionBase,
+    kind: z.literal('TREASURY_APPROVE'),
+    treasuryOpId: z.string().uuid(),
+    spender: wallet,
+    approveToken: wallet,
+    amount: units,
+  }),
+  // Treasury: the Safe calls the adapter with calldata checked against the op's terms.
+  z.strictObject({
+    ...actionBase,
+    kind: z.literal('TREASURY_EXECUTE'),
+    treasuryOpId: z.string().uuid(),
+    target: wallet,
+    data: z.string().regex(/^0x([0-9a-f]{2})+$/),
+    tokenIn: wallet,
+    amountIn: units,
+    tokenOut: wallet,
+    minOut: units,
+  }),
   z
     .strictObject({
       ...actionBase,
@@ -84,6 +105,28 @@ const safeAbi = parseAbi([
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns(bool)',
 ]);
 export function safeActionCall(a: SafeAction) {
+  if (a.kind === 'TREASURY_APPROVE')
+    return {
+      to: a.approveToken,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: parseAbi([
+          'function approve(address spender,uint256 amount) returns(bool)',
+        ]),
+        functionName: 'approve',
+        args: [a.spender, BigInt(a.amount)],
+      }),
+      operation: 0,
+      nonce: BigInt(a.nonce),
+    } as const;
+  if (a.kind === 'TREASURY_EXECUTE')
+    return {
+      to: a.target,
+      value: 0n,
+      data: a.data as Hex,
+      operation: 0,
+      nonce: BigInt(a.nonce),
+    } as const;
   // An above-cap payment is a direct token transfer signed by the full Safe quorum.
   if (a.kind === 'PAY_VENDOR')
     return {
@@ -179,12 +222,19 @@ export function safeActionApprovalTypedData(a: SafeAction) {
       vendorChangeHash:
         'vendorChangeHash' in a
           ? (a.vendorChangeHash as Hex)
-          : keccak256(
-              encodeAbiParameters(
-                [{ type: 'uint256' }, { type: 'uint256' }],
-                [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+          : a.kind === 'TREASURY_APPROVE' || a.kind === 'TREASURY_EXECUTE'
+            ? keccak256(
+                encodeAbiParameters(
+                  [{ type: 'string' }, { type: 'string' }],
+                  [a.treasuryOpId, a.kind],
+                ),
+              )
+            : keccak256(
+                encodeAbiParameters(
+                  [{ type: 'uint256' }, { type: 'uint256' }],
+                  [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+                ),
               ),
-            ),
       expiresAt: BigInt(a.expiresAt),
     },
   };
@@ -195,8 +245,20 @@ export function safeActionGrantCall(a: SafeAction) {
     chainId: a.chainId,
     token: a.token,
     payer: a.safe,
-    recipient: a.kind === 'PAY_VENDOR' ? a.vendorAddress : a.policy,
-    amount: a.kind === 'PAY_VENDOR' ? BigInt(a.amount) : 0n,
+    recipient:
+      a.kind === 'PAY_VENDOR'
+        ? a.vendorAddress
+        : a.kind === 'TREASURY_APPROVE'
+          ? a.spender
+          : a.kind === 'TREASURY_EXECUTE'
+            ? a.target
+            : a.policy,
+    amount:
+      a.kind === 'PAY_VENDOR'
+        ? BigInt(a.amount)
+        : a.kind === 'TREASURY_EXECUTE'
+          ? BigInt(a.amountIn)
+          : 0n,
   };
 }
 export function safeActionExecution(
