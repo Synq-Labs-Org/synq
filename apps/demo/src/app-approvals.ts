@@ -30,6 +30,10 @@ import type { WorkspaceFinance } from '@synq/workspaces/finance';
 import type { WorkspacePayouts } from '@synq/workspaces/payouts';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
+import {
+  commercialPolicyTypedData,
+  type WorkspaceOffers,
+} from '@synq/workspaces/offers';
 
 /*
  * The approvals inbox: every request across the caller's workspaces that still
@@ -44,6 +48,7 @@ export type ApprovalSources = {
   payouts?: { service: WorkspacePayouts; wake(): void };
   governance?: { service: WorkspaceGovernance; wake(): void };
   revenue?: WorkspaceRevenue;
+  offers?: WorkspaceOffers;
 };
 
 type Purpose =
@@ -52,7 +57,8 @@ type Purpose =
   | 'PAYOUT'
   | 'FINANCE_CHANGE'
   | 'REVENUE_POLICY'
-  | 'CIRCLE_REFUND';
+  | 'CIRCLE_REFUND'
+  | 'COMMERCIAL_POLICY';
 type Step = { label: string; typedData: Record<string, unknown> };
 type Pending = {
   item: {
@@ -132,7 +138,8 @@ export class AppApprovals {
     for (const { workspace: w } of owned) {
       const base = { workspaceId: w.id, workspaceName: w.displayName };
       const threshold = w.threshold ?? 1;
-      const { setups, finance, payouts, governance, revenue } = this.sources;
+      const { setups, finance, payouts, governance, revenue, offers } =
+        this.sources;
 
       if (setups && w.status === 'LAUNCHING') {
         const v = await this.optional(() =>
@@ -170,6 +177,46 @@ export class AppApprovals {
               };
             },
           });
+      }
+      if (offers && w.kind === 'BUSINESS') {
+        const list = await this.optional(() =>
+          offers.policies(w.id, principalId),
+        );
+        for (const v of list ?? []) {
+          if (v.state !== 'REVIEW') continue;
+          out.push({
+            item: {
+              ...base,
+              requestId: approvalId('COMMERCIAL_POLICY', w.id, v.policyHash),
+              purpose: 'COMMERCIAL_POLICY',
+              summary: `Sales policy version ${v.version}: ${v.policy.catalog.length} catalog items, discounts up to ${v.policy.maxDiscountBps / 100}%`,
+              amount: null,
+              recipientHint: null,
+              approvals: 0,
+              threshold: 1,
+              expiresAt: null,
+            },
+            enforcedBy:
+              'Synq offer validator (deterministic checks on every offer)',
+            steps: [
+              {
+                label: 'Approve the sales policy',
+                typedData: plain(
+                  commercialPolicyTypedData(w.id, v.version, v.policyHash),
+                ),
+              },
+            ],
+            submit: async ([s]) => {
+              const r = await offers.approvePolicy(
+                w.id,
+                principalId,
+                v.version,
+                s!,
+              );
+              return { approvals: 1, done: r.state === 'ACTIVE' };
+            },
+          });
+        }
       }
       if (w.status !== 'ACTIVE') continue;
 

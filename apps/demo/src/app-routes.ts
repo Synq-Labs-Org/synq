@@ -13,6 +13,8 @@ import type { WorkspaceContributions } from '@synq/workspaces/contributions';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
+import type { WorkspaceLeads } from '@synq/workspaces/leads';
+import type { WorkspaceOffers } from '@synq/workspaces/offers';
 import type { AppApprovals } from './app-approvals.js';
 import { workspaceHttp } from './workspace-http.js';
 
@@ -41,6 +43,8 @@ export type AppRouteDeps = {
   books?: WorkspaceBooks;
   /** The /v2 capability report; entries with a status and reason are passed on. */
   capabilities?: () => Record<string, unknown>;
+  leads?: WorkspaceLeads;
+  offers?: WorkspaceOffers;
 };
 
 const USDC = {
@@ -575,10 +579,16 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
             status: String((value as { status: string }).status),
             reason: String((value as { reason: string }).reason).slice(0, 600),
           };
-      capabilities.leadInbox = {
-        status: 'NOT_CONFIGURED',
-        reason: 'The private lead inbox is not available yet.',
-      };
+      capabilities.leadInbox = deps.leads
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'Private enquiries through single-use invitations; prospects are outside counterparties, never members.',
+          }
+        : {
+            status: 'NOT_CONFIGURED',
+            reason: 'The private lead inbox is not configured on this server.',
+          };
       capabilities.agentRuns = {
         status: 'NOT_CONFIGURED',
         reason: 'Agent run history is not recorded yet.',
@@ -599,7 +609,9 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
           open: owed.length,
           units: String(owed.reduce((n, p) => n + BigInt(p.amount), 0n)),
         },
-        leads: { open: 0, needsOwner: 0 },
+        leads: deps.leads
+          ? await deps.leads.counts(w.id)
+          : { open: 0, needsOwner: 0 },
         pendingApprovals: pending.filter((p) => p.item.workspaceId === w.id)
           .length,
         agentHighlights: [],
@@ -612,6 +624,175 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
       };
     }),
   );
+
+  // MARK: Leads and offers
+
+  const leads = deps.leads;
+  const offers = deps.offers;
+  if (leads) {
+    const leadParams = (req: FastifyRequest) =>
+      z
+        .strictObject({ workspaceId: z.uuid(), leadId: z.uuid() })
+        .parse(req.params);
+    route('workspace.inbox');
+    app.get('/v3/workspaces/:workspaceId/inbox', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const { workspaceId } = z
+          .strictObject({ workspaceId: z.uuid() })
+          .parse(req.params);
+        const q = PageQuery.extend({
+          stage: z
+            .string()
+            .regex(/^[A-Z_]{3,40}$/)
+            .optional(),
+          handling: z.enum(['AGENT', 'HUMAN', 'FROZEN']).optional(),
+        }).parse(req.query);
+        return leads.inbox(workspaceId, s.principalId, q);
+      }),
+    );
+    route('workspace.lead');
+    app.get('/v3/workspaces/:workspaceId/leads/:leadId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const p = leadParams(req);
+        return leads.detail(
+          p.workspaceId,
+          s.principalId,
+          p.leadId,
+          offers ? (id) => offers.forLead(id) : undefined,
+        );
+      }),
+    );
+    route('workspace.leadMessage');
+    app.post(
+      '/v3/workspaces/:workspaceId/leads/:leadId/message',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await mutation(req);
+          const p = leadParams(req);
+          return leads.fromStaff(
+            p.workspaceId,
+            s.principalId,
+            p.leadId,
+            req.body,
+            String(req.headers['idempotency-key']),
+          );
+        }),
+    );
+    route('workspace.leadTakeover');
+    app.post(
+      '/v3/workspaces/:workspaceId/leads/:leadId/takeover',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await mutation(req);
+          const p = leadParams(req);
+          return leads.takeover(
+            p.workspaceId,
+            s.principalId,
+            p.leadId,
+            req.body,
+          );
+        }),
+    );
+    route('workspace.leadInvite');
+    app.post('/v3/workspaces/:workspaceId/lead-invites', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const { workspaceId } = z
+          .strictObject({ workspaceId: z.uuid() })
+          .parse(req.params);
+        await store.throttle(`lead-invite:${workspaceId}`, 30);
+        return leads.invite(workspaceId, s.principalId, req.body);
+      }),
+    );
+    route('leadInvite.redeem');
+    app.post('/v3/lead-invites/redeem', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        await store.throttle(`lead-redeem:${s.principalId}`, 10);
+        const body = z
+          .strictObject({ token: z.string().max(64) })
+          .parse(req.body);
+        const r = await leads.redeem({
+          token: body.token,
+          channel: 'web',
+          identity: s.principalId,
+          deliveryRef: null,
+          principalId: s.principalId,
+        });
+        return { leadId: r.leadId, bound: r.bound };
+      }),
+    );
+  }
+  if (leads && offers) {
+    route('workspace.leadOffer');
+    app.post('/v3/workspaces/:workspaceId/leads/:leadId/offers', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const p = z
+          .strictObject({ workspaceId: z.uuid(), leadId: z.uuid() })
+          .parse(req.params);
+        const body = z
+          .strictObject({ terms: z.unknown(), offerId: z.uuid().optional() })
+          .parse(req.body);
+        const r = await offers.send({
+          workspaceId: p.workspaceId,
+          leadId: p.leadId,
+          terms: body.terms,
+          actor: { kind: 'STAFF', principalId: s.principalId },
+          ...(body.offerId ? { offerId: body.offerId } : {}),
+        });
+        return {
+          sent: r.sent,
+          checks: r.validation.checks,
+          needsOwner: r.validation.needsOwner,
+          offer: r.sent ? r.offer : null,
+        };
+      }),
+    );
+    route('workspace.offerValidate');
+    app.post(
+      '/v3/workspaces/:workspaceId/offers/:offerId/versions/:version/validate',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await mutation(req);
+          const p = z
+            .strictObject({
+              workspaceId: z.uuid(),
+              offerId: z.uuid(),
+              version: z.coerce.number().int().positive(),
+            })
+            .parse(req.params);
+          return offers.revalidate(
+            p.workspaceId,
+            s.principalId,
+            p.offerId,
+            p.version,
+          );
+        }),
+    );
+    route('workspace.commercialPolicies');
+    app.get('/v3/workspaces/:workspaceId/commercial-policies', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const { workspaceId } = z
+          .strictObject({ workspaceId: z.uuid() })
+          .parse(req.params);
+        return { policies: await offers.policies(workspaceId, s.principalId) };
+      }),
+    );
+    route('workspace.commercialPolicyPropose');
+    app.post('/v3/workspaces/:workspaceId/commercial-policies', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const { workspaceId } = z
+          .strictObject({ workspaceId: z.uuid() })
+          .parse(req.params);
+        return offers.proposePolicy(workspaceId, s.principalId, req.body);
+      }),
+    );
+  }
 
   return { implemented };
 }

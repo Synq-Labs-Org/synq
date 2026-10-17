@@ -918,6 +918,9 @@ importers:
       '@synq/chain-registry':
         specifier: workspace:*
         version: link:../chain-registry
+      '@synq/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@synq/dealroom':
         specifier: workspace:*
         version: link:../dealroom

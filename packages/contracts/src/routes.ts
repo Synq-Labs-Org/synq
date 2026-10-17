@@ -2,6 +2,7 @@ import { z } from 'zod';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
 import * as business from './business.js';
+import * as commercial from './commercial.js';
 import * as common from './common.js';
 import * as contexts from './contexts.js';
 import * as notifications from './notifications.js';
@@ -186,7 +187,7 @@ export const ROUTES: readonly Route[] = [
       handling: business.LeadHandlingSchema.optional(),
     }),
     response: business.InboxPageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Private leads, newest activity first.',
   },
   {
@@ -196,7 +197,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'OWNER, ADMIN',
     response: business.LeadDetailSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Lead summary, consented transcript and offer versions.',
   },
   {
@@ -207,7 +208,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'OWNER, ADMIN (only while handling is HUMAN)',
     request: business.LeadMessageRequestSchema,
     response: business.LeadMessageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Staff message to the lead.',
   },
   {
@@ -218,7 +219,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'OWNER, ADMIN',
     request: business.TakeoverRequestSchema,
     response: business.TakeoverResultSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary:
       'Take over, hand back, freeze offers or escalate; 409 on a stale version.',
   },
@@ -230,7 +231,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'OWNER, ADMIN',
     request: business.LeadInviteRequestSchema,
     response: business.LeadInviteSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Single-use private invitation link for a prospect.',
   },
   {
@@ -241,7 +242,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'external lead with a provider-verified identity',
     request: business.LeadInviteRedeemSchema,
     response: business.LeadInviteRedeemResultSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Bind a private session to the redeeming identity, once.',
   },
   {
@@ -251,9 +252,43 @@ export const ROUTES: readonly Route[] = [
     auth: 'mutation',
     roles: 'OWNER, ADMIN',
     response: business.OfferValidationSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary:
       'Run the deterministic commercial policy checks on one offer version.',
+  },
+  {
+    id: 'workspace.leadOffer',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/leads/{leadId}/offers',
+    auth: 'mutation',
+    roles: 'OWNER, ADMIN (only while handling is HUMAN)',
+    request: commercial.OfferSendRequestSchema,
+    response: commercial.OfferSendResultSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Send an offer (or a new version of one) after the policy checks pass.',
+  },
+  {
+    id: 'workspace.commercialPolicies',
+    method: 'GET',
+    path: '/v3/workspaces/{workspaceId}/commercial-policies',
+    auth: 'session',
+    roles: 'OWNER, ADMIN',
+    response: commercial.CommercialPolicyListSchema,
+    status: 'IMPLEMENTED',
+    summary: 'Commercial policy versions, newest first.',
+  },
+  {
+    id: 'workspace.commercialPolicyPropose',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/commercial-policies',
+    auth: 'mutation',
+    roles: 'OWNER, ADMIN',
+    request: commercial.CommercialPolicySchema,
+    response: commercial.CommercialPolicyViewSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Propose the next policy version; an owner signs it from the approvals inbox.',
   },
   {
     id: 'workspace.agentRuns',

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
 import * as business from './business.js';
+import * as commercial from './commercial.js';
 import * as common from './common.js';
 import * as contexts from './contexts.js';
 import * as notifications from './notifications.js';
@@ -10,6 +11,7 @@ import { MetaRouteSchema, MetaSchema } from './routes.js';
 export * from './approvals.js';
 export * from './auth.js';
 export * from './business.js';
+export * from './commercial.js';
 export * from './common.js';
 export * from './contexts.js';
 export * from './notifications.js';
@@ -78,6 +80,13 @@ export const NAMED_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   LeadInviteRedeem: business.LeadInviteRedeemSchema,
   LeadInviteRedeemResult: business.LeadInviteRedeemResultSchema,
   OfferValidation: business.OfferValidationSchema,
+  CommercialPolicy: commercial.CommercialPolicySchema,
+  CommercialPolicyView: commercial.CommercialPolicyViewSchema,
+  CommercialPolicyList: commercial.CommercialPolicyListSchema,
+  OfferTerms: commercial.OfferTermsSchema,
+  OfferCheck: commercial.OfferCheckSchema,
+  OfferSendRequest: commercial.OfferSendRequestSchema,
+  OfferSendResult: commercial.OfferSendResultSchema,
   ApprovalPurpose: approvals.ApprovalPurposeSchema,
   ApprovalItem: approvals.ApprovalItemSchema,
   ApprovalPage: approvals.ApprovalPageSchema,

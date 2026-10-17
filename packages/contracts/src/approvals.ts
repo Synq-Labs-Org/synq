@@ -25,6 +25,7 @@ export const ApprovalPurposeSchema = z.enum([
   'LEASE_ISSUE',
   'LEASE_REVOKE',
   'CIRCLE_REFUND',
+  'COMMERCIAL_POLICY',
 ]);
 
 export const ApprovalItemSchema = z.strictObject({

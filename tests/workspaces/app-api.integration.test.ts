@@ -8,7 +8,12 @@ import { contract, token } from '@synq/chain-registry/arc';
 import { vaultSetupTypedData } from '@synq/kernel/arc-vault-setup';
 import { WorkspaceVaultSetups } from '../../packages/workspaces/src/vault-setup.js';
 import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
+import { WorkspaceLeads } from '../../packages/workspaces/src/leads.js';
+import { WorkspaceOffers } from '../../packages/workspaces/src/offers.js';
 import {
+  InboxPageSchema,
+  LeadDetailSchema,
+  LeadInviteSchema,
   ApprovalPageSchema,
   SignatureResultSchema,
   SigningRequestSchema,
@@ -648,5 +653,108 @@ describe('v3 approvals inbox', () => {
         })
       ).statusCode,
     ).toBe(404);
+  });
+});
+
+describe('v3 leads routes', () => {
+  it('invites, lists, reads and takes over a lead through the API', async () => {
+    const leads = new WorkspaceLeads(store, {
+      webOrigin: origin,
+      telegramBot: () => 'asksynqbot',
+    });
+    await leads.migrate();
+    const offers = new WorkspaceOffers(store);
+    await offers.migrate();
+    const api = Fastify();
+    registerAppRoutes(api, {
+      store,
+      devices: new WorkspaceDeviceSessions(store),
+      leads,
+      offers,
+    });
+    try {
+      const owner = await deviceSession();
+      const outsider = await deviceSession();
+      const { workspace: w } = await store.create(owner.session.principalId, {
+        displayName: 'Lead Co',
+        kind: 'BUSINESS',
+      });
+      const h = bearer(owner.session.accessToken);
+      expect(
+        (
+          await api.inject({
+            method: 'POST',
+            url: `/v3/workspaces/${w.id}/lead-invites`,
+            headers: h,
+            payload: { source: 'TELEGRAM', expiresInSeconds: 3600 },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const invite = LeadInviteSchema.parse(
+        (
+          await api.inject({
+            method: 'POST',
+            url: `/v3/workspaces/${w.id}/lead-invites`,
+            headers: { ...h, ...key() },
+            payload: { source: 'TELEGRAM', expiresInSeconds: 3600 },
+          })
+        ).json(),
+      );
+      expect(invite.telegramUrl).toMatch(
+        /^https:\/\/t\.me\/asksynqbot\?start=lead_/,
+      );
+      const token = new URL(invite.telegramUrl!).searchParams.get('start')!;
+      // An outside web user redeems; it stays a client, not a member.
+      const redeemed = await api.inject({
+        method: 'POST',
+        url: '/v3/lead-invites/redeem',
+        headers: { ...bearer(outsider.session.accessToken), ...key() },
+        payload: { token },
+      });
+      expect(redeemed.statusCode).toBe(200);
+      const { leadId } = redeemed.json();
+      const inbox = InboxPageSchema.parse(
+        (
+          await api.inject({ url: `/v3/workspaces/${w.id}/inbox`, headers: h })
+        ).json(),
+      );
+      expect(inbox.items.map((l) => l.leadId)).toEqual([leadId]);
+      expect(
+        (
+          await api.inject({
+            url: `/v3/workspaces/${w.id}/inbox`,
+            headers: bearer(outsider.session.accessToken),
+          })
+        ).statusCode,
+      ).toBe(404);
+      const detail = LeadDetailSchema.parse(
+        (
+          await api.inject({
+            url: `/v3/workspaces/${w.id}/leads/${leadId}`,
+            headers: h,
+          })
+        ).json(),
+      );
+      expect(detail.handlingVersion).toBe(0);
+      const takeover = (expectedVersion: number) =>
+        api.inject({
+          method: 'POST',
+          url: `/v3/workspaces/${w.id}/leads/${leadId}/takeover`,
+          headers: { ...h, ...key() },
+          payload: { action: 'HUMAN_TAKEOVER', expectedVersion },
+        });
+      expect((await takeover(0)).statusCode).toBe(200);
+      const stale = await takeover(0);
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json().error).toBe('VERSION_CONFLICT');
+      const meta = MetaSchema.parse(
+        (await api.inject({ url: '/v3/meta' })).json(),
+      );
+      expect(meta.routes.find((r) => r.id === 'workspace.inbox')!.status).toBe(
+        'IMPLEMENTED',
+      );
+    } finally {
+      await api.close();
+    }
   });
 });
