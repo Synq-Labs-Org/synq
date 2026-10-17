@@ -1,8 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Synq on a single Graviton EC2 host: Docker Compose (Caddy TLS, web, Telegram
-  service, Postgres). The host builds main from GitHub with a read-only deploy
-  key; operators reach it over SSM only (no SSH).
+  service, Postgres). The host follows the deploy branch with a read-only deploy
+  key and pulls the images CI built for it; operators reach it over SSM only
+  (no SSH).
 
 Parameters:
   InstanceType:

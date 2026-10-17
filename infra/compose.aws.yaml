@@ -2,9 +2,10 @@
 # synqlabs.world, the web app serves pages and proxies /api/v1, and the
 # Telegram service runs the live group bot on Monad testnet.
 #
-# The host builds the images from its checkout of main
-# (scripts/deploy/host-deploy.sh); values come from /opt/synq/.env, written
-# from SSM Parameter Store on every deploy.
+# CI builds the bot and web images for each green commit of main and pushes them
+# to GHCR; the host pulls the ones for the commit it deploys and builds nothing
+# (scripts/deploy/host-deploy.sh sets SYNQ_IMAGE_TAG). Values come from
+# /opt/synq/.env, written from SSM Parameter Store on every deploy.
 name: synq
 
 x-hardening: &hardening
@@ -61,10 +62,7 @@ services:
 
   bot:
     <<: *hardening
-    build:
-      context: ..
-      dockerfile: infra/docker/bot.Dockerfile
-    image: synq-bot:current
+    image: ghcr.io/synq-labs-org/synq-bot:${SYNQ_IMAGE_TAG:?set SYNQ_IMAGE_TAG}
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,12 +108,8 @@ services:
 
   web:
     <<: *hardening
-    build:
-      context: ..
-      dockerfile: infra/docker/web.Dockerfile
-      args:
-        SYNQ_API_ORIGIN: http://bot:3292
-    image: synq-web:current
+    # Built with SYNQ_API_ORIGIN=http://bot:3292 (Next.js fixes rewrites at build time).
+    image: ghcr.io/synq-labs-org/synq-web:${SYNQ_IMAGE_TAG:?set SYNQ_IMAGE_TAG}
     read_only: true
     tmpfs:
       - /tmp

@@ -1,8 +1,10 @@
 #!/bin/bash
 # Runs ON the EC2 host (root), from the synq-deploy systemd timer or over SSM.
 # Pulls the `deploy` branch (main once CI is green) with the read-only deploy
-# key, refreshes config from SSM Parameter Store, and rebuilds + restarts the
-# stack only when the branch moved (or --force).
+# key, refreshes config from SSM Parameter Store, pulls the images CI built for
+# that commit and restarts the stack, only when the branch moved (or --force).
+# Nothing is built here: CI pushes ghcr.io/synq-labs-org/synq-{bot,web}:<commit>
+# before it moves `deploy`.
 set -euo pipefail
 exec 9>/run/synq-deploy.lock
 flock -n 9 || { echo "another deploy is running"; exit 0; }
@@ -53,13 +55,19 @@ for k in workspace-operator workspace-grant; do
   fi
 done
 
+export SYNQ_IMAGE_TAG=$after
 compose() { docker compose --env-file "$BASE/.env" -f "$REPO/infra/compose.aws.yaml" "$@"; }
-# One image at a time keeps peak memory inside a small host.
-compose build bot
-compose build web
+# Pull before touching the running stack: a missing image leaves it as it was.
+compose pull --quiet bot web
 compose up -d --remove-orphans --wait --wait-timeout 600 || { compose ps; exit 1; }
+# Keep this deploy's images and the previous one's (for rollback); drop the rest.
+docker images --format '{{.Repository}}:{{.Tag}}' |
+  grep -E '^ghcr\.io/synq-labs-org/synq-(bot|web):' |
+  grep -vE ":($after|$before)\$" |
+  xargs -r docker rmi >/dev/null 2>&1 || true
 docker image prune -f >/dev/null
-docker builder prune -f --keep-storage 3GB >/dev/null || true
+# Left over from when the host built images itself.
+docker builder prune -af >/dev/null 2>&1 || true
 install -m 700 "$REPO/scripts/deploy/host-deploy.sh" "$BASE/host-deploy.sh"
 echo "$after" > "$BASE/deployed"
 echo "deployed $after"

@@ -7,8 +7,10 @@
 #   scripts/deploy/aws.sh bootstrap   install the auto-deploy timer on the host and deploy
 #   scripts/deploy/aws.sh deploy      deploy now (otherwise the host polls `deploy` every 2 minutes)
 #
-# Pipeline: push main -> GitHub Actions verify -> green main is fast-forwarded to
-# `deploy` -> the host builds and restarts within ~2 minutes.
+# Pipeline: push main -> GitHub Actions verify, which also builds the arm64 bot and
+# web images and pushes them to GHCR -> green main is fast-forwarded to `deploy`
+# -> within ~2 minutes the host pulls that commit's images and restarts.
+# Nothing is built on the host.
 #   scripts/deploy/aws.sh status      container status and the deployed commit
 #   scripts/deploy/aws.sh logs [svc]  last 200 log lines (bot, web, caddy, postgres)
 #   scripts/deploy/aws.sh console "approve alice last"   operator console of the Telegram service
