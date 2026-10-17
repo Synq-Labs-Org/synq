@@ -5,7 +5,7 @@ import SwiftUI
 
 extension CardLink {
     /// Art for the card's kind.
-    var artSlot: SynqArtSlot {
+    public var artSlot: SynqArtSlot {
         switch preview?.type {
         case "GROUP_TREASURY": return .fund
         case "GROUP_GIFT": return .gift
@@ -16,7 +16,7 @@ extension CardLink {
         }
     }
 
-    func card(status: CardStatus?) -> SynqCardModel {
+    public func card(status: CardStatus?) -> SynqCardModel {
         let title = preview?.title ?? "Group proposal"
         let lines = preview?.lines ?? []
         return SynqCardModel(art: artSlot, eyebrow: "Review · \(preview?.groupLabel ?? "Synq")", title: title,
@@ -31,24 +31,39 @@ extension CardLink {
 }
 
 /// Transcript (live layout) rendering of a card.
-struct TranscriptCardView: View {
-    let link: CardLink
-    let status: CardStatus?
+public struct TranscriptCardView: View {
+    public init(link: CardLink, status: CardStatus?) {
+        self.link = link
+        self.status = status
+    }
 
-    var body: some View { SynqCardBubble(model: link.card(status: status)) }
+    public let link: CardLink
+    public let status: CardStatus?
+
+    public var body: some View { SynqCardBubble(model: link.card(status: status)) }
 }
 
 /// Expanded view: current state plus a button that opens the authenticated approval page.
-struct ExpandedCardView: View {
-    let link: CardLink
-    let status: CardStatus?
-    let error: String?
-    let onRefresh: () -> Void
-    let onReview: () -> Void
-    let onShareUpdate: (() -> Void)?
+public struct ExpandedCardView: View {
+    public init(link: CardLink, status: CardStatus?, error: String?, onRefresh: @escaping () -> Void,
+                onReview: @escaping () -> Void, onShareUpdate: (() -> Void)?) {
+        self.link = link
+        self.status = status
+        self.error = error
+        self.onRefresh = onRefresh
+        self.onReview = onReview
+        self.onShareUpdate = onShareUpdate
+    }
+
+    public let link: CardLink
+    public let status: CardStatus?
+    public let error: String?
+    public let onRefresh: () -> Void
+    public let onReview: () -> Void
+    public let onShareUpdate: (() -> Void)?
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             VStack(alignment: .leading, spacing: theme.space.l) {
                 SynqHeader(title: "Review", actions: [SynqHeaderAction(icon: .refresh, label: "Refresh status", action: onRefresh)])
@@ -90,12 +105,12 @@ struct ExpandedCardView: View {
 }
 
 /// Compact compose view: turn a Synq link from the clipboard into a card message.
-struct ComposeView: View {
-    let onPaste: () -> Void
-    let message: String?
+public struct ComposeView: View {
+    public let onPaste: () -> Void
+    public let message: String?
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             VStack(spacing: theme.space.m) {
                 Text("Share a Synq proposal").synqType(.title)

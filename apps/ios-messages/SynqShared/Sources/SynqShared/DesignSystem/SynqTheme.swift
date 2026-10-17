@@ -7,7 +7,7 @@ import SwiftUI
 // components in Components.swift, so a new look is one new `SynqTheme` value set
 // at the root (`.environment(\.synqTheme, …)`). See THEMING.md.
 
-protocol SynqTheme {
+public protocol SynqTheme {
     var id: String { get }
     /// Name and one line shown in the theme picker.
     var name: String { get }
@@ -31,32 +31,32 @@ protocol SynqTheme {
 
 // MARK: - Tokens
 
-struct SynqColors {
-    var background: Color
-    var panel: Color
-    var inkPrimary: Color
-    var inkSecondary: Color
-    var inkTertiary: Color
-    var line: Color
+public struct SynqColors {
+    public var background: Color
+    public var panel: Color
+    public var inkPrimary: Color
+    public var inkSecondary: Color
+    public var inkTertiary: Color
+    public var line: Color
     /// Borders that should read as controls (outline buttons, focused fields).
-    var lineStrong: Color
-    var approved: Color
-    var approvedFill: Color
-    var approvedLine: Color
-    var pending: Color
-    var danger: Color
+    public var lineStrong: Color
+    public var approved: Color
+    public var approvedFill: Color
+    public var approvedLine: Color
+    public var pending: Color
+    public var danger: Color
     /// Fill of the strong primary button and selected states.
-    var accent: Color
+    public var accent: Color
     /// Ink on top of `accent`.
-    var onAccent: Color
+    public var onAccent: Color
 }
 
-enum SynqInk {
+public enum SynqInk {
     case primary, secondary, tertiary, approved, pending, danger, onAccent
 }
 
 extension SynqColors {
-    func ink(_ i: SynqInk) -> Color {
+    public func ink(_ i: SynqInk) -> Color {
         switch i {
         case .primary: return inkPrimary
         case .secondary: return inkSecondary
@@ -71,18 +71,18 @@ extension SynqColors {
 
 /// A font role resolved by the theme. `family` is a PostScript name; when it is
 /// not registered the system font with `fallback` design is used instead.
-struct SynqFontSpec {
-    var family: String?
-    var size: CGFloat
-    var weight: Font.Weight = .regular
-    var fallback: Font.Design = .monospaced
-    var relativeTo: Font.TextStyle = .body
-    var tracking: CGFloat = 0
-    var uppercase = false
+public struct SynqFontSpec {
+    public var family: String?
+    public var size: CGFloat
+    public var weight: Font.Weight = .regular
+    public var fallback: Font.Design = .monospaced
+    public var relativeTo: Font.TextStyle = .body
+    public var tracking: CGFloat = 0
+    public var uppercase = false
     /// Fixed size (no Dynamic Type) for dense layouts such as the keypad and tab bar.
-    var fixed = false
+    public var fixed = false
 
-    var font: Font {
+    public var font: Font {
         if let family, SynqFonts.isAvailable(family) {
             return fixed ? .custom(family, fixedSize: size) : .custom(family, size: size, relativeTo: relativeTo)
         }
@@ -90,85 +90,85 @@ struct SynqFontSpec {
     }
 }
 
-enum SynqTypeRole: CaseIterable {
+public enum SynqTypeRole: CaseIterable {
     case wordmark, wordmarkSub, title, headline, sectionLabel, amountLarge, amountMedium, amountUnit
     case body, bodyStrong, caption, mono, button, keypad, tab, tagline, display
 }
 
-struct SynqTypography {
-    var roles: [SynqTypeRole: SynqFontSpec]
+public struct SynqTypography {
+    public var roles: [SynqTypeRole: SynqFontSpec]
     /// Family used to draw character-grid art (glyph advance assumed 0.6 em).
-    var artFamily: String?
+    public var artFamily: String?
 
-    subscript(_ role: SynqTypeRole) -> SynqFontSpec { roles[role] ?? SynqFontSpec(size: 15) }
+    public subscript(_ role: SynqTypeRole) -> SynqFontSpec { roles[role] ?? SynqFontSpec(size: 15) }
 }
 
-struct SynqSpacing {
-    var xxs: CGFloat = 2
-    var xs: CGFloat = 4
-    var s: CGFloat = 8
-    var m: CGFloat = 12
-    var l: CGFloat = 16
-    var xl: CGFloat = 24
-    var xxl: CGFloat = 32
+public struct SynqSpacing {
+    public var xxs: CGFloat = 2
+    public var xs: CGFloat = 4
+    public var s: CGFloat = 8
+    public var m: CGFloat = 12
+    public var l: CGFloat = 16
+    public var xl: CGFloat = 24
+    public var xxl: CGFloat = 32
     /// Screen side margin.
-    var gutter: CGFloat = 16
+    public var gutter: CGFloat = 16
 }
 
-struct SynqRadii {
-    var panel: CGFloat
-    var control: CGFloat
-    var badge: CGFloat
-    var key: CGFloat
-    var bubble: CGFloat
+public struct SynqRadii {
+    public var panel: CGFloat
+    public var control: CGFloat
+    public var badge: CGFloat
+    public var key: CGFloat
+    public var bubble: CGFloat
 }
 
-struct SynqLines {
-    var hairline: CGFloat = 1
-    var control: CGFloat = 1
+public struct SynqLines {
+    public var hairline: CGFloat = 1
+    public var control: CGFloat = 1
     /// Dash pattern for section rules; empty for solid.
-    var ruleDash: [CGFloat] = []
+    public var ruleDash: [CGFloat] = []
 }
 
-struct SynqMotion {
-    var spring: Animation = .spring(response: 0.42, dampingFraction: 0.86)
-    var quick: Animation = .easeOut(duration: 0.18)
+public struct SynqMotion {
+    public var spring: Animation = .spring(response: 0.42, dampingFraction: 0.86)
+    public var quick: Animation = .easeOut(duration: 0.18)
     /// A blinking cursor in fields and the searching card.
-    var blinkingCursor = true
+    public var blinkingCursor = true
     /// Gentle shimmer while searching (skipped with Reduce Motion).
-    var shimmer = true
-    var pressScale: CGFloat = 0.98
+    public var shimmer = true
+    public var pressScale: CGFloat = 0.98
 }
 
 /// Decorative glyphs the components draw around content (never functional text).
-struct SynqGlyphs {
-    var bracketOpen: String?
-    var bracketClose: String?
-    var strongOpen: String?
-    var strongClose: String?
-    var rowArrow: String?
-    var cursor: String?
-    var prompt: String
+public struct SynqGlyphs {
+    public var bracketOpen: String?
+    public var bracketClose: String?
+    public var strongOpen: String?
+    public var strongClose: String?
+    public var rowArrow: String?
+    public var cursor: String?
+    public var prompt: String
     /// Spinner frames drawn as text; empty draws an arc.
-    var spinner: [String] = []
+    public var spinner: [String] = []
 }
 
 /// Theme flavour copy: taglines and tab labels. Functional English copy stays in screens.
-struct SynqFlavor {
-    var wordmark: String
-    var wordmarkSub: String?
-    var taglines: [SynqArtSlot: String]
-    var tabs: [SynqTab: String]
-    var centreTab: String
-    var seeAll: String?
-    var flightsHeadline: String?
+public struct SynqFlavor {
+    public var wordmark: String
+    public var wordmarkSub: String?
+    public var taglines: [SynqArtSlot: String]
+    public var tabs: [SynqTab: String]
+    public var centreTab: String
+    public var seeAll: String?
+    public var flightsHeadline: String?
     /// Short place coordinates by airport code, shown beside hero art.
-    var places: [String: String]
+    public var places: [String: String]
 }
 
 extension SynqFlavor {
     /// Airport coordinates any theme may show beside hero art.
-    static let airportCoordinates: [String: String] = [
+    public static let airportCoordinates: [String: String] = [
         "GOI": "15.3808°N\n73.8314°E", "DEL": "28.5562°N\n77.1000°E", "BOM": "19.0896°N\n72.8656°E",
         "BLR": "13.1986°N\n77.7066°E", "DXB": "25.2532°N\n55.3657°E", "SIN": "1.3644°N\n103.9915°E",
         "HND": "35.5494°N\n139.7798°E", "BKK": "13.6900°N\n100.7501°E", "DPS": "8.7482°S\n115.1672°E",
@@ -177,21 +177,21 @@ extension SynqFlavor {
 }
 
 /// Semantic icon names, mapped by the theme to SF Symbols.
-enum SynqIcon: String, CaseIterable {
+public enum SynqIcon: String, CaseIterable {
     case back, forward, close, more, settings, scan, copy, share, invite, plus, check, clock, warning, refresh
     case external, flight, flightLand, gift, send, grid, swap, pin, calendar, people, passkey
     case home, trips, group, ask, search, receipt, shield, vote, voted, money
     case deal, team, split, bank, contractor, theme
 }
 
-struct SynqIcons {
-    var symbols: [SynqIcon: String]
-    var weight: Font.Weight
+public struct SynqIcons {
+    public var symbols: [SynqIcon: String]
+    public var weight: Font.Weight
 
-    func name(_ i: SynqIcon) -> String { symbols[i] ?? Self.standard[i] ?? "circle" }
+    public func name(_ i: SynqIcon) -> String { symbols[i] ?? Self.standard[i] ?? "circle" }
 
     /// The plain SF Symbol for every icon; themes override what they want.
-    static let standard: [SynqIcon: String] = [
+    public static let standard: [SynqIcon: String] = [
         .back: "arrow.left", .forward: "arrow.right", .close: "xmark", .more: "ellipsis", .settings: "gearshape", .scan: "viewfinder",
         .copy: "doc.on.doc", .share: "square.and.arrow.up", .invite: "plus", .plus: "plus", .check: "checkmark",
         .clock: "clock", .warning: "exclamationmark.triangle", .refresh: "arrow.clockwise",
@@ -206,32 +206,32 @@ struct SynqIcons {
 }
 
 /// How the components draw themselves.
-struct SynqLooks {
-    enum PanelLabel { case notched, above }
-    enum Avatar { case pixel, initials }
-    enum Progress { case outlined, capsule }
+public struct SynqLooks {
+    public enum PanelLabel { case notched, above }
+    public enum Avatar { case pixel, initials }
+    public enum Progress { case outlined, capsule }
 
-    var panelLabel: PanelLabel
-    var panelFilled: Bool
-    var avatar: Avatar
-    var progress: Progress
-    var uppercaseTitles: Bool
+    public var panelLabel: PanelLabel
+    public var panelFilled: Bool
+    public var avatar: Avatar
+    public var progress: Progress
+    public var uppercaseTitles: Bool
     /// Section labels followed by a hairline rule.
-    var ruledSections: Bool
+    public var ruledSections: Bool
 }
 
-enum SynqArtSlot: String, CaseIterable {
+public enum SynqArtSlot: String, CaseIterable {
     case home, flights, fund, send, gift, receipt, deal, risk, agent
 }
 
-enum SynqArtVariant { case hero, strip }
+public enum SynqArtVariant { case hero, strip }
 
-enum SynqTab: String, CaseIterable, Identifiable {
+public enum SynqTab: String, CaseIterable, Identifiable {
     case home, trips, ask, gifts, group
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     /// English name for VoiceOver, whatever the theme shows.
-    var spoken: String {
+    public var spoken: String {
         switch self {
         case .home: return "Home"
         case .trips: return "Flights"
@@ -249,29 +249,33 @@ private struct ThemeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var synqTheme: any SynqTheme {
+    public var synqTheme: any SynqTheme {
         get { self[ThemeKey.self] }
         set { self[ThemeKey.self] = newValue }
     }
 }
 
-enum SynqThemes {
+public enum SynqThemes {
     /// Every theme the app ships; the first is the default.
-    static let all: [any SynqTheme] = [AsciiTheme(), PaperTheme(), HoloTheme()]
+    public static let all: [any SynqTheme] = [AsciiTheme(), PaperTheme(), HoloTheme()]
 
-    static func named(_ id: String) -> any SynqTheme { all.first { $0.id == id } ?? all[0] }
+    public static func named(_ id: String) -> any SynqTheme { all.first { $0.id == id } ?? all[0] }
 
     /// The person's choice, kept on this device (Settings → Theme).
-    static let storageKey = "synq.theme"
-    static var current: any SynqTheme { named(UserDefaults.standard.string(forKey: storageKey) ?? all[0].id) }
+    public static let storageKey = "synq.theme"
+    public static var current: any SynqTheme { named(UserDefaults.standard.string(forKey: storageKey) ?? all[0].id) }
 }
 
 /// Applies the chosen theme to everything inside it and follows changes live.
-struct SynqThemeRoot<Content: View>: View {
-    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
-    @ViewBuilder var content: () -> Content
+public struct SynqThemeRoot<Content: View>: View {
+    public init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
 
-    var body: some View {
+    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
+    @ViewBuilder public var content: () -> Content
+
+    public var body: some View {
         let theme = SynqThemes.named(themeId)
         content()
             .environment(\.synqTheme, theme)
@@ -281,25 +285,36 @@ struct SynqThemeRoot<Content: View>: View {
 
 // MARK: - Fonts
 
-/// Registers the bundled fonts (also listed under UIAppFonts) and reports which
-/// families loaded, so roles fall back to system fonts when one is missing.
-enum SynqFonts {
-    static let files = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-Medium.ttf", "JetBrainsMono-Bold.ttf",
-                        "DepartureMono-Regular.otf", "NotoSansJP-Synq.ttf"]
+/// Registers the bundled fonts (shipped in the SynqShared resource bundle of
+/// both the app and the extension) and reports which families loaded, so roles
+/// fall back to system fonts when one is missing.
+public enum SynqFonts {
+    public static let files = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-Medium.ttf", "JetBrainsMono-Bold.ttf",
+                               "DepartureMono-Regular.otf", "NotoSansJP-Synq.ttf"]
 
     private final class Marker {}
     private static var registered = false
 
-    /// Registers fonts found in `directory`, else in the extension bundle.
-    static func register(from directory: URL? = nil) {
+    /// The bundle holding the fonts: the package's resource bundle, or the code's
+    /// own bundle when the sources are compiled directly (design previews).
+    private static var bundle: Bundle {
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        return Bundle(for: Marker.self)
+        #endif
+    }
+
+    /// Registers fonts found in `directory`, else in the SynqShared resource bundle.
+    public static func register(from directory: URL? = nil) {
         guard !registered else { return }
         registered = true
         for file in files {
             let url = directory?.appendingPathComponent(file)
-                ?? Bundle(for: Marker.self).url(forResource: (file as NSString).deletingPathExtension,
-                                                withExtension: (file as NSString).pathExtension)
+                ?? bundle.url(forResource: (file as NSString).deletingPathExtension,
+                              withExtension: (file as NSString).pathExtension)
             guard let url else { continue }
-            // Already registered through UIAppFonts is fine: the error is ignored.
+            // Already registered is fine: the error is ignored.
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         }
     }
@@ -307,7 +322,7 @@ enum SynqFonts {
     private static var cache: [String: Bool] = [:]
     private static let lock = NSLock()
 
-    static func isAvailable(_ postScriptName: String) -> Bool {
+    public static func isAvailable(_ postScriptName: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         if let known = cache[postScriptName] { return known }
         let font = CTFontCreateWithName(postScriptName as CFString, 12, nil)

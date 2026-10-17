@@ -6,12 +6,12 @@ import SwiftUI
 
 // MARK: - Type and ink
 
-struct SynqTypeModifier: ViewModifier {
+public struct SynqTypeModifier: ViewModifier {
     @Environment(\.synqTheme) private var theme
-    let role: SynqTypeRole
-    let ink: SynqInk
+    public let role: SynqTypeRole
+    public let ink: SynqInk
 
-    func body(content: Content) -> some View {
+    public func body(content: Content) -> some View {
         let spec = theme.type[role]
         content
             .font(spec.font)
@@ -23,19 +23,19 @@ struct SynqTypeModifier: ViewModifier {
 
 extension View {
     /// Applies a typography role and an ink from the current theme.
-    func synqType(_ role: SynqTypeRole, _ ink: SynqInk = .primary) -> some View {
+    public func synqType(_ role: SynqTypeRole, _ ink: SynqInk = .primary) -> some View {
         modifier(SynqTypeModifier(role: role, ink: ink))
     }
 }
 
 /// An icon from the theme's icon set.
-struct SynqIconView: View {
+public struct SynqIconView: View {
     @Environment(\.synqTheme) private var theme
-    let icon: SynqIcon
-    var size: CGFloat = 18
-    var ink: SynqInk = .primary
+    public let icon: SynqIcon
+    public var size: CGFloat = 18
+    public var ink: SynqInk = .primary
 
-    var body: some View {
+    public var body: some View {
         Image(systemName: theme.icons.name(icon))
             .font(.system(size: size, weight: theme.icons.weight))
             .foregroundStyle(theme.colors.ink(ink))
@@ -46,11 +46,11 @@ struct SynqIconView: View {
 // MARK: - Screen
 
 /// The themed canvas every screen sits on.
-struct SynqScreen<Content: View>: View {
+public struct SynqScreen<Content: View>: View {
     @Environment(\.synqTheme) private var theme
-    @ViewBuilder var content: () -> Content
+    @ViewBuilder public var content: () -> Content
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             theme.colors.background.ignoresSafeArea()
             content()
@@ -61,13 +61,13 @@ struct SynqScreen<Content: View>: View {
 }
 
 /// Spacing and gutters from the theme, for screens that lay out stacks.
-struct SynqStack<Content: View>: View {
+public struct SynqStack<Content: View>: View {
     @Environment(\.synqTheme) private var theme
-    var spacing: KeyPath<SynqSpacing, CGFloat> = \.l
-    var gutter = true
-    @ViewBuilder var content: () -> Content
+    public var spacing: KeyPath<SynqSpacing, CGFloat> = \.l
+    public var gutter = true
+    @ViewBuilder public var content: () -> Content
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space[keyPath: spacing]) { content() }
             .padding(.horizontal, gutter ? theme.space.gutter : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -76,21 +76,21 @@ struct SynqStack<Content: View>: View {
 
 // MARK: - Header
 
-struct SynqHeaderAction {
-    var icon: SynqIcon
-    var label: String
-    var action: () -> Void
+public struct SynqHeaderAction {
+    public var icon: SynqIcon
+    public var label: String
+    public var action: () -> Void
 }
 
 /// Back arrow, an all-caps title and trailing icon buttons.
-struct SynqHeader: View {
+public struct SynqHeader: View {
     @Environment(\.synqTheme) private var theme
-    let title: String
-    var onBack: (() -> Void)? = nil
-    var backLabel = "Back"
-    var actions: [SynqHeaderAction] = []
+    public let title: String
+    public var onBack: (() -> Void)? = nil
+    public var backLabel = "Back"
+    public var actions: [SynqHeaderAction] = []
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: theme.space.m) {
             if let onBack {
                 Button {
@@ -122,14 +122,14 @@ struct SynqHeader: View {
 }
 
 /// The home header: wordmark, the theme's sub-mark, the network label and one action.
-struct SynqWordmarkBar: View {
+public struct SynqWordmarkBar: View {
     @Environment(\.synqTheme) private var theme
-    let network: String
-    var action: SynqHeaderAction? = nil
-    var compact = false
+    public let network: String
+    public var action: SynqHeaderAction? = nil
+    public var compact = false
     @State private var choosingTheme = false
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .top, spacing: theme.space.s) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(theme.copy.wordmark).synqType(.wordmark)
@@ -157,13 +157,13 @@ struct SynqWordmarkBar: View {
 }
 
 /// A small icon button framed by the theme's brackets (or a plain circle).
-struct SynqIconButton: View {
+public struct SynqIconButton: View {
     @Environment(\.synqTheme) private var theme
-    let icon: SynqIcon
-    let label: String
-    let action: () -> Void
+    public let icon: SynqIcon
+    public let label: String
+    public let action: () -> Void
 
-    var body: some View {
+    public var body: some View {
         Button {
             Haptics.tap()
             action()
@@ -188,12 +188,12 @@ struct SynqIconButton: View {
 // MARK: - Art
 
 /// Full-bleed hero art from the theme's art set, with optional place coordinates.
-struct SynqHeroArt: View {
+public struct SynqHeroArt: View {
     @Environment(\.synqTheme) private var theme
-    let slot: SynqArtSlot
-    var place: String? = nil
+    public let slot: SynqArtSlot
+    public var place: String? = nil
 
-    var body: some View {
+    public var body: some View {
         theme.art(slot, .hero)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .topTrailing) {
@@ -208,19 +208,19 @@ struct SynqHeroArt: View {
 }
 
 /// The theme's short art strip for cards and compact rows.
-struct SynqArtStrip: View {
+public struct SynqArtStrip: View {
     @Environment(\.synqTheme) private var theme
-    let slot: SynqArtSlot
+    public let slot: SynqArtSlot
 
-    var body: some View { theme.art(slot, .strip).accessibilityHidden(true) }
+    public var body: some View { theme.art(slot, .strip).accessibilityHidden(true) }
 }
 
 /// The theme's large flavour headline for flights (e.g. "Where to?"), with an English line under it.
-struct SynqDisplay: View {
+public struct SynqDisplay: View {
     @Environment(\.synqTheme) private var theme
-    let line: String
+    public let line: String
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.xs) {
             if let flavour = theme.copy.flightsHeadline {
                 Text(flavour).synqType(.display).accessibilityHidden(true)
@@ -233,13 +233,13 @@ struct SynqDisplay: View {
 // MARK: - Panel and sections
 
 /// An outlined (or filled) panel with its label notched into the top border.
-struct SynqPanel<Content: View>: View {
+public struct SynqPanel<Content: View>: View {
     @Environment(\.synqTheme) private var theme
-    var label: String? = nil
-    var padding = true
-    @ViewBuilder var content: () -> Content
+    public var label: String? = nil
+    public var padding = true
+    @ViewBuilder public var content: () -> Content
 
-    var body: some View {
+    public var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
         let notched = theme.looks.panelLabel == .notched
         VStack(alignment: .leading, spacing: theme.space.s) {
@@ -269,15 +269,15 @@ struct SynqPanel<Content: View>: View {
 }
 
 /// A section label followed by a rule, with optional trailing flavour or action.
-struct SynqSectionLabel: View {
+public struct SynqSectionLabel: View {
     @Environment(\.synqTheme) private var theme
-    let text: String
-    var trailing: String? = nil
+    public let text: String
+    public var trailing: String? = nil
     /// Shows the theme's "see all" flavour as the trailing text.
-    var seeAll = false
-    var action: (() -> Void)? = nil
+    public var seeAll = false
+    public var action: (() -> Void)? = nil
 
-    var body: some View {
+    public var body: some View {
         let trailing = seeAll ? theme.copy.seeAll : self.trailing
         HStack(spacing: theme.space.s) {
             Text(text).synqType(.sectionLabel, .secondary).accessibilityAddTraits(.isHeader)
@@ -295,10 +295,10 @@ struct SynqSectionLabel: View {
 }
 
 /// A dashed (or solid) hairline rule.
-struct SynqRule: View {
+public struct SynqRule: View {
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         GeometryReader { geo in
             Path { p in
                 p.move(to: CGPoint(x: 0, y: 0.5))
@@ -311,11 +311,11 @@ struct SynqRule: View {
     }
 }
 
-struct SynqDivider: View {
+public struct SynqDivider: View {
     @Environment(\.synqTheme) private var theme
-    var vertical = false
+    public var vertical = false
 
-    var body: some View {
+    public var body: some View {
         Rectangle().fill(theme.colors.line)
             .frame(width: vertical ? theme.lines.hairline : nil, height: vertical ? nil : theme.lines.hairline)
             .accessibilityHidden(true)
@@ -323,12 +323,12 @@ struct SynqDivider: View {
 }
 
 /// Small explanatory text, with a warning mark for errors.
-struct SynqNote: View {
+public struct SynqNote: View {
     @Environment(\.synqTheme) private var theme
-    let text: String
-    var error = false
+    public let text: String
+    public var error = false
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: theme.space.s) {
             if error { SynqIconView(icon: .warning, size: 12, ink: .danger) }
             Text(text).synqType(.caption, error ? .danger : .tertiary).fixedSize(horizontal: false, vertical: true)
@@ -339,7 +339,7 @@ struct SynqNote: View {
 
 // MARK: - Buttons
 
-enum SynqButtonKind {
+public enum SynqButtonKind {
     /// Filled, strongest action (passkey hand-offs).
     case primary
     /// Outlined with the theme's brackets.
@@ -348,17 +348,17 @@ enum SynqButtonKind {
     case compact
 }
 
-struct SynqButton: View {
+public struct SynqButton: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.isEnabled) private var enabled
-    let title: String
-    var icon: SynqIcon? = nil
-    var trailingIcon: SynqIcon? = nil
-    var kind: SynqButtonKind = .secondary
-    var busy = false
-    let action: () -> Void
+    public let title: String
+    public var icon: SynqIcon? = nil
+    public var trailingIcon: SynqIcon? = nil
+    public var kind: SynqButtonKind = .secondary
+    public var busy = false
+    public let action: () -> Void
 
-    var body: some View {
+    public var body: some View {
         Button {
             Haptics.tap()
             action()
@@ -422,14 +422,14 @@ struct SynqButton: View {
 }
 
 /// A selectable chip (examples, suggestions, options).
-struct SynqChip: View {
+public struct SynqChip: View {
     @Environment(\.synqTheme) private var theme
-    let title: String
-    var icon: SynqIcon? = nil
-    var selected = false
-    let action: () -> Void
+    public let title: String
+    public var icon: SynqIcon? = nil
+    public var selected = false
+    public let action: () -> Void
 
-    var body: some View {
+    public var body: some View {
         Button {
             Haptics.tap()
             action()
@@ -450,10 +450,10 @@ struct SynqChip: View {
     }
 }
 
-struct SynqPressStyle: ButtonStyle {
+public struct SynqPressStyle: ButtonStyle {
     @Environment(\.synqTheme) private var theme
 
-    func makeBody(configuration: Configuration) -> some View {
+    public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed ? theme.motion.pressScale : 1)
@@ -464,7 +464,7 @@ struct SynqPressStyle: ButtonStyle {
 
 // MARK: - Rows and groups
 
-enum SynqRowTrailing {
+public enum SynqRowTrailing {
     case arrow
     case chevron
     case badge(SynqBadgeKind, String)
@@ -473,13 +473,13 @@ enum SynqRowTrailing {
 }
 
 /// One outlined group holding rows separated by hairlines.
-struct SynqGroup<Content: View>: View {
+public struct SynqGroup<Content: View>: View {
     @Environment(\.synqTheme) private var theme
     /// Draws the border in the strong line (a highlighted option).
-    var emphasis = false
-    @ViewBuilder var content: () -> Content
+    public var emphasis = false
+    @ViewBuilder public var content: () -> Content
 
-    var body: some View {
+    public var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.panel, style: .continuous)
         VStack(spacing: 0) { content() }
             .background(shape.fill(theme.looks.panelFilled ? theme.colors.panel : theme.colors.background))
@@ -489,17 +489,17 @@ struct SynqGroup<Content: View>: View {
 }
 
 /// An icon, a title and a subtitle, with a trailing arrow, chevron, badge or text.
-struct SynqRow: View {
+public struct SynqRow: View {
     @Environment(\.synqTheme) private var theme
-    var icon: SynqIcon? = nil
-    let title: String
-    var subtitle: String? = nil
-    var detail: String? = nil
-    var trailing: SynqRowTrailing = .arrow
-    var divider = false
-    var action: (() -> Void)? = nil
+    public var icon: SynqIcon? = nil
+    public let title: String
+    public var subtitle: String? = nil
+    public var detail: String? = nil
+    public var trailing: SynqRowTrailing = .arrow
+    public var divider = false
+    public var action: (() -> Void)? = nil
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             if divider { SynqDivider() }
             if let action {
@@ -557,25 +557,25 @@ struct SynqRow: View {
 // MARK: - Fields
 
 /// One field in a stacked field group: label, value (or editor), trailing icon cell.
-struct SynqField: View {
+public struct SynqField: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
-    let label: String
-    var icon: SynqIcon? = nil
-    var text: Binding<String>? = nil
-    var value: String = ""
-    var placeholder = ""
-    var detail: String? = nil
-    var keyboard: SynqKeyboard? = nil
-    var large = false
-    var trailingIcon: SynqIcon? = nil
-    var trailingLabel = ""
-    var trailingAction: (() -> Void)? = nil
-    var divider = false
+    public let label: String
+    public var icon: SynqIcon? = nil
+    public var text: Binding<String>? = nil
+    public var value: String = ""
+    public var placeholder = ""
+    public var detail: String? = nil
+    public var keyboard: SynqKeyboard? = nil
+    public var large = false
+    public var trailingIcon: SynqIcon? = nil
+    public var trailingLabel = ""
+    public var trailingAction: (() -> Void)? = nil
+    public var divider = false
 
     private var shown: String { text?.wrappedValue ?? value }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             if divider { SynqDivider() }
             HStack(spacing: 0) {
@@ -629,20 +629,20 @@ struct SynqField: View {
 }
 
 /// The "Ask or tell Synq…" input with the theme's prompt glyph and a send key.
-struct SynqCommandField: View {
+public struct SynqCommandField: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Binding var text: String
-    var placeholder: String
-    var busy: Bool
-    var onSubmit: () -> Void
-    var onFocus: () -> Void
+    @Binding public var text: String
+    public var placeholder: String
+    public var busy: Bool
+    public var onSubmit: () -> Void
+    public var onFocus: () -> Void
     @FocusState private var focused: Bool
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    var body: some View {
+    public var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.control, style: .continuous)
         HStack(alignment: .center, spacing: theme.space.s) {
             if !theme.glyphs.prompt.isEmpty {
@@ -708,12 +708,12 @@ struct SynqCommandField: View {
 
 // MARK: - Badges, progress, amounts
 
-enum SynqBadgeKind: Equatable {
+public enum SynqBadgeKind: Equatable {
     case approved, pending, neutral, live, danger
 }
 
 extension SynqTone {
-    var badge: SynqBadgeKind {
+    public var badge: SynqBadgeKind {
         switch self {
         case .waiting, .moving: return .pending
         case .live: return .live
@@ -723,12 +723,12 @@ extension SynqTone {
     }
 }
 
-struct SynqBadge: View {
+public struct SynqBadge: View {
     @Environment(\.synqTheme) private var theme
-    let kind: SynqBadgeKind
-    let text: String
+    public let kind: SynqBadgeKind
+    public let text: String
 
-    var body: some View {
+    public var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.badge, style: .continuous)
         let c = theme.colors
         let (ink, fill, line): (SynqInk, Color, Color) = {
@@ -761,13 +761,13 @@ struct SynqBadge: View {
 }
 
 /// A thin outlined bar with a white fill and a dithered edge, plus a count.
-struct SynqProgress: View {
+public struct SynqProgress: View {
     @Environment(\.synqTheme) private var theme
-    let value: Int
-    let total: Int
-    var label: String? = nil
+    public let value: Int
+    public let total: Int
+    public var label: String? = nil
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: theme.space.m) {
             GeometryReader { geo in
                 let frac = total > 0 ? min(1, CGFloat(value) / CGFloat(total)) : 0
@@ -813,13 +813,13 @@ struct SynqProgress: View {
 }
 
 /// An exact amount with its unit.
-struct SynqAmount: View {
+public struct SynqAmount: View {
     @Environment(\.synqTheme) private var theme
-    let amount: String
-    let unit: String
-    var large = true
+    public let amount: String
+    public let unit: String
+    public var large = true
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: theme.space.s) {
             Text(amount).synqType(large ? .amountLarge : .amountMedium).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.6)
@@ -831,13 +831,13 @@ struct SynqAmount: View {
 }
 
 /// A rotating spinner: the theme's glyph frames or an arc.
-struct SynqSpinner: View {
+public struct SynqSpinner: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
-    var ink: SynqInk = .primary
-    var size: CGFloat = 18
+    public var ink: SynqInk = .primary
+    public var size: CGFloat = 18
 
-    var body: some View {
+    public var body: some View {
         Group {
             if let phase = mode.phase {
                 frame(phase)
@@ -865,12 +865,12 @@ struct SynqSpinner: View {
 }
 
 /// A scanning activity bar (searching): a bright segment sweeping across dots.
-struct SynqScanBar: View {
+public struct SynqScanBar: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    public var body: some View {
         Group {
             if let phase = mode.phase {
                 bar(phase)
@@ -902,17 +902,17 @@ struct SynqScanBar: View {
 
 // MARK: - Avatars
 
-enum SynqAvatarStatus { case none, approved, pending }
+public enum SynqAvatarStatus { case none, approved, pending }
 
 /// A member medallion: a deterministic pixel face (or initials) with a status mark.
-struct SynqAvatar: View {
+public struct SynqAvatar: View {
     @Environment(\.synqTheme) private var theme
-    let id: String
-    let name: String
-    var status: SynqAvatarStatus = .none
-    var size: CGFloat = 44
+    public let id: String
+    public let name: String
+    public var status: SynqAvatarStatus = .none
+    public var size: CGFloat = 44
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             Circle().fill(theme.colors.background)
             if theme.looks.avatar == .pixel {
@@ -950,15 +950,15 @@ struct SynqAvatar: View {
 }
 
 /// A 1-bit pixel portrait generated from a seed: head, hair, eyes, mouth, shoulders.
-struct PixelFace: View {
-    let seed: Int
-    let ink: Color
-    let dim: Color
+public struct PixelFace: View {
+    public let seed: Int
+    public let ink: Color
+    public let dim: Color
 
-    static let n = 24
+    public static let n = 24
 
     /// 0 empty, 1 ink, 2 dim (dither).
-    static func grid(_ seed: Int) -> [[UInt8]] {
+    public static func grid(_ seed: Int) -> [[UInt8]] {
         var s = UInt64(truncatingIfNeeded: seed) &* 0x9E3779B97F4A7C15 | 1
         func r(_ k: Int) -> Int {
             s = s &* 6364136223846793005 &+ 1442695040888963407
@@ -1034,7 +1034,7 @@ struct PixelFace: View {
         return g
     }
 
-    var body: some View {
+    public var body: some View {
         Canvas { ctx, size in
             let g = Self.grid(seed)
             let p = size.width / CGFloat(Self.n)
@@ -1051,17 +1051,17 @@ struct PixelFace: View {
 }
 
 /// Overlapping avatars for a row.
-struct SynqAvatarStack: View {
-    struct Person: Identifiable {
-        let id: String
-        let name: String
+public struct SynqAvatarStack: View {
+    public struct Person: Identifiable {
+        public let id: String
+        public let name: String
     }
 
-    let people: [Person]
-    var size: CGFloat = 34
-    var limit = 4
+    public let people: [Person]
+    public var size: CGFloat = 34
+    public var limit = 4
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: -size * 0.18) {
             ForEach(Array(people.prefix(limit))) { p in SynqAvatar(id: p.id, name: p.name, size: size) }
         }
@@ -1073,13 +1073,13 @@ struct SynqAvatarStack: View {
 // MARK: - Keypad
 
 /// A 3×4 keypad editing a decimal amount (up to six decimals).
-struct SynqKeypad: View {
+public struct SynqKeypad: View {
     @Environment(\.synqTheme) private var theme
-    @Binding var text: String
+    @Binding public var text: String
 
     private let keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"]
 
-    var body: some View {
+    public var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: theme.space.s), count: 3), spacing: theme.space.s) {
             ForEach(keys, id: \.self) { k in
                 Button {
@@ -1115,12 +1115,12 @@ struct SynqKeypad: View {
 
 // MARK: - Tab bar
 
-struct SynqTabBar: View {
+public struct SynqTabBar: View {
     @Environment(\.synqTheme) private var theme
-    let selected: SynqTab
-    let onSelect: (SynqTab) -> Void
+    public let selected: SynqTab
+    public let onSelect: (SynqTab) -> Void
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             SynqDivider()
             HStack(alignment: .center, spacing: 0) {
@@ -1174,34 +1174,34 @@ struct SynqTabBar: View {
 // MARK: - Card bubble (transcript)
 
 /// What a transcript card shows; built by the screens from fund, payment and trip views.
-struct SynqCardModel: Equatable {
-    var art: SynqArtSlot
-    var eyebrow: String
-    var title: String
-    var amount: String?
-    var unit: String
-    var detail: String
-    var badge: SynqBadgeKind
-    var status: String
-    var progress: (Int, Int)?
-    var network: String
-    var accessibilityLabel: String
+public struct SynqCardModel: Equatable {
+    public var art: SynqArtSlot
+    public var eyebrow: String
+    public var title: String
+    public var amount: String?
+    public var unit: String
+    public var detail: String
+    public var badge: SynqBadgeKind
+    public var status: String
+    public var progress: (Int, Int)?
+    public var network: String
+    public var accessibilityLabel: String
 
-    static func == (a: SynqCardModel, b: SynqCardModel) -> Bool {
+    public static func == (a: SynqCardModel, b: SynqCardModel) -> Bool {
         a.title == b.title && a.amount == b.amount && a.status == b.status && a.detail == b.detail
             && a.progress?.0 == b.progress?.0 && a.progress?.1 == b.progress?.1 && a.network == b.network
     }
 }
 
 /// A live-layout transcript bubble: art strip, label, title, amount, status, network.
-struct SynqCardBubble: View {
+public struct SynqCardBubble: View {
     @Environment(\.synqTheme) private var theme
-    let model: SynqCardModel
+    public let model: SynqCardModel
 
     /// Bubble height for a width (MSMessagesAppViewController.contentSizeThatFits).
-    static func height(forWidth w: CGFloat) -> CGFloat { min(250, (w - 24) / 120 * 1.8 * 12 + 148) }
+    public static func height(forWidth w: CGFloat) -> CGFloat { min(250, (w - 24) / 120 * 1.8 * 12 + 148) }
 
-    var body: some View {
+    public var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.radius.bubble, style: .continuous)
         VStack(alignment: .leading, spacing: 6) {
             SynqArtStrip(slot: model.art)
@@ -1239,9 +1239,9 @@ struct SynqCardBubble: View {
 }
 
 // Secure input cannot be captured by macOS ImageRenderer; previews show only its placeholder.
-struct SynqPrivateCodeField: View {
-    @Binding var text: String
-    var body: some View {
+public struct SynqPrivateCodeField: View {
+    @Binding public var text: String
+    public var body: some View {
 #if os(iOS)
         SecureField("Private sign-in code from the web page", text: $text).synqType(.body).synqKeyboard(.codes)
 #else

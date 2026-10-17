@@ -4,18 +4,18 @@ import SwiftUI
 // system type, no brackets, symbol art). It exists to prove a theme swap needs no
 // screen changes: `render.sh <out> holo` renders every screen with it.
 
-struct HoloTheme: SynqTheme {
-    let id = "holo"
-    let name = "Holo"
-    let summary = "Violet glass, rounded type, symbol art"
-    let colorScheme = ColorScheme.dark
+public struct HoloTheme: SynqTheme {
+    public let id = "holo"
+    public let name = "Holo"
+    public let summary = "Violet glass, rounded type, symbol art"
+    public let colorScheme = ColorScheme.dark
 
-    static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
+    public static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
               blue: Double(v & 0xFF) / 255, opacity: a)
     }
 
-    let colors = SynqColors(
+    public let colors = SynqColors(
         background: hex(0x07060D), panel: hex(0x16142A),
         inkPrimary: hex(0xF5F4FA), inkSecondary: hex(0xA9A6BF), inkTertiary: hex(0x6E6A88),
         line: hex(0x2C2945), lineStrong: hex(0x8B6BFF),
@@ -29,7 +29,7 @@ struct HoloTheme: SynqTheme {
                      uppercase: upper, fixed: fixed)
     }
 
-    let type = SynqTypography(roles: [
+    public let type = SynqTypography(roles: [
         .wordmark: r(30, .bold, .largeTitle, fixed: true), .wordmarkSub: r(11, .medium, .caption, fixed: true),
         .title: r(18, .bold, .headline), .headline: r(22, .bold, .title2),
         .sectionLabel: r(13, .semibold, .footnote, tracking: 0.4, upper: true),
@@ -40,23 +40,23 @@ struct HoloTheme: SynqTheme {
         .tagline: r(13, .medium, .caption, fixed: true), .display: r(26, .bold, .title),
     ], artFamily: nil)
 
-    let space = SynqSpacing()
-    let radius = SynqRadii(panel: 20, control: 26, badge: 10, key: 14, bubble: 18)
-    let lines = SynqLines(hairline: 0.75, control: 0.75, ruleDash: [])
-    let motion = SynqMotion(blinkingCursor: false)
-    let glyphs = SynqGlyphs(bracketOpen: nil, bracketClose: nil, strongOpen: nil, strongClose: nil, rowArrow: nil,
+    public let space = SynqSpacing()
+    public let radius = SynqRadii(panel: 20, control: 26, badge: 10, key: 14, bubble: 18)
+    public let lines = SynqLines(hairline: 0.75, control: 0.75, ruleDash: [])
+    public let motion = SynqMotion(blinkingCursor: false)
+    public let glyphs = SynqGlyphs(bracketOpen: nil, bracketClose: nil, strongOpen: nil, strongClose: nil, rowArrow: nil,
                             cursor: nil, prompt: "")
-    let copy = SynqFlavor(wordmark: "Synq", wordmarkSub: nil, taglines: [:],
+    public let copy = SynqFlavor(wordmark: "Synq", wordmarkSub: nil, taglines: [:],
                           tabs: [.home: "Home", .trips: "Flights", .gifts: "Gifts", .group: "Group", .ask: "S"],
                           centreTab: "S", seeAll: "See all", flightsHeadline: "Where to?", places: [:])
-    let icons = SynqIcons(symbols: SynqIcons.standard.merging([
+    public let icons = SynqIcons(symbols: SynqIcons.standard.merging([
         .flight: "airplane", .gift: "gift.fill", .send: "arrow.up.right", .home: "house.fill",
         .group: "person.2.fill", .people: "person.2.fill", .passkey: "faceid", .ask: "sparkles",
     ]) { _, new in new }, weight: .semibold)
-    let looks = SynqLooks(panelLabel: .above, panelFilled: true, avatar: .initials, progress: .capsule,
+    public let looks = SynqLooks(panelLabel: .above, panelFilled: true, avatar: .initials, progress: .capsule,
                           uppercaseTitles: false, ruledSections: false)
 
-    func art(_ slot: SynqArtSlot, _ variant: SynqArtVariant) -> AnyView {
+    public func art(_ slot: SynqArtSlot, _ variant: SynqArtVariant) -> AnyView {
         let symbol: String
         switch slot {
         case .home: symbol = "mountain.2.fill"

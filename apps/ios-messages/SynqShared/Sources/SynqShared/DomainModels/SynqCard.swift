@@ -3,82 +3,82 @@ import Foundation
 /// Swift mirror of the canonical `synq.card/v1` schema (packages/schemas/src/cards.ts).
 /// Display only: amounts are the backend's exact decimal strings and are never parsed
 /// into numbers or recomputed here.
-struct CardMoney: Codable, Equatable {
-    let amount: String
-    let symbol: String
-    var text: String { "\(amount) \(symbol)" }
+public struct CardMoney: Codable, Equatable {
+    public let amount: String
+    public let symbol: String
+    public var text: String { "\(amount) \(symbol)" }
 }
 
-struct CardAction: Codable, Equatable {
-    let kind: String
-    let label: String
-    let url: String
-    let style: String
+public struct CardAction: Codable, Equatable {
+    public let kind: String
+    public let label: String
+    public let url: String
+    public let style: String
 }
 
-struct CardQuorum: Codable, Equatable {
-    let counted: Int
-    let required: Int
+public struct CardQuorum: Codable, Equatable {
+    public let counted: Int
+    public let required: Int
 }
 
-struct CardRecipient: Codable, Equatable {
-    let label: String
-    let address: String?
+public struct CardRecipient: Codable, Equatable {
+    public let label: String
+    public let address: String?
 }
 
-struct CardOption: Codable, Equatable {
-    let optionId: String
-    let product: String?
-    let price: CardMoney?
-    let delivery: String?
-    let votes: Int?
-    let hotel: String?
-    let room: String?
-    let total: CardMoney?
-    let cancellation: String?
-    let preferenceVotes: Int?
+public struct CardOption: Codable, Equatable {
+    public let optionId: String
+    public let product: String?
+    public let price: CardMoney?
+    public let delivery: String?
+    public let votes: Int?
+    public let hotel: String?
+    public let room: String?
+    public let total: CardMoney?
+    public let cancellation: String?
+    public let preferenceVotes: Int?
 }
 
-struct SynqCard: Codable, Equatable {
-    let schema: String
-    let type: String
-    let cardId: String
-    let groupId: String
-    let groupLabel: String
-    let issuedAt: Int
-    let actions: [CardAction]
+public struct SynqCard: Codable, Equatable {
+    public let schema: String
+    public let type: String
+    public let cardId: String
+    public let groupId: String
+    public let groupLabel: String
+    public let issuedAt: Int
+    public let actions: [CardAction]
     // GROUP_TREASURY
-    let balance: CardMoney?
-    let available: CardMoney?
-    let reserved: CardMoney?
-    let memberCount: Int?
+    public let balance: CardMoney?
+    public let available: CardMoney?
+    public let reserved: CardMoney?
+    public let memberCount: Int?
     // APPROVAL_PROPOSAL
-    let proposalId: String?
-    let proposalKind: String?
-    let amount: CardMoney?
-    let recipient: CardRecipient?
-    let reason: String?
-    let quorum: CardQuorum?
-    let status: String?
+    public let proposalId: String?
+    public let proposalKind: String?
+    public let amount: CardMoney?
+    public let recipient: CardRecipient?
+    public let reason: String?
+    public let quorum: CardQuorum?
+    public let status: String?
     // GROUP_GIFT / HOTEL_COMPARISON
-    let occasion: String?
-    let stay: String?
-    let options: [CardOption]?
-    let provider: String?
+    public let occasion: String?
+    public let stay: String?
+    public let options: [CardOption]?
+    public let provider: String?
     // DCA_MANDATE
-    let asset: String?
-    let frequency: String?
-    let perExecutionLimit: CardMoney?
-    let cumulativeLimit: CardMoney?
+    public let asset: String?
+    public let frequency: String?
+    public let perExecutionLimit: CardMoney?
+    public let cumulativeLimit: CardMoney?
     // EXECUTION_RECEIPT
-    let label: String?
-    let transactionHash: String?
-    let settlementStatus: String?
-    let executionMode: String?
+    public let label: String?
+    public let transactionHash: String?
+    public let settlementStatus: String?
+    public let executionMode: String?
 
-    static let supportedSchema = "synq.card/v1"
+    public static let supportedSchema = "synq.card/v1"
 
-    var title: String {
+    public var title: String {
         switch type {
         case "GROUP_TREASURY": return "\(groupLabel) treasury"
         case "APPROVAL_PROPOSAL": return reason ?? "Group proposal"
@@ -91,7 +91,7 @@ struct SynqCard: Codable, Equatable {
     }
 
     /// Detail lines; mirrors the server renderers' wording without any arithmetic.
-    var lines: [String] {
+    public var lines: [String] {
         var out: [String] = []
         switch type {
         case "GROUP_TREASURY":

@@ -4,14 +4,14 @@ import SwiftUI
 // confirms it with a passkey and members approve it there.
 
 /// Header, canvas and spacing shared by every sheet.
-struct SheetScaffold<Content: View>: View {
-    var title: String
-    var onCancel: () -> Void
-    var actions: [SynqHeaderAction] = []
-    @ViewBuilder var content: () -> Content
+public struct SheetScaffold<Content: View>: View {
+    public var title: String
+    public var onCancel: () -> Void
+    public var actions: [SynqHeaderAction] = []
+    @ViewBuilder public var content: () -> Content
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             VStack(alignment: .leading, spacing: theme.space.l) {
                 SynqHeader(title: title, onBack: onCancel, backLabel: "Cancel", actions: actions)
@@ -27,15 +27,15 @@ struct SheetScaffold<Content: View>: View {
 
 // MARK: - Send
 
-struct SendSheet: View {
-    let view: FundView
-    let onContinue: (FundRecipient, String) -> Void
-    let onCancel: () -> Void
+public struct SendSheet: View {
+    public let view: FundView
+    public let onContinue: (FundRecipient, String) -> Void
+    public let onCancel: () -> Void
     @State private var recipient: FundRecipient?
     @State private var amount: String
     @Environment(\.synqTheme) private var theme
 
-    init(view: FundView, prefill: SendPrefill, onContinue: @escaping (FundRecipient, String) -> Void,
+    public init(view: FundView, prefill: SendPrefill, onContinue: @escaping (FundRecipient, String) -> Void,
          onCancel: @escaping () -> Void) {
         self.view = view
         self.onContinue = onContinue
@@ -48,7 +48,7 @@ struct SendSheet: View {
     private var normalized: String? { normalizedAmount(amount, max: maxAmount) }
     private var symbol: String { view.treasury?.symbol ?? "AUSD" }
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Send payment", onCancel: onCancel) {
             SynqStack(spacing: \.m) {
                 recipientPanel
@@ -110,18 +110,18 @@ struct SendSheet: View {
 
 // MARK: - Plan a trip
 
-struct PlanTripSheet: View {
-    let prefill: FlightDraft
-    let onSearch: (FlightPlan) -> Void
-    let onCancel: () -> Void
+public struct PlanTripSheet: View {
+    public let prefill: FlightDraft
+    public let onSearch: (FlightPlan) -> Void
+    public let onCancel: () -> Void
 
-    init(prefill: FlightDraft = FlightDraft(), onSearch: @escaping (FlightPlan) -> Void, onCancel: @escaping () -> Void) {
+    public init(prefill: FlightDraft = FlightDraft(), onSearch: @escaping (FlightPlan) -> Void, onCancel: @escaping () -> Void) {
         self.prefill = prefill
         self.onSearch = onSearch
         self.onCancel = onCancel
     }
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Plan a trip", onCancel: onCancel) {
             SynqHeroArt(slot: .flights)
             SynqStack {
@@ -135,13 +135,13 @@ struct PlanTripSheet: View {
 
 // MARK: - Gift
 
-struct GiftSheet: View {
-    let prefill: GiftPrefill
-    let maxBudget: Int
-    let onSearch: (String, String) -> Void
-    let onCancel: () -> Void
+public struct GiftSheet: View {
+    public let prefill: GiftPrefill
+    public let maxBudget: Int
+    public let onSearch: (String, String) -> Void
+    public let onCancel: () -> Void
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Find a gift", onCancel: onCancel) {
             SynqHeroArt(slot: .gift)
             SynqStack {

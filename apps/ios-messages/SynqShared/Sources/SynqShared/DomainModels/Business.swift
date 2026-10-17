@@ -10,95 +10,95 @@ import Foundation
 
 // MARK: - Features
 
-enum BusinessFeatureKind: String, CaseIterable, Identifiable {
+public enum BusinessFeatureKind: String, CaseIterable, Identifiable {
     case deals, invoices, team, splits, treasury, contractors
-    var id: String { rawValue }
+    public var id: String { rawValue }
 }
 
-struct BusinessFeature: Decodable, Equatable {
-    let enabled: Bool
-    let reason: String?
+public struct BusinessFeature: Decodable, Equatable {
+    public let enabled: Bool
+    public let reason: String?
 }
 
-struct BusinessCapabilities: Decodable, Equatable {
-    let network: String?
-    let chainId: Int?
-    let business: String?
-    let features: [String: BusinessFeature]
+public struct BusinessCapabilities: Decodable, Equatable {
+    public let network: String?
+    public let chainId: Int?
+    public let business: String?
+    public let features: [String: BusinessFeature]
 
-    func feature(_ kind: BusinessFeatureKind) -> BusinessFeature? { features[kind.rawValue] }
+    public func feature(_ kind: BusinessFeatureKind) -> BusinessFeature? { features[kind.rawValue] }
 }
 
 /// Whether a feature can be used here, and if not, the honest reason why.
-enum BusinessAvailability: Equatable {
+public enum BusinessAvailability: Equatable {
     case checking
     case enabled
     case off(String)
 
-    static let notOnServer = "Not enabled on this server yet."
+    public static let notOnServer = "Not enabled on this server yet."
 
-    var isEnabled: Bool { self == .enabled }
-    var reason: String? { if case .off(let r) = self { return r } else { return nil } }
+    public var isEnabled: Bool { self == .enabled }
+    public var reason: String? { if case .off(let r) = self { return r } else { return nil } }
 }
 
-enum BusinessNetwork {
+public enum BusinessNetwork {
     /// The chain every business feature runs on.
-    static let label = "Arc testnet"
-    static let chainId = 5042002
+    public static let label = "Arc testnet"
+    public static let chainId = 5042002
 }
 
 // MARK: - Deal Room
 
-struct DealMilestone: Decodable, Equatable, Identifiable {
-    let title: String
-    let amount: String
-    let due: String?
-    var id: String { "\(title)|\(amount)|\(due ?? "")" }
+public struct DealMilestone: Decodable, Equatable, Identifiable {
+    public let title: String
+    public let amount: String
+    public let due: String?
+    public var id: String { "\(title)|\(amount)|\(due ?? "")" }
 }
 
-struct DealDraft: Decodable, Equatable {
+public struct DealDraft: Decodable, Equatable {
     /// DRAFTED or REFUSED.
-    let status: String
-    let dealId: String?
-    let title: String?
-    let total: String?
-    let symbol: String?
-    let milestones: [DealMilestone]?
-    let client: String?
-    let freelancer: String?
-    let arbiter: String?
-    let ambiguities: [String]?
-    let reviewUrl: String?
-    let reason: String?
-    let network: String?
+    public let status: String
+    public let dealId: String?
+    public let title: String?
+    public let total: String?
+    public let symbol: String?
+    public let milestones: [DealMilestone]?
+    public let client: String?
+    public let freelancer: String?
+    public let arbiter: String?
+    public let ambiguities: [String]?
+    public let reviewUrl: String?
+    public let reason: String?
+    public let network: String?
 
-    var drafted: Bool { status == "DRAFTED" && reviewURL != nil }
-    var reviewURL: URL? { reviewUrl.flatMap(BusinessLinks.https) }
+    public var drafted: Bool { status == "DRAFTED" && reviewURL != nil }
+    public var reviewURL: URL? { reviewUrl.flatMap(BusinessLinks.https) }
 }
 
 // MARK: - Invoices
 
-struct BusinessInvoice: Decodable, Equatable {
-    let invoiceId: String
-    let number: String
+public struct BusinessInvoice: Decodable, Equatable {
+    public let invoiceId: String
+    public let number: String
     /// DRAFT, ISSUED, PARTIALLY_PAID, PAID, OVERPAID or VOID.
-    let status: String
-    let payer: String
-    let description: String?
-    let total: String
-    let symbol: String
-    let dueDate: String?
-    let issuer: String?
-    let payTo: String?
-    let issueUrl: String?
-    let payUrl: String?
-    let network: String?
+    public let status: String
+    public let payer: String
+    public let description: String?
+    public let total: String
+    public let symbol: String
+    public let dueDate: String?
+    public let issuer: String?
+    public let payTo: String?
+    public let issueUrl: String?
+    public let payUrl: String?
+    public let network: String?
 
-    var issueURL: URL? { issueUrl.flatMap(BusinessLinks.https) }
+    public var issueURL: URL? { issueUrl.flatMap(BusinessLinks.https) }
     /// A checkout link exists only once the issuer has signed (never for a draft).
-    var payURL: URL? { status == "DRAFT" || status == "VOID" ? nil : payUrl.flatMap(BusinessLinks.https) }
+    public var payURL: URL? { status == "DRAFT" || status == "VOID" ? nil : payUrl.flatMap(BusinessLinks.https) }
 
-    var statusText: String {
+    public var statusText: String {
         switch status {
         case "DRAFT": return "Draft"
         case "ISSUED": return "Issued"
@@ -113,22 +113,22 @@ struct BusinessInvoice: Decodable, Equatable {
 
 // MARK: - Finance team
 
-struct TeamSection: Decodable, Equatable, Identifiable {
-    let persona: String
-    let label: String
-    let stance: String
-    let text: String
-    let evidence: [String]?
-    var id: String { "\(persona)|\(label)" }
+public struct TeamSection: Decodable, Equatable, Identifiable {
+    public let persona: String
+    public let label: String
+    public let stance: String
+    public let text: String
+    public let evidence: [String]?
+    public var id: String { "\(persona)|\(label)" }
 }
 
-struct TeamDecision: Decodable, Equatable {
-    let status: String
-    let outcome: String?
-    let reasons: [String]
+public struct TeamDecision: Decodable, Equatable {
+    public let status: String
+    public let outcome: String?
+    public let reasons: [String]
 
     /// The Kernel's verdict in words, from the structured fields only.
-    var headline: String {
+    public var headline: String {
         switch outcome {
         case "ALLOW": return "Allowed by the Kernel"
         case "REQUIRE_OWNER_APPROVAL": return "Needs the owner's signature"
@@ -146,7 +146,7 @@ struct TeamDecision: Decodable, Equatable {
     }
 
     /// A short badge word, from the structured fields only.
-    var badge: String {
+    public var badge: String {
         switch outcome {
         case "ALLOW": return "Allow"
         case "REQUIRE_OWNER_APPROVAL": return "Owner signs"
@@ -163,143 +163,143 @@ struct TeamDecision: Decodable, Equatable {
         }
     }
 
-    var tone: String {
+    public var tone: String {
         if outcome == "DENY" || status == "DENIED" || status == "REFUSED_STALE" { return "DANGER" }
         if outcome == "ALLOW" || status == "GRANTED" { return "APPROVED" }
         return "PENDING"
     }
 }
 
-struct TeamRiskCase: Decodable, Equatable {
-    let caseId: String
-    let status: String
-    let outcome: String
-    let froze: Bool
+public struct TeamRiskCase: Decodable, Equatable {
+    public let caseId: String
+    public let status: String
+    public let outcome: String
+    public let froze: Bool
 }
 
-struct TeamResult: Decodable, Equatable {
+public struct TeamResult: Decodable, Equatable {
     /// ANSWERED, NEEDS_CLARIFICATION or STOPPED.
-    let status: String
-    let runId: String?
-    let sections: [TeamSection]
-    let decision: TeamDecision
-    let riskCase: TeamRiskCase?
-    let unavailable: [String]?
-    let approvalUrl: String?
-    let answer: String?
-    let readOnly: Bool?
-    let network: String?
+    public let status: String
+    public let runId: String?
+    public let sections: [TeamSection]
+    public let decision: TeamDecision
+    public let riskCase: TeamRiskCase?
+    public let unavailable: [String]?
+    public let approvalUrl: String?
+    public let answer: String?
+    public let readOnly: Bool?
+    public let network: String?
 
     /// Specialists in the order the member reads them; the Kernel's decision is separate.
-    var specialists: [TeamSection] {
+    public var specialists: [TeamSection] {
         let order = ["CFO", "RISK", "PAYMENT", "AUDIT"]
         return sections.filter { $0.persona != "DECISION" }
             .sorted { (order.firstIndex(of: $0.persona) ?? 9) < (order.firstIndex(of: $1.persona) ?? 9) }
     }
 
-    var approvalURL: URL? { approvalUrl.flatMap(BusinessLinks.https) }
+    public var approvalURL: URL? { approvalUrl.flatMap(BusinessLinks.https) }
 }
 
 // MARK: - Treasury
 
-struct TreasuryAccount: Decodable, Equatable, Identifiable {
-    let label: String
-    let address: String
-    let usdc: String?
-    let explorer: String?
-    var id: String { address + label }
+public struct TreasuryAccount: Decodable, Equatable, Identifiable {
+    public let label: String
+    public let address: String
+    public let usdc: String?
+    public let explorer: String?
+    public var id: String { address + label }
 }
 
-struct VaultPolicyView: Decodable, Equatable {
-    let perPaymentCap: String
-    let windowCap: String
-    let remaining: String
-    let paused: Bool
+public struct VaultPolicyView: Decodable, Equatable {
+    public let perPaymentCap: String
+    public let windowCap: String
+    public let remaining: String
+    public let paused: Bool
 }
 
-struct EarnVaultView: Decodable, Equatable, Identifiable {
-    let name: String
-    let address: String
-    let underlyingOk: Bool?
-    let totalAssets: String?
-    let apy: String?
-    let note: String?
-    var id: String { address }
+public struct EarnVaultView: Decodable, Equatable, Identifiable {
+    public let name: String
+    public let address: String
+    public let underlyingOk: Bool?
+    public let totalAssets: String?
+    public let apy: String?
+    public let note: String?
+    public var id: String { address }
 }
 
-struct UsycEligibility: Decodable, Equatable {
-    let wallet: String?
+public struct UsycEligibility: Decodable, Equatable {
+    public let wallet: String?
     /// ELIGIBLE, INELIGIBLE or UNAVAILABLE.
-    let status: String
-    let explanation: String
+    public let status: String
+    public let explanation: String
 }
 
-struct TreasuryView: Decodable, Equatable {
-    let network: String?
-    let blockNumber: String?
-    let observedAt: Int?
-    let accounts: [TreasuryAccount]
-    let vaultPolicy: VaultPolicyView?
-    let earn: [EarnVaultView]
-    let usyc: UsycEligibility?
+public struct TreasuryView: Decodable, Equatable {
+    public let network: String?
+    public let blockNumber: String?
+    public let observedAt: Int?
+    public let accounts: [TreasuryAccount]
+    public let vaultPolicy: VaultPolicyView?
+    public let earn: [EarnVaultView]
+    public let usyc: UsycEligibility?
 }
 
 // MARK: - Revenue split preview
 
-struct SplitLeg: Decodable, Equatable, Identifiable {
-    let purpose: String
-    let kind: String
-    let label: String
-    let amount: String
-    let basis: String?
-    var id: String { "\(purpose)|\(label)|\(amount)" }
+public struct SplitLeg: Decodable, Equatable, Identifiable {
+    public let purpose: String
+    public let kind: String
+    public let label: String
+    public let amount: String
+    public let basis: String?
+    public var id: String { "\(purpose)|\(label)|\(amount)" }
 }
 
-struct ForecastPoint: Decodable, Equatable, Identifiable {
-    let days: Int
-    let committed: String
-    let expected: String?
-    let lowPoint: String?
-    var id: Int { days }
+public struct ForecastPoint: Decodable, Equatable, Identifiable {
+    public let days: Int
+    public let committed: String
+    public let expected: String?
+    public let lowPoint: String?
+    public var id: Int { days }
 }
 
-struct SplitPolicyView: Decodable, Equatable {
-    let taxReserveBps: Int?
-    let operatingFloor: String?
-    let horizonDays: Int?
+public struct SplitPolicyView: Decodable, Equatable {
+    public let taxReserveBps: Int?
+    public let operatingFloor: String?
+    public let horizonDays: Int?
 }
 
-struct SplitPreview: Decodable, Equatable {
-    let label: String
-    let amount: String
-    let symbol: String
-    let headline: String?
-    let legs: [SplitLeg]
-    let summary: [String: String]?
-    let forecast: [ForecastPoint]?
-    let policy: SplitPolicyView?
-    let notes: [String]?
+public struct SplitPreview: Decodable, Equatable {
+    public let label: String
+    public let amount: String
+    public let symbol: String
+    public let headline: String?
+    public let legs: [SplitLeg]
+    public let summary: [String: String]?
+    public let forecast: [ForecastPoint]?
+    public let policy: SplitPolicyView?
+    public let notes: [String]?
 }
 
 // MARK: - Vendors
 
-struct BusinessVendor: Decodable, Equatable, Identifiable, Hashable {
-    let vendorId: String
-    let name: String
-    let kind: String?
-    let address: String
-    let verified: Bool
-    let source: String?
-    var id: String { vendorId }
+public struct BusinessVendor: Decodable, Equatable, Identifiable, Hashable {
+    public let vendorId: String
+    public let name: String
+    public let kind: String?
+    public let address: String
+    public let verified: Bool
+    public let source: String?
+    public var id: String { vendorId }
 }
 
 private struct VendorList: Decodable { let vendors: [BusinessVendor] }
 
 // MARK: - Links
 
-enum BusinessLinks {
+public enum BusinessLinks {
     /// Only https links are ever opened.
-    static func https(_ s: String) -> URL? {
+    public static func https(_ s: String) -> URL? {
         guard let u = URL(string: s), u.scheme == "https", u.host != nil else { return nil }
         return u
     }
@@ -309,18 +309,18 @@ enum BusinessLinks {
 /// The token is the server's HMAC pay link; the fragment is an unverified display
 /// hint written by the sender (browsers never send it). Live status comes from
 /// `GET /api/v1/pay/<token>`.
-struct InvoiceLink: Equatable {
-    let token: String
-    let number: String?
-    let amount: String?
-    let symbol: String?
-    let payer: String?
-    let url: URL
-    let checkoutURL: URL
+public struct InvoiceLink: Equatable {
+    public let token: String
+    public let number: String?
+    public let amount: String?
+    public let symbol: String?
+    public let payer: String?
+    public let url: URL
+    public let checkoutURL: URL
 
-    static let tokenPattern = "^[A-Za-z0-9_.-]{10,200}$"
+    public static let tokenPattern = "^[A-Za-z0-9_.-]{10,200}$"
 
-    init?(url: URL, allowedHost: String) {
+    public init?(url: URL, allowedHost: String) {
         guard url.scheme == "https", let host = url.host, host.lowercased() == allowedHost.lowercased()
         else { return nil }
         let parts = url.path.split(separator: "/").map(String.init)
@@ -347,7 +347,7 @@ struct InvoiceLink: Equatable {
     }
 
     /// The message URL for an issued invoice's checkout link, with display hints.
-    static func messageURL(for invoice: BusinessInvoice, allowedHost: String) -> URL? {
+    public static func messageURL(for invoice: BusinessInvoice, allowedHost: String) -> URL? {
         guard let pay = invoice.payURL, pay.host?.lowercased() == allowedHost.lowercased(),
               var c = URLComponents(url: pay, resolvingAgainstBaseURL: false)
         else { return nil }
@@ -364,27 +364,27 @@ struct InvoiceLink: Equatable {
 }
 
 /// The public checkout view (`GET /api/v1/pay/<token>`), as far as the bubble needs it.
-struct CheckoutStatus: Decodable, Equatable {
-    let number: String
-    let status: String
-    let payer: String?
-    let total: String
-    let amountDue: String?
-    let dueDate: String?
-    let asset: Asset?
+public struct CheckoutStatus: Decodable, Equatable {
+    public let number: String
+    public let status: String
+    public let payer: String?
+    public let total: String
+    public let amountDue: String?
+    public let dueDate: String?
+    public let asset: Asset?
 
-    struct Asset: Decodable, Equatable { let symbol: String }
+    public struct Asset: Decodable, Equatable { public let symbol: String }
 }
 
 // MARK: - Client
 
-enum BusinessError: Error, Equatable {
+public enum BusinessError: Error, Equatable {
     /// The server has no business routes (404) or the feature is switched off (503).
     case notEnabled(String)
     case api(String)
     case unreachable
 
-    var message: String {
+    public var message: String {
         switch self {
         case .notEnabled(let m): return m
         case .api(let m): return m
@@ -394,11 +394,11 @@ enum BusinessError: Error, Equatable {
 }
 
 /// Talks to `https://<host>/api/v1/funds/<fundId>/business/…` with the fund key.
-struct BusinessClient {
-    let host: String
-    var session: URLSession = .shared
+public struct BusinessClient {
+    public let host: String
+    public var session: URLSession = .shared
 
-    func url(_ path: String, query: [URLQueryItem] = []) -> URL {
+    public func url(_ path: String, query: [URLQueryItem] = []) -> URL {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
@@ -407,14 +407,14 @@ struct BusinessClient {
         return c.url!
     }
 
-    func get(_ path: String, key: String) -> URLRequest {
+    public func get(_ path: String, key: String) -> URLRequest {
         var r = URLRequest(url: url(path, query: [URLQueryItem(name: "k", value: key)]),
                            cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         r.httpMethod = "GET"
         return r
     }
 
-    func post(_ path: String, body: [String: Any], timeout: TimeInterval = 30) -> URLRequest {
+    public func post(_ path: String, body: [String: Any], timeout: TimeInterval = 30) -> URLRequest {
         var r = URLRequest(url: url(path), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         r.httpMethod = "POST"
         r.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -424,7 +424,7 @@ struct BusinessClient {
     }
 
     /// Maps an HTTP status and body to a value or an honest error.
-    static func decode<T: Decodable>(_ data: Data, status: Int, as: T.Type) throws -> T {
+    public static func decode<T: Decodable>(_ data: Data, status: Int, as: T.Type) throws -> T {
         if status == 404 { throw BusinessError.notEnabled(BusinessAvailability.notOnServer) }
         let apiError = try? JSONDecoder().decode(FundAPIError.self, from: data)
         if status == 503 || apiError?.error == "NOT_ENABLED" {
@@ -446,46 +446,46 @@ struct BusinessClient {
 
     private func base(_ fundId: String) -> String { "/funds/\(fundId)/business" }
 
-    func capabilities(fundId: String, key: String) async throws -> BusinessCapabilities {
+    public func capabilities(fundId: String, key: String) async throws -> BusinessCapabilities {
         try await send(get("\(base(fundId))/capabilities", key: key), as: BusinessCapabilities.self)
     }
 
-    func draftDeal(fundId: String, key: String, text: String) async throws -> DealDraft {
+    public func draftDeal(fundId: String, key: String, text: String) async throws -> DealDraft {
         try await send(post("\(base(fundId))/deals", body: ["key": key, "text": text], timeout: 60), as: DealDraft.self)
     }
 
-    static func invoiceBody(key: String, payer: String, amount: String, description: String) -> [String: Any] {
+    public static func invoiceBody(key: String, payer: String, amount: String, description: String) -> [String: Any] {
         ["key": key, "payer": payer, "amount": amount, "description": description]
     }
 
-    func createInvoice(fundId: String, key: String, payer: String, amount: String, description: String) async throws -> BusinessInvoice {
+    public func createInvoice(fundId: String, key: String, payer: String, amount: String, description: String) async throws -> BusinessInvoice {
         try await send(post("\(base(fundId))/invoices",
                             body: Self.invoiceBody(key: key, payer: payer, amount: amount, description: description)),
                        as: BusinessInvoice.self)
     }
 
-    func invoice(fundId: String, key: String, invoiceId: String) async throws -> BusinessInvoice {
+    public func invoice(fundId: String, key: String, invoiceId: String) async throws -> BusinessInvoice {
         try await send(get("\(base(fundId))/invoices/\(invoiceId)", key: key), as: BusinessInvoice.self)
     }
 
-    func ask(fundId: String, key: String, text: String) async throws -> TeamResult {
+    public func ask(fundId: String, key: String, text: String) async throws -> TeamResult {
         try await send(post("\(base(fundId))/team/ask", body: ["key": key, "text": text], timeout: 90), as: TeamResult.self)
     }
 
-    func treasury(fundId: String, key: String) async throws -> TreasuryView {
+    public func treasury(fundId: String, key: String) async throws -> TreasuryView {
         try await send(get("\(base(fundId))/treasury", key: key), as: TreasuryView.self)
     }
 
-    func previewSplit(fundId: String, key: String, amount: String) async throws -> SplitPreview {
+    public func previewSplit(fundId: String, key: String, amount: String) async throws -> SplitPreview {
         try await send(post("\(base(fundId))/splits/preview", body: ["key": key, "amount": amount]), as: SplitPreview.self)
     }
 
-    func vendors(fundId: String, key: String) async throws -> [BusinessVendor] {
+    public func vendors(fundId: String, key: String) async throws -> [BusinessVendor] {
         try await send(get("\(base(fundId))/vendors", key: key), as: VendorList.self).vendors
     }
 
     /// Public checkout status for a shared invoice card (no fund key needed).
-    func checkout(token: String) async throws -> CheckoutStatus {
+    public func checkout(token: String) async throws -> CheckoutStatus {
         var r = URLRequest(url: url("/pay/\(token)"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         r.httpMethod = "GET"
         return try await send(r, as: CheckoutStatus.self)
@@ -496,14 +496,14 @@ struct BusinessClient {
 
 /// A business instruction the device recognised; it opens the matching screen
 /// (pre-filled) instead of going to Ask Synq. Nothing runs that moves money.
-enum BusinessCommand: Equatable {
+public enum BusinessCommand: Equatable {
     case deal(text: String)
     case invoice(payer: String, amount: String, description: String)
     case team(question: String)
     case split(amount: String)
     case treasury
 
-    var feature: BusinessFeatureKind {
+    public var feature: BusinessFeatureKind {
         switch self {
         case .deal: return .deals
         case .invoice: return .invoices
@@ -514,10 +514,10 @@ enum BusinessCommand: Equatable {
     }
 }
 
-enum BusinessParser {
+public enum BusinessParser {
     private static let amount = "\\$?([0-9]{1,6}(?:\\.[0-9]{1,6})?)(?: ?(?:usdc|usd|dollars|bucks))?"
 
-    static func parse(_ raw: String) -> BusinessCommand? {
+    public static func parse(_ raw: String) -> BusinessCommand? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         let s = text.lowercased().replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)

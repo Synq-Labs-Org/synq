@@ -1,116 +1,142 @@
 import SwiftUI
 
-/// What the Messages controller hands the fund screens: actions that need the
-/// conversation or Safari.
-struct FundActions {
-    var insertInvite: (FundRef, FundView?) -> Void
-    var insertProposal: (FundRef, FundProposal) -> Void
-    var insertTrip: (FundRef, TripView) -> Void
+/// What a host hands the fund screens: actions that need the conversation (the
+/// Messages card port) or a secure browser (the deep-link port).
+public struct FundActions {
+    public var insertInvite: (FundRef, FundView?) -> Void
+    public var insertProposal: (FundRef, FundProposal) -> Void
+    public var insertTrip: (FundRef, TripView) -> Void
     /// Shares an issued invoice's checkout link as an INVOICE card.
-    var insertInvoice: (BusinessInvoice) -> Void = { _ in }
+    public var insertInvoice: (BusinessInvoice) -> Void = { _ in }
     /// Opens the Synq page (passkey ceremonies) in the in-app browser.
     var open: (URL) -> Void
-    var expand: () -> Void
+    public var expand: () -> Void
+    /// False outside Messages: "share in this chat" actions are not offered.
+    public var canInsertCards = true
 
-    static let none = FundActions(insertInvite: { _, _ in }, insertProposal: { _, _ in }, insertTrip: { _, _ in },
-                                  open: { _ in }, expand: {})
+    public static let none = FundActions(insertInvite: { _, _ in }, insertProposal: { _, _ in }, insertTrip: { _, _ in },
+                                  open: { _ in }, expand: {}, canInsertCards: false)
+
+    /// Builds the actions from the host's ports. `expand` asks Messages for the
+    /// expanded panel; the full-screen app passes nothing.
+    @MainActor
+    public init(cards: MessagesCardPort, links: DeepLinkPort, expand: @escaping () -> Void = {}) {
+        self.init(insertInvite: { [weak cards] ref, view in cards?.insertInvite(ref, view: view) },
+                  insertProposal: { [weak cards] ref, p in cards?.insertProposal(ref, p) },
+                  insertTrip: { [weak cards] ref, t in cards?.insertTrip(ref, t) },
+                  insertInvoice: { [weak cards] invoice in cards?.insertInvoice(invoice) },
+                  open: { [weak links] url in links?.openSecurely(url) },
+                  expand: expand, canInsertCards: cards.canInsert)
+    }
+
+    public init(insertInvite: @escaping (FundRef, FundView?) -> Void, insertProposal: @escaping (FundRef, FundProposal) -> Void,
+         insertTrip: @escaping (FundRef, TripView) -> Void, insertInvoice: @escaping (BusinessInvoice) -> Void = { _ in },
+         open: @escaping (URL) -> Void, expand: @escaping () -> Void, canInsertCards: Bool = true) {
+        self.insertInvite = insertInvite
+        self.insertProposal = insertProposal
+        self.insertTrip = insertTrip
+        self.insertInvoice = insertInvoice
+        self.open = open
+        self.expand = expand
+        self.canInsertCards = canInsertCards
+    }
 }
 
 /// A search in flight, shown as the animated "searching" card.
-struct SearchProgress: Equatable {
-    enum Kind: Equatable { case flight, gift }
-    var kind: Kind
-    var headline: String
-    var detail: String
-    var from: String?
-    var to: String?
+public struct SearchProgress: Equatable {
+    public enum Kind: Equatable { case flight, gift }
+    public var kind: Kind
+    public var headline: String
+    public var detail: String
+    public var from: String?
+    public var to: String?
 
-    static func flight(_ p: FlightPlan) -> SearchProgress {
+    public static func flight(_ p: FlightPlan) -> SearchProgress {
         SearchProgress(kind: .flight, headline: "\(p.origin) → \(p.destination)",
                        detail: "\(TripFormat.range(p.departureDate, p.returnDate)) · \(TripFormat.travellers(p.travelers))",
                        from: p.origin, to: p.destination)
     }
 
-    static func gift(query: String, maxPrice: String) -> SearchProgress {
+    public static func gift(query: String, maxPrice: String) -> SearchProgress {
         SearchProgress(kind: .gift, headline: query.capitalizedFirst, detail: "Under $\(maxPrice) · live prices")
     }
 }
 
 /// Requests to open a sheet, pre-filled; a fresh id each time re-presents it.
-struct SendPrefill: Identifiable, Equatable {
-    var id = UUID()
-    var recipientId: String?
-    var amount: String = ""
+public struct SendPrefill: Identifiable, Equatable {
+    public var id = UUID()
+    public var recipientId: String?
+    public var amount: String = ""
 }
 
-struct PlanPrefill: Identifiable, Equatable {
-    var id = UUID()
-    var draft = FlightDraft()
+public struct PlanPrefill: Identifiable, Equatable {
+    public var id = UUID()
+    public var draft = FlightDraft()
 }
 
-struct GiftPrefill: Identifiable, Equatable {
-    var id = UUID()
-    var query = ""
-    var maxPrice = "50"
+public struct GiftPrefill: Identifiable, Equatable {
+    public var id = UUID()
+    public var query = ""
+    public var maxPrice = "50"
 }
 
 /// Synq's answer to the last command, with the next step when it needs a tap.
-struct CommandNote: Equatable {
-    var prompt: String
-    var reply: String
-    var outcome: CommandOutcome
+public struct CommandNote: Equatable {
+    public var prompt: String
+    public var reply: String
+    public var outcome: CommandOutcome
 }
 
 @MainActor
-final class FundModel: ObservableObject {
-    @Published var ref: FundRef?
-    @Published var view: FundView?
-    @Published var error: String?
-    @Published var busy = false
-    @Published var selectedProposal: String?
-    @Published var selectedTrip: String?
-    @Published var trips: [TripView] = []
-    @Published var asking = false
-    @Published var searching: SearchProgress?
-    @Published var note: CommandNote?
+public final class FundModel: ObservableObject {
+    @Published public var ref: FundRef?
+    @Published public var view: FundView?
+    @Published public var error: String?
+    @Published public var busy = false
+    @Published public var selectedProposal: String?
+    @Published public var selectedTrip: String?
+    @Published public var trips: [TripView] = []
+    @Published public var asking = false
+    @Published public var searching: SearchProgress?
+    @Published public var note: CommandNote?
     /// Set to open the Send, Plan Trip or Gift sheet, pre-filled.
-    @Published var sendSheet: SendPrefill?
-    @Published var planSheet: PlanPrefill?
-    @Published var giftSheet: GiftPrefill?
-    let voter = deviceVoterId()
+    @Published public var sendSheet: SendPrefill?
+    @Published public var planSheet: PlanPrefill?
+    @Published public var giftSheet: GiftPrefill?
+    public let voter = deviceVoterId()
 
-    let client: FundClient
-    @Published var workspaces: [WorkspaceSummary] = []
-    @Published var workspaceSnapshot: WorkspaceSnapshot?
-    @Published var workspaceCapabilities: WorkspaceCapabilities?
-    @Published var selectedWorkspace: WorkspaceSummary?
-    @Published var workspaceInvoices: [WorkspaceInvoice]?
-    @Published var workspacePayouts: [WorkspacePayout]?
-    @Published var workspaceVendors: [WorkspaceVendor]?
+    public let client: FundClient
+    @Published public var workspaces: [WorkspaceSummary] = []
+    @Published public var workspaceSnapshot: WorkspaceSnapshot?
+    @Published public var workspaceCapabilities: WorkspaceCapabilities?
+    @Published public var selectedWorkspace: WorkspaceSummary?
+    @Published public var workspaceInvoices: [WorkspaceInvoice]?
+    @Published public var workspacePayouts: [WorkspacePayout]?
+    @Published public var workspaceVendors: [WorkspaceVendor]?
     /// Optional sources: nil means the server does not offer it (or it failed), shown as unavailable.
-    @Published var workspaceBooks: WorkspaceBooks?
-    @Published var workspaceDeals: [WorkspaceDeal]?
-    @Published var workspaceSplits: [WorkspaceSplit]?
-    @Published var workspaceSwaps: [WorkspaceSwap]?
-    @Published var workspaceGroup: WorkspaceGroup?
-    @Published var workspaceReply: WorkspaceTeamReply?
-    @Published var workspaceLoading = false
-    @Published var workspaceAsking = false
-    @Published var workspaceDetailError: String?
+    @Published public var workspaceBooks: WorkspaceBooks?
+    @Published public var workspaceDeals: [WorkspaceDeal]?
+    @Published public var workspaceSplits: [WorkspaceSplit]?
+    @Published public var workspaceSwaps: [WorkspaceSwap]?
+    @Published public var workspaceGroup: WorkspaceGroup?
+    @Published public var workspaceReply: WorkspaceTeamReply?
+    @Published public var workspaceLoading = false
+    @Published public var workspaceAsking = false
+    @Published public var workspaceDetailError: String?
     private var workspaceLoad: Task<Void, Never>?
     private var workspaceAsk: Task<Void, Never>?
     private var workspaceRequestId = UUID().uuidString
     private var workspaceQuestion = ""
-    @Published var workspaceSignedIn = false
-    @Published var workspaceBusy = false
-    @Published var workspaceError: String?
-    let book: FundBook
+    @Published public var workspaceSignedIn = false
+    @Published public var workspaceBusy = false
+    @Published public var workspaceError: String?
+    public let book: FundBook
     /// The Arc business features, scoped by the same fund id and key.
-    let business: BusinessModel
-    var conversation: String?
+    public let business: BusinessModel
+    public var conversation: String?
     private var polling: Task<Void, Never>?
 
-    init(client: FundClient, book: FundBook = FundBook()) {
+    public init(client: FundClient, book: FundBook = FundBook()) {
         self.client = client
         self.book = book
         business = BusinessModel(client: BusinessClient(host: client.host))
@@ -118,7 +144,7 @@ final class FundModel: ObservableObject {
         if workspaceSignedIn { Task { await refreshWorkspaces() } }
     }
 
-    func signInWorkspace(code: String) {
+    public func signInWorkspace(code: String) {
         guard !workspaceBusy else { return }
         workspaceBusy = true; workspaceError = nil
         Task {
@@ -133,7 +159,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func refreshWorkspaces() async {
+    public func refreshWorkspaces() async {
         workspaceBusy = true
         defer { workspaceBusy = false }
         do {
@@ -146,7 +172,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func signOutWorkspace() {
+    public func signOutWorkspace() {
         guard !workspaceBusy else { return }
         workspaceBusy = true
         Task {
@@ -163,7 +189,7 @@ final class FundModel: ObservableObject {
             workspaceError = "Your session expired. Sign in again with a new private code."
         } else { workspaceDetailError = message }
     }
-    func selectWorkspace(_ workspace: WorkspaceSummary?) {
+    public func selectWorkspace(_ workspace: WorkspaceSummary?) {
         workspaceLoad?.cancel(); workspaceAsk?.cancel()
         let changedWorkspace = selectedWorkspace?.id != workspace?.id
         selectedWorkspace = workspace
@@ -218,7 +244,7 @@ final class FundModel: ObservableObject {
 
         }
     }
-    func askWorkspace(_ message: String) {
+    public func askWorkspace(_ message: String) {
         guard let workspace = selectedWorkspace, !workspaceAsking else { return }
         if workspaceQuestion != message { workspaceRequestId = UUID().uuidString; workspaceQuestion = message }
         let requestId = workspaceRequestId
@@ -235,9 +261,9 @@ final class FundModel: ObservableObject {
         }
     }
 
-    var network: String { view?.networkLabel ?? SynqNetwork.fundBackend }
+    public var network: String { view?.networkLabel ?? SynqNetwork.fundBackend }
 
-    func show(_ ref: FundRef?, proposal: String? = nil, trip: String? = nil) {
+    public func show(_ ref: FundRef?, proposal: String? = nil, trip: String? = nil) {
         if ref?.fundId != self.ref?.fundId {
             view = nil
             trips = []
@@ -252,7 +278,7 @@ final class FundModel: ObservableObject {
         refresh()
     }
 
-    func refresh() {
+    public func refresh() {
         guard let ref else { return }
         Task {
             do {
@@ -275,7 +301,7 @@ final class FundModel: ObservableObject {
     }
 
     /// Follows server-side progress (launch, setup, approvals) while the app is open.
-    func startPolling() {
+    public func startPolling() {
         polling?.cancel()
         polling = Task { [weak self] in
             while !Task.isCancelled {
@@ -291,7 +317,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func stopPolling() {
+    public func stopPolling() {
         polling?.cancel()
         polling = nil
     }
@@ -300,7 +326,7 @@ final class FundModel: ObservableObject {
 
     /// What the Start screen's command field would create: a fund name and,
     /// for a flight instruction, the search to run once the fund is live.
-    static func startPlan(for text: String, today: Date = Date(), calendar: Calendar = .current)
+    public static func startPlan(for text: String, today: Date = Date(), calendar: Calendar = .current)
         -> (name: String, flight: FlightPlan?, draft: FlightDraft?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if case .flight(let d)? = QuickParser.parse(trimmed, today: today, calendar: calendar), let dest = d.destinationLabel {
@@ -310,7 +336,7 @@ final class FundModel: ObservableObject {
         return (String(trimmed.prefix(40)), nil, nil)
     }
 
-    func create(fromCommand text: String, then insert: @escaping (FundRef) -> Void) {
+    public func create(fromCommand text: String, then insert: @escaping (FundRef) -> Void) {
         let plan = Self.startPlan(for: text)
         guard !plan.name.isEmpty else { return }
         busy = true
@@ -349,7 +375,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func launch() {
+    public func launch() {
         guard let ref, let admin = ref.adminKey else { return }
         busy = true
         Haptics.tap()
@@ -370,7 +396,7 @@ final class FundModel: ObservableObject {
 
     /// Sends the instruction to Ask Synq, falls back to the on-device parser, and
     /// runs searches straight away when the instruction is clear.
-    func submit(_ text: String) {
+    public func submit(_ text: String) {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let ref, !prompt.isEmpty, !asking else { return }
         // Business instructions open their screen on the device; Ask Synq never sees them.
@@ -408,7 +434,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func perform(_ outcome: CommandOutcome, prompt: String, reply: String?) {
+    public func perform(_ outcome: CommandOutcome, prompt: String, reply: String?) {
         switch outcome {
         case .runFlight(let plan):
             runFlight(plan)
@@ -431,7 +457,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func runFlight(_ plan: FlightPlan) {
+    public func runFlight(_ plan: FlightPlan) {
         guard let ref, searching == nil else { return }
         guard view?.state == "ACTIVE" else {
             error = "Trips open once the fund is live."
@@ -463,7 +489,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func runGift(query: String, maxPrice: String) {
+    public func runGift(query: String, maxPrice: String) {
         guard let ref, searching == nil else { return }
         guard view?.state == "ACTIVE" else {
             error = "Gifts open once the fund is live."
@@ -501,7 +527,7 @@ final class FundModel: ObservableObject {
         if let i = trips.firstIndex(where: { $0.tripId == trip.tripId }) { trips[i] = trip } else { trips.insert(trip, at: 0) }
     }
 
-    func loadTrip(_ tripId: String) {
+    public func loadTrip(_ tripId: String) {
         guard let ref else { return }
         Task {
             if let t = try? await client.trip(fundId: ref.fundId, key: ref.key, tripId: tripId, voter: voter) {
@@ -510,7 +536,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func vote(_ trip: TripView, option: String) {
+    public func vote(_ trip: TripView, option: String) {
         guard let ref else { return }
         Haptics.tap()
         Task {
@@ -527,7 +553,7 @@ final class FundModel: ObservableObject {
 
     /// Picks an option and returns where the group pays for it (the Synq page,
     /// where the payer confirms with Face ID; members then approve with theirs).
-    func choose(_ trip: TripView, option: String, then pay: @escaping (URL) -> Void) {
+    public func choose(_ trip: TripView, option: String, then pay: @escaping (URL) -> Void) {
         guard let ref else { return }
         busy = true
         Haptics.tap()
@@ -547,7 +573,7 @@ final class FundModel: ObservableObject {
         }
     }
 
-    func requestTestFunds() {
+    public func requestTestFunds() {
         guard let ref else { return }
         busy = true
         Haptics.tap()

@@ -3,11 +3,11 @@ import SwiftUI
 // Settings → Theme: every shipped theme, previewed in its own look. The choice is
 // kept on this device and applies at once to every screen, sheet and bubble.
 
-struct ThemeSheet: View {
-    let onClose: () -> Void
+public struct ThemeSheet: View {
+    public let onClose: () -> Void
     @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
 
-    var body: some View {
+    public var body: some View {
         SynqThemeRoot {
             SheetScaffold(title: "Theme", onCancel: onClose) {
                 SynqStack(spacing: \.m) {
@@ -25,12 +25,12 @@ struct ThemeSheet: View {
 }
 
 /// One theme, drawn with that theme's own tokens and art.
-struct ThemeOption: View {
-    let option: any SynqTheme
-    let selected: Bool
-    let onPick: () -> Void
+public struct ThemeOption: View {
+    public let option: any SynqTheme
+    public let selected: Bool
+    public let onPick: () -> Void
 
-    var body: some View {
+    public var body: some View {
         SynqGroup(emphasis: selected) {
             SynqArtStrip(slot: .home)
             SynqRow(title: option.name, subtitle: option.summary,

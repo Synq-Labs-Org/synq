@@ -8,15 +8,15 @@ import SwiftUI
 // MARK: - Root
 
 /// Expanded/compact fund screen: tabs, one payment or one trip, and the sheets.
-struct FundScreen: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    @State var tab: SynqTab = .home
-    @State var command = ""
+public struct FundScreen: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    @State public var tab: SynqTab = .home
+    @State public var command = ""
     @Environment(\.synqCompact) private var compact
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             if compact {
                 FundHomeView(model: model, actions: actions, command: $command, onTab: select)
@@ -128,10 +128,14 @@ struct FundScreen: View {
 }
 
 /// The live bubble in the transcript for an invite, a payment or a trip card.
-struct FundBubble: View {
-    @ObservedObject var model: FundModel
+public struct FundBubble: View {
+    public init(model: FundModel) {
+        _model = ObservedObject(wrappedValue: model)
+    }
 
-    var body: some View {
+    @ObservedObject public var model: FundModel
+
+    public var body: some View {
         if let tripId = model.selectedTrip {
             FundTripBubble(trip: model.trips.first { $0.tripId == tripId },
                            fundName: model.view?.name ?? model.ref?.name)
@@ -146,17 +150,17 @@ struct FundBubble: View {
 
 // MARK: - Start
 
-struct StartFundView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    let onPasteLink: () -> Void
-    @State var text = ""
+public struct StartFundView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    public let onPasteLink: () -> Void
+    @State public var text = ""
     @State private var workspaceCode = ""
     @Environment(\.synqCompact) private var compact
     @Environment(\.synqTheme) private var theme
 
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             if compact { compactBody } else { expandedBody }
         }
@@ -224,15 +228,15 @@ struct StartFundView: View {
 
 // MARK: - Home
 
-struct FundHomeView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    @Binding var command: String
-    var onTab: (SynqTab) -> Void = { _ in }
+public struct FundHomeView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    @Binding public var command: String
+    public var onTab: (SynqTab) -> Void = { _ in }
     @Environment(\.synqCompact) private var compact
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if compact { compactBody } else { expandedBody }
     }
 
@@ -361,15 +365,15 @@ struct FundHomeView: View {
 }
 
 /// The fund's group-fund panel: name, members, balance, approvals and avatars.
-struct FundSummaryPanel: View {
-    let view: FundView
-    let onInvite: () -> Void
-    let onOpen: () -> Void
+public struct FundSummaryPanel: View {
+    public let view: FundView
+    public let onInvite: () -> Void
+    public let onOpen: () -> Void
     @Environment(\.synqTheme) private var theme
 
     private var next: FundProposal? { view.pendingProposals.first }
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Group fund") {
             VStack(alignment: .leading, spacing: theme.space.xs) {
                 Text(view.name).synqType(.headline).lineLimit(1)
@@ -409,14 +413,14 @@ struct FundSummaryPanel: View {
 }
 
 /// Forming, setting up, launching or failed: what to do next.
-struct FundStatePanel: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    let ref: FundRef
-    let view: FundView
+public struct FundStatePanel: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    public let ref: FundRef
+    public let view: FundView
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Group fund") {
             HStack {
                 Text(view.name).synqType(.headline).lineLimit(1)
@@ -497,14 +501,14 @@ struct FundStatePanel: View {
 
 // MARK: - Ask (centre tab)
 
-struct AskView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    @Binding var command: String
-    var onTab: (SynqTab) -> Void
+public struct AskView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    @Binding public var command: String
+    public var onTab: (SynqTab) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: "Ask Synq", onBack: { onTab(.home) })
             SynqHeroArt(slot: .agent)
@@ -584,12 +588,12 @@ struct AskView: View {
 }
 
 /// Thinking, searching and Synq's reply, shown wherever the command field is.
-struct CommandActivity: View {
-    @ObservedObject var model: FundModel
-    let onPerform: (CommandOutcome) -> Void
+public struct CommandActivity: View {
+    @ObservedObject public var model: FundModel
+    public let onPerform: (CommandOutcome) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if model.asking {
             HStack(spacing: theme.space.s) {
                 SynqSpinner(ink: .secondary, size: 14)
@@ -608,12 +612,12 @@ struct CommandActivity: View {
 }
 
 /// The "searching DEL → GOI · Dec 1–5 · 3 travellers" state.
-struct SearchingPanel: View {
-    var progress: SearchProgress
-    var compact = false
+public struct SearchingPanel: View {
+    public var progress: SearchProgress
+    public var compact = false
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: progress.kind == .flight ? "Searching flights" : "Searching gifts") {
             HStack(spacing: theme.space.m) {
                 SynqIconView(icon: progress.kind == .flight ? .flight : .gift, size: 20)
@@ -637,14 +641,14 @@ struct SearchingPanel: View {
 }
 
 /// Synq's reply to a command, with the one next step when it needs a tap.
-struct CommandReplyPanel: View {
-    var note: CommandNote
-    var busy: Bool
-    var onRun: () -> Void
-    var onDismiss: () -> Void
+public struct CommandReplyPanel: View {
+    public var note: CommandNote
+    public var busy: Bool
+    public var onRun: () -> Void
+    public var onDismiss: () -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Synq") {
             HStack(alignment: .top) {
                 SynqEcho(text: note.prompt)
@@ -678,11 +682,11 @@ struct CommandReplyPanel: View {
 }
 
 /// The user's own words, echoed with the theme's prompt glyph.
-struct SynqEcho: View {
-    let text: String
+public struct SynqEcho: View {
+    public let text: String
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         Text(theme.glyphs.prompt.isEmpty ? "“\(text)”" : "\(theme.glyphs.prompt) \(text)")
             .synqType(.mono, .secondary).lineLimit(2)
     }
@@ -690,16 +694,16 @@ struct SynqEcho: View {
 
 // MARK: - Group (the fund)
 
-struct GroupView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    var onTab: (SynqTab) -> Void
+public struct GroupView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    public var onTab: (SynqTab) -> Void
     @Environment(\.synqTheme) private var theme
 
     /// Where the group is headed: the latest flight's destination, if any.
     private var place: String? { model.trips.first { !$0.isGift }?.destination }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: model.view?.name ?? model.ref?.name ?? "Group", onBack: { onTab(.home) },
                        actions: model.ref.map { ref in
@@ -768,12 +772,12 @@ struct GroupView: View {
 }
 
 /// Members with their pixel avatars and where they stand on the next payment.
-struct MemberGrid: View {
-    let view: FundView
-    let next: FundProposal?
+public struct MemberGrid: View {
+    public let view: FundView
+    public let next: FundProposal?
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: theme.space.s), count: 4), spacing: theme.space.m) {
             ForEach(view.members) { m in
                 let (status, line) = standing(m)
@@ -797,13 +801,13 @@ struct MemberGrid: View {
 }
 
 /// Payment rows: icon, recipient, exact amount, status badge and time.
-struct PaymentList: View {
-    let proposals: [FundProposal]
-    let network: String
-    let onOpen: (FundProposal) -> Void
+public struct PaymentList: View {
+    public let proposals: [FundProposal]
+    public let network: String
+    public let onOpen: (FundProposal) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqGroup {
             ForEach(Array(proposals.enumerated()), id: \.element.id) { i, p in
                 VStack(spacing: 0) {
@@ -856,11 +860,11 @@ struct PaymentList: View {
 }
 
 /// Trip and gift rows.
-struct TripRows: View {
-    let trips: [TripView]
-    let onOpen: (TripView) -> Void
+public struct TripRows: View {
+    public let trips: [TripView]
+    public let onOpen: (TripView) -> Void
 
-    var body: some View {
+    public var body: some View {
         SynqGroup {
             ForEach(Array(trips.enumerated()), id: \.element.id) { i, t in
                 SynqRow(icon: t.isGift ? .gift : .flight, title: t.routeTitle,
@@ -873,12 +877,12 @@ struct TripRows: View {
 }
 
 /// A horizontal row of chips that scrolls on device (a clipped row in still renders).
-struct ChipScroller<Content: View>: View {
-    @ViewBuilder var content: () -> Content
+public struct ChipScroller<Content: View>: View {
+    @ViewBuilder public var content: () -> Content
     @Environment(\.synqRenderMode) private var mode
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if mode.isStill {
             HStack(spacing: theme.space.s) { content() }
                 .fixedSize()
@@ -893,13 +897,13 @@ struct ChipScroller<Content: View>: View {
 }
 
 
-struct WorkspaceDetailView: View {
-    @ObservedObject var model: FundModel
-    let workspace: WorkspaceSummary
-    let actions: FundActions
+public struct WorkspaceDetailView: View {
+    @ObservedObject public var model: FundModel
+    public let workspace: WorkspaceSummary
+    public let actions: FundActions
     @State private var question = ""
     @Environment(\.synqTheme) private var theme
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.m) {
             SynqPanel(label: workspace.displayName) {
                 Text("Arc testnet · \(workspace.status)").synqType(.caption, .secondary)
@@ -1055,5 +1059,22 @@ struct WorkspaceDetailView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Host entry points (same file: they set the private observed-object storage)
+
+extension FundScreen {
+    public init(model: FundModel, actions: FundActions) {
+        _model = ObservedObject(wrappedValue: model)
+        self.actions = actions
+    }
+}
+
+extension StartFundView {
+    public init(model: FundModel, actions: FundActions, onPasteLink: @escaping () -> Void) {
+        _model = ObservedObject(wrappedValue: model)
+        self.actions = actions
+        self.onPasteLink = onPasteLink
     }
 }

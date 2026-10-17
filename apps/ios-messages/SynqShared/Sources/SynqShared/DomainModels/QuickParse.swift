@@ -7,21 +7,21 @@ import Foundation
 // Foundation only: it is unit-tested on macOS by Checks/ParserChecks.swift.
 
 /// A complete, valid flight search the group can run.
-struct FlightPlan: Codable, Equatable {
-    var origin: String
-    var destination: String
-    var departureDate: String
-    var returnDate: String?
-    var travelers: Int
-    var originLabel: String?
-    var destinationLabel: String?
-    var cabin: String?
+public struct FlightPlan: Codable, Equatable {
+    public var origin: String
+    public var destination: String
+    public var departureDate: String
+    public var returnDate: String?
+    public var travelers: Int
+    public var originLabel: String?
+    public var destinationLabel: String?
+    public var cabin: String?
 
-    static let iata = "^[A-Z]{3}$"
-    static let day = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    public static let iata = "^[A-Z]{3}$"
+    public static let day = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
     /// The same rules the server applies to `POST /funds/:id/trips`.
-    func isValid(today: String) -> Bool {
+    public func isValid(today: String) -> Bool {
         guard origin.range(of: Self.iata, options: .regularExpression) != nil,
               destination.range(of: Self.iata, options: .regularExpression) != nil,
               origin != destination,
@@ -37,17 +37,30 @@ struct FlightPlan: Codable, Equatable {
 }
 
 /// What the parser understood; anything missing is nil.
-struct FlightDraft: Equatable {
-    var origin: String?
-    var destination: String?
-    var originLabel: String?
-    var destinationLabel: String?
-    var departureDate: String?
-    var returnDate: String?
-    var travelers: Int?
-    var cabin: String?
+public struct FlightDraft: Equatable {
+    public var origin: String?
+    public var destination: String?
+    public var originLabel: String?
+    public var destinationLabel: String?
+    public var departureDate: String?
+    public var returnDate: String?
+    public var travelers: Int?
+    public var cabin: String?
 
-    func plan(defaultTravelers: Int, today: String) -> FlightPlan? {
+    public init(origin: String? = nil, destination: String? = nil, originLabel: String? = nil,
+                destinationLabel: String? = nil, departureDate: String? = nil, returnDate: String? = nil,
+                travelers: Int? = nil, cabin: String? = nil) {
+        self.origin = origin
+        self.destination = destination
+        self.originLabel = originLabel
+        self.destinationLabel = destinationLabel
+        self.departureDate = departureDate
+        self.returnDate = returnDate
+        self.travelers = travelers
+        self.cabin = cabin
+    }
+
+    public func plan(defaultTravelers: Int, today: String) -> FlightPlan? {
         guard let origin, let destination, let departureDate else { return nil }
         let p = FlightPlan(origin: origin, destination: destination, departureDate: departureDate,
                            returnDate: returnDate, travelers: travelers ?? max(1, min(4, defaultTravelers)),
@@ -56,14 +69,14 @@ struct FlightDraft: Equatable {
     }
 }
 
-struct GiftDraft: Equatable {
-    var query: String
-    var maxPrice: String
+public struct GiftDraft: Equatable {
+    public var query: String
+    public var maxPrice: String
     /// True when the instruction names what to look for, not just "a gift".
-    var specific: Bool
+    public var specific: Bool
 }
 
-enum QuickIntent: Equatable {
+public enum QuickIntent: Equatable {
     case flight(FlightDraft)
     case gift(GiftDraft)
 }
@@ -72,8 +85,8 @@ enum QuickIntent: Equatable {
 
 /// A vetted city → airport table. Ambiguous English words (Nice, Split, Reading,
 /// Male) are deliberately left out; three-letter codes are accepted directly.
-enum Airports {
-    static let cities: [String: String] = [
+public enum Airports {
+    public static let cities: [String: String] = [
         // India
         "delhi": "DEL", "new delhi": "DEL", "mumbai": "BOM", "bombay": "BOM", "bangalore": "BLR",
         "bengaluru": "BLR", "chennai": "MAA", "madras": "MAA", "kolkata": "CCU", "calcutta": "CCU",
@@ -108,10 +121,10 @@ enum Airports {
         "marrakech": "RAK", "sydney": "SYD", "melbourne": "MEL", "auckland": "AKL",
     ]
 
-    static let codes: Set<String> = Set(cities.values)
+    public static let codes: Set<String> = Set(cities.values)
 
     /// A readable city for a code, e.g. GOI → Goa.
-    static func label(for code: String) -> String? {
+    public static func label(for code: String) -> String? {
         let preferred: [String: String] = ["DEL": "Delhi", "BOM": "Mumbai", "BLR": "Bengaluru",
                                            "MAA": "Chennai", "CCU": "Kolkata", "COK": "Kochi",
                                            "TRV": "Thiruvananthapuram", "IXE": "Mangaluru",
@@ -125,7 +138,7 @@ enum Airports {
 
 // MARK: - Parser
 
-enum QuickParser {
+public enum QuickParser {
     private static let flightWords: Set<String> = ["flight", "flights", "fly", "flying", "plane", "airfare",
                                                    "airfares", "ticket", "tickets", "fare", "fares"]
     private static let giftWords: Set<String> = ["gift", "gifts", "present", "presents"]
@@ -140,7 +153,7 @@ enum QuickParser {
     private static let weekdays: [String: Int] = ["sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
                                                   "thursday": 5, "friday": 6, "saturday": 7]
 
-    static func parse(_ text: String, today: Date = Date(), calendar: Calendar = .current) -> QuickIntent? {
+    public static func parse(_ text: String, today: Date = Date(), calendar: Calendar = .current) -> QuickIntent? {
         let s = normalize(text)
         let words = s.split(separator: " ").map(String.init)
         guard !words.isEmpty else { return nil }
@@ -168,17 +181,17 @@ enum QuickParser {
     }
 
     /// "yyyy-MM-dd" for today in the given calendar (server compares day strings).
-    static func today(_ date: Date = Date(), calendar: Calendar = .current) -> String {
+    public static func today(_ date: Date = Date(), calendar: Calendar = .current) -> String {
         day(date, calendar)
     }
 
-    static func day(_ date: Date, _ cal: Calendar) -> String {
+    public static func day(_ date: Date, _ cal: Calendar) -> String {
         let c = cal.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     /// Lowercase words; arrows become "to", dashes between things become " - ".
-    static func normalize(_ text: String) -> String {
+    public static func normalize(_ text: String) -> String {
         var s = text.lowercased()
         for arrow in ["→", "->", "⟶", "➝", "✈"] { s = s.replacingOccurrences(of: arrow, with: " to ") }
         for dash in ["–", "—", "‒", "-"] { s = s.replacingOccurrences(of: dash, with: " - ") }
@@ -197,14 +210,14 @@ enum QuickParser {
 
     // MARK: Route
 
-    struct Mention: Equatable {
-        let code: String
-        let label: String
-        let index: Int
-        let marker: String?   // "from" or "to" when introduced by one
+    public struct Mention: Equatable {
+        public let code: String
+        public let label: String
+        public let index: Int
+        public let marker: String?   // "from" or "to" when introduced by one
     }
 
-    static func cityMentions(original: String, words: [String]) -> [Mention] {
+    public static func cityMentions(original: String, words: [String]) -> [Mention] {
         let upperCodes = Set(original.split(whereSeparator: { !$0.isLetter }).map(String.init)
             .filter { $0.count == 3 && $0 == $0.uppercased() })
         var out: [Mention] = []
@@ -410,7 +423,7 @@ enum QuickParser {
 
     // MARK: Travellers, cabin
 
-    static func travelers(_ s: String) -> Int? {
+    public static func travelers(_ s: String) -> Int? {
         let n = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)"
         let nouns = "(?:people|persons|person|travellers|travelers|traveller|traveler|adults|adult|passengers|passenger|pax|tickets|ticket|seats|seat|of us|friends|guys)"
         if let m = matches("\\b\(n) \(nouns)\\b", s).first { return count(m.g[0]!) }
@@ -430,7 +443,7 @@ enum QuickParser {
 
     private static func count(_ w: String) -> Int? { Int(w) ?? numberWords[w] }
 
-    static func cabin(_ s: String) -> String? {
+    public static func cabin(_ s: String) -> String? {
         if s.contains("premium economy") { return "premium_economy" }
         if s.range(of: "\\bbusiness\\b", options: .regularExpression) != nil { return "business" }
         if s.range(of: "\\bfirst class\\b", options: .regularExpression) != nil { return "first" }
@@ -440,7 +453,7 @@ enum QuickParser {
 
     // MARK: Gifts
 
-    static func gift(_ s: String) -> GiftDraft {
+    public static func gift(_ s: String) -> GiftDraft {
         var budget: String?
         var q = " " + s + " "
         let patterns = [
@@ -469,13 +482,13 @@ enum QuickParser {
 
     // MARK: Regex helper
 
-    struct Match {
-        let loc: Int
-        let end: Int
-        let g: [String?]
+    public struct Match {
+        public let loc: Int
+        public let end: Int
+        public let g: [String?]
     }
 
-    static func matches(_ pattern: String, _ s: String) -> [Match] {
+    public static func matches(_ pattern: String, _ s: String) -> [Match] {
         guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         let ns = s as NSString
         return re.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { r in
@@ -492,7 +505,7 @@ enum QuickParser {
 
 /// What one command-bar submission leads to. Only searches ever run on their own;
 /// sending money always opens the Send sheet and then the passkey page.
-enum CommandOutcome: Equatable {
+public enum CommandOutcome: Equatable {
     case runFlight(FlightPlan)
     case runGift(query: String, maxPrice: String)
     /// Complete but not confirmed as an instruction: one tap to search.
@@ -505,11 +518,11 @@ enum CommandOutcome: Equatable {
     case answer
 }
 
-enum CommandResolver {
+public enum CommandResolver {
     /// - Parameters:
     ///   - reply: the server's Ask Synq answer, nil when it could not be reached.
     ///   - local: what the on-device parser made of the same text.
-    static func resolve(reply: AskReply?, local: QuickIntent?, defaultTravelers: Int, today: String) -> CommandOutcome {
+    public static func resolve(reply: AskReply?, local: QuickIntent?, defaultTravelers: Int, today: String) -> CommandOutcome {
         switch reply?.action {
         case .flightSearch(let f)?:
             let server = FlightPlan(origin: f.origin.uppercased(), destination: f.destination.uppercased(),
@@ -567,7 +580,7 @@ enum CommandResolver {
 
 // MARK: - Trip wording
 
-enum TripFormat {
+public enum TripFormat {
     private static func date(_ s: String) -> Date? {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -587,13 +600,13 @@ enum TripFormat {
     }
 
     /// "Dec 1", "Tue, Dec 1".
-    static func day(_ s: String?, weekday: Bool = false) -> String {
+    public static func day(_ s: String?, weekday: Bool = false) -> String {
         guard let s, let d = date(s) else { return s ?? "" }
         return format(d, weekday ? "EEE, MMM d" : "MMM d")
     }
 
     /// "Dec 1–5", "Dec 28 – Jan 3", "Dec 1".
-    static func range(_ from: String?, _ to: String?) -> String {
+    public static func range(_ from: String?, _ to: String?) -> String {
         guard let from, let a = date(from) else { return "" }
         guard let to, let b = date(to), to != from else { return format(a, "MMM d") }
         if format(a, "MMM") == format(b, "MMM") { return "\(format(a, "MMM d"))–\(format(b, "d"))" }
@@ -601,14 +614,14 @@ enum TripFormat {
     }
 
     /// "Dec 12, 10:24" (UTC) for a Unix time in seconds.
-    static func stamp(_ seconds: Int) -> String {
+    public static func stamp(_ seconds: Int) -> String {
         format(Date(timeIntervalSince1970: TimeInterval(seconds)), "MMM d, HH:mm")
     }
 
-    static func travellers(_ n: Int) -> String { n == 1 ? "1 traveller" : "\(n) travellers" }
+    public static func travellers(_ n: Int) -> String { n == 1 ? "1 traveller" : "\(n) travellers" }
 
     /// "DEL → GOI · Dec 1–5 · 3 travellers"
-    static func summary(_ p: FlightPlan) -> String {
+    public static func summary(_ p: FlightPlan) -> String {
         "\(p.origin) → \(p.destination) · \(range(p.departureDate, p.returnDate)) · \(travellers(p.travelers))"
     }
 }

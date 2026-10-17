@@ -6,10 +6,10 @@ import SwiftUI
 
 // MARK: - Flights tab
 
-struct FlightsView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    var onTab: (SynqTab) -> Void
+public struct FlightsView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    public var onTab: (SynqTab) -> Void
     @Environment(\.synqTheme) private var theme
 
     private var flights: [TripView] { model.trips.filter { !$0.isGift } }
@@ -23,7 +23,7 @@ struct FlightsView: View {
                            returnDate: t.returnDate, travelers: t.travelers)
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: "Flights", onBack: { onTab(.home) })
             SynqHeroArt(slot: .flights)
@@ -57,9 +57,9 @@ struct FlightsView: View {
 }
 
 /// FROM / TO / DATES / TRAVELLERS as one outlined field group, then the search button.
-struct FlightSearchForm: View {
-    let busy: Bool
-    let onSearch: (FlightPlan) -> Void
+public struct FlightSearchForm: View {
+    public let busy: Bool
+    public let onSearch: (FlightPlan) -> Void
     @State private var origin: String
     @State private var destination: String
     @State private var date: Date
@@ -70,7 +70,7 @@ struct FlightSearchForm: View {
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
 
-    init(prefill: FlightDraft = FlightDraft(), busy: Bool = false, onSearch: @escaping (FlightPlan) -> Void) {
+    public init(prefill: FlightDraft = FlightDraft(), busy: Bool = false, onSearch: @escaping (FlightPlan) -> Void) {
         self.busy = busy
         self.onSearch = onSearch
         let cal = Calendar(identifier: .gregorian)
@@ -94,7 +94,7 @@ struct FlightSearchForm: View {
     private static func day(_ d: Date) -> String { QuickParser.day(d, Calendar(identifier: .gregorian)) }
 
     /// A typed code or a known city name.
-    static func code(_ s: String) -> String? {
+    public static func code(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespaces)
         if let c = Airports.cities[t.lowercased()] { return c }
         let u = t.uppercased()
@@ -119,7 +119,7 @@ struct FlightSearchForm: View {
                   : "\(TripFormat.day(Self.day(date))) · one way"
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.m) {
             SynqGroup {
                 SynqField(label: "From", icon: .pin, text: $origin, placeholder: "Delhi or DEL", detail: label(origin),
@@ -171,16 +171,16 @@ struct FlightSearchForm: View {
 
 // MARK: - Gifts tab
 
-struct GiftsView: View {
-    @ObservedObject var model: FundModel
-    let actions: FundActions
-    var onTab: (SynqTab) -> Void
+public struct GiftsView: View {
+    @ObservedObject public var model: FundModel
+    public let actions: FundActions
+    public var onTab: (SynqTab) -> Void
     @Environment(\.synqTheme) private var theme
 
     private var gifts: [TripView] { model.trips.filter(\.isGift) }
     private var live: Bool { model.view?.state == "ACTIVE" }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: "Gifts", onBack: { onTab(.home) })
             SynqHeroArt(slot: .gift)
@@ -206,15 +206,15 @@ struct GiftsView: View {
     }
 }
 
-struct GiftSearchForm: View {
-    let maxBudget: Int
-    let busy: Bool
-    let onSearch: (String, String) -> Void
+public struct GiftSearchForm: View {
+    public let maxBudget: Int
+    public let busy: Bool
+    public let onSearch: (String, String) -> Void
     @State private var query: String
     @State private var budget: String
     @Environment(\.synqTheme) private var theme
 
-    init(prefill: GiftPrefill, maxBudget: Int, busy: Bool = false, onSearch: @escaping (String, String) -> Void) {
+    public init(prefill: GiftPrefill, maxBudget: Int, busy: Bool = false, onSearch: @escaping (String, String) -> Void) {
         self.maxBudget = max(1, min(500, maxBudget))
         self.busy = busy
         self.onSearch = onSearch
@@ -228,7 +228,7 @@ struct GiftSearchForm: View {
             && (Int(budget) ?? 0) >= 1 && (Int(budget) ?? 0) <= maxBudget
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.m) {
             SynqGroup {
                 SynqField(label: "Looking for", icon: .gift, text: $query, placeholder: "e.g. gifts for car lovers")
@@ -252,13 +252,13 @@ struct GiftSearchForm: View {
 
 // MARK: - Trip detail
 
-struct TripDetailView: View {
-    @ObservedObject var model: FundModel
-    let trip: TripView
-    let actions: FundActions
+public struct TripDetailView: View {
+    @ObservedObject public var model: FundModel
+    public let trip: TripView
+    public let actions: FundActions
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: trip.isGift ? "Gift" : trip.routeTitle,
                        onBack: { withAnimation(theme.motion.spring) { model.selectedTrip = nil } },
@@ -362,20 +362,20 @@ struct TripDetailView: View {
 }
 
 /// One leg of a flight option, as shown on the option card.
-struct LegLine: Equatable {
-    var label: String
-    var from: String
-    var to: String
-    var depart: String?
-    var arrive: String?
-    var day: String
-    var note: String
+public struct LegLine: Equatable {
+    public var label: String
+    public var from: String
+    public var to: String
+    public var depart: String?
+    public var arrive: String?
+    public var day: String
+    public var note: String
 }
 
 extension TripView {
     /// Outbound (and return) legs for an option: from the server when it sends
     /// them, otherwise from the trip's route and dates.
-    func legs(for o: TripOptionView) -> [LegLine] {
+    public func legs(for o: TripOptionView) -> [LegLine] {
         func time(_ s: String?) -> String? {
             guard let s, s.count >= 16 else { return nil }
             let i = s.index(s.startIndex, offsetBy: 11)
@@ -407,11 +407,11 @@ extension TripView {
     }
 }
 
-struct OptionCard: View {
-    let trip: TripView
-    let option: TripOptionView
-    let rank: Int
-    let onVote: () -> Void
+public struct OptionCard: View {
+    public let trip: TripView
+    public let option: TripOptionView
+    public let rank: Int
+    public let onVote: () -> Void
     @Environment(\.synqTheme) private var theme
 
     private var mine: Bool { trip.myVote == option.optionId }
@@ -419,7 +419,7 @@ struct OptionCard: View {
     private var chosen: Bool { trip.chosen == option.optionId }
     private var highlighted: Bool { chosen || (trip.chosen == nil && leading) }
 
-    var body: some View {
+    public var body: some View {
         SynqGroup(emphasis: highlighted) {
             VStack(alignment: .leading, spacing: theme.space.m) {
                 HStack(alignment: .top, spacing: theme.space.m) {
@@ -461,11 +461,11 @@ struct OptionCard: View {
     }
 }
 
-struct LegView: View {
-    let leg: LegLine
+public struct LegView: View {
+    public let leg: LegLine
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: theme.space.m) {
             SynqIconView(icon: leg.label == "Return" ? .flightLand : .flight, size: 13, ink: .secondary).frame(width: 18)
             VStack(alignment: .leading, spacing: theme.space.xxs) {
@@ -496,17 +496,17 @@ struct LegView: View {
 
 // MARK: - Payment detail
 
-struct ProposalDetailView: View {
-    let proposal: FundProposal
-    let fundName: String
-    let network: String
-    let onApprove: () -> Void
-    let onExplorer: (URL) -> Void
-    let onShare: () -> Void
-    let onBack: (() -> Void)?
+public struct ProposalDetailView: View {
+    public let proposal: FundProposal
+    public let fundName: String
+    public let network: String
+    public let onApprove: () -> Void
+    public let onExplorer: (URL) -> Void
+    public let onShare: () -> Void
+    public let onBack: (() -> Void)?
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.l) {
             SynqHeader(title: "Payment", onBack: onBack,
                        actions: [SynqHeaderAction(icon: .share, label: "Share in this chat", action: onShare)])

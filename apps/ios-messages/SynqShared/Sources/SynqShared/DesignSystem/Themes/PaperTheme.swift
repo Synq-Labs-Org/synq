@@ -4,24 +4,24 @@ import SwiftUI
 // serif headlines, filled panels with labels above, and risograph-style art
 // (overprinted sun, hills and halftone dots) drawn procedurally per slot.
 
-struct PaperTheme: SynqTheme {
-    let id = "paper"
-    let name = "Paper"
-    let summary = "Light print look, serif type, riso art"
-    let colorScheme = ColorScheme.light
+public struct PaperTheme: SynqTheme {
+    public let id = "paper"
+    public let name = "Paper"
+    public let summary = "Light print look, serif type, riso art"
+    public let colorScheme = ColorScheme.light
 
-    static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
+    public static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
               blue: Double(v & 0xFF) / 255, opacity: a)
     }
 
     /// Print inks for the art.
-    static let vermilion = hex(0xD2492A)
-    static let ochre = hex(0xE3A63B)
-    static let indigo = hex(0x2C4A7C)
-    static let teal = hex(0x2F7A6D)
+    public static let vermilion = hex(0xD2492A)
+    public static let ochre = hex(0xE3A63B)
+    public static let indigo = hex(0x2C4A7C)
+    public static let teal = hex(0x2F7A6D)
 
-    let colors = SynqColors(
+    public let colors = SynqColors(
         background: hex(0xF4EFE6), panel: hex(0xFBF8F2),
         inkPrimary: hex(0x1C1A17), inkSecondary: hex(0x57514A), inkTertiary: hex(0x7A7366),
         line: hex(0xDCD3C4), lineStrong: hex(0x1C1A17),
@@ -40,7 +40,7 @@ struct PaperTheme: SynqTheme {
                      uppercase: upper, fixed: fixed)
     }
 
-    let type = SynqTypography(roles: [
+    public let type = SynqTypography(roles: [
         .wordmark: serif(32, .semibold, .largeTitle, tracking: -0.5, fixed: true),
         .wordmarkSub: sans(11, .medium, .caption, tracking: 1.2, upper: true, fixed: true),
         .title: serif(19, .semibold, .headline), .headline: serif(23, .semibold, .title2),
@@ -55,24 +55,24 @@ struct PaperTheme: SynqTheme {
         .display: serif(27, .semibold, .title, tracking: -0.3),
     ], artFamily: nil)
 
-    let space = SynqSpacing()
-    let radius = SynqRadii(panel: 14, control: 12, badge: 6, key: 10, bubble: 16)
-    let lines = SynqLines(hairline: 1, control: 1, ruleDash: [])
-    let motion = SynqMotion(blinkingCursor: false)
-    let glyphs = SynqGlyphs(bracketOpen: nil, bracketClose: nil, strongOpen: nil, strongClose: nil, rowArrow: "→",
+    public let space = SynqSpacing()
+    public let radius = SynqRadii(panel: 14, control: 12, badge: 6, key: 10, bubble: 16)
+    public let lines = SynqLines(hairline: 1, control: 1, ruleDash: [])
+    public let motion = SynqMotion(blinkingCursor: false)
+    public let glyphs = SynqGlyphs(bracketOpen: nil, bracketClose: nil, strongOpen: nil, strongClose: nil, rowArrow: "→",
                             cursor: nil, prompt: "")
-    let copy = SynqFlavor(
+    public let copy = SynqFlavor(
         wordmark: "Synq", wordmarkSub: "pay together",
         taglines: [.home: "Go further,\ntogether", .fund: "One pot,\nmany hands", .send: "Small payments,\nbig memories",
                    .gift: "Give as one", .receipt: "Every cent,\naccounted for", .deal: "Agreed,\nin writing",
                    .risk: "Safe by\ndesign", .agent: "Think it\nthrough"],
         tabs: [.home: "Home", .trips: "Flights", .gifts: "Gifts", .group: "Group", .ask: "S"],
         centreTab: "S", seeAll: "See all", flightsHeadline: "Where to next?", places: SynqFlavor.airportCoordinates)
-    let icons = SynqIcons(symbols: [.ask: "sparkles", .home: "house", .send: "arrow.up.right"], weight: .regular)
-    let looks = SynqLooks(panelLabel: .above, panelFilled: true, avatar: .initials, progress: .capsule,
+    public let icons = SynqIcons(symbols: [.ask: "sparkles", .home: "house", .send: "arrow.up.right"], weight: .regular)
+    public let looks = SynqLooks(panelLabel: .above, panelFilled: true, avatar: .initials, progress: .capsule,
                           uppercaseTitles: false, ruledSections: true)
 
-    func art(_ slot: SynqArtSlot, _ variant: SynqArtVariant) -> AnyView {
+    public func art(_ slot: SynqArtSlot, _ variant: SynqArtVariant) -> AnyView {
         AnyView(PaperPrint(slot: slot, hero: variant == .hero, tagline: variant == .hero ? copy.taglines[slot] : nil,
                            paper: Self.hex(0xEDE4D3), ink: colors.inkPrimary, taglineFont: type[.tagline]))
     }
@@ -82,13 +82,13 @@ struct PaperTheme: SynqTheme {
 
 /// A two- or three-ink print: halftone sky, a sun, overprinted hills and a stamp
 /// with the slot's symbol. Layout and inks come from the slot, so it is stable.
-struct PaperPrint: View {
-    let slot: SynqArtSlot
-    let hero: Bool
-    let tagline: String?
-    let paper: Color
-    let ink: Color
-    let taglineFont: SynqFontSpec
+public struct PaperPrint: View {
+    public let slot: SynqArtSlot
+    public let hero: Bool
+    public let tagline: String?
+    public let paper: Color
+    public let ink: Color
+    public let taglineFont: SynqFontSpec
 
     private struct Recipe {
         var sun: Color
@@ -113,7 +113,7 @@ struct PaperPrint: View {
 
     private var seed: Double { Double(SynqArtSlot.allCases.firstIndex(of: slot) ?? 0) }
 
-    var body: some View {
+    public var body: some View {
         let r = recipe
         ZStack(alignment: .topLeading) {
             Canvas { ctx, size in

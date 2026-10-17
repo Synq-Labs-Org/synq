@@ -8,13 +8,13 @@ import SwiftUI
 
 // MARK: - Home section
 
-struct BusinessTile {
-    let kind: BusinessFeatureKind
-    let icon: SynqIcon
-    let title: String
-    let subtitle: String
+public struct BusinessTile {
+    public let kind: BusinessFeatureKind
+    public let icon: SynqIcon
+    public let title: String
+    public let subtitle: String
 
-    static let all: [BusinessTile] = [
+    public static let all: [BusinessTile] = [
         BusinessTile(kind: .deals, icon: .deal, title: "Deal room", subtitle: "Agree, sign, escrow milestones"),
         BusinessTile(kind: .invoices, icon: .receipt, title: "Get paid", subtitle: "Invoice + checkout link"),
         BusinessTile(kind: .team, icon: .team, title: "Ask your finance team", subtitle: "CFO · Risk · Kernel decision"),
@@ -23,16 +23,16 @@ struct BusinessTile {
         BusinessTile(kind: .contractors, icon: .contractor, title: "Pay a contractor", subtitle: "Verified vendors only"),
     ]
 
-    static func of(_ kind: BusinessFeatureKind) -> BusinessTile { all.first { $0.kind == kind }! }
+    public static func of(_ kind: BusinessFeatureKind) -> BusinessTile { all.first { $0.kind == kind }! }
 }
 
 /// The headline list on Home: the Arc business features, labelled with their network.
-struct BusinessSection: View {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
+public struct BusinessSection: View {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.s) {
             SynqSectionLabel(text: "Arc business", trailing: networkTitle(business.network))
             SynqGroup {
@@ -64,11 +64,11 @@ struct BusinessSection: View {
 }
 
 /// Compact-mode chips for the same features.
-struct BusinessChips: View {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
+public struct BusinessChips: View {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
 
-    var body: some View {
+    public var body: some View {
         ForEach(BusinessTile.all, id: \.kind) { tile in
             SynqChip(title: chipTitle(tile.kind), icon: tile.icon) {
                 actions.expand()
@@ -92,12 +92,12 @@ struct BusinessChips: View {
 // MARK: - Sheet host
 
 /// Presents the business sheet the model asks for.
-struct BusinessSheetHost: ViewModifier {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
+public struct BusinessSheetHost: ViewModifier {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
     @Environment(\.synqTheme) private var theme
 
-    func body(content: Content) -> some View {
+    public func body(content: Content) -> some View {
         content.sheet(item: $business.sheet) { sheet in
             BusinessScreen(business: business, sheet: sheet, actions: actions) { business.sheet = nil }
                 .environment(\.synqTheme, theme)
@@ -106,19 +106,19 @@ struct BusinessSheetHost: ViewModifier {
 }
 
 extension View {
-    func businessSheets(_ business: BusinessModel, actions: FundActions) -> some View {
+    public func businessSheets(_ business: BusinessModel, actions: FundActions) -> some View {
         modifier(BusinessSheetHost(business: business, actions: actions))
     }
 }
 
 /// One business screen, chosen by kind.
-struct BusinessScreen: View {
-    @ObservedObject var business: BusinessModel
-    let sheet: BusinessSheet
-    let actions: FundActions
-    let onClose: () -> Void
+public struct BusinessScreen: View {
+    @ObservedObject public var business: BusinessModel
+    public let sheet: BusinessSheet
+    public let actions: FundActions
+    public let onClose: () -> Void
 
-    var body: some View {
+    public var body: some View {
         switch sheet.kind {
         case .deals: DealRoomSheet(business: business, sheet: sheet, actions: actions, onClose: onClose)
         case .invoices: GetPaidSheet(business: business, sheet: sheet, actions: actions, onClose: onClose)
@@ -133,12 +133,12 @@ struct BusinessScreen: View {
 // MARK: - Shared pieces
 
 /// Network and mode, always visible on a business screen.
-struct BusinessModeLine: View {
-    var network: String
-    var mode: String
+public struct BusinessModeLine: View {
+    public var network: String
+    public var mode: String
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: theme.space.s) {
             Text(networkTitle(network)).synqType(.caption, .secondary)
             Text("·").synqType(.caption, .tertiary)
@@ -151,13 +151,13 @@ struct BusinessModeLine: View {
 }
 
 /// Shows the feature's content when the server serves it, else the honest reason.
-struct BusinessGate<Content: View>: View {
-    @ObservedObject var business: BusinessModel
-    let kind: BusinessFeatureKind
-    @ViewBuilder var content: () -> Content
+public struct BusinessGate<Content: View>: View {
+    @ObservedObject public var business: BusinessModel
+    public let kind: BusinessFeatureKind
+    @ViewBuilder public var content: () -> Content
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         switch business.availability(kind) {
         case .enabled:
             content()
@@ -183,10 +183,10 @@ struct BusinessGate<Content: View>: View {
 }
 
 /// "12.50 USDC" with the statement-style two decimals.
-func usdc(_ amount: String, _ symbol: String = "USDC") -> String { "\(cardAmount(amount)) \(symbol)" }
+public func usdc(_ amount: String, _ symbol: String = "USDC") -> String { "\(cardAmount(amount)) \(symbol)" }
 
 extension SynqBadgeKind {
-    static func stance(_ s: String) -> SynqBadgeKind {
+    public static func stance(_ s: String) -> SynqBadgeKind {
         switch s {
         case "PAY", "CLEAR": return .approved
         case "HOLD", "REVIEW": return .pending
@@ -210,14 +210,14 @@ private func stanceWord(_ s: String) -> String {
 
 // MARK: - Deal Room
 
-struct DealRoomSheet: View {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
-    let onClose: () -> Void
+public struct DealRoomSheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
+    public let onClose: () -> Void
     @State private var text: String
     @Environment(\.synqTheme) private var theme
 
-    init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
+    public init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
         self.business = business
         self.actions = actions
         self.onClose = onClose
@@ -226,7 +226,7 @@ struct DealRoomSheet: View {
 
     private let prompt = "Describe the work, total USDC, milestones and deadlines"
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Deal room", onCancel: onClose) {
             SynqHeroArt(slot: .deal)
             SynqStack(spacing: \.m) {
@@ -260,13 +260,13 @@ struct DealRoomSheet: View {
     }
 }
 
-struct DealResultView: View {
-    let deal: DealDraft
-    let network: String
-    let onReview: (URL) -> Void
+public struct DealResultView: View {
+    public let deal: DealDraft
+    public let network: String
+    public let onReview: (URL) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if deal.drafted, let url = deal.reviewURL {
             SynqPanel(label: "Draft deal") {
                 HStack(alignment: .top) {
@@ -301,16 +301,16 @@ struct DealResultView: View {
 
 // MARK: - Get paid
 
-struct GetPaidSheet: View {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
-    let onClose: () -> Void
+public struct GetPaidSheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
+    public let onClose: () -> Void
     @State private var payer: String
     @State private var amount: String
     @State private var note: String
     @Environment(\.synqTheme) private var theme
 
-    init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
+    public init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
         self.business = business
         self.actions = actions
         self.onClose = onClose
@@ -325,7 +325,7 @@ struct GetPaidSheet: View {
             && !note.trimmingCharacters(in: .whitespaces).isEmpty && business.busy == nil
     }
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Get paid", onCancel: onClose) {
             SynqHeroArt(slot: .receipt)
             SynqStack(spacing: \.m) {
@@ -363,13 +363,13 @@ struct GetPaidSheet: View {
     }
 }
 
-struct InvoiceResultView: View {
-    let invoice: BusinessInvoice
-    let busy: Bool
-    let onIssue: (URL) -> Void
-    let onRefresh: () -> Void
-    let onShare: () -> Void
-    let onCheckout: (URL) -> Void
+public struct InvoiceResultView: View {
+    public let invoice: BusinessInvoice
+    public let busy: Bool
+    public let onIssue: (URL) -> Void
+    public let onRefresh: () -> Void
+    public let onShare: () -> Void
+    public let onCheckout: (URL) -> Void
     @Environment(\.synqTheme) private var theme
 
     private var badge: SynqBadgeKind {
@@ -381,7 +381,7 @@ struct InvoiceResultView: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Invoice") {
             HStack(alignment: .top) {
                 Text("Invoice \(invoice.number)").synqType(.headline).lineLimit(1).minimumScaleFactor(0.7)
@@ -414,7 +414,7 @@ struct InvoiceResultView: View {
 }
 
 /// The INVOICE card shown in the transcript for a shared checkout link.
-func invoiceCard(number: String?, payer: String?, amount: String?, symbol: String?, status: String?) -> SynqCardModel {
+public func invoiceCard(number: String?, payer: String?, amount: String?, symbol: String?, status: String?) -> SynqCardModel {
     let word: String
     let badge: SynqBadgeKind
     switch status {
@@ -435,9 +435,14 @@ func invoiceCard(number: String?, payer: String?, amount: String?, symbol: Strin
 }
 
 /// Transcript bubble for a shared invoice: live status once fetched, the sender's hint before.
-struct InvoiceBubble: View {
-    let link: InvoiceLink
-    let status: CheckoutStatus?
+public struct InvoiceBubble: View {
+    public init(link: InvoiceLink, status: CheckoutStatus?) {
+        self.link = link
+        self.status = status
+    }
+
+    public let link: InvoiceLink
+    public let status: CheckoutStatus?
 
     /// What is still due; a settled invoice shows its total.
     private var shownAmount: String? {
@@ -446,7 +451,7 @@ struct InvoiceBubble: View {
         return status.amountDue ?? status.total
     }
 
-    var body: some View {
+    public var body: some View {
         SynqCardBubble(model: invoiceCard(number: status?.number ?? link.number, payer: status?.payer ?? link.payer,
                                           amount: shownAmount,
                                           symbol: status?.asset?.symbol ?? link.symbol, status: status?.status))
@@ -454,15 +459,24 @@ struct InvoiceBubble: View {
 }
 
 /// Expanded view of a shared invoice card: what is owed and the checkout page.
-struct InvoiceLinkView: View {
-    let link: InvoiceLink
-    let status: CheckoutStatus?
-    let error: String?
-    let onCheckout: () -> Void
-    let onRefresh: () -> Void
+public struct InvoiceLinkView: View {
+    public init(link: InvoiceLink, status: CheckoutStatus?, error: String?, onCheckout: @escaping () -> Void,
+                onRefresh: @escaping () -> Void) {
+        self.link = link
+        self.status = status
+        self.error = error
+        self.onCheckout = onCheckout
+        self.onRefresh = onRefresh
+    }
+
+    public let link: InvoiceLink
+    public let status: CheckoutStatus?
+    public let error: String?
+    public let onCheckout: () -> Void
+    public let onRefresh: () -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqScreen {
             VStack(alignment: .leading, spacing: theme.space.l) {
                 SynqHeader(title: "Invoice")
@@ -501,16 +515,16 @@ struct InvoiceLinkView: View {
 
 // MARK: - Finance team
 
-struct TeamSheet: View {
-    @ObservedObject var business: BusinessModel
-    let sheet: BusinessSheet
-    let actions: FundActions
-    let onClose: () -> Void
+public struct TeamSheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let sheet: BusinessSheet
+    public let actions: FundActions
+    public let onClose: () -> Void
     @State private var question: String
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
 
-    init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
+    public init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void) {
         self.business = business
         self.sheet = sheet
         self.actions = actions
@@ -521,7 +535,7 @@ struct TeamSheet: View {
     private let ideas = ["Review open payment requests", "What is reserved in this workspace?",
                          "What can the finance team do right now?"]
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Finance team", onCancel: onClose) {
             SynqHeroArt(slot: .agent)
             SynqStack(spacing: \.m) {
@@ -558,11 +572,11 @@ struct TeamSheet: View {
     }
 }
 
-struct TeamThinking: View {
-    let question: String
+public struct TeamThinking: View {
+    public let question: String
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Council") {
             SynqEcho(text: question)
             HStack(spacing: theme.space.s) {
@@ -575,12 +589,12 @@ struct TeamThinking: View {
 }
 
 /// CFO and Risk in their own words; the Decision panel only from the Kernel's structured verdict.
-struct TeamResultView: View {
-    let result: TeamResult
-    let onApprove: (URL) -> Void
+public struct TeamResultView: View {
+    public let result: TeamResult
+    public let onApprove: (URL) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if result.status != "ANSWERED", result.specialists.isEmpty {
             SynqPanel(label: result.status == "STOPPED" ? "Stopped" : "Needs detail") {
                 Text(result.answer ?? "The team needs more detail.").synqType(.body).fixedSize(horizontal: false, vertical: true)
@@ -626,9 +640,9 @@ struct TeamResultView: View {
     }
 }
 
-struct DecisionPanel: View {
-    let decision: TeamDecision
-    let riskCase: TeamRiskCase?
+public struct DecisionPanel: View {
+    public let decision: TeamDecision
+    public let riskCase: TeamRiskCase?
     @Environment(\.synqTheme) private var theme
 
     private var badge: SynqBadgeKind {
@@ -639,7 +653,7 @@ struct DecisionPanel: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Decision · Kernel") {
             HStack(alignment: .top) {
                 Text(decision.headline).synqType(.headline).fixedSize(horizontal: false, vertical: true)
@@ -664,15 +678,15 @@ struct DecisionPanel: View {
 
 // MARK: - Split income
 
-struct SplitSheet: View {
-    @ObservedObject var business: BusinessModel
-    let sheet: BusinessSheet
-    let onClose: () -> Void
+public struct SplitSheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let sheet: BusinessSheet
+    public let onClose: () -> Void
     @State private var amount: String
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
 
-    init(business: BusinessModel, sheet: BusinessSheet, onClose: @escaping () -> Void) {
+    public init(business: BusinessModel, sheet: BusinessSheet, onClose: @escaping () -> Void) {
         self.business = business
         self.sheet = sheet
         self.onClose = onClose
@@ -681,7 +695,7 @@ struct SplitSheet: View {
 
     private var normalized: String? { normalizedAmount(amount, max: 1_000_000) }
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Split income", onCancel: onClose) {
             SynqHeroArt(slot: .fund)
             SynqStack(spacing: \.m) {
@@ -707,11 +721,11 @@ struct SplitSheet: View {
     }
 }
 
-struct SplitResultView: View {
-    let split: SplitPreview
+public struct SplitResultView: View {
+    public let split: SplitPreview
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         SynqPanel(label: "Waterfall") {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: theme.space.xxs) {
@@ -767,14 +781,14 @@ struct SplitResultView: View {
 
 // MARK: - Treasury
 
-struct TreasurySheet: View {
-    @ObservedObject var business: BusinessModel
-    let actions: FundActions
-    let onClose: () -> Void
+public struct TreasurySheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let actions: FundActions
+    public let onClose: () -> Void
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Treasury", onCancel: onClose,
                       actions: [SynqHeaderAction(icon: .refresh, label: "Refresh balances") { business.loadTreasury() }]) {
             SynqHeroArt(slot: .fund)
@@ -797,12 +811,12 @@ struct TreasurySheet: View {
     }
 }
 
-struct TreasuryContent: View {
-    let treasury: TreasuryView
-    let onExplorer: (URL) -> Void
+public struct TreasuryContent: View {
+    public let treasury: TreasuryView
+    public let onExplorer: (URL) -> Void
     @Environment(\.synqTheme) private var theme
 
-    var body: some View {
+    public var body: some View {
         if let vault = treasury.accounts.first {
             SynqPanel(label: vault.label) {
                 Text(shortId(vault.address)).synqType(.caption, .secondary)
@@ -857,17 +871,17 @@ struct TreasuryContent: View {
 
 // MARK: - Pay a contractor
 
-struct ContractorSheet: View {
-    @ObservedObject var business: BusinessModel
-    let sheet: BusinessSheet
-    let actions: FundActions
-    let onClose: () -> Void
+public struct ContractorSheet: View {
+    @ObservedObject public var business: BusinessModel
+    public let sheet: BusinessSheet
+    public let actions: FundActions
+    public let onClose: () -> Void
     @State private var vendor: BusinessVendor?
     @State private var amount: String
     @Environment(\.synqTheme) private var theme
     @Environment(\.synqRenderMode) private var mode
 
-    init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void,
+    public init(business: BusinessModel, sheet: BusinessSheet, actions: FundActions, onClose: @escaping () -> Void,
          selected: BusinessVendor? = nil) {
         self.business = business
         self.sheet = sheet
@@ -880,7 +894,7 @@ struct ContractorSheet: View {
     private var verified: [BusinessVendor] { (business.vendors ?? []).filter(\.verified) }
     private var normalized: String? { normalizedAmount(amount, max: 10_000) }
 
-    var body: some View {
+    public var body: some View {
         SheetScaffold(title: "Pay a contractor", onCancel: onClose) {
             SynqHeroArt(slot: .risk)
             SynqStack(spacing: \.m) {

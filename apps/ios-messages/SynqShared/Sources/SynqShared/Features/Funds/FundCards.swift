@@ -6,7 +6,7 @@ import SwiftUI
 // sandbox card.
 
 /// Money on a card always shows two decimals, like a statement.
-func cardAmount(_ s: String) -> String {
+public func cardAmount(_ s: String) -> String {
     guard let d = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")) else { return s }
     let f = NumberFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
@@ -17,17 +17,17 @@ func cardAmount(_ s: String) -> String {
 }
 
 /// "0x3a1f…7f2d"-style short form of an id or address.
-func shortId(_ s: String) -> String {
+public func shortId(_ s: String) -> String {
     s.count > 12 ? "\(s.prefix(6))…\(s.suffix(4))" : s
 }
 
 /// Network labels in title case ("Monad testnet" → "Monad Testnet").
-func networkTitle(_ s: String) -> String {
+public func networkTitle(_ s: String) -> String {
     s.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
 }
 
 extension String {
-    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+    public var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
 
 private func plural(_ n: Int, _ one: String, _ many: String? = nil) -> String {
@@ -37,7 +37,7 @@ private func plural(_ n: Int, _ one: String, _ many: String? = nil) -> String {
 // MARK: - Fund
 
 extension FundView {
-    var tone: SynqTone {
+    public var tone: SynqTone {
         switch state {
         case "FORMING", "SETUP": return .waiting
         case "LAUNCHING": return .moving
@@ -46,7 +46,7 @@ extension FundView {
         }
     }
 
-    var cardStatus: String {
+    public var cardStatus: String {
         switch state {
         case "FORMING": return "Joining"
         case "LAUNCHING": return "Creating"
@@ -56,10 +56,10 @@ extension FundView {
         }
     }
 
-    var activatedCount: Int { members.filter(\.activated).count }
-    var pendingProposals: [FundProposal] { proposals.filter { $0.state == "PENDING" } }
+    public var activatedCount: Int { members.filter(\.activated).count }
+    public var pendingProposals: [FundProposal] { proposals.filter { $0.state == "PENDING" } }
 
-    var card: SynqCardModel {
+    public var card: SynqCardModel {
         let balance = treasury.map { cardAmount($0.balance) }
         let label = [
             "Synq group fund \(name).",
@@ -78,7 +78,7 @@ extension FundView {
 }
 
 /// The card shown before a fund exists or while it loads.
-func draftFundCard(name: String, network: String = SynqNetwork.fundBackend) -> SynqCardModel {
+public func draftFundCard(name: String, network: String = SynqNetwork.fundBackend) -> SynqCardModel {
     let n = name.isEmpty ? "Your fund" : name
     return SynqCardModel(art: .fund, eyebrow: "Group fund", title: n, amount: nil, unit: "AUSD",
                          detail: "Everyone joins with Face ID", badge: .pending, status: "New", progress: nil,
@@ -88,7 +88,7 @@ func draftFundCard(name: String, network: String = SynqNetwork.fundBackend) -> S
 // MARK: - Payment
 
 extension FundProposal {
-    var tone: SynqTone {
+    public var tone: SynqTone {
         switch state {
         case "PAID": return .done
         case "EXECUTING": return .moving
@@ -97,7 +97,7 @@ extension FundProposal {
         }
     }
 
-    var cardStatus: String {
+    public var cardStatus: String {
         switch state {
         case "PAID": return "Paid"
         case "EXECUTING": return "Sending"
@@ -106,7 +106,7 @@ extension FundProposal {
         }
     }
 
-    func card(fundName: String, network: String) -> SynqCardModel {
+    public func card(fundName: String, network: String) -> SynqCardModel {
         let label = "Synq payment of \(amount) \(symbol) to \(recipient) from \(fundName). "
             + "Status \(statusText). \(approvals.counted) of \(approvals.required) approvals. Network \(network)."
         return SynqCardModel(art: state == "PAID" ? .receipt : .send, eyebrow: "Payment · \(fundName)",
@@ -121,7 +121,7 @@ extension FundProposal {
 // MARK: - Trips and gifts
 
 extension TripView {
-    var tone: SynqTone {
+    public var tone: SynqTone {
         switch state {
         case "VOTING", "AWAITING_PAYMENT": return .waiting
         case "BOOKING": return .moving
@@ -130,7 +130,7 @@ extension TripView {
         }
     }
 
-    var cardStatus: String {
+    public var cardStatus: String {
         switch state {
         case "VOTING": return "Voting"
         case "AWAITING_PAYMENT": return "Approve"
@@ -140,31 +140,31 @@ extension TripView {
         }
     }
 
-    var isReturn: Bool { returnDate != nil }
-    var leadingOption: TripOptionView? {
+    public var isReturn: Bool { returnDate != nil }
+    public var leadingOption: TripOptionView? {
         chosenOption ?? options.first { $0.optionId == leading } ?? options.first
     }
 
-    var originLabel: String { origin.flatMap { Airports.label(for: $0) } ?? origin ?? "" }
-    var destinationLabel: String { destination.flatMap { Airports.label(for: $0) } ?? destination ?? "" }
+    public var originLabel: String { origin.flatMap { Airports.label(for: $0) } ?? origin ?? "" }
+    public var destinationLabel: String { destination.flatMap { Airports.label(for: $0) } ?? destination ?? "" }
 
     /// "Delhi → Goa", or the gift being chosen.
-    var cardTitle: String {
+    public var cardTitle: String {
         if isGift { return leadingOption?.title ?? (query ?? title) }
         return "\(originLabel) → \(destinationLabel)"
     }
 
     /// "DEL → GOI", or the gift search.
-    var routeTitle: String {
+    public var routeTitle: String {
         isGift ? (query ?? title).capitalizedFirst : "\(origin ?? "") → \(destination ?? "")"
     }
 
-    var dateText: String { TripFormat.range(departureDate, returnDate) }
+    public var dateText: String { TripFormat.range(departureDate, returnDate) }
 
     /// The provider mode, always shown: flights are Duffel test mode, gifts a sandbox card.
-    var modeLabel: String { isGift ? "Sandbox" : "Duffel test" }
+    public var modeLabel: String { isGift ? "Sandbox" : "Duffel test" }
 
-    func card(fundName: String) -> SynqCardModel {
+    public func card(fundName: String) -> SynqCardModel {
         let price: (String, String)? = payment.map { (cardAmount($0.amount), "AUSD") }
             ?? leadingOption.map { (cardAmount($0.total), $0.currency) }
         let what = isGift ? "gift \(cardTitle)" : "\(isReturn ? "return " : "")flight \(cardTitle), \(dateText)"
@@ -183,19 +183,19 @@ extension TripView {
 
 // MARK: - Transcript bubbles
 
-struct FundInviteBubble: View {
-    let fallbackName: String
-    let view: FundView?
+public struct FundInviteBubble: View {
+    public let fallbackName: String
+    public let view: FundView?
 
-    var body: some View { SynqCardBubble(model: view?.card ?? draftFundCard(name: fallbackName)) }
+    public var body: some View { SynqCardBubble(model: view?.card ?? draftFundCard(name: fallbackName)) }
 }
 
-struct FundProposalBubble: View {
-    let proposal: FundProposal?
-    let fundName: String?
-    var network: String = SynqNetwork.fundBackend
+public struct FundProposalBubble: View {
+    public let proposal: FundProposal?
+    public let fundName: String?
+    public var network: String = SynqNetwork.fundBackend
 
-    var body: some View {
+    public var body: some View {
         SynqCardBubble(model: proposal?.card(fundName: fundName ?? "Synq", network: network)
             ?? SynqCardModel(art: .send, eyebrow: "Payment", title: fundName ?? "Synq", amount: nil, unit: "AUSD",
                              detail: "Tap to review", badge: .pending, status: "Review", progress: nil,
@@ -203,11 +203,11 @@ struct FundProposalBubble: View {
     }
 }
 
-struct FundTripBubble: View {
-    let trip: TripView?
-    let fundName: String?
+public struct FundTripBubble: View {
+    public let trip: TripView?
+    public let fundName: String?
 
-    var body: some View {
+    public var body: some View {
         SynqCardBubble(model: trip?.card(fundName: fundName ?? "Synq")
             ?? SynqCardModel(art: .flights, eyebrow: "Group pick", title: fundName ?? "Synq", amount: nil, unit: "",
                              detail: "Tap to vote", badge: .pending, status: "Vote", progress: nil,

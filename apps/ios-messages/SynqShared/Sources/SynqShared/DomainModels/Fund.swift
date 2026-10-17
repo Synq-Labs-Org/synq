@@ -1,18 +1,18 @@
 import Foundation
 import Security
 
-struct WorkspaceSession: Codable {
-    let token: String
-    let principalId: String
-    let expiresAt: Double
+public struct WorkspaceSession: Codable {
+    public let token: String
+    public let principalId: String
+    public let expiresAt: Double
 }
 
-enum WorkspaceKeychain {
+public enum WorkspaceKeychain {
     private static func query(_ host: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: "synq.workspace.\(host)", kSecAttrAccount as String: "session"]
     }
-    static func load(host: String) -> WorkspaceSession? {
+    public static func load(host: String) -> WorkspaceSession? {
         var q = query(host)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -22,7 +22,7 @@ enum WorkspaceKeychain {
               session.expiresAt > Date().timeIntervalSince1970 else { return nil }
         return session
     }
-    static func save(_ session: WorkspaceSession, host: String) throws {
+    public static func save(_ session: WorkspaceSession, host: String) throws {
         var q = query(host)
         SecItemDelete(q as CFDictionary)
         q[kSecValueData as String] = try JSONEncoder().encode(session)
@@ -31,95 +31,95 @@ enum WorkspaceKeychain {
             throw FundAPIError(error: "KEYCHAIN_UNAVAILABLE", message: "Could not securely save sign-in. Try again after unlocking your phone.")
         }
     }
-    static func clear(host: String) { SecItemDelete(query(host) as CFDictionary) }
+    public static func clear(host: String) { SecItemDelete(query(host) as CFDictionary) }
 }
 
-struct WorkspaceSummary: Decodable, Equatable, Identifiable {
-    let id: String
-    let displayName: String
-    let kind: String
-    let chainId: Int
-    let status: String
-    let vault: String?
-    let threshold: Int?
+public struct WorkspaceSummary: Decodable, Equatable, Identifiable {
+    public let id: String
+    public let displayName: String
+    public let kind: String
+    public let chainId: Int
+    public let status: String
+    public let vault: String?
+    public let threshold: Int?
 }
 
-struct WorkspaceInvoice: Decodable, Identifiable {
-    let invoiceId: String
-    let number: String
-    let status: String
-    let reconciliation: String
-    let total: String
-    let amountDue: String
-    var id: String { invoiceId }
+public struct WorkspaceInvoice: Decodable, Identifiable {
+    public let invoiceId: String
+    public let number: String
+    public let status: String
+    public let reconciliation: String
+    public let total: String
+    public let amountDue: String
+    public var id: String { invoiceId }
 }
-struct WorkspacePayout: Decodable, Identifiable {
-    struct Data: Decodable { let id: String; let amount: String; let purpose: String }
-    let data: Data
-    let state: String
-    let reason: String?
-    let txHash: String?
-    var id: String { data.id }
+public struct WorkspacePayout: Decodable, Identifiable {
+    public struct Data: Decodable { public let id: String; public let amount: String; public let purpose: String }
+    public let data: Data
+    public let state: String
+    public let reason: String?
+    public let txHash: String?
+    public var id: String { data.id }
 }
-struct WorkspaceVendor: Decodable, Identifiable {
-    let id: String
-    let name: String
-    let address: String
-    let status: String
-    let eligibleAt: Double
+public struct WorkspaceVendor: Decodable, Identifiable {
+    public let id: String
+    public let name: String
+    public let address: String
+    public let status: String
+    public let eligibleAt: Double
 }
-struct WorkspaceFinanceView: Decodable { let vendors: [WorkspaceVendor] }
-struct WorkspaceBooks: Decodable {
-    struct Payable: Decodable, Identifiable { let id: String; let number: String; let amount: String; let dueOn: String; let status: String }
-    struct Bill: Decodable, Identifiable { let id: String; let label: String; let billKind: String; let amount: String; let nextDueOn: String; let cadenceDays: Int }
-    let payables: [Payable]
-    let bills: [Bill]
+public struct WorkspaceFinanceView: Decodable { public let vendors: [WorkspaceVendor] }
+public struct WorkspaceBooks: Decodable {
+    public struct Payable: Decodable, Identifiable { public let id: String; public let number: String; public let amount: String; public let dueOn: String; public let status: String }
+    public struct Bill: Decodable, Identifiable { public let id: String; public let label: String; public let billKind: String; public let amount: String; public let nextDueOn: String; public let cadenceDays: Int }
+    public let payables: [Payable]
+    public let bills: [Bill]
 }
-struct WorkspaceDeal: Decodable, Identifiable {
-    struct Escrow: Decodable { let escrowDealId: String }
-    struct Milestone: Decodable { let index: Int; let title: String; let amount: String; let status: String }
-    let id: String
-    let title: String
-    let total: String
-    let status: String
-    let escrow: Escrow?
-    let milestones: [Milestone]
+public struct WorkspaceDeal: Decodable, Identifiable {
+    public struct Escrow: Decodable { public let escrowDealId: String }
+    public struct Milestone: Decodable { public let index: Int; public let title: String; public let amount: String; public let status: String }
+    public let id: String
+    public let title: String
+    public let total: String
+    public let status: String
+    public let escrow: Escrow?
+    public let milestones: [Milestone]
 }
-struct WorkspaceSplit: Decodable, Identifiable {
-    struct Leg: Decodable { let kind: String; let purpose: String; let amount: String; let state: String }
-    let id: String
-    let state: String
-    let received: String
-    let legs: [Leg]
+public struct WorkspaceSplit: Decodable, Identifiable {
+    public struct Leg: Decodable { public let kind: String; public let purpose: String; public let amount: String; public let state: String }
+    public let id: String
+    public let state: String
+    public let received: String
+    public let legs: [Leg]
 }
-struct WorkspaceSwap: Decodable, Identifiable {
-    struct Terms: Decodable { let from: String; let to: String; let amountIn: String; let minOut: String }
-    struct Evidence: Decodable { let received: String? }
-    let id: String
-    let state: String
-    let data: Terms
-    let evidence: Evidence?
+public struct WorkspaceSwap: Decodable, Identifiable {
+    public struct Terms: Decodable { public let from: String; public let to: String; public let amountIn: String; public let minOut: String }
+    public struct Evidence: Decodable { public let received: String? }
+    public let id: String
+    public let state: String
+    public let data: Terms
+    public let evidence: Evidence?
 }
-struct WorkspaceGroup: Decodable {
-    struct Contribution: Decodable, Identifiable { let id: String; let mine: Bool; let member: String; let amount: String; let state: String }
-    struct Share: Decodable { let member: String; let mine: Bool; let amount: String }
-    struct Refund: Decodable, Identifiable { let id: String; let mine: Bool; let amount: String; let state: String }
-    let contributions: [Contribution]
-    let balances: [Share]
-    let refunds: [Refund]
+public struct WorkspaceGroup: Decodable {
+    public struct Contribution: Decodable, Identifiable { public let id: String; public let mine: Bool; public let member: String; public let amount: String; public let state: String }
+    public struct Share: Decodable { public let member: String; public let mine: Bool; public let amount: String }
+    public struct Refund: Decodable, Identifiable { public let id: String; public let mine: Bool; public let amount: String; public let state: String }
+    public let contributions: [Contribution]
+    public let balances: [Share]
+    public let refunds: [Refund]
 }
-struct WorkspaceTeamReply: Decodable {
-    struct Citation: Decodable { let path: String; let source: String; let freshness: String }
-    struct World: Decodable { let builtAt: Double; let decisionGrade: Bool }
-    let answer: String
-    let status: String
-    let citations: [Citation]
-    let world: World?
-    let payoutId: String?
+public struct WorkspaceTeamReply: Decodable {
+    public struct Citation: Decodable { public let path: String; public let source: String; public let freshness: String }
+    public struct World: Decodable { public let builtAt: Double; public let decisionGrade: Bool }
+    public let answer: String
+    public let status: String
+    public let citations: [Citation]
+    public let world: World?
+    public let payoutId: String?
 }
-func workspaceUSDC(_ baseUnits: String) -> String { workspaceAmount(baseUnits, symbol: "USDC") }
+public func workspaceUSDC(_ baseUnits: String) -> String { workspaceAmount(baseUnits, symbol: "USDC") }
 /// Exact six-decimal token amount (USDC or EURC) from integer base units.
-func workspaceAmount(_ baseUnits: String, symbol: String) -> String {
+public func workspaceAmount(_ baseUnits: String, symbol: String) -> String {
     guard !baseUnits.isEmpty, baseUnits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return "Unknown amount" }
     let padded = String(repeating: "0", count: max(0, 7 - baseUnits.count)) + baseUnits
     let boundary = padded.index(padded.endIndex, offsetBy: -6)
@@ -129,44 +129,44 @@ func workspaceAmount(_ baseUnits: String, symbol: String) -> String {
     return "\(whole.isEmpty ? "0" : String(whole))\(fraction.isEmpty ? "" : "." + fraction) \(symbol)"
 }
 
-struct WorkspaceObserved<Value: Decodable>: Decodable {
-    struct Meta: Decodable { let freshness: String; let source: String; let observedAt: Double? }
-    let value: Value
-    let meta: Meta
+public struct WorkspaceObserved<Value: Decodable>: Decodable {
+    public struct Meta: Decodable { public let freshness: String; public let source: String; public let observedAt: Double? }
+    public let value: Value
+    public let meta: Meta
 }
-struct WorkspaceSnapshot: Decodable {
-    struct Record: Decodable, Identifiable { let id: String; let state: String }
-    struct World: Decodable {
-        struct Balance: Decodable { let chain: String; let asset: String; let account: String; let baseUnits: String }
-        struct Treasury: Decodable { let balances: WorkspaceObserved<[Balance]>; let availableToSpend: WorkspaceObserved<String?> }
-        struct Decision: Decodable { let decisionGrade: Bool; let reasons: [String] }
-        let builtAt: Double
-        let treasury: Treasury
-        let decision: Decision
+public struct WorkspaceSnapshot: Decodable {
+    public struct Record: Decodable, Identifiable { public let id: String; public let state: String }
+    public struct World: Decodable {
+        public struct Balance: Decodable { public let chain: String; public let asset: String; public let account: String; public let baseUnits: String }
+        public struct Treasury: Decodable { public let balances: WorkspaceObserved<[Balance]>; public let availableToSpend: WorkspaceObserved<String?> }
+        public struct Decision: Decodable { public let decisionGrade: Bool; public let reasons: [String] }
+        public let builtAt: Double
+        public let treasury: Treasury
+        public let decision: Decision
     }
-    let world: World
-    let riskCases: [Record]
-    let deals: [Record]?
+    public let world: World
+    public let riskCases: [Record]
+    public let deals: [Record]?
 }
-struct WorkspaceCapabilities: Decodable {
-    struct Capability: Decodable { let status: String; let reason: String }
-    let circleWallets: Capability
-    let gasStation: Capability
-    let usyc: Capability
-    let earn: Capability
-    let swap: Capability
-    let duffel: Capability
-    let lithic: Capability
-    let cctp: Capability
-    let gateway: Capability
-    var entries: [(String, Capability)] {
+public struct WorkspaceCapabilities: Decodable {
+    public struct Capability: Decodable { public let status: String; public let reason: String }
+    public let circleWallets: Capability
+    public let gasStation: Capability
+    public let usyc: Capability
+    public let earn: Capability
+    public let swap: Capability
+    public let duffel: Capability
+    public let lithic: Capability
+    public let cctp: Capability
+    public let gateway: Capability
+    public var entries: [(String, Capability)] {
         [("Circle Wallets", circleWallets), ("Gas Station", gasStation), ("USYC eligibility", usyc), ("Earn", earn), ("Swap", swap), ("Duffel", duffel), ("Lithic", lithic), ("CCTP", cctp), ("Gateway", gateway)]
     }
 }
 
-struct WorkspaceClient {
-    let host: String
-    var session: URLSession = .shared
+public struct WorkspaceClient {
+    public let host: String
+    public var session: URLSession = .shared
     private func call<T: Decodable>(_ path: String, body: [String: String]? = nil, authenticated: Bool = true, as type: T.Type) async throws -> T {
         var c = URLComponents(); c.scheme = "https"; c.host = host; c.path = "/api/v2\(path)"
         guard let url = c.url else { throw FundAPIError(error: "INVALID_HOST", message: "Synq's host is not configured.") }
@@ -191,7 +191,7 @@ struct WorkspaceClient {
         }
         return try JSONDecoder().decode(type, from: data)
     }
-    func redeem(code: String) async throws {
+    public func redeem(code: String) async throws {
         let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard normalized.range(of: "^[0-9a-f]{48}$", options: .regularExpression) != nil else {
             throw FundAPIError(error: "INVALID_CODE", message: "Paste the private sign-in code from the Synq page.")
@@ -203,7 +203,7 @@ struct WorkspaceClient {
         }
         try WorkspaceKeychain.save(received, host: host)
     }
-    func list() async throws -> [WorkspaceSummary] {
+    public func list() async throws -> [WorkspaceSummary] {
         struct Response: Decodable { let workspaces: [WorkspaceSummary] }
         return try await call("/workspaces", as: Response.self).workspaces
     }
@@ -211,45 +211,45 @@ struct WorkspaceClient {
         guard UUID(uuidString: workspace) != nil else { throw FundAPIError(error: "INVALID_WORKSPACE", message: "Choose a valid workspace.") }
         return "/workspaces/\(workspace)\(suffix)"
     }
-    func invoices(_ workspace: String) async throws -> [WorkspaceInvoice] {
+    public func invoices(_ workspace: String) async throws -> [WorkspaceInvoice] {
         struct Response: Decodable { let invoices: [WorkspaceInvoice] }
         return try await call(workspacePath(workspace, "/invoices"), as: Response.self).invoices
     }
-    func payouts(_ workspace: String) async throws -> [WorkspacePayout] {
+    public func payouts(_ workspace: String) async throws -> [WorkspacePayout] {
         struct Response: Decodable { let payouts: [WorkspacePayout] }
         return try await call(workspacePath(workspace, "/payouts"), as: Response.self).payouts
     }
-    func finance(_ workspace: String) async throws -> WorkspaceFinanceView {
+    public func finance(_ workspace: String) async throws -> WorkspaceFinanceView {
         try await call(workspacePath(workspace, "/finance"), as: WorkspaceFinanceView.self)
     }
-    func ask(_ workspace: String, message: String, requestId: String) async throws -> WorkspaceTeamReply {
+    public func ask(_ workspace: String, message: String, requestId: String) async throws -> WorkspaceTeamReply {
         try await call(workspacePath(workspace, "/team/ask"), body: ["message": message, "idempotencyKey": requestId], as: WorkspaceTeamReply.self)
     }
-    func snapshot(_ workspace: String) async throws -> WorkspaceSnapshot {
+    public func snapshot(_ workspace: String) async throws -> WorkspaceSnapshot {
         try await call(workspacePath(workspace, "/team/snapshot"), as: WorkspaceSnapshot.self)
     }
-    func books(_ workspace: String) async throws -> WorkspaceBooks {
+    public func books(_ workspace: String) async throws -> WorkspaceBooks {
         try await call(workspacePath(workspace, "/books"), as: WorkspaceBooks.self)
     }
-    func deals(_ workspace: String) async throws -> [WorkspaceDeal] {
+    public func deals(_ workspace: String) async throws -> [WorkspaceDeal] {
         struct Response: Decodable { let deals: [WorkspaceDeal] }
         return try await call(workspacePath(workspace, "/deals"), as: Response.self).deals
     }
-    func splits(_ workspace: String) async throws -> [WorkspaceSplit] {
+    public func splits(_ workspace: String) async throws -> [WorkspaceSplit] {
         struct Response: Decodable { let allocations: [WorkspaceSplit] }
         return try await call(workspacePath(workspace, "/allocations"), as: Response.self).allocations
     }
-    func swaps(_ workspace: String) async throws -> [WorkspaceSwap] {
+    public func swaps(_ workspace: String) async throws -> [WorkspaceSwap] {
         struct Response: Decodable { let ops: [WorkspaceSwap] }
         return try await call(workspacePath(workspace, "/treasury/ops"), as: Response.self).ops
     }
-    func group(_ workspace: String) async throws -> WorkspaceGroup {
+    public func group(_ workspace: String) async throws -> WorkspaceGroup {
         try await call(workspacePath(workspace, "/contributions"), as: WorkspaceGroup.self)
     }
-    func capabilities() async throws -> WorkspaceCapabilities {
+    public func capabilities() async throws -> WorkspaceCapabilities {
         try await call("/capabilities", as: WorkspaceCapabilities.self)
     }
-    func logout() async {
+    public func logout() async {
         struct Response: Decodable { let ok: Bool }
         _ = try? await call("/auth/logout", body: [:], as: Response.self)
         WorkspaceKeychain.clear(host: host)
@@ -258,58 +258,58 @@ struct WorkspaceClient {
 
 // MARK: - API models (mirror of apps/demo/src/fund-service.ts FundView)
 
-struct FundMember: Codable, Equatable, Identifiable {
-    let name: String
-    let principalId: String
-    let memberId: String?
-    let activated: Bool
-    let signedSetup: Bool
-    var id: String { principalId }
+public struct FundMember: Codable, Equatable, Identifiable {
+    public let name: String
+    public let principalId: String
+    public let memberId: String?
+    public let activated: Bool
+    public let signedSetup: Bool
+    public var id: String { principalId }
 }
 
-struct FundTreasury: Codable, Equatable {
-    let balance: String
-    let symbol: String
+public struct FundTreasury: Codable, Equatable {
+    public let balance: String
+    public let symbol: String
 }
 
-struct FundSetup: Codable, Equatable {
-    let signed: Int
-    let required: Int
+public struct FundSetup: Codable, Equatable {
+    public let signed: Int
+    public let required: Int
 }
 
-struct FundGroup: Codable, Equatable {
-    let chainGroupId: String
-    let account: String
+public struct FundGroup: Codable, Equatable {
+    public let chainGroupId: String
+    public let account: String
 }
 
-struct FundRecipient: Codable, Equatable, Hashable, Identifiable {
-    let name: String
-    let recipientId: String
-    var id: String { recipientId }
+public struct FundRecipient: Codable, Equatable, Hashable, Identifiable {
+    public let name: String
+    public let recipientId: String
+    public var id: String { recipientId }
 }
 
-struct FundApprovals: Codable, Equatable {
-    let counted: Int
-    let required: Int
-    let names: [String]
+public struct FundApprovals: Codable, Equatable {
+    public let counted: Int
+    public let required: Int
+    public let names: [String]
 }
 
-struct FundProposal: Codable, Equatable, Identifiable {
-    let intentHash: String
+public struct FundProposal: Codable, Equatable, Identifiable {
+    public let intentHash: String
     /// PENDING, EXECUTING, PAID or REJECTED.
-    let state: String
-    let amount: String
-    let symbol: String
-    let recipient: String
-    let sender: String?
-    let approvals: FundApprovals
-    let transactionHash: String?
-    let explorer: String?
-    let createdAt: Int
-    var id: String { intentHash }
+    public let state: String
+    public let amount: String
+    public let symbol: String
+    public let recipient: String
+    public let sender: String?
+    public let approvals: FundApprovals
+    public let transactionHash: String?
+    public let explorer: String?
+    public let createdAt: Int
+    public var id: String { intentHash }
 
-    var title: String { "\(amount) \(symbol) to \(recipient)" }
-    var statusText: String {
+    public var title: String { "\(amount) \(symbol) to \(recipient)" }
+    public var statusText: String {
         switch state {
         case "PAID": return "Paid"
         case "EXECUTING": return "Sending…"
@@ -319,32 +319,32 @@ struct FundProposal: Codable, Equatable, Identifiable {
     }
 }
 
-struct FundView: Codable, Equatable {
-    let fundId: String
-    let name: String
+public struct FundView: Codable, Equatable {
+    public let fundId: String
+    public let name: String
     /// FORMING, LAUNCHING, SETUP, ACTIVE or FAILED.
-    let state: String
-    let error: String?
-    let createdAt: Int
-    let members: [FundMember]
-    let minMembers: Int
-    let maxMembers: Int
-    let threshold: Int
-    let group: FundGroup?
-    let setup: FundSetup?
-    let treasury: FundTreasury?
-    let recipients: [FundRecipient]
-    let proposals: [FundProposal]
-    let canRequestTestFunds: Bool
+    public let state: String
+    public let error: String?
+    public let createdAt: Int
+    public let members: [FundMember]
+    public let minMembers: Int
+    public let maxMembers: Int
+    public let threshold: Int
+    public let group: FundGroup?
+    public let setup: FundSetup?
+    public let treasury: FundTreasury?
+    public let recipients: [FundRecipient]
+    public let proposals: [FundProposal]
+    public let canRequestTestFunds: Bool
     /// Largest single payment, as a decimal (absent from older servers).
-    let maxPayment: String?
+    public let maxPayment: String?
     /// Chain the group wallet lives on, when the server says (newer servers).
-    let network: String?
-    let chainId: Int?
+    public let network: String?
+    public let chainId: Int?
 
     /// Truthful network label: what the server reports, else what a payment's
     /// explorer link shows, else the fund backend's chain (Monad testnet).
-    var networkLabel: String {
+    public var networkLabel: String {
         if let network, !network.isEmpty { return network }
         if let chainId, let known = SynqNetwork.label(chainId: chainId) { return known }
         for p in proposals {
@@ -353,7 +353,7 @@ struct FundView: Codable, Equatable {
         return SynqNetwork.fundBackend
     }
 
-    var stateText: String {
+    public var stateText: String {
         switch state {
         case "FORMING": return "Gathering members"
         case "LAUNCHING": return "Creating the group wallet…"
@@ -365,16 +365,16 @@ struct FundView: Codable, Equatable {
         }
     }
 
-    var memberSummary: String {
+    public var memberSummary: String {
         members.count == 1 ? "1 member" : "\(members.count) members"
     }
 }
 
-enum SynqNetwork {
+public enum SynqNetwork {
     /// The chain the fund backend (apps/demo fund service) runs group wallets on.
-    static let fundBackend = "Monad testnet"
+    public static let fundBackend = "Monad testnet"
 
-    static func label(chainId: Int) -> String? {
+    public static func label(chainId: Int) -> String? {
         switch chainId {
         case 10143: return "Monad testnet"
         case 5042002: return "Arc testnet"
@@ -385,7 +385,7 @@ enum SynqNetwork {
         }
     }
 
-    static func label(explorer: String) -> String? {
+    public static func label(explorer: String) -> String? {
         let host = URL(string: explorer)?.host?.lowercased() ?? ""
         if host.contains("monad") { return "Monad testnet" }
         if host.contains("arc") { return "Arc testnet" }
@@ -398,21 +398,21 @@ enum SynqNetwork {
 
 /// A flight search Ask Synq understood. Fields added later decode as absent on
 /// older servers: no return date, no labels, and never auto-run.
-struct AskFlight: Equatable {
-    let origin: String
-    let destination: String
-    let departureDate: String
-    let returnDate: String?
-    let travelers: Int
-    let originLabel: String?
-    let destinationLabel: String?
-    let cabin: String?
-    let autoRun: Bool
+public struct AskFlight: Equatable {
+    public let origin: String
+    public let destination: String
+    public let departureDate: String
+    public let returnDate: String?
+    public let travelers: Int
+    public let originLabel: String?
+    public let destinationLabel: String?
+    public let cabin: String?
+    public let autoRun: Bool
 }
 
 /// One suggested next step from Ask Synq. Searches may run on their own when the
 /// server says `autoRun`; a send only ever pre-fills the Send sheet.
-enum AskAction: Decodable, Equatable {
+public enum AskAction: Decodable, Equatable {
     case send(recipientId: String, recipient: String, amount: String)
     case flightSearch(AskFlight)
     case giftSearch(query: String, maxPrice: String, autoRun: Bool)
@@ -423,7 +423,7 @@ enum AskAction: Decodable, Equatable {
         case originLabel, destinationLabel, cabin, autoRun, query, maxPrice
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         let autoRun = (try? c.decodeIfPresent(Bool.self, forKey: .autoRun)) ?? false
         switch try c.decode(String.self, forKey: .kind) {
@@ -452,40 +452,40 @@ enum AskAction: Decodable, Equatable {
     }
 }
 
-struct AskReply: Decodable, Equatable {
-    let reply: String
-    let action: AskAction?
+public struct AskReply: Decodable, Equatable {
+    public let reply: String
+    public let action: AskAction?
 }
 
 /// One flight leg of an option, when the server sends them (round trips).
 /// Every field is optional so a richer or older server never breaks decoding.
-struct TripLeg: Decodable, Equatable {
-    let origin: String?
-    let destination: String?
-    let departAt: String?
-    let arriveAt: String?
-    let date: String?
-    let flightNumber: String?
-    let stops: Int?
-    let duration: String?
+public struct TripLeg: Decodable, Equatable {
+    public let origin: String?
+    public let destination: String?
+    public let departAt: String?
+    public let arriveAt: String?
+    public let date: String?
+    public let flightNumber: String?
+    public let stops: Int?
+    public let duration: String?
 }
 
-struct TripOptionView: Decodable, Equatable, Identifiable {
-    let optionId: String
-    let title: String
-    let detail: String
-    let total: String
-    let currency: String
-    let refundable: Bool
-    let votes: Int
-    let legs: [TripLeg]?
-    var id: String { optionId }
+public struct TripOptionView: Decodable, Equatable, Identifiable {
+    public let optionId: String
+    public let title: String
+    public let detail: String
+    public let total: String
+    public let currency: String
+    public let refundable: Bool
+    public let votes: Int
+    public let legs: [TripLeg]?
+    public var id: String { optionId }
 
     private enum Keys: String, CodingKey {
         case optionId, title, detail, total, currency, refundable, votes, legs
     }
 
-    init(optionId: String, title: String, detail: String, total: String, currency: String,
+    public init(optionId: String, title: String, detail: String, total: String, currency: String,
          refundable: Bool, votes: Int, legs: [TripLeg]? = nil) {
         self.optionId = optionId
         self.title = title
@@ -497,7 +497,7 @@ struct TripOptionView: Decodable, Equatable, Identifiable {
         self.legs = legs
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         optionId = try c.decode(String.self, forKey: .optionId)
         title = try c.decode(String.self, forKey: .title)
@@ -510,49 +510,49 @@ struct TripOptionView: Decodable, Equatable, Identifiable {
     }
 }
 
-struct TripPayment: Decodable, Equatable {
-    let amount: String
-    let intentHash: String?
+public struct TripPayment: Decodable, Equatable {
+    public let amount: String
+    public let intentHash: String?
 }
 
-struct TripBooking: Decodable, Equatable {
-    let reference: String?
+public struct TripBooking: Decodable, Equatable {
+    public let reference: String?
 }
 
-struct TripPayTo: Decodable, Equatable {
-    let recipientId: String
-    let label: String
+public struct TripPayTo: Decodable, Equatable {
+    public let recipientId: String
+    public let label: String
 }
 
-struct TripView: Decodable, Equatable, Identifiable {
-    let tripId: String
+public struct TripView: Decodable, Equatable, Identifiable {
+    public let tripId: String
     /// FLIGHT or GIFT.
-    let kind: String
-    let title: String
-    let origin: String?
-    let destination: String?
-    let departureDate: String?
+    public let kind: String
+    public let title: String
+    public let origin: String?
+    public let destination: String?
+    public let departureDate: String?
     /// Present for return flights (newer servers).
-    let returnDate: String?
-    let travelers: Int?
-    let query: String?
-    let maxPrice: String?
+    public let returnDate: String?
+    public let travelers: Int?
+    public let query: String?
+    public let maxPrice: String?
     /// VOTING, AWAITING_PAYMENT, BOOKING, BOOKED or FAILED.
-    let state: String
-    let options: [TripOptionView]
-    let voteCount: Int
-    let leading: String?
-    let myVote: String?
-    let chosen: String?
-    let payment: TripPayment?
-    let booking: TripBooking?
-    let error: String?
-    let label: String
-    let payTo: TripPayTo?
-    var id: String { tripId }
+    public let state: String
+    public let options: [TripOptionView]
+    public let voteCount: Int
+    public let leading: String?
+    public let myVote: String?
+    public let chosen: String?
+    public let payment: TripPayment?
+    public let booking: TripBooking?
+    public let error: String?
+    public let label: String
+    public let payTo: TripPayTo?
+    public var id: String { tripId }
 
-    var isGift: Bool { kind == "GIFT" }
-    var stateText: String {
+    public var isGift: Bool { kind == "GIFT" }
+    public var stateText: String {
         switch state {
         case "VOTING": return voteCount == 1 ? "1 vote" : "\(voteCount) votes"
         case "AWAITING_PAYMENT": return "Waiting for the group to pay"
@@ -561,7 +561,7 @@ struct TripView: Decodable, Equatable, Identifiable {
         default: return "Could not book"
         }
     }
-    var chosenOption: TripOptionView? { options.first { $0.optionId == chosen } }
+    public var chosenOption: TripOptionView? { options.first { $0.optionId == chosen } }
 }
 
 private struct TripList: Decodable { let trips: [TripView] }
@@ -572,30 +572,30 @@ private struct TripList: Decodable { let trips: [TripView] }
 /// `https://<host>/fund/<fundId>/p/<intentHash>#k=<key>` (payment) or
 /// `https://<host>/fund/<fundId>/t/<tripId>#k=<key>` (trip).
 /// The key sits in the fragment so browsers never send it to the server.
-enum FundLink: Equatable {
+public enum FundLink: Equatable {
     case invite(fundId: String, key: String)
     case proposal(fundId: String, key: String, intentHash: String)
     case trip(fundId: String, key: String, tripId: String)
 
-    var fundId: String {
+    public var fundId: String {
         switch self {
         case .invite(let id, _), .proposal(let id, _, _), .trip(let id, _, _): return id
         }
     }
 
-    var key: String {
+    public var key: String {
         switch self {
         case .invite(_, let k), .proposal(_, let k, _), .trip(_, let k, _): return k
         }
     }
 
-    static let tripPattern = "^trp_[0-9a-f]{16}$"
+    public static let tripPattern = "^trp_[0-9a-f]{16}$"
 
-    static let fundIdPattern = "^fnd_[0-9a-f]{20}$"
-    static let keyPattern = "^[A-Za-z0-9_-]{32}$"
-    static let hashPattern = "^0x[0-9a-fA-F]{64}$"
+    public static let fundIdPattern = "^fnd_[0-9a-f]{20}$"
+    public static let keyPattern = "^[A-Za-z0-9_-]{32}$"
+    public static let hashPattern = "^0x[0-9a-fA-F]{64}$"
 
-    init?(url: URL, allowedHost: String) {
+    public init?(url: URL, allowedHost: String) {
         guard url.scheme == "https",
               let host = url.host, host.lowercased() == allowedHost.lowercased()
         else { return nil }
@@ -617,7 +617,7 @@ enum FundLink: Equatable {
         }
     }
 
-    func url(host: String) -> URL {
+    public func url(host: String) -> URL {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
@@ -630,30 +630,30 @@ enum FundLink: Equatable {
         return c.url!
     }
 
-    static func matches(_ s: String, _ pattern: String) -> Bool {
+    public static func matches(_ s: String, _ pattern: String) -> Bool {
         s.range(of: pattern, options: .regularExpression) != nil
     }
 }
 
 // MARK: - API client
 
-struct FundAPIError: Error, Decodable {
-    let error: String
-    let message: String
+public struct FundAPIError: Error, Decodable {
+    public let error: String
+    public let message: String
 }
 
-struct FundCreated: Decodable {
-    let fundId: String
-    let key: String
-    let adminKey: String
+public struct FundCreated: Decodable {
+    public let fundId: String
+    public let key: String
+    public let adminKey: String
 }
 
 /// Talks to `https://<host>/api/v1/funds`. It holds no credentials beyond the
 /// fund key and, for the creator, the admin key; money only moves after members
 /// approve with their passkeys on the Synq site.
-struct FundClient {
-    let host: String
-    var session: URLSession = .shared
+public struct FundClient {
+    public let host: String
+    public var session: URLSession = .shared
 
     private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                          timeout: TimeInterval = 15) -> URLRequest {
@@ -681,11 +681,11 @@ struct FundClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    func create(name: String) async throws -> FundCreated {
+    public func create(name: String) async throws -> FundCreated {
         try await send(request("/funds", method: "POST", body: ["name": name]), as: FundCreated.self)
     }
 
-    func view(fundId: String, key: String) async throws -> FundView {
+    public func view(fundId: String, key: String) async throws -> FundView {
         var r = request("/funds/\(fundId)")
         var c = URLComponents(url: r.url!, resolvingAgainstBaseURL: false)!
         c.queryItems = [URLQueryItem(name: "k", value: key)]
@@ -693,27 +693,27 @@ struct FundClient {
         return try await send(r, as: FundView.self)
     }
 
-    func launch(fundId: String, adminKey: String) async throws {
+    public func launch(fundId: String, adminKey: String) async throws {
         struct Status: Decodable { let status: String }
         _ = try await send(request("/funds/\(fundId)/launch", method: "POST", body: ["adminKey": adminKey]), as: Status.self)
     }
 
-    func ask(fundId: String, key: String, text: String) async throws -> AskReply {
+    public func ask(fundId: String, key: String, text: String) async throws -> AskReply {
         try await send(request("/funds/\(fundId)/ask", method: "POST", body: ["key": key, "text": text]),
                        as: AskReply.self)
     }
 
     /// Live provider searches can take most of a minute, so these wait longer.
-    static let searchTimeout: TimeInterval = 100
+    public static let searchTimeout: TimeInterval = 100
 
-    func startTrip(fundId: String, key: String, plan: FlightPlan) async throws -> TripView {
+    public func startTrip(fundId: String, key: String, plan: FlightPlan) async throws -> TripView {
         try await send(request("/funds/\(fundId)/trips", method: "POST",
                                body: Self.tripBody(key: key, plan: plan), timeout: Self.searchTimeout),
                        as: TripView.self)
     }
 
     /// `returnDate` is sent only when present, so older servers see the same body as before.
-    static func tripBody(key: String, plan: FlightPlan) -> [String: Any] {
+    public static func tripBody(key: String, plan: FlightPlan) -> [String: Any] {
         var body: [String: Any] = [
             "key": key, "origin": plan.origin, "destination": plan.destination,
             "departureDate": plan.departureDate, "travelers": plan.travelers,
@@ -722,7 +722,7 @@ struct FundClient {
         return body
     }
 
-    func startGift(fundId: String, key: String, query: String, maxPrice: String) async throws -> TripView {
+    public func startGift(fundId: String, key: String, query: String, maxPrice: String) async throws -> TripView {
         try await send(request("/funds/\(fundId)/gifts", method: "POST",
                                body: ["key": key, "query": query, "maxPrice": maxPrice],
                                timeout: Self.searchTimeout), as: TripView.self)
@@ -736,31 +736,31 @@ struct FundClient {
         return r
     }
 
-    func trips(fundId: String, key: String, voter: String) async throws -> [TripView] {
+    public func trips(fundId: String, key: String, voter: String) async throws -> [TripView] {
         try await send(readRequest("/funds/\(fundId)/trips", key: key, voter: voter), as: TripList.self).trips
     }
 
-    func trip(fundId: String, key: String, tripId: String, voter: String) async throws -> TripView {
+    public func trip(fundId: String, key: String, tripId: String, voter: String) async throws -> TripView {
         try await send(readRequest("/funds/\(fundId)/trips/\(tripId)", key: key, voter: voter), as: TripView.self)
     }
 
-    func vote(fundId: String, key: String, tripId: String, voter: String, optionId: String) async throws -> TripView {
+    public func vote(fundId: String, key: String, tripId: String, voter: String, optionId: String) async throws -> TripView {
         try await send(request("/funds/\(fundId)/trips/\(tripId)/votes", method: "POST",
                                body: ["key": key, "voterId": voter, "optionId": optionId]), as: TripView.self)
     }
 
-    func choose(fundId: String, key: String, tripId: String, optionId: String) async throws -> TripView {
+    public func choose(fundId: String, key: String, tripId: String, optionId: String) async throws -> TripView {
         try await send(request("/funds/\(fundId)/trips/\(tripId)/choose", method: "POST",
                                body: ["key": key, "optionId": optionId]), as: TripView.self)
     }
 
-    func requestTestFunds(fundId: String, key: String) async throws -> FundView {
+    public func requestTestFunds(fundId: String, key: String) async throws -> FundView {
         try await send(request("/funds/\(fundId)/test-funds", method: "POST", body: ["key": key]), as: FundView.self)
     }
 
     // Pages on the Synq site where the passkey ceremonies happen.
 
-    func workspacePage(workspace: String? = nil, payout: String? = nil) -> URL {
+    public func workspacePage(workspace: String? = nil, payout: String? = nil) -> URL {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
@@ -772,11 +772,11 @@ struct FundClient {
         return c.url!
     }
 
-    func fundPage(_ fundId: String, key: String) -> URL {
+    public func fundPage(_ fundId: String, key: String) -> URL {
         FundLink.invite(fundId: fundId, key: key).url(host: host)
     }
 
-    func sendPage(groupId: String, recipientId: String, amount: String) -> URL {
+    public func sendPage(groupId: String, recipientId: String, amount: String) -> URL {
         var c = URLComponents()
         c.scheme = "https"
         c.host = host
@@ -789,37 +789,41 @@ struct FundClient {
         return c.url!
     }
 
-    func tripPaymentPage(groupId: String, payTo: TripPayTo, amount: String) -> URL {
+    public func tripPaymentPage(groupId: String, payTo: TripPayTo, amount: String) -> URL {
         sendPage(groupId: groupId, recipientId: payTo.recipientId, amount: amount)
     }
 
-    func approvalPage(_ intentHash: String) -> URL {
+    public func approvalPage(_ intentHash: String) -> URL {
         URL(string: "https://\(host)/intents/\(intentHash)")!
     }
 }
 
 // MARK: - Funds this device knows about
 
-struct FundRef: Codable, Equatable {
-    let fundId: String
-    let key: String
-    var name: String
+public struct FundRef: Codable, Equatable {
+    public let fundId: String
+    public let key: String
+    public var name: String
     /// Present only on the device that started the fund.
-    var adminKey: String?
-    var conversations: [String]
-    var lastUsed: Date
+    public var adminKey: String?
+    public var conversations: [String]
+    public var lastUsed: Date
     /// A flight typed on the Start screen, searched once the fund goes live.
-    var pendingFlight: FlightPlan?
+    public var pendingFlight: FlightPlan?
 }
 
 /// Local memory of which fund belongs to which conversation. The extension cannot
 /// read the transcript, so it learns the link when someone starts a fund here or
 /// taps one of its cards.
-struct FundBook {
-    var defaults: UserDefaults = .standard
+public struct FundBook {
+    public var defaults: UserDefaults = .standard
     private let storageKey = "synq.funds.v1"
 
-    func all() -> [FundRef] {
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    public func all() -> [FundRef] {
         guard let data = defaults.data(forKey: storageKey),
               let refs = try? JSONDecoder().decode([FundRef].self, from: data)
         else { return [] }
@@ -830,14 +834,14 @@ struct FundBook {
         if let data = try? JSONEncoder().encode(refs) { defaults.set(data, forKey: storageKey) }
     }
 
-    func fund(forConversation conversation: String) -> FundRef? {
+    public func fund(forConversation conversation: String) -> FundRef? {
         all().filter { $0.conversations.contains(conversation) }.max { $0.lastUsed < $1.lastUsed }
     }
 
-    func ref(_ fundId: String) -> FundRef? { all().first { $0.fundId == fundId } }
+    public func ref(_ fundId: String) -> FundRef? { all().first { $0.fundId == fundId } }
 
     @discardableResult
-    func remember(fundId: String, key: String, name: String?, adminKey: String? = nil, conversation: String?) -> FundRef {
+    public func remember(fundId: String, key: String, name: String?, adminKey: String? = nil, conversation: String?) -> FundRef {
         var refs = all()
         var ref = refs.first { $0.fundId == fundId }
             ?? FundRef(fundId: fundId, key: key, name: name ?? "Synq fund", adminKey: nil, conversations: [], lastUsed: Date())
@@ -852,7 +856,7 @@ struct FundBook {
     }
 
     @discardableResult
-    func setPendingFlight(_ plan: FlightPlan?, for fundId: String) -> FundRef? {
+    public func setPendingFlight(_ plan: FlightPlan?, for fundId: String) -> FundRef? {
         var refs = all()
         guard let i = refs.firstIndex(where: { $0.fundId == fundId }) else { return nil }
         refs[i].pendingFlight = plan
@@ -862,7 +866,7 @@ struct FundBook {
 }
 
 /// One anonymous id per device for non-binding trip votes.
-func deviceVoterId(_ defaults: UserDefaults = .standard) -> String {
+public func deviceVoterId(_ defaults: UserDefaults = .standard) -> String {
     if let id = defaults.string(forKey: "synq.voter.v1") { return id }
     let id = UUID().uuidString.lowercased()
     defaults.set(id, forKey: "synq.voter.v1")
@@ -870,7 +874,7 @@ func deviceVoterId(_ defaults: UserDefaults = .standard) -> String {
 }
 
 /// Decimal text a person typed, normalised to at most six places; nil when invalid.
-func normalizedAmount(_ raw: String, max: Decimal) -> String? {
+public func normalizedAmount(_ raw: String, max: Decimal) -> String? {
     let s = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
     guard s.range(of: "^[0-9]{1,6}(\\.[0-9]{1,6})?$", options: .regularExpression) != nil,
           let value = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")),

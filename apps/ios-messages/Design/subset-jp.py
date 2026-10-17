@@ -5,7 +5,7 @@
 Source: https://github.com/google/fonts/tree/main/ofl/notosansjp
 Keeps kana, CJK punctuation and vertical forms, plus every other non-ASCII
 character found in the theme files, and writes
-SynqMessagesExtension/Fonts/NotoSansJP-Synq.ttf.
+SynqShared/Sources/SynqShared/DesignSystem/Fonts/NotoSansJP-Synq.ttf.
 """
 import glob
 import sys
@@ -16,7 +16,7 @@ from fontTools.varLib import instancer
 
 src = sys.argv[1]
 chars = set()
-for path in glob.glob("SynqMessagesExtension/*Theme*.swift"):
+for path in glob.glob("SynqShared/Sources/SynqShared/DesignSystem/**/*Theme*.swift", recursive=True):
     chars |= {c for c in open(path, encoding="utf-8").read() if ord(c) >= 0x3000}
 ranges = [(0x3000, 0x303F), (0x3040, 0x309F), (0x30A0, 0x30FF), (0xFE10, 0xFE19), (0xFF01, 0xFF5E)]
 for lo, hi in ranges:
@@ -47,5 +47,5 @@ for nid in (16, 17):
 for t in ("STAT", "fvar", "gvar", "avar", "HVAR", "MVAR"):
     if t in font:
         del font[t]
-font.save("SynqMessagesExtension/Fonts/NotoSansJP-Synq.ttf")
+font.save("SynqShared/Sources/SynqShared/DesignSystem/Fonts/NotoSansJP-Synq.ttf")
 print(len(chars), "characters")

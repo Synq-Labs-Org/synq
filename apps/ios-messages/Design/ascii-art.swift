@@ -8,7 +8,7 @@
 //
 //   sh Design/ascii-art.sh [preview-dir]
 //
-// Writes SynqMessagesExtension/AsciiArtData.swift (the committed art) and, with
+// Writes SynqShared/Sources/SynqShared/DesignSystem/Themes/AsciiArtData.swift (the committed art) and, with
 // a preview directory, one PNG per piece.
 import AppKit
 import CoreGraphics
@@ -742,7 +742,7 @@ func convert(_ piece: Piece) -> [String] {
 
 // MARK: - Previews
 
-let fontURL = URL(fileURLWithPath: "SynqMessagesExtension/Fonts/JetBrainsMono-Regular.ttf")
+let fontURL = URL(fileURLWithPath: "SynqShared/Sources/SynqShared/DesignSystem/Fonts/JetBrainsMono-Regular.ttf")
 let fontDesc = (CTFontManagerCreateFontDescriptorsFromURL(fontURL as CFURL) as! [CTFontDescriptor])[0]
 let font = CTFontCreateWithFontDescriptor(fontDesc, CGFloat(cellW) / 0.6, nil)
 
@@ -794,4 +794,4 @@ for piece in pieces {
     print("\(piece.name): \(piece.cols)×\(rows.count)")
 }
 swift += "}\n"
-try! swift.write(toFile: "SynqMessagesExtension/AsciiArtData.swift", atomically: true, encoding: .utf8)
+try! swift.write(toFile: "SynqShared/Sources/SynqShared/DesignSystem/Themes/AsciiArtData.swift", atomically: true, encoding: .utf8)

@@ -4,13 +4,13 @@ import Foundation
 /// Only `p`, `g` and `n` carry meaning to the server. The embedded `card` is an
 /// unverified display hint written by whoever sent the message; the extension shows it
 /// as such and the web page never trusts it.
-struct CardLink: Equatable {
-    let proposalId: String
-    let groupId: String
-    let nonce: String
-    let preview: SynqCard?
-    let openURL: URL
-    let messageURL: URL
+public struct CardLink: Equatable {
+    public let proposalId: String
+    public let groupId: String
+    public let nonce: String
+    public let preview: SynqCard?
+    public let openURL: URL
+    public let messageURL: URL
 
     private static let proposalPattern = "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
     private static let groupPattern = "^0x[0-9a-fA-F]{64}$"
@@ -18,7 +18,7 @@ struct CardLink: Equatable {
 
     /// Parses and validates a link. `allowedHost` is the Synq web host from Info.plist;
     /// links to any other host (or not https) are refused so a card cannot open a lookalike site.
-    init?(url: URL, allowedHost: String) {
+    public init?(url: URL, allowedHost: String) {
         guard url.scheme == "https",
               let host = url.host, host.lowercased() == allowedHost.lowercased(),
               url.path == "/approve",
@@ -45,12 +45,12 @@ struct CardLink: Equatable {
         preview = value("card").flatMap { CardLink.decodePreview($0, groupId: g, proposalId: p) }
     }
 
-    static func matches(_ s: String, _ pattern: String) -> Bool {
+    public static func matches(_ s: String, _ pattern: String) -> Bool {
         s.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// A preview whose group or proposal differs from the link is discarded.
-    static func decodePreview(_ encoded: String, groupId: String, proposalId: String) -> SynqCard? {
+    public static func decodePreview(_ encoded: String, groupId: String, proposalId: String) -> SynqCard? {
         var b64 = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while b64.count % 4 != 0 { b64.append("=") }
         guard encoded.count <= 4096,
@@ -64,16 +64,16 @@ struct CardLink: Equatable {
     }
 
     /// Public, nonce-gated quorum status: `GET /api/v1/cards/status?p&g&n` via the web origin.
-    func statusURL() -> URL? {
+    public func statusURL() -> URL? {
         var c = URLComponents(url: openURL, resolvingAgainstBaseURL: false)
         c?.path = "/api/v1/cards/status"
         return c?.url
     }
 }
 
-struct CardStatus: Codable, Equatable {
-    let status: String
-    let state: String
-    let counted: Int
-    let required: Int
+public struct CardStatus: Codable, Equatable {
+    public let status: String
+    public let state: String
+    public let counted: Int
+    public let required: Int
 }

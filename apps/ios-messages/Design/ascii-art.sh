@@ -1,5 +1,5 @@
 #!/bin/sh
-# Regenerates SynqMessagesExtension/AsciiArtData.swift from the procedural scenes in
+# Regenerates SynqShared/Sources/SynqShared/DesignSystem/Themes/AsciiArtData.swift from the procedural scenes in
 # Design/ascii-art.swift; with an argument, also writes a preview PNG per piece there.
 set -eu
 cd "$(dirname "$0")/.."
