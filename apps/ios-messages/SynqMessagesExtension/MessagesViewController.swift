@@ -164,8 +164,11 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         }
         // The look is the person's saved choice (Settings → Theme); every screen and
         // card reads it from the environment and follows a change at once.
+        // Capture the finished screen by value: closing over `view` itself would make
+        // the root contain itself and recurse forever.
         let compact = presentationStyle == .compact
-        view = AnyView(SynqThemeRoot { view.environment(\.synqCompact, compact) })
+        let screen = view
+        view = AnyView(SynqThemeRoot { screen.environment(\.synqCompact, compact) })
         let controller = UIHostingController(rootView: view)
         controller.view.backgroundColor = UIColor(SynqThemes.current.colors.background)
         hosted?.willMove(toParent: nil)
