@@ -7,6 +7,7 @@ import {
   WorkspaceDealViewSchema,
 } from '@synq/workspaces/deal-contracts';
 import { api, describeError } from '../../lib/api';
+import { DealEscrowActions } from './deal-escrow';
 const Contacts = z.strictObject({
   contacts: z.array(WorkspaceDealContactSchema),
 });
@@ -61,8 +62,8 @@ export function DealPanel({
       <h2>Deals with workspace members</h2>
       <p>
         Select the contracting users and an independent arbiter. Each user
-        reviews and signs in their own wallet. Synq dispute desk is unavailable.
-        Escrow execution is still being connected.
+        reviews and signs in their own wallet, and funds, releases or refunds
+        the escrow from that wallet. Synq never holds a party's key.
       </p>
       {loading && <p role="status">Loading linked members and deals…</p>}
       {error && <p role="alert">{error}</p>}
@@ -182,6 +183,16 @@ export function DealPanel({
             </p>
           ))}
           <a href={d.reviewPath}>Review terms and sign in your wallet</a>
+          <DealEscrowActions
+            workspaceId={workspaceId}
+            principalId={principalId}
+            deal={d}
+            onChange={(next) =>
+              setDeals((current) =>
+                current.map((v) => (v.id === next.id ? next : v)),
+              )
+            }
+          />
         </article>
       ))}
     </section>

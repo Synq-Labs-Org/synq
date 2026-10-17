@@ -29,7 +29,25 @@ export const WorkspaceDealViewSchema = z.strictObject({
   reviewPath: z
     .string()
     .regex(/^\/deal\/deal_[0-9a-f]{16,32}\?t=[A-Za-z0-9_.-]+$/),
-  execution: z.literal('BLOCKED_WORKSPACE_ESCROW_EXECUTOR'),
+  execution: z.literal('PARTY_WALLET_ESCROW'),
+  escrow: z
+    .strictObject({ address: WalletSchema, escrowDealId: z.string() })
+    .nullable(),
+  milestones: z.array(
+    z.strictObject({
+      index: z.number().int(),
+      title: z.string(),
+      amount: UnitsSchema,
+      evidenceType: z.string().nullable(),
+      status: z.string(),
+    }),
+  ),
+  dispute: z
+    .strictObject({
+      raisedBy: z.enum(['CLIENT', 'FREELANCER']),
+      deadline: z.number(),
+    })
+    .nullable(),
 });
 export const WorkspaceDealContactSchema = z.strictObject({
   principalId: z.string(),
