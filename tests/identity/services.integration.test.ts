@@ -5,10 +5,12 @@ import {
   type IdentityTx,
 } from '../../packages/identity/src/server.js';
 import { identityContract } from './identity-contract.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_IDENTITY_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_identity_test';
+const url = testDatabaseUrl(
+  'SYNQ_IDENTITY_TEST_DATABASE_URL',
+  'synq_identity_test',
+);
 
 async function ensureDatabase(): Promise<void> {
   const target = new URL(url);

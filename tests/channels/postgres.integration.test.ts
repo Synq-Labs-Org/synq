@@ -2,10 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { PostgresChannelStore } from '@synq/channels/postgres';
 import { freshChannelDatabase } from './db.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_CHANNELS_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_test';
+const url = testDatabaseUrl('SYNQ_CHANNELS_DATABASE_URL', 'synq_channels_test');
 let pool: pg.Pool;
 let store: PostgresChannelStore;
 const NOW = 1_800_000_000;

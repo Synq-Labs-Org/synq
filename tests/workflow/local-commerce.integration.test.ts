@@ -22,6 +22,7 @@ import { usd } from '../../scripts/lib/fabric-booking-world.js';
 import { FakeReloadly } from '../commerce/fake-reloadly.js';
 import { startTemporal, testConfig } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 const BOOKING = [
   'revalidateBookingCandidate',
@@ -38,8 +39,10 @@ it('LOCAL-COM-001 the production worker runtime registers booking with Postgres 
   const dir = mkdtempSync(join(tmpdir(), 'synq-local-commerce-'));
   const local = await bootstrapLocalEnvironment({
     dataDir: dir,
-    databaseUrl:
-      'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p07_local_commerce',
+    databaseUrl: testDatabaseUrl(
+      'SYNQ_UNUSED_TEST_DATABASE_URL',
+      'synq_p07_local_commerce',
+    ),
     // The local token has 18 decimals; a $10.50 sandbox order reserves ~10.5 tokens.
     funding: 100n * 10n ** 18n,
   });

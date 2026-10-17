@@ -171,7 +171,7 @@ function arcLines(card: ArcCard): string[] {
     case 'CONTRACTOR_PAYMENT':
       return [
         `Amount: ${money(card.amount)} to ${card.recipient.label} (${card.recipient.address})${card.recipient.verified ? ', verified payout address' : ', NOT a verified payout address'}`,
-        `Route: ${card.route === 'VAULT_POLICY_PAY' ? 'vault policy.pay' : 'agent wallet'} · Approvals: ${card.approvals.counted}/${card.approvals.required}`,
+        `Route: ${card.route === 'VAULT_POLICY_PAY' ? 'vault policy.pay' : card.route === 'SAFE_QUORUM_TRANSFER' ? 'full owner quorum transfer' : 'agent wallet'} · Approvals: ${card.approvals.counted}/${card.approvals.required}`,
         `Status: ${card.status}${card.transactionHash ? ` · tx ${card.transactionHash}` : ''}`,
         `Intent ${card.paymentId}${card.obligationRef ? ` for ${card.obligationRef}` : ''}`,
         ...(card.status === 'PROPOSED' || card.status === 'AWAITING_APPROVAL'

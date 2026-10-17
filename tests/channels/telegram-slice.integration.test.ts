@@ -16,12 +16,16 @@ import {
 import { PostgresChannelStore } from '@synq/channels/postgres';
 import { freshChannelDatabase } from './db.js';
 import { FakeTelegram } from '../../apps/demo/src/fake-telegram.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-process.env.SYNQ_DEMO_DATABASE_URL ??=
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_demo';
-const CHANNEL_DB =
-  process.env.SYNQ_CHANNELS_SLICE_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_slice_test';
+process.env.SYNQ_DEMO_DATABASE_URL ??= testDatabaseUrl(
+  'SYNQ_UNUSED_TEST_DATABASE_URL',
+  'synq_channels_demo',
+);
+const CHANNEL_DB = testDatabaseUrl(
+  'SYNQ_CHANNELS_SLICE_DATABASE_URL',
+  'synq_channels_slice_test',
+);
 const CHAT = -100777;
 const WEB = 'https://synq.test';
 const EXPLORER = 'https://testnet.monadexplorer.com/tx/';

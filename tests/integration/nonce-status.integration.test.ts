@@ -5,11 +5,13 @@ import { expect, it } from 'vitest';
 import { createTestClient, http, keccak256 } from 'viem';
 import { anvil } from 'viem/chains';
 import { RpcNonceStatusReader } from '../../packages/read-model/src/kernel-adapter.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 it('RpcNonceStatusReader reads nonceUsed/intentUsed from the deployed module at confirmation depth, echoes the query and binds the deployment', async () => {
-  process.env.SYNQ_DEMO_DATABASE_URL =
-    process.env.SYNQ_NONCE_TEST_DATABASE_URL ??
-    'postgresql://postgres:synq_local@127.0.0.1:55432/synq_nonce_demo';
+  process.env.SYNQ_DEMO_DATABASE_URL = testDatabaseUrl(
+    'SYNQ_NONCE_TEST_DATABASE_URL',
+    'synq_nonce_demo',
+  );
   const { startLocalVertical } = await import('../../apps/demo/src/local.js');
   const local = await startLocalVertical();
   const journal = mkdtempSync(join(tmpdir(), 'synq-nonce-'));

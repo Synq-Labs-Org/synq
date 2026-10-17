@@ -31,6 +31,7 @@ import {
   signedBoth,
   T0,
 } from './harness.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 /**
  * Deal Room on Postgres (own `synq_dealroom_migrations`, database
@@ -39,9 +40,10 @@ import {
  * apply.
  */
 
-const URL =
-  process.env.SYNQ_DEALROOM_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_m2_dealroom';
+const URL = testDatabaseUrl(
+  'SYNQ_DEALROOM_TEST_DATABASE_URL',
+  'synq_m2_dealroom',
+);
 let pool: pg.Pool;
 
 async function ensureDatabase(url: string) {

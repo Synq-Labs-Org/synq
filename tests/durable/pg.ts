@@ -4,11 +4,17 @@ import pg from 'pg';
  * Test database URL: the named env var, else `SYNQ_TEST_PG_BASE` (for example
  * postgresql://postgres@127.0.0.1:55433 locally), else the CI compose Postgres.
  */
-export function testDatabaseUrl(envVar: string, database: string): string {
+export function testDatabaseUrl(
+  envVar: string | null,
+  database: string,
+): string {
   const base =
     process.env.SYNQ_TEST_PG_BASE ??
     'postgresql://postgres:synq_local@127.0.0.1:55432';
-  return process.env[envVar] ?? `${base.replace(/\/+$/, '')}/${database}`;
+  return (
+    (envVar ? process.env[envVar] : undefined) ??
+    `${base.replace(/\/+$/, '')}/${database}`
+  );
 }
 
 export const DURABLE_DATABASE_URL = testDatabaseUrl(

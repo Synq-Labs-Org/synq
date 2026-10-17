@@ -36,10 +36,12 @@ import {
   persistedKernel,
 } from './harness/local-checks.js';
 import type { WorkflowHandle } from '@temporalio/client';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const DATABASE_URL =
-  process.env.SYNQ_WORKFLOW_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p07_gauntlet';
+const DATABASE_URL = testDatabaseUrl(
+  'SYNQ_WORKFLOW_TEST_DATABASE_URL',
+  'synq_p07_gauntlet',
+);
 const TUNING: Partial<ActionTuning> = {
   activityTimeoutSeconds: 30,
   heartbeatTimeoutSeconds: 3,

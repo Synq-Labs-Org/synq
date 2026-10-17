@@ -36,6 +36,7 @@ import {
 } from '../allocations/harness.js';
 import { durablePool, runId } from '../durable/pg.js';
 import { groupFundRefundCrash, signedStepsCrash } from './crash-scenarios.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 /**
  * P23-02 Postgres twins of crash-recovery.test.ts: the durable stores a real
@@ -45,9 +46,10 @@ import { groupFundRefundCrash, signedStepsCrash } from './crash-scenarios.js';
  * sender+nonce. Locally:
  *   SYNQ_CROSS_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55433/synq_m2_secperf_crash
  */
-const URL =
-  process.env.SYNQ_CROSS_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_m2_secperf_crash';
+const URL = testDatabaseUrl(
+  'SYNQ_CROSS_TEST_DATABASE_URL',
+  'synq_m2_secperf_crash',
+);
 let pool: pg.Pool;
 beforeAll(async () => {
   const name = new globalThis.URL(URL).pathname.slice(1);

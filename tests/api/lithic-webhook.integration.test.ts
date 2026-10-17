@@ -14,10 +14,12 @@ import {
   signed,
   webhookApp,
 } from './lithic-webhook-fixtures.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const URL =
-  process.env.SYNQ_WEBHOOK_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_webhooks';
+const URL = testDatabaseUrl(
+  'SYNQ_WEBHOOK_TEST_DATABASE_URL',
+  'synq_p08_webhooks',
+);
 const schema = `lwh_${process.pid}_${Date.now() % 1_000_000}`;
 let pool: pg.Pool;
 beforeAll(async () => {

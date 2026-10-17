@@ -89,6 +89,7 @@ import {
   MEMBER,
   SAFE,
 } from '../funding/helpers.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 const ATTACKER = '0x000000000000000000000000000000000000bad0' as const;
 const targets = [
@@ -265,8 +266,10 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'synq-integrated-attacks-'));
   local = await bootstrapLocalEnvironment({
     dataDir: dir,
-    databaseUrl:
-      'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p07_attacker_demo',
+    databaseUrl: testDatabaseUrl(
+      'SYNQ_UNUSED_TEST_DATABASE_URL',
+      'synq_p07_attacker_demo',
+    ),
   });
   runtime = await openLocalRuntime(local.manifest);
   temporal = await startTemporal();

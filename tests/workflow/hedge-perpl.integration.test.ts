@@ -44,10 +44,9 @@ import { fixtureControls } from './harness/controls.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_HEDGE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_wf_hedge';
+const url = testDatabaseUrl('SYNQ_HEDGE_TEST_DATABASE_URL', 'synq_wf_hedge');
 const context = contextFixture('testnet');
 const NOW = context.markets.find((m) => m.id === 64)!.state!.at.t! + 1_000;
 const T = Math.floor(NOW / 1000);

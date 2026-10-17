@@ -28,10 +28,12 @@ import {
   rpId,
   submission,
 } from './v1-harness.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_IDENTITY_API_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_identity_api_test';
+const url = testDatabaseUrl(
+  'SYNQ_IDENTITY_API_TEST_DATABASE_URL',
+  'synq_identity_api_test',
+);
 const pools: pg.Pool[] = [];
 const wallClock = () => Math.floor(Date.now() / 1000);
 const app = (intents?: IntentAuthorizer) => {

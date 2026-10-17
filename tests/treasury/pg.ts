@@ -1,8 +1,10 @@
 import pg from 'pg';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-export const P08_DATABASE_URL =
-  process.env.SYNQ_P08_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_test';
+export const P08_DATABASE_URL = testDatabaseUrl(
+  'SYNQ_P08_TEST_DATABASE_URL',
+  'synq_p08_test',
+);
 
 export async function ensureP08Database(url = P08_DATABASE_URL) {
   const name = new URL(url).pathname.slice(1);

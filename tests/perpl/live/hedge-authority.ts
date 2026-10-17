@@ -16,13 +16,15 @@ import {
 } from '../../../packages/identity/src/mera-browser.js';
 import { DeterministicAuthenticator } from '../../identity/fixtures.js';
 import { testnetPerpl } from '../../risk/hedge-fixtures.js';
+import { testDatabaseUrl } from '../../durable/pg.js';
 
 // P05 software passkey mechanics for the labelled operator harness. This does
 // not assert real human presence or deployed Safe ownership.
 export async function liveHedgeAuthority(input: { mandate: Mandate }) {
-  const url =
-    process.env.SYNQ_HEDGE_LIVE_DATABASE_URL ??
-    'postgresql://postgres:synq_local@127.0.0.1:55432/synq_resume_p10_live';
+  const url = testDatabaseUrl(
+    'SYNQ_HEDGE_LIVE_DATABASE_URL',
+    'synq_resume_p10_live',
+  );
   const name = new URL(url).pathname.slice(1);
   if (!/^[a-z_][a-z0-9_]*$/.test(name))
     throw new Error('unsafe live-test DB name');

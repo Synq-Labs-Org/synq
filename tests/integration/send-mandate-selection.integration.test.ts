@@ -40,10 +40,13 @@ import {
 } from '../api/v1-harness.js';
 import { addr, word } from '../identity/fixtures.js';
 import { ensureDatabase } from '../../apps/demo/src/testnet-config.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 it('I-04 production Send keeps its designated terms, durable access and approvals when a wider independent treasury mandate is indexed', async () => {
-  const url =
-    'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_critic_e2e_selection';
+  const url = testDatabaseUrl(
+    'SYNQ_UNUSED_TEST_DATABASE_URL',
+    'synq_p08_critic_e2e_selection',
+  );
   await ensureDatabase(url);
   const pool = new pg.Pool({ connectionString: url, max: 6 });
   const identity = new PostgresIdentityStore(pool);

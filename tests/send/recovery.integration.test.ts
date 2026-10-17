@@ -33,10 +33,12 @@ import {
   sandboxManifest,
   type SandboxGroup,
 } from '../api/kernel-fixture.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_P08_RECOVERY_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_recovery_builder';
+const url = testDatabaseUrl(
+  'SYNQ_P08_RECOVERY_DATABASE_URL',
+  'synq_p08_recovery_builder',
+);
 const pool = new pg.Pool({ connectionString: url, max: 4 });
 const NOW = 1_800_000_000;
 const hash = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as const;

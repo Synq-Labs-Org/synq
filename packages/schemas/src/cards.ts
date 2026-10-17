@@ -456,7 +456,7 @@ export const ContractorPaymentCardSchema = z.strictObject({
     verified: z.boolean(),
   }),
   amount: CardMoneySchema,
-  route: z.enum(['VAULT_POLICY_PAY', 'AGENT_WALLET']),
+  route: z.enum(['VAULT_POLICY_PAY', 'SAFE_QUORUM_TRANSFER', 'AGENT_WALLET']),
   /** Invoice / payable / milestone the payment settles. */
   obligationRef: Ref.nullable(),
   approvals: z.strictObject({

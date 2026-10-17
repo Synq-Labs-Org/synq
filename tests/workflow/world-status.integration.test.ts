@@ -11,13 +11,16 @@ import type { DcaTickResult } from '../../workers/workflow/src/workflows/dca.js'
 import type { ActionWorkflowState } from '../../workers/workflow/src/workflows/action-execution.js';
 import { startTemporal, testConfig, eventually } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 it('I-02/I-03 real running DCA and its abandoned approval child remain visible to the production World source', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'synq-world-workflows-'));
   const local = await bootstrapLocalEnvironment({
     dataDir: dir,
-    databaseUrl:
-      'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p07_world_status_demo',
+    databaseUrl: testDatabaseUrl(
+      'SYNQ_UNUSED_TEST_DATABASE_URL',
+      'synq_p07_world_status_demo',
+    ),
   });
   const runtime = await openLocalRuntime(local.manifest);
   const env = await startTemporal();

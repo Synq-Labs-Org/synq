@@ -19,9 +19,12 @@ import {
 import { mandateRoutes } from '../../apps/api/src/mandate-routes.js';
 import { productionChannelPorts } from '../../apps/api/src/channel-runtime.js';
 import { executeReadyMandates } from '../../apps/demo/src/governance-executor.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-process.env.SYNQ_DEMO_DATABASE_URL ??=
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_channels_mandate_demo';
+process.env.SYNQ_DEMO_DATABASE_URL ??= testDatabaseUrl(
+  'SYNQ_UNUSED_TEST_DATABASE_URL',
+  'synq_channels_mandate_demo',
+);
 type Local = Awaited<
   ReturnType<
     (typeof import('../../apps/demo/src/local.js'))['startLocalVertical']

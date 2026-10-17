@@ -20,9 +20,11 @@ import {
   type DestinationReceipt,
 } from '@synq/funding';
 import { MEMBER, SAFE, TESTNET, NOW, request } from './helpers.js';
-const url =
-  process.env.SYNQ_P08_STORE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_store_test';
+import { testDatabaseUrl } from '../durable/pg.js';
+const url = testDatabaseUrl(
+  'SYNQ_P08_STORE_TEST_DATABASE_URL',
+  'synq_p08_store_test',
+);
 const pool = new pg.Pool({ connectionString: url, max: 8 });
 const hash = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as const;
 const asset = officialAssets.testnetAUSD;

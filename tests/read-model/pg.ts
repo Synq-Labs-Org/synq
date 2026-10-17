@@ -1,10 +1,12 @@
 import pg from 'pg';
 import { randomBytes } from 'node:crypto';
 import { PostgresProjectionStore } from '../../packages/read-model/src/storage.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-export const databaseUrl =
-  process.env.SYNQ_RM_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_test';
+export const databaseUrl = testDatabaseUrl(
+  'SYNQ_RM_TEST_DATABASE_URL',
+  'synq_test',
+);
 export const redisUrl =
   process.env.SYNQ_RM_TEST_REDIS_URL ?? 'redis://127.0.0.1:56379/7';
 

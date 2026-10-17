@@ -31,10 +31,12 @@ import { FakeReloadly } from '../commerce/fake-reloadly.js';
 import { ensureP08Database } from '../treasury/pg.js';
 import { startTemporal, testConfig } from './harness/temporal.js';
 import { withWorkers } from './harness/worker.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const URL =
-  process.env.SYNQ_COMMERCE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_commerce_runtime';
+const URL = testDatabaseUrl(
+  'SYNQ_COMMERCE_TEST_DATABASE_URL',
+  'synq_p08_commerce_runtime',
+);
 const GROUP = 'group-1';
 const MEMBERS = ['alice', 'bob', 'carol'];
 const now = () => Math.floor(Date.now() / 1000);

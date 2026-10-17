@@ -11,10 +11,12 @@ import {
 import type { DcaStrategy } from '../../workers/workflow/src/activities/types.js';
 import { eventually, startTemporal, testConfig } from './harness/temporal.js';
 import { WorkerProcess } from './harness/worker-process.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const DATABASE_URL =
-  process.env.SYNQ_WORKFLOW_DCA_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p07_dca';
+const DATABASE_URL = testDatabaseUrl(
+  'SYNQ_WORKFLOW_DCA_DATABASE_URL',
+  'synq_p07_dca',
+);
 const INTERVAL = 5;
 
 type Tick = {

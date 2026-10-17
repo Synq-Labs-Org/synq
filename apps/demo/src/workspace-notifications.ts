@@ -323,7 +323,8 @@ export function payoutReceiptCard(
       verified: true,
     },
     amount: { amount: formatUnits(BigInt(p.amount), 6), symbol: 'USDC' },
-    route: 'VAULT_POLICY_PAY',
+    route:
+      p.route === 'SAFE_QUORUM' ? 'SAFE_QUORUM_TRANSFER' : 'VAULT_POLICY_PAY',
     obligationRef: null,
     approvals: {
       counted: Object.keys(payout.signatures).length,

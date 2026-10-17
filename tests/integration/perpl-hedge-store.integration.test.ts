@@ -44,10 +44,12 @@ import {
 } from '../risk/hedge-fixtures.js';
 import { contextFixture } from '../perpl/context-fixture.js';
 import { FakePerplRest, testSigner } from '../perpl/fake-perpl.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_HEDGE_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_resume_p10_hedge';
+const url = testDatabaseUrl(
+  'SYNQ_HEDGE_TEST_DATABASE_URL',
+  'synq_resume_p10_hedge',
+);
 let pool: pg.Pool;
 let store: PostgresHedgeStore;
 let identity: PostgresIdentityStore;

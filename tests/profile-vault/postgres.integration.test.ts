@@ -8,6 +8,7 @@ import {
   ProfileDirectory,
 } from '@synq/profile-vault';
 import { ensureP08Database } from '../treasury/pg.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 const now = () => 1_790_000_000;
 const keys = new EnvVaultKeyProvider({
@@ -25,8 +26,7 @@ let pool: pg.Pool;
 const schemas: string[] = [];
 beforeAll(async () => {
   pool = await ensureP08Database(
-    process.env.SYNQ_P11_TEST_DATABASE_URL ??
-      'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_p11',
+    testDatabaseUrl('SYNQ_P11_TEST_DATABASE_URL', 'synq_p08_p11'),
   );
 });
 afterAll(async () => {

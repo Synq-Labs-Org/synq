@@ -16,10 +16,12 @@ import {
   harness,
   intent,
 } from '../kernel/fixtures.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_KERNEL_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_kernel_test';
+const url = testDatabaseUrl(
+  'SYNQ_KERNEL_TEST_DATABASE_URL',
+  'synq_kernel_test',
+);
 let pool: pg.Pool;
 
 beforeAll(async () => {

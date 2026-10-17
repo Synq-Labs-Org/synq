@@ -15,14 +15,14 @@ import {
   req,
   reservationScenarios,
 } from './reservation-scenarios.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
 let pool: pg.Pool;
 const schemas: string[] = [];
 let n = 0;
 beforeAll(async () => {
   pool = await ensureP08Database(
-    process.env.SYNQ_P11_TEST_DATABASE_URL ??
-      'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p08_p11',
+    testDatabaseUrl('SYNQ_P11_TEST_DATABASE_URL', 'synq_p08_p11'),
   );
 });
 afterAll(async () => {

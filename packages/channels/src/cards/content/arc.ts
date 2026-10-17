@@ -463,6 +463,10 @@ const ROUTE = {
     label: 'Vault policy',
     note: 'Paid from the vault through policy.pay; the policy re-checks recipient, mandate and limits on chain',
   },
+  SAFE_QUORUM_TRANSFER: {
+    label: 'Full owner quorum',
+    note: 'Above the operator budget: every Safe owner signed this exact transfer from the vault',
+  },
   AGENT_WALLET: {
     label: 'Agent wallet',
     note: 'Paid from the agent wallet inside its delegated mandate; the Kernel grant names this exact recipient and amount',

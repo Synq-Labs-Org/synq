@@ -47,10 +47,9 @@ import {
 } from '../kernel/fixtures.js';
 import { FixtureDirectory } from '../kernel/fixtures.js';
 import { SUPPORT, action, brainFor, chatFixture } from '../brain/harness.js';
+import { testDatabaseUrl } from '../durable/pg.js';
 
-const url =
-  process.env.SYNQ_P06_TEST_DATABASE_URL ??
-  'postgresql://postgres:synq_local@127.0.0.1:55432/synq_p06_world';
+const url = testDatabaseUrl('SYNQ_P06_TEST_DATABASE_URL', 'synq_p06_world');
 const redisUrl =
   process.env.SYNQ_P06_TEST_REDIS_URL ?? 'redis://127.0.0.1:56379/11';
 const GROUP = 'p06_group';
