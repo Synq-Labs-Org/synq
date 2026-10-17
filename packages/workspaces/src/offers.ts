@@ -281,6 +281,13 @@ export class WorkspaceOffers {
     private readonly options: {
       /** Change markers for the live stream (ids only, after commit). */
       publish?: (workspaceId: string, leadId: string) => Promise<void>;
+      /** An offer was accepted in chat (after commit). */
+      onAccepted?: (accepted: {
+        workspaceId: string;
+        leadId: string;
+        offerId: string;
+        version: number;
+      }) => Promise<void>;
     } = {},
   ) {}
 
@@ -677,8 +684,13 @@ export class WorkspaceOffers {
       'SELECT workspace_id FROM synq_leads WHERE id=$1',
       [leadId],
     );
-    if (owner.rows[0])
-      await this.publish(String(owner.rows[0].workspace_id), leadId);
+    if (owner.rows[0]) {
+      const workspaceId = String(owner.rows[0].workspace_id);
+      await this.publish(workspaceId, leadId);
+      await this.options
+        .onAccepted?.({ workspaceId, leadId, offerId, version })
+        .catch(() => undefined);
+    }
     return accepted;
   }
 }
