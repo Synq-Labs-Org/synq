@@ -1,6 +1,6 @@
 import { PostgresSplitStore } from '@synq/allocations';
 import { boundedWorkspaceSigner } from './workspace-signing.js';
-import { Ledger, PostgresLedgerStore } from '@synq/ledger';
+import { Ledger, PostgresLedgerStore, walletTag } from '@synq/ledger';
 import {
   erc20Abi,
   getAddress,
@@ -466,9 +466,11 @@ export async function bookWorkspacePayout(
           documentRef: p.data.obligation,
         },
         {
+          // Tagged with the paying vault so per-vault cash reconciles to its on-chain balance.
           account: 'CASH_ARC_USDC',
           assetId,
           amount: -amount,
+          counterpartyId: walletTag(getAddress(p.data.vault)),
           documentRef: p.data.obligation,
         },
       ],

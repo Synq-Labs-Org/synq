@@ -1074,6 +1074,16 @@ describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signe
     ]);
     const paid = await f.payouts.view(f.w.id, f.owner.principalId, p.data.id);
     expect(paid.state).toBe('PAID');
+    const vaultCash = (
+      await new Ledger(new PostgresLedgerStore(pool)).store.entries(f.w.id)
+    )
+      .flatMap((e) => e.postings)
+      .filter(
+        (x) =>
+          x.account === 'CASH_ARC_USDC' &&
+          x.counterpartyId === walletTag(f.authority.vault),
+      );
+    expect(vaultCash.map((x) => x.amount)).toEqual([-70000n]);
     expect(paid.txHash).toBe(f.govFake.broadcasts[0]);
     expect((await f.restartGov().execute(action.action.id)).state).toBe(
       'CONFIRMED',

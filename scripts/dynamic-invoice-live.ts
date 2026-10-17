@@ -53,6 +53,20 @@ const runId = z
   .parse(process.env.SYNQ_DYNAMIC_RUN_ID);
 if (process.env.SYNQ_ALLOW_MAINNET_BROADCAST === 'true')
   throw new Error('MAINNET_FORBIDDEN');
+// Invoice 1 provisions a fresh payer with gas; later invoices reuse that payer's own balance.
+const seq = z.coerce
+  .number()
+  .int()
+  .min(1)
+  .max(20)
+  .parse(process.env.SYNQ_DYNAMIC_INVOICE_SEQ ?? '1');
+const units = z.coerce
+  .bigint()
+  .min(1n)
+  .max(50000n)
+  .parse(process.env.SYNQ_DYNAMIC_INVOICE_UNITS ?? '10000');
+if (seq === 1 && units !== 10000n) throw new Error('FIRST_INVOICE_IS_FIXED');
+const suffix = seq === 1 ? '' : `-${seq}`;
 if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
   process.stdout.write(
     'Read-only mode. No keys, signatures, files or transactions created.\n',
@@ -82,7 +96,7 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
     .parse(
       JSON.parse(secret(join(dir, `e2e-user-${runId}-run.json`))).workspaceId,
     );
-  const manifestPath = join(dir, `e2e-user-${runId}-invoice.json`);
+  const manifestPath = join(dir, `e2e-user-${runId}-invoice${suffix}.json`);
   type Manifest = {
     createdAt: number;
     invoiceId: string | null;
@@ -106,7 +120,7 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
       };
   const save = () =>
     writeFileSync(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
-  const evidencePath = `bounty-evidence/arc/dynamic-invoice-${runId}.json`;
+  const evidencePath = `bounty-evidence/arc/dynamic-invoice-${runId}${suffix}.json`;
   const evidence: Record<string, unknown> = {
     runId,
     workspaceId,
@@ -199,14 +213,14 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
     if (!manifest.invoiceId) {
       manifest.invoiceId = (
         await invoices.create(workspaceId, auth.principalId, {
-          number: `ARC-${runId}`,
+          number: `ARC-${runId}${suffix}`,
           payerName: 'Outside software-wallet payer',
           dueDate: new Date((now() + 86400) * 1000).toISOString().slice(0, 10),
           lineItems: [
             {
               description: 'Authorized testnet invoice proof',
               quantity: 1,
-              unitPrice: '10000',
+              unitPrice: String(units),
             },
           ],
         })
@@ -234,7 +248,11 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
           args: [a.vault],
         }),
       ]);
-      if (op < 40_000_000_000_000_000n || pay !== 0n)
+      if (
+        seq === 1
+          ? op < 40_000_000_000_000_000n || pay !== 0n
+          : pay < units * 10n ** 12n + 5_000_000_000_000_000n
+      )
         throw new Error('FRESH_PAYER_OR_OPERATOR_BALANCE');
       manifest.operatorBefore = String(op);
       manifest.payerBefore = String(pay);
@@ -247,6 +265,7 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
     const key = `dynamic-invoice-gas:${runId}`;
     let funding = await outbox.get(key);
     if (funding) funding = await recover(outbox, chain, funding, now);
+    else if (seq !== 1) throw new Error('FIRST_INVOICE_FUNDING_MISSING');
     else {
       const mandate: PaymentMandate = {
         mandateId: key,
@@ -326,7 +345,7 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
     }
     if (funding.state !== 'CONFIRMED' || !funding.evidence)
       throw new Error('FUNDING_NOT_CONFIRMED');
-    const call = payCall(invoice, 10000n);
+    const call = payCall(invoice, units);
     if (!manifest.raw) {
       if (
         invoice.paid !== 0n ||
@@ -419,7 +438,7 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
     if (
       result.status !== 'PAID' ||
       result.reconciliation !== 'FINALIZED' ||
-      result.paid !== '10000'
+      result.paid !== String(units)
     )
       throw new Error('INDEXER_SETTLEMENT_PENDING');
     const [opAfter, payAfter, vaultAfter] = await Promise.all([
@@ -433,19 +452,22 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
       }),
     ]);
     const payerFee = receipt.gasUsed * receipt.effectiveGasPrice;
+    // Arc gas is USDC: native wei carry 12 more decimals than the 6-decimal token.
+    const funded = seq === 1 ? 30_000_000_000_000_000n : 0n;
     if (
-      BigInt(manifest.operatorBefore) -
-        opAfter -
-        30_000_000_000_000_000n -
-        funding.evidence.feeWei !==
-        0n ||
+      (seq === 1 &&
+        BigInt(manifest.operatorBefore) -
+          opAfter -
+          funded -
+          funding.evidence.feeWei !==
+          0n) ||
       BigInt(manifest.payerBefore!) +
-        30_000_000_000_000_000n -
+        funded -
         payAfter -
-        10_000_000_000_000_000n -
+        units * 10n ** 12n -
         payerFee !==
         0n ||
-      vaultAfter - BigInt(manifest.vaultBefore!) !== 10000n
+      vaultAfter - BigInt(manifest.vaultBefore!) !== units
     )
       throw new Error('CHAIN_RECONCILIATION_MISMATCH');
     const cash = (await ledger.store.entries(workspaceId))
@@ -464,11 +486,12 @@ if (process.env.SYNQ_DYNAMIC_INVOICE_LIVE !== '1') {
       vault: a.vault,
       payer: payer.address,
       paymentHash: manifest.hash,
-      fundingHash: funding.hash,
-      amountBaseUnits: '10000',
-      fundingBaseUnits: '30000',
+      sequence: seq,
+      fundingHash: seq === 1 ? funding.hash : null,
+      amountBaseUnits: String(units),
+      fundingBaseUnits: seq === 1 ? '30000' : '0',
       paymentFeeNativeWei: String(payerFee),
-      fundingFeeNativeWei: String(funding.evidence.feeWei),
+      fundingFeeNativeWei: seq === 1 ? String(funding.evidence.feeWei) : '0',
       vaultBalanceBaseUnits: String(vaultAfter),
       vaultCashLedgerBaseUnits: String(cash),
       reconciliationDifferenceWei: '0',
