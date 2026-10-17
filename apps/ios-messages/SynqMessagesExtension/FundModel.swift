@@ -87,6 +87,12 @@ final class FundModel: ObservableObject {
     @Published var workspaceInvoices: [WorkspaceInvoice]?
     @Published var workspacePayouts: [WorkspacePayout]?
     @Published var workspaceVendors: [WorkspaceVendor]?
+    /// Optional sources: nil means the server does not offer it (or it failed), shown as unavailable.
+    @Published var workspaceBooks: WorkspaceBooks?
+    @Published var workspaceDeals: [WorkspaceDeal]?
+    @Published var workspaceSplits: [WorkspaceSplit]?
+    @Published var workspaceSwaps: [WorkspaceSwap]?
+    @Published var workspaceGroup: WorkspaceGroup?
     @Published var workspaceReply: WorkspaceTeamReply?
     @Published var workspaceLoading = false
     @Published var workspaceAsking = false
@@ -162,6 +168,7 @@ final class FundModel: ObservableObject {
         let changedWorkspace = selectedWorkspace?.id != workspace?.id
         selectedWorkspace = workspace
         workspaceInvoices = nil; workspacePayouts = nil; workspaceVendors = nil
+        workspaceBooks = nil; workspaceDeals = nil; workspaceSplits = nil; workspaceSwaps = nil; workspaceGroup = nil
         workspaceSnapshot = nil; workspaceCapabilities = nil
         workspaceReply = nil; workspaceDetailError = nil; workspaceAsking = false; workspaceLoading = false
         if changedWorkspace || workspace == nil { workspaceRequestId = UUID().uuidString; workspaceQuestion = "" }
@@ -199,6 +206,15 @@ final class FundModel: ObservableObject {
                 guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
                 workspaceCapabilities = capabilities
             } catch { if !Task.isCancelled && selectedWorkspace?.id == workspace.id { workspaceFailure("Feature availability could not be checked.") } }
+            guard !Task.isCancelled else { return }
+            let books = try? await client.books(workspace.id)
+            let deals = try? await client.deals(workspace.id)
+            let splits = try? await client.splits(workspace.id)
+            let swaps = try? await client.swaps(workspace.id)
+            let group = workspace.kind == "GROUP" ? try? await client.group(workspace.id) : nil
+            guard !Task.isCancelled, selectedWorkspace?.id == workspace.id else { return }
+            workspaceBooks = books; workspaceDeals = deals; workspaceSplits = splits
+            workspaceSwaps = swaps; workspaceGroup = group
 
         }
     }

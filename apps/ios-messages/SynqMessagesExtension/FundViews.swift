@@ -947,6 +947,75 @@ struct WorkspaceDetailView: View {
                     }
                 } else { Text("Payment data unavailable.").synqType(.body, .secondary) }
             }
+            if workspace.kind == "GROUP" {
+                SynqPanel(label: "Group fund") {
+                    if let group = model.workspaceGroup {
+                        if group.balances.isEmpty { Text("No contributions credited yet.").synqType(.body, .secondary) }
+                        ForEach(Array(group.balances.enumerated()), id: \.offset) { _, share in
+                            Text("\(share.mine ? "You" : share.member) · \(workspaceUSDC(share.amount))").synqType(.body)
+                        }
+                        let pending = group.contributions.filter { $0.mine && $0.state == "OPEN" }
+                        if !pending.isEmpty { Text("\(pending.count) of your contributions are waiting for the payment to settle.").synqType(.caption, .secondary) }
+                        ForEach(group.refunds) { refund in
+                            Text("Refund \(refund.mine ? "to you" : "to a member") · \(workspaceUSDC(refund.amount)) · \(refund.state)").synqType(.caption, .secondary)
+                        }
+                    } else { Text("Group fund data unavailable.").synqType(.body, .secondary) }
+                    Text("Contributions are paid from your own wallet on the secure page and count only for the wallet that paid.").synqType(.caption, .secondary)
+                    SynqButton(title: "Contribute on the secure page", kind: .compact,
+                               action: { actions.open(model.client.workspacePage(workspace: workspace.id)) })
+                }
+            }
+            SynqPanel(label: "Bills and payables") {
+                if let books = model.workspaceBooks {
+                    let open = books.payables.filter { $0.status == "OPEN" }
+                    if open.isEmpty && books.bills.isEmpty { Text("No bills recorded.").synqType(.body, .secondary) }
+                    ForEach(open) { p in
+                        Text("\(p.number) · \(workspaceUSDC(p.amount))").synqType(.body)
+                        Text("Due \(p.dueOn)").synqType(.caption, .secondary)
+                    }
+                    ForEach(books.bills) { b in
+                        Text("\(b.label) · \(workspaceUSDC(b.amount)) every \(b.cadenceDays) days").synqType(.caption, .secondary)
+                    }
+                } else { Text("Bills unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Deals") {
+                if let deals = model.workspaceDeals {
+                    if deals.isEmpty { Text("No deals involving your wallet.").synqType(.body, .secondary) }
+                    ForEach(deals) { d in
+                        Text("\(d.title) · \(workspaceUSDC(d.total))").synqType(.body)
+                        Text(d.escrow.map { "\(d.status) · escrow \($0.escrowDealId)" } ?? d.status).synqType(.caption, .secondary)
+                        ForEach(Array(d.milestones.enumerated()), id: \.offset) { _, m in
+                            Text("\(m.index + 1). \(m.title) · \(workspaceUSDC(m.amount)) · \(m.status)").synqType(.caption, .secondary)
+                        }
+                    }
+                    if !deals.isEmpty {
+                        SynqButton(title: "Fund, release or dispute from your wallet", kind: .compact,
+                                   action: { actions.open(model.client.workspacePage(workspace: workspace.id)) })
+                    }
+                } else { Text("Deals unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Automatic splits") {
+                if let splits = model.workspaceSplits {
+                    if splits.isEmpty { Text("No automatic splits yet.").synqType(.body, .secondary) }
+                    ForEach(splits.prefix(5)) { split in
+                        Text("\(workspaceUSDC(split.received)) received · \(split.state)").synqType(.body)
+                        ForEach(Array(split.legs.filter { $0.kind == "TRANSFER" }.enumerated()), id: \.offset) { _, leg in
+                            Text("\(leg.purpose.replacingOccurrences(of: "_", with: " ").lowercased()) · \(workspaceUSDC(leg.amount)) · \(leg.state)").synqType(.caption, .secondary)
+                        }
+                    }
+                } else { Text("Splits unavailable.").synqType(.body, .secondary) }
+            }
+            SynqPanel(label: "Treasury swaps") {
+                if let swaps = model.workspaceSwaps {
+                    if swaps.isEmpty { Text("No treasury swaps.").synqType(.body, .secondary) }
+                    ForEach(swaps.prefix(5)) { op in
+                        Text("\(workspaceAmount(op.data.amountIn, symbol: op.data.from)) → \(op.data.to) · \(op.state)").synqType(.body)
+                        if let received = op.evidence?.received {
+                            Text("Received \(workspaceAmount(received, symbol: op.data.to))").synqType(.caption, .secondary)
+                        }
+                    }
+                } else { Text("Swaps unavailable.").synqType(.body, .secondary) }
+            }
             SynqPanel(label: "Verified vendors") {
                 if let vendors = model.workspaceVendors {
                     if vendors.isEmpty { Text("No vendors in this workspace.").synqType(.body, .secondary) }

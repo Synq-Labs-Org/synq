@@ -69,6 +69,45 @@ struct WorkspaceVendor: Decodable, Identifiable {
     let eligibleAt: Double
 }
 struct WorkspaceFinanceView: Decodable { let vendors: [WorkspaceVendor] }
+struct WorkspaceBooks: Decodable {
+    struct Payable: Decodable, Identifiable { let id: String; let number: String; let amount: String; let dueOn: String; let status: String }
+    struct Bill: Decodable, Identifiable { let id: String; let label: String; let billKind: String; let amount: String; let nextDueOn: String; let cadenceDays: Int }
+    let payables: [Payable]
+    let bills: [Bill]
+}
+struct WorkspaceDeal: Decodable, Identifiable {
+    struct Escrow: Decodable { let escrowDealId: String }
+    struct Milestone: Decodable { let index: Int; let title: String; let amount: String; let status: String }
+    let id: String
+    let title: String
+    let total: String
+    let status: String
+    let escrow: Escrow?
+    let milestones: [Milestone]
+}
+struct WorkspaceSplit: Decodable, Identifiable {
+    struct Leg: Decodable { let kind: String; let purpose: String; let amount: String; let state: String }
+    let id: String
+    let state: String
+    let received: String
+    let legs: [Leg]
+}
+struct WorkspaceSwap: Decodable, Identifiable {
+    struct Terms: Decodable { let from: String; let to: String; let amountIn: String; let minOut: String }
+    struct Evidence: Decodable { let received: String? }
+    let id: String
+    let state: String
+    let data: Terms
+    let evidence: Evidence?
+}
+struct WorkspaceGroup: Decodable {
+    struct Contribution: Decodable, Identifiable { let id: String; let mine: Bool; let member: String; let amount: String; let state: String }
+    struct Share: Decodable { let member: String; let mine: Bool; let amount: String }
+    struct Refund: Decodable, Identifiable { let id: String; let mine: Bool; let amount: String; let state: String }
+    let contributions: [Contribution]
+    let balances: [Share]
+    let refunds: [Refund]
+}
 struct WorkspaceTeamReply: Decodable {
     struct Citation: Decodable { let path: String; let source: String; let freshness: String }
     struct World: Decodable { let builtAt: Double; let decisionGrade: Bool }
@@ -78,14 +117,16 @@ struct WorkspaceTeamReply: Decodable {
     let world: World?
     let payoutId: String?
 }
-func workspaceUSDC(_ baseUnits: String) -> String {
+func workspaceUSDC(_ baseUnits: String) -> String { workspaceAmount(baseUnits, symbol: "USDC") }
+/// Exact six-decimal token amount (USDC or EURC) from integer base units.
+func workspaceAmount(_ baseUnits: String, symbol: String) -> String {
     guard !baseUnits.isEmpty, baseUnits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return "Unknown amount" }
     let padded = String(repeating: "0", count: max(0, 7 - baseUnits.count)) + baseUnits
     let boundary = padded.index(padded.endIndex, offsetBy: -6)
     let whole = String(padded[..<boundary]).drop(while: { $0 == "0" })
     var fraction = String(padded[boundary...])
     while fraction.last == "0" { fraction.removeLast() }
-    return "\(whole.isEmpty ? "0" : String(whole))\(fraction.isEmpty ? "" : "." + fraction) USDC"
+    return "\(whole.isEmpty ? "0" : String(whole))\(fraction.isEmpty ? "" : "." + fraction) \(symbol)"
 }
 
 struct WorkspaceObserved<Value: Decodable>: Decodable {
@@ -186,6 +227,24 @@ struct WorkspaceClient {
     }
     func snapshot(_ workspace: String) async throws -> WorkspaceSnapshot {
         try await call(workspacePath(workspace, "/team/snapshot"), as: WorkspaceSnapshot.self)
+    }
+    func books(_ workspace: String) async throws -> WorkspaceBooks {
+        try await call(workspacePath(workspace, "/books"), as: WorkspaceBooks.self)
+    }
+    func deals(_ workspace: String) async throws -> [WorkspaceDeal] {
+        struct Response: Decodable { let deals: [WorkspaceDeal] }
+        return try await call(workspacePath(workspace, "/deals"), as: Response.self).deals
+    }
+    func splits(_ workspace: String) async throws -> [WorkspaceSplit] {
+        struct Response: Decodable { let allocations: [WorkspaceSplit] }
+        return try await call(workspacePath(workspace, "/allocations"), as: Response.self).allocations
+    }
+    func swaps(_ workspace: String) async throws -> [WorkspaceSwap] {
+        struct Response: Decodable { let ops: [WorkspaceSwap] }
+        return try await call(workspacePath(workspace, "/treasury/ops"), as: Response.self).ops
+    }
+    func group(_ workspace: String) async throws -> WorkspaceGroup {
+        try await call(workspacePath(workspace, "/contributions"), as: WorkspaceGroup.self)
     }
     func capabilities() async throws -> WorkspaceCapabilities {
         try await call("/capabilities", as: WorkspaceCapabilities.self)

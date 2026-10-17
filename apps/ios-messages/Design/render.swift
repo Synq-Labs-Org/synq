@@ -351,6 +351,22 @@ struct Render {
         workspacePreview.workspacePayouts = [WorkspacePayout(data: .init(id: "00000000-0000-4000-8000-000000000002", amount: "50000", purpose: "Accepted project delivery"), state: "REVIEW", reason: nil, txHash: nil)]
         workspacePreview.workspaceVendors = [WorkspaceVendor(id: "preview-vendor", name: "Project supplier", address: "Payout address shown after verification", status: "COOLING", eligibleAt: 1_792_224_000)]
         shot("screen-workspace-records.png", height: 1900, scale: 2, WorkspaceDetailView(model: workspacePreview, workspace: selectedWorkspace, actions: .none))
+        let groupWorkspace = WorkspaceSummary(id: "00000000-0000-4000-8000-000000000003", displayName: "Weekend trip fund", kind: "GROUP", chainId: 5042002, status: "ACTIVE", vault: nil, threshold: 2)
+        let groupPreview = sampleModel(nil)
+        groupPreview.selectedWorkspace = groupWorkspace
+        groupPreview.workspaceInvoices = []; groupPreview.workspacePayouts = []; groupPreview.workspaceVendors = []
+        groupPreview.workspaceGroup = WorkspaceGroup(
+            contributions: [.init(id: "c1", mine: true, member: "You", amount: "4000", state: "PAID"), .init(id: "c2", mine: false, member: "0x31d5…605A", amount: "2000", state: "PAID")],
+            balances: [.init(member: "You", mine: true, amount: "4000"), .init(member: "0x31d5…605A", mine: false, amount: "2000")],
+            refunds: [])
+        groupPreview.workspaceBooks = WorkspaceBooks(payables: [.init(id: "p1", number: "BILL-12", amount: "3000", dueOn: "2026-10-20", status: "OPEN")],
+                                                     bills: [.init(id: "b1", label: "Studio rent", billKind: "RENT", amount: "30000", nextDueOn: "2026-11-01", cadenceDays: 30)])
+        groupPreview.workspaceDeals = [WorkspaceDeal(id: "deal_preview", title: "Landing page", total: "10000", status: "FUNDED", escrow: .init(escrowDealId: "5"),
+                                                     milestones: [.init(index: 0, title: "Hero section", amount: "5000", status: "DELIVERED"), .init(index: 1, title: "Pricing table", amount: "5000", status: "FUNDED")])]
+        groupPreview.workspaceSplits = [WorkspaceSplit(id: "split_preview", state: "COMPLETED", received: "5000",
+                                                       legs: [.init(kind: "TRANSFER", purpose: "CONTRACTOR_PAYABLE", amount: "3000", state: "RECONCILED"), .init(kind: "TRANSFER", purpose: "DISTRIBUTION", amount: "2000", state: "RECONCILED")])]
+        groupPreview.workspaceSwaps = [WorkspaceSwap(id: "swap_preview", state: "DONE", data: .init(from: "USDC", to: "EURC", amountIn: "2000", minOut: "2292"), evidence: .init(received: "2315"))]
+        shot("screen-workspace-group-business.png", height: 2900, scale: 2, WorkspaceDetailView(model: groupPreview, workspace: groupWorkspace, actions: .none))
         workspacePreview.workspaceInvoices = nil; workspacePreview.workspacePayouts = nil; workspacePreview.workspaceVendors = nil
         workspacePreview.workspaceDetailError = "Payment requests unavailable. Refresh or sign in again."
         shot("screen-workspace-data-error.png", height: 1700, scale: 2, WorkspaceDetailView(model: workspacePreview, workspace: selectedWorkspace, actions: .none))
