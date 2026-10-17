@@ -42,7 +42,7 @@ let pool: Pool;
 let store: PostgresWorkspaceStore;
 let s: Services;
 let app: FastifyInstance;
-let clock = BASE_CLOCK;
+const clock = BASE_CLOCK;
 
 type Ids = Record<string, string>;
 type Kind = 'public' | 'principal' | 'owned' | 'workspace' | 'planned';
