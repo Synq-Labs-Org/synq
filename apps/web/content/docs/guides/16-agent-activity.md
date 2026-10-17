@@ -43,7 +43,7 @@ Open a run to see its events in order, with **Chain receipts** below: transactio
 
 ## Trigger types
 
-Runs begin from triggers such as a lead message, a settled invoice or another event. You will see titles like "Sales conversation", "Deal agreement signed", "Deal escrow funded".
+A run records what started it: `INVOICE_SETTLED`, `DEPOSIT_FINALIZED`, `SCHEDULE`, `OWNER_REQUEST`, `LEAD_MESSAGE` or `OTHER`. You will see titles like "Sales conversation", "Deal agreement signed" and "Deal escrow funded". A run's status and proof level follow its latest event.
 
 ## Idempotency
 
