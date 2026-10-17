@@ -29,6 +29,7 @@ import {
   type WalletScreeningPort,
 } from '@synq/plugin-risk';
 import { WorkspacePayouts } from '@synq/workspaces/payouts';
+import { Ledger, PostgresLedgerStore } from '@synq/ledger';
 import { bookWorkspacePayout } from './workspace-payout.js';
 import { WorkspaceError } from '@synq/workspaces';
 import {
@@ -186,8 +187,24 @@ export class WorkspaceGovernanceExecutor {
               [a.workspaceId],
             )
           ).rows[0];
+          const held = await sql.query(
+            "SELECT COALESCE(sum(h.amount),0) AS held FROM synq_alloc_reservations h LEFT JOIN synq_ws_split_admissions x ON x.leg_key=h.reservation_id WHERE h.workspace_id=$1 AND h.status='ACTIVE' AND COALESCE(x.state,'')<>'CONFIRMED'",
+            [a.workspaceId],
+          );
+          // Money held for others (refunds, escrow, unmatched receipts) is never spendable.
+          const liabilities = await new Ledger(
+            new PostgresLedgerStore(sql),
+          ).balances(a.workspaceId, token('arc-testnet', 'USDC').assetId);
+          const restricted =
+            -liabilities.REFUND_LIABILITY -
+            liabilities.ESCROW_LIABILITY -
+            liabilities.UNAPPLIED_RECEIPTS;
           if (
-            balance - BigInt(reserved.rows[0].reserved) - BigInt(a.amount) <
+            balance -
+              BigInt(reserved.rows[0].reserved) -
+              BigInt(held.rows[0].held) -
+              restricted -
+              BigInt(a.amount) <
             BigInt(budget?.reserve ?? 0)
           )
             return refuse('RESERVE_FLOOR');

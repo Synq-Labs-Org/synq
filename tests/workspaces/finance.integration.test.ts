@@ -1110,11 +1110,35 @@ describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signe
         screenedAt: q.now,
       }),
     });
-    for (const scenario of ['HIT', 'RESERVE'] as const) {
+    for (const scenario of ['HIT', 'RESERVE', 'RESTRICTED'] as const) {
       const f = await governanceFixture(
         scenario === 'HIT' ? (payee) => hitPort(payee) : undefined,
       );
       if (scenario === 'RESERVE') f.govFake.setTokenBalance(75000n);
+      if (scenario === 'RESTRICTED')
+        // Plenty of cash on chain, but most of it is an unmatched receipt owed back.
+        await new Ledger(new PostgresLedgerStore(pool)).post({
+          entryId: `je_restricted_${f.w.id}`,
+          workspaceId: f.w.id,
+          occurredAt: f.store.now(),
+          memo: 'unmatched receipt',
+          source: { kind: 'ADJUSTMENT', ref: f.w.id },
+          evidence: null,
+          idempotencyKey: `restricted-${f.w.id}`,
+          reversalOf: null,
+          postings: [
+            {
+              account: 'CASH_ARC_USDC',
+              assetId: token('arc-testnet', 'USDC').assetId,
+              amount: 950000n,
+            },
+            {
+              account: 'UNAPPLIED_RECEIPTS',
+              assetId: token('arc-testnet', 'USDC').assetId,
+              amount: -950000n,
+            },
+          ],
+        });
       const p = await f.payouts.propose(f.w.id, f.owner.principalId, {
         vendorId: f.vendorId,
         amount: '70000',
