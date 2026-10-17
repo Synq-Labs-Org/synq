@@ -9,7 +9,7 @@ A **lead** is a private conversation between your business and one outside prosp
 
 1. Open **Inbox** in the hub (or the iPhone app's Inbox tab).
 2. Choose **Invite a client**.
-3. Pick the **Channel**: `Web link` or `Telegram` (Telegram only appears when the server has a bot connected).
+3. Pick the **Channel**: `Web link` or `Telegram` (Telegram needs a connected bot; otherwise the server answers `TELEGRAM_NOT_CONFIGURED`).
 4. Choose **Expires after**: 1 hour, 24 hours or 7 days (the server allows 5 minutes to 7 days).
 5. Copy the link. **The token is shown once.** The iPhone app notes: "A private link that works once and expires. It carries no prices or messages."
 
