@@ -18,6 +18,7 @@
 		5E0000000000000000000400 /* WalletConnectSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000401 /* WalletConnectSigner.swift */; };
 		5E0000000000000000000404 /* ReownAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000402 /* ReownAppKit */; };
 		5E0000000000000000000405 /* WalletConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000403 /* WalletConnect */; };
+		5E0000000000000000000410 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000027 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -273,6 +274,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5E0000000000000000000410 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -389,6 +391,7 @@
 		5E0000000000000000000067 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8NPF39H3FL;
@@ -410,6 +413,7 @@
 		5E0000000000000000000068 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 8NPF39H3FL;
