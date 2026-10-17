@@ -85,14 +85,6 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
       { id: 'workspace.inbox', status: 'PLANNED' },
     ],
   },
-  DeviceSession: {
-    principalId: 'principal-example',
-    sessionId: uuid(10),
-    accessToken: '0'.repeat(64).replace(/^0/, 'a'),
-    accessExpiresAt: at(15),
-    refreshToken: '0'.repeat(64).replace(/^0/, 'b'),
-    refreshExpiresAt: at(60 * 24 * 7),
-  },
   Contexts: {
     principalId: 'principal-example',
     walletHint: hint(me),
@@ -297,13 +289,19 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
   SigningRequest: {
     request: approvalItem,
     signer: hint(me),
+    signerAddress: me,
     enforcedBy: 'Workspace Safe and its policy guard',
-    typedData: {
-      domain: { name: 'Example', version: '1', chainId: 5042002 },
-      types: { Example: [{ name: 'amount', type: 'uint256' }] },
-      primaryType: 'Example',
-      message: { amount: '40000000' },
-    },
+    steps: [
+      {
+        label: 'Approve this payment',
+        typedData: {
+          domain: { name: 'Example', version: '1', chainId: 5042002 },
+          types: { Example: [{ name: 'amount', type: 'uint256' }] },
+          primaryType: 'Example',
+          message: { amount: '40000000' },
+        },
+      },
+    ],
   },
   NotificationPage: {
     items: [

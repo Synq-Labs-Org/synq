@@ -207,6 +207,26 @@ export interface ChannelPorts {
   team?(input: TeamRequest): Promise<TeamReplyView>;
   /** Canonical treasury workspace for a group; use the same id in the DM link. */
   teamWorkspace?(groupId: string): Promise<string | null>;
+  /**
+   * `/start lead_…` in a private chat: binds this provider-verified sender to
+   * a business's private lead, once. The sender stays an outside client.
+   */
+  leadStart?(input: {
+    channel: ChannelId;
+    externalUserId: string;
+    chatId: string;
+    token: string;
+  }): Promise<DirectReply>;
+  /**
+   * A private message from a sender bound to a lead; null when they are not
+   * one. A reply with empty text means handled, with nothing to send.
+   */
+  leadMessage?(input: {
+    channel: ChannelId;
+    externalUserId: string;
+    text: string;
+    eventId: string;
+  }): Promise<DirectReply | null>;
   /** DM from a sender with no link yet: onboarding only (start, link code). */
   directOnboarding?(input: {
     channel: ChannelId;
@@ -569,6 +589,32 @@ export class ChannelGateway {
         return this.result('REFUSED', 'CALLBACK_NOT_AN_APPROVAL');
       }
       case 'MESSAGE_RECEIVED':
+        if (
+          this.options.ports.leadMessage &&
+          envelope.chatKind === 'DIRECT' &&
+          envelope.externalUserId &&
+          !envelope.verifiedSender.isBot &&
+          !envelope.forwarded &&
+          envelope.body.trim() &&
+          !envelope.body.trim().startsWith('/')
+        ) {
+          const reply = await this.options.ports.leadMessage({
+            channel: envelope.channel,
+            externalUserId: envelope.externalUserId,
+            text: envelope.body,
+            eventId: envelope.eventId,
+          });
+          // Empty text: handled without a reply (a repeat delivery, or a person is handling it).
+          if (reply && !reply.text)
+            return this.result('HANDLED', 'LEAD_MESSAGE_SILENT');
+          if (reply)
+            return this.replyOutcome(
+              envelope,
+              'HANDLED',
+              'LEAD_MESSAGE',
+              reply,
+            );
+        }
         if (
           this.options.ports.workspaceMessage &&
           envelope.externalUserId &&
@@ -943,6 +989,24 @@ export class ChannelGateway {
       !parsed.args
     )
       return this.workspaceOnboarding(envelope);
+    if (
+      this.options.ports.leadStart &&
+      envelope.chatKind === 'DIRECT' &&
+      parsed.kind === 'COMMAND' &&
+      parsed.name === 'start' &&
+      parsed.args.trim().startsWith('lead_')
+    )
+      return this.replyOutcome(
+        envelope,
+        'HANDLED',
+        'LEAD_START',
+        await this.options.ports.leadStart({
+          channel: envelope.channel,
+          externalUserId: envelope.externalUserId,
+          chatId: envelope.externalGroupId,
+          token: parsed.args.trim(),
+        }),
+      );
     if (
       envelope.chatKind === 'DIRECT' &&
       parsed.kind === 'COMMAND' &&

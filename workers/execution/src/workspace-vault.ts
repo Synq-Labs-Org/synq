@@ -664,6 +664,14 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
         },
         screening,
       ),
+    /** USDC held by any address on Arc testnet, at the latest block. */
+    readAddressBalance: async (address: Address) =>
+      chain.client.readContract({
+        address: token('arc-testnet', 'USDC').address as Address,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address],
+      }),
     readBalance: async (id: string) => {
       const a = await finance.authority(id);
       const amount = await chain.client.readContract({

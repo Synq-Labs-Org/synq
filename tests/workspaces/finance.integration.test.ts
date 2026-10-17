@@ -42,6 +42,9 @@ import {
 } from '@synq/allocations/policy-data';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
+import { AgentEvents } from '../../packages/workspaces/src/agent-events.js';
+import { walletTypedData } from '@synq/contracts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { getAddress, keccak256, type Hex } from 'viem';
@@ -896,6 +899,59 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
     expect(
       (await f.payouts.view(f.w.id, f.owner.principalId, p.data.id)).state,
     ).toBe('PAID');
+  });
+  it('serves each owner the exact payout signatures through the approvals inbox', async () => {
+    const f = await payoutFixture();
+    const p = await f.propose();
+    const inbox = new AppApprovals(f.finance.workspaces, {
+      payouts: { service: f.payouts, wake: () => undefined },
+    });
+    const json = walletTypedData;
+    const mandate = mandateTypedData(payoutMandate(p.data));
+    const intent = intentApprovalTypedData(
+      payoutIntent(p.data),
+      p.data.approval,
+    );
+    const mine = await inbox.pending(f.owner.principalId, f.owner.a.address);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.item.purpose).toBe('PAYOUT');
+    expect(mine[0]!.steps.map((s) => s.typedData)).toEqual([
+      json(mandate),
+      json(intent),
+    ]);
+    const theirs = await inbox.pending(
+      f.coowner.principalId,
+      f.coowner.a.address,
+    );
+    expect(theirs[0]!.steps.map((s) => s.typedData)).toEqual([json(intent)]);
+    const id = mine[0]!.item.requestId;
+    await expect(
+      inbox.sign(f.owner.principalId, f.owner.a.address, id, {
+        signatures: [await f.owner.a.signTypedData(intent)],
+      }),
+    ).rejects.toMatchObject({ code: 'SIGNATURES_REQUIRED' });
+    expect(
+      await inbox.sign(f.owner.principalId, f.owner.a.address, id, {
+        signatures: [
+          await f.owner.a.signTypedData(mandate),
+          await f.owner.a.signTypedData(intent),
+        ],
+      }),
+    ).toMatchObject({ status: 'RECORDED', approvals: 1 });
+    expect(
+      await inbox.pending(f.owner.principalId, f.owner.a.address),
+    ).toHaveLength(0);
+    expect(
+      await inbox.sign(
+        f.coowner.principalId,
+        f.coowner.a.address,
+        theirs[0]!.item.requestId,
+        { signatures: [await f.coowner.a.signTypedData(intent)] },
+      ),
+    ).toMatchObject({ status: 'READY', approvals: 2 });
+    expect(
+      (await f.payouts.view(f.w.id, f.owner.principalId, p.data.id)).state,
+    ).toBe('READY');
   });
   it('atomically admits grant, approval nonce, obligation and signed bytes; crash recovers without signing again', async () => {
     const f = await payoutFixture(),
@@ -1880,6 +1936,27 @@ describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable P
     expect((await books.view(f.w.id, f.owner.principalId)).payables).toEqual([
       expect.objectContaining({ id: payableId, status: 'PAID' }),
     ]);
+    // The completed split shows as an agent run with each transfer on chain.
+    const agentEvents = new AgentEvents(f.finance.workspaces);
+    await agentEvents.migrate();
+    expect(await agentEvents.projectSplits(f.w.id)).toBeGreaterThan(0);
+    expect(await agentEvents.projectSplits(f.w.id)).toBe(0);
+    const runs = await agentEvents.runs(f.w.id, f.owner.principalId);
+    expect(runs.items).toHaveLength(1);
+    const run = await agentEvents.detail(
+      f.w.id,
+      f.owner.principalId,
+      runs.items[0]!.runId,
+    );
+    expect(run.events.map((e) => `${e.kind}:${e.actor}`)).toContain(
+      'DECISION:DETERMINISTIC',
+    );
+    expect(
+      run.events
+        .filter((e) => e.kind === 'BROADCAST')
+        .map((e) => e.amount!.units)
+        .sort(),
+    ).toEqual(['15000', '25000']);
     expect(await books.reader(f.w.id).payables()).toEqual([]);
   });
   it('G6 holds the whole receipt for an unaccepted milestone instead of distributing it', async () => {

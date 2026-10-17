@@ -98,6 +98,8 @@ export async function registerChannels(input: {
   executionMode: 'REAL_TESTNET' | 'SIMULATION';
   workspaceOnboarding?: boolean;
   workspaceMessage?: ChannelPorts['workspaceMessage'];
+  leadStart?: ChannelPorts['leadStart'];
+  leadMessage?: ChannelPorts['leadMessage'];
   brain?: ChannelPorts['brain'];
   mandateProposals?: Pick<MandateProposalService, 'list' | 'counted'>;
   log: ChannelLog;
@@ -232,6 +234,8 @@ export async function registerChannels(input: {
       ...(input.workspaceMessage
         ? { workspaceMessage: input.workspaceMessage }
         : {}),
+      ...(input.leadStart ? { leadStart: input.leadStart } : {}),
+      ...(input.leadMessage ? { leadMessage: input.leadMessage } : {}),
     },
     webBaseUrl,
     workspaceOnboarding: input.workspaceOnboarding,

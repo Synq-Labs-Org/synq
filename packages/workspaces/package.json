@@ -22,21 +22,26 @@
     "./team": "./src/team.ts",
     "./payout-command": "./src/payout-command.ts",
     "./invoice-command": "./src/invoice-command.ts",
-    "./team-contracts": "./src/team-contracts.ts"
+    "./team-contracts": "./src/team-contracts.ts",
+    "./leads": "./src/leads.ts",
+    "./offers": "./src/offers.ts",
+    "./sales-agent": "./src/sales-agent.ts",
+    "./agent-events": "./src/agent-events.ts"
   },
   "dependencies": {
-    "@synq/kernel": "workspace:*",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/allocations": "workspace:*",
+    "@synq/chain-registry": "workspace:*",
+    "@synq/contracts": "workspace:*",
+    "@synq/dealroom": "workspace:*",
     "@synq/identity": "workspace:*",
+    "@synq/invoices": "workspace:*",
+    "@synq/kernel": "workspace:*",
+    "@synq/ledger": "workspace:*",
+    "@synq/plugin-risk": "workspace:*",
+    "@synq/world-model": "workspace:*",
     "pg": "8.18.0",
     "viem": "2.57.4",
-    "zod": "4.6.5",
-    "@synq/invoices": "workspace:*",
-    "@synq/ledger": "workspace:*",
-    "@synq/chain-registry": "workspace:*",
-    "@synq/allocations": "workspace:*",
-    "@synq/dealroom": "workspace:*",
-    "@synq/agent-runtime": "workspace:*",
-    "@synq/world-model": "workspace:*",
-    "@synq/plugin-risk": "workspace:*"
+    "zod": "4.6.5"
   }
 }

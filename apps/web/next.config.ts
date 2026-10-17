@@ -40,6 +40,7 @@ const config: NextConfig = {
     return [
       { source: '/api/v1/:path*', destination: `${api}/v1/:path*` },
       { source: '/api/v2/:path*', destination: `${api}/v2/:path*` },
+      { source: '/api/v3/:path*', destination: `${api}/v3/:path*` },
     ];
   },
   async headers() {

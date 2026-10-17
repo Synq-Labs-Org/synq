@@ -18,24 +18,30 @@
     "expiresAt": "2026-10-17T11:00:00.000Z"
   },
   "signer": "0x1111…1111",
+  "signerAddress": "0x1111111111111111111111111111111111111111",
   "enforcedBy": "Workspace Safe and its policy guard",
-  "typedData": {
-    "domain": {
-      "name": "Example",
-      "version": "1",
-      "chainId": 5042002
-    },
-    "types": {
-      "Example": [
-        {
-          "name": "amount",
-          "type": "uint256"
+  "steps": [
+    {
+      "label": "Approve this payment",
+      "typedData": {
+        "domain": {
+          "name": "Example",
+          "version": "1",
+          "chainId": 5042002
+        },
+        "types": {
+          "Example": [
+            {
+              "name": "amount",
+              "type": "uint256"
+            }
+          ]
+        },
+        "primaryType": "Example",
+        "message": {
+          "amount": "40000000"
         }
-      ]
-    },
-    "primaryType": "Example",
-    "message": {
-      "amount": "40000000"
+      }
     }
-  }
+  ]
 }

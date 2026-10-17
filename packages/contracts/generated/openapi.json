@@ -12,7 +12,7 @@
         "summary": "Contract version and which routes this server implements.",
         "x-synq-auth": "none",
         "x-synq-roles": "anyone",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -44,7 +44,7 @@
         "summary": "Exchange a signed native login challenge for a device session.",
         "x-synq-auth": "none",
         "x-synq-roles": "wallet that signed the /v2 login challenge",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -86,7 +86,7 @@
         "summary": "Exchange a one-time web sign-in code for a device session (no wallet on the phone).",
         "x-synq-auth": "none",
         "x-synq-roles": "holder of a fresh one-time code from a signed-in web session",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -128,7 +128,7 @@
         "summary": "Rotate tokens. Reusing an old refresh token revokes the session.",
         "x-synq-auth": "none",
         "x-synq-roles": "holder of the current refresh token for that device",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -170,7 +170,7 @@
         "summary": "The principal's signed-in devices.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -202,7 +202,7 @@
         "summary": "End this device session.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -244,7 +244,7 @@
         "summary": "End every session of this principal, including this one.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -286,7 +286,7 @@
         "summary": "Personal context plus one context per business workspace.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -318,7 +318,7 @@
         "summary": "Own wallets, personal vaults, circles and recent activity.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -350,7 +350,7 @@
         "summary": "Group circles the principal is a verified member of.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -403,7 +403,7 @@
         "summary": "Members, attributed contributions, proposals and rules.",
         "x-synq-auth": "session",
         "x-synq-roles": "circle member",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "circleId",
@@ -444,7 +444,7 @@
         "summary": "Balances, receivables, payables, leads, approvals, agent highlights.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER, VIEWER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -485,7 +485,7 @@
         "summary": "Private leads, newest activity first.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -587,7 +587,7 @@
         "summary": "Lead summary, consented transcript and offer versions.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -636,7 +636,7 @@
         "summary": "Staff message to the lead.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "OWNER, ADMIN (only while handling is HUMAN)",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -704,7 +704,7 @@
         "summary": "Take over, hand back, freeze offers or escalate; 409 on a stale version.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -772,7 +772,7 @@
         "summary": "Single-use private invitation link for a prospect.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -832,7 +832,7 @@
         "summary": "Bind a private session to the redeeming identity, once.",
         "x-synq-auth": "session",
         "x-synq-roles": "external lead with a provider-verified identity",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [],
         "responses": {
           "200": {
@@ -874,7 +874,7 @@
         "summary": "Run the deterministic commercial policy checks on one offer version.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -934,13 +934,180 @@
         }
       }
     },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}/offers": {
+      "post": {
+        "operationId": "workspace.leadOffer",
+        "summary": "Send an offer (or a new version of one) after the policy checks pass.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN (only while handling is HUMAN)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferSendResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfferSendRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/commercial-policies": {
+      "get": {
+        "operationId": "workspace.commercialPolicies",
+        "summary": "Commercial policy versions, newest first.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommercialPolicyList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "workspace.commercialPolicyPropose",
+        "summary": "Propose the next policy version; an owner signs it from the approvals inbox.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommercialPolicyView"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommercialPolicy"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v3/workspaces/{workspaceId}/agent-runs": {
       "get": {
         "operationId": "workspace.agentRuns",
         "summary": "Agent runs, newest first.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1001,7 +1168,7 @@
         "summary": "Typed events and chain receipts of one run.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1149,7 +1316,7 @@
         "summary": "Requests waiting for this wallet's signature, across workspaces.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1202,7 +1369,7 @@
         "summary": "Exact typed data to sign.",
         "x-synq-auth": "session",
         "x-synq-roles": "a required signer",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "requestId",
@@ -1243,7 +1410,7 @@
         "summary": "Submit a wallet signature; the server verifies the signer.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "a required signer",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "requestId",
@@ -1510,7 +1677,7 @@
         "summary": "Server-sent StreamEvent records; replay from a cursor.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal; events filtered to their contexts",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1553,7 +1720,7 @@
         "summary": "Same events as the stream, for clients that cannot hold a connection.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1753,7 +1920,7 @@
           "settled": {
             "type": "string",
             "pattern": "^(0|[1-9][0-9]{0,77})$",
-            "description": "Integer token base units as a decimal string"
+            "description": "Final on chain; includes reserved"
           },
           "reserved": {
             "type": "string",
@@ -2620,6 +2787,7 @@
               "SUBMITTED",
               "CONFIRMED",
               "FAILED",
+              "NEEDS_REVIEW",
               "CANCELLED",
               "EXPIRED"
             ]
@@ -3915,6 +4083,347 @@
         ],
         "additionalProperties": false
       },
+      "CommercialPolicy": {
+        "type": "object",
+        "properties": {
+          "catalog": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "unitUnits": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,30})$"
+                },
+                "floorUnits": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,30})$"
+                },
+                "maxQuantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "leadTimeDays": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 365
+                },
+                "rushSurchargeBps": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10000
+                },
+                "capacity": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "unitsAvailable": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "asOf": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                          "description": "UTC ISO-8601 timestamp"
+                        }
+                      },
+                      "required": [
+                        "unitsAvailable",
+                        "asOf"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "sku",
+                "description",
+                "unitUnits",
+                "floorUnits",
+                "maxQuantity",
+                "leadTimeDays",
+                "rushSurchargeBps",
+                "capacity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "maxDiscountBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "minDepositBps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "maxMilestones": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "offerTtlSeconds": {
+            "type": "integer",
+            "minimum": 3600,
+            "maximum": 2592000
+          },
+          "ownerApprovalAboveUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,30})$"
+          },
+          "capacityFreshSeconds": {
+            "type": "integer",
+            "minimum": 3600,
+            "maximum": 2592000
+          }
+        },
+        "required": [
+          "catalog",
+          "maxDiscountBps",
+          "minDepositBps",
+          "maxMilestones",
+          "offerTtlSeconds",
+          "ownerApprovalAboveUnits",
+          "capacityFreshSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "CommercialPolicyView": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "REVIEW",
+              "ACTIVE",
+              "SUPERSEDED"
+            ]
+          },
+          "policyHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CommercialPolicy"
+          },
+          "approvedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "state",
+          "policyHash",
+          "policy",
+          "approvedBy"
+        ],
+        "additionalProperties": false
+      },
+      "CommercialPolicyList": {
+        "type": "object",
+        "properties": {
+          "policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommercialPolicyView"
+            }
+          }
+        },
+        "required": [
+          "policies"
+        ],
+        "additionalProperties": false
+      },
+      "OfferTerms": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "unitUnits": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,30})$"
+                }
+              },
+              "required": [
+                "sku",
+                "quantity",
+                "unitUnits"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "rush": {
+            "type": "boolean"
+          },
+          "deliveryDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "milestones": {
+            "minItems": 1,
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "units": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,30})$"
+                },
+                "dueInDays": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 365
+                }
+              },
+              "required": [
+                "label",
+                "units",
+                "dueInDays"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "depositUnits": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,30})$"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 400
+          }
+        },
+        "required": [
+          "lines",
+          "rush",
+          "deliveryDays",
+          "milestones",
+          "depositUnits",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "OfferCheck": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "rule",
+          "passed",
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "OfferSendRequest": {
+        "type": "object",
+        "properties": {
+          "terms": {
+            "$ref": "#/components/schemas/OfferTerms"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "terms"
+        ],
+        "additionalProperties": false
+      },
+      "OfferSendResult": {
+        "type": "object",
+        "properties": {
+          "sent": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferCheck"
+            }
+          },
+          "needsOwner": {
+            "type": "boolean"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "sent",
+          "checks",
+          "needsOwner",
+          "offer"
+        ],
+        "additionalProperties": false
+      },
       "ApprovalPurpose": {
         "type": "string",
         "enum": [
@@ -3927,7 +4436,8 @@
           "ESCROW",
           "LEASE_ISSUE",
           "LEASE_REVOKE",
-          "CIRCLE_REFUND"
+          "CIRCLE_REFUND",
+          "COMMERCIAL_POLICY"
         ]
       },
       "ApprovalItem": {
@@ -3987,10 +4497,18 @@
             "maximum": 9007199254740991
           },
           "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-            "description": "UTC ISO-8601 timestamp"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the request does not expire"
           }
         },
         "required": [
@@ -4089,6 +4607,23 @@
         ],
         "additionalProperties": false
       },
+      "SigningStep": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "typedData": {
+            "$ref": "#/components/schemas/TypedData"
+          }
+        },
+        "required": [
+          "label",
+          "typedData"
+        ],
+        "additionalProperties": false
+      },
       "SigningRequest": {
         "type": "object",
         "properties": {
@@ -4098,35 +4633,51 @@
           "signer": {
             "type": "string",
             "maxLength": 16,
-            "description": "The wallet that must sign"
+            "description": "The wallet that must sign (display)"
+          },
+          "signerAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Full address of the wallet that must sign; refuse to sign from any other"
           },
           "enforcedBy": {
             "type": "string",
             "maxLength": 120,
             "description": "Contract or service that enforces it"
           },
-          "typedData": {
-            "$ref": "#/components/schemas/TypedData"
+          "steps": {
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SigningStep"
+            }
           }
         },
         "required": [
           "request",
           "signer",
+          "signerAddress",
           "enforcedBy",
-          "typedData"
+          "steps"
         ],
         "additionalProperties": false
       },
       "SignatureSubmit": {
         "type": "object",
         "properties": {
-          "signature": {
-            "type": "string",
-            "pattern": "^0x[0-9a-fA-F]{130}$"
+          "signatures": {
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{130}$"
+            }
           }
         },
         "required": [
-          "signature"
+          "signatures"
         ],
         "additionalProperties": false
       },
@@ -4177,7 +4728,7 @@
           "SECURITY_PAUSE"
         ]
       },
-      "Notification": {
+      "AppNotification": {
         "type": "object",
         "properties": {
           "notificationId": {
@@ -4253,7 +4804,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Notification"
+              "$ref": "#/components/schemas/AppNotification"
             }
           },
           "nextCursor": {

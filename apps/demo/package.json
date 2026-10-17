@@ -13,6 +13,7 @@
     "@synq/api": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/channels": "workspace:*",
+    "@synq/contracts": "workspace:*",
     "@synq/dealroom": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/execution-worker": "workspace:*",

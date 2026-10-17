@@ -1,7 +1,6 @@
 import type { WorkspaceTeam } from '@synq/workspaces/team';
 import type { WorkspaceDeals } from '@synq/workspaces/deals';
-import { createHash } from 'node:crypto';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   AcceptInviteSchema,
@@ -14,7 +13,6 @@ import {
   type WorkspaceVaultSetups,
   type WorkspaceChannelLinks,
 } from '@synq/workspaces';
-import { IdentityError } from '@synq/identity';
 import type { WorkspaceFinance } from '@synq/workspaces/finance';
 import type { WorkspacePayouts } from '@synq/workspaces/payouts';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
@@ -24,8 +22,8 @@ import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 import type { WorkspaceTreasury } from '@synq/execution-worker/workspace-treasury';
 import type { WorkspaceContributions } from '@synq/workspaces/contributions';
+import { COOKIE, workspaceHttp } from './workspace-http.js';
 
-const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
   vaultReady = false,
   telegramReady = false,
@@ -122,71 +120,7 @@ export function registerWorkspaceRoutes(
     available: (workspaceId: string) => Promise<bigint>;
   },
 ) {
-  const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
-    reply.header('cache-control', 'no-store');
-    try {
-      return reply.send(await run());
-    } catch (error) {
-      if (error instanceof z.ZodError)
-        return reply.code(400).send({
-          error: 'INVALID_REQUEST',
-          message: 'Invalid workspace request.',
-        });
-      if (error instanceof WorkspaceError)
-        return reply.code(error.status).send({
-          error: error.code,
-          message: error.code.replaceAll('_', ' ').toLowerCase(),
-        });
-      if (error instanceof IdentityError)
-        return reply.code(403).send({
-          error: error.code,
-          message:
-            'Channel identity proof or wallet signature was not accepted.',
-        });
-      // SQL errors may contain session hashes or invite digests. Never log request data.
-      return reply.code(500).send({
-        error: 'WORKSPACE_UNAVAILABLE',
-        message: 'Workspace service unavailable.',
-      });
-    }
-  };
-  const origin = (req: FastifyRequest) => {
-    if (req.headers.origin !== store.origin)
-      throw new WorkspaceError('ORIGIN_MISMATCH', 403);
-  };
-  const token = (req: FastifyRequest) => {
-    const bearer = req.headers.authorization;
-    if (bearer !== undefined) {
-      if (!/^Bearer [0-9a-f]{64}$/.test(bearer))
-        throw new WorkspaceError('UNAUTHENTICATED', 401);
-      return { value: bearer.slice(7), audience: 'native' as const };
-    }
-    const cookies = (req.headers.cookie ?? '').split(';').map((p) => p.trim());
-    const found = cookies.filter((p) => p.startsWith(`${COOKIE}=`));
-    if (found.length !== 1) throw new WorkspaceError('UNAUTHENTICATED', 401);
-    return {
-      value: found[0]!.slice(COOKIE.length + 1),
-      audience: 'web' as const,
-    };
-  };
-  const auth = async (req: FastifyRequest, mutation = false) => {
-    const t = token(req);
-    if (t.audience === 'web' && mutation) origin(req);
-    const session = await store.session(t.value, t.audience);
-    await store.throttle(`principal:${session.principalId}`, 120);
-    return session;
-  };
-  const id = async (req: FastifyRequest) => {
-    const workspaceId = z
-      .strictObject({ workspaceId: WorkspaceIdSchema })
-      .parse(req.params).workspaceId;
-    await store.throttle(`workspace:${workspaceId}`, 240);
-    return workspaceId;
-  };
-  const anonymous = async (req: FastifyRequest) => {
-    const address = createHash('sha256').update(req.ip).digest('hex');
-    await store.throttle(`auth:${address}`, 20);
-  };
+  const { handle, origin, token, auth, id, anonymous } = workspaceHttp(store);
   app.get('/v2/capabilities', (_req, reply) =>
     handle(reply, async () => ({
       ...workspaceCapabilities(

@@ -134,6 +134,7 @@ export const CircleProposalSchema = z.strictObject({
     'SUBMITTED',
     'CONFIRMED',
     'FAILED',
+    'NEEDS_REVIEW',
     'CANCELLED',
     'EXPIRED',
   ]),

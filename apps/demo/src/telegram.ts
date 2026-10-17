@@ -111,13 +111,26 @@ import {
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
 import { registerBusinessRoutes } from './business-routes.js';
-import { registerWorkspaceRoutes } from './workspace-routes.js';
+import {
+  registerWorkspaceRoutes,
+  workspaceCapabilities,
+} from './workspace-routes.js';
+import { registerAppRoutes } from './app-routes.js';
+import { AppApprovals } from './app-approvals.js';
 import {
   PostgresWorkspaceStore,
   WorkspaceIdSchema,
   WorkspaceError,
 } from '@synq/workspaces';
-import { WorkspaceVaultSetups } from '@synq/workspaces';
+import {
+  WorkspaceDeviceSessions,
+  WorkspaceVaultSetups,
+} from '@synq/workspaces';
+import { CONSENT_SCOPE, WorkspaceLeads } from '@synq/workspaces/leads';
+import { WorkspaceOffers } from '@synq/workspaces/offers';
+import { SalesAgent } from '@synq/workspaces/sales-agent';
+import { AgentEvents } from '@synq/workspaces/agent-events';
+import { chainProfile } from '@synq/chain-registry/arc';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 import { workspaceChannelRuntime } from './workspace-channels.js';
@@ -127,7 +140,11 @@ import { WorkspaceReceipts } from '@synq/workspaces/receipts';
 import { arcProviderClients } from '@synq/api/arc-indexer';
 import { viemIndexerChain } from '@synq/ledger';
 import { workspaceCommandPort } from './workspace-commands.js';
-import { TelegramAdapter, TelegramBotApi } from '@synq/channels';
+import {
+  TelegramAdapter,
+  TelegramBotApi,
+  type ChannelPorts,
+} from '@synq/channels';
 import { CardBannerRenderer } from '@synq/channels/cards';
 import {
   ArcBusiness,
@@ -523,6 +540,14 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
     let workspaceDeals: WorkspaceDeals | undefined;
     let workspaceEscrow: WorkspaceDealEscrow | undefined;
     let workspaceMessage: ReturnType<typeof workspaceCommandPort> | undefined;
+    /** Set once the bot connects; lead invites and staff replies need it. */
+    let leadTelegram:
+      | {
+          username: string | null;
+          send(chatId: string, text: string): Promise<void>;
+        }
+      | undefined;
+    let leadPorts: Pick<ChannelPorts, 'leadStart' | 'leadMessage'> | undefined;
     if (process.env.SYNQ_WORKSPACES_ENABLED === '1') {
       if (!process.env.SYNQ_ORIGIN) throw new Error('SYNQ_ORIGIN_REQUIRED');
       const workspaces = new PostgresWorkspaceStore(
@@ -627,6 +652,117 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         vault?.treasury,
         vault?.contributions,
       );
+      const devices = new WorkspaceDeviceSessions(workspaces);
+      const agentEvents = new AgentEvents(workspaces, {
+        explorerTxUrl:
+          process.env.SYNQ_ARC_EXPLORER_TX_URL ??
+          `${chainProfile('arc-testnet').explorer}/tx/`,
+      });
+      await agentEvents.migrate();
+      // Revenue splits become agent runs from their stored states and tx hashes.
+      setInterval(() => {
+        agentEvents.projectSplits().catch(() => undefined);
+      }, 60_000).unref();
+      const leads = new WorkspaceLeads(workspaces, {
+        webOrigin: process.env.SYNQ_WEB_BASE_URL ?? workspaces.origin,
+        telegramBot: () => leadTelegram?.username ?? null,
+        deliver: async (t) => {
+          if (t.channel === 'telegram' && leadTelegram)
+            await leadTelegram.send(t.deliveryRef, t.text);
+        },
+        publish: (type, workspaceId, leadId) =>
+          agentEvents.publish(type, { workspaceId }, leadId),
+      });
+      await leads.migrate();
+      const offers = new WorkspaceOffers(workspaces, {
+        publish: (workspaceId, leadId) =>
+          agentEvents.publish('OFFER_UPDATED', { workspaceId }, leadId),
+      });
+      await offers.migrate();
+      const sales = new SalesAgent(
+        leads,
+        offers,
+        () => fundReasoner?.structured,
+        async (id) =>
+          String(
+            (
+              await workspaces.pool.query(
+                'SELECT display_name FROM synq_workspaces WHERE id=$1',
+                [id],
+              )
+            ).rows[0]?.display_name ?? 'the business',
+          ),
+        agentEvents,
+      );
+      leadPorts = {
+        leadStart: async (input) => {
+          try {
+            const r = await leads.redeem({
+              token: input.token,
+              channel: 'telegram',
+              identity: input.externalUserId,
+              deliveryRef: input.chatId,
+            });
+            return {
+              text: `You are now talking privately with ${r.workspaceName}. ${CONSENT_SCOPE} Tell us what you need. Nothing said here moves money: agreements are signed and paid separately from your own wallet.`,
+            };
+          } catch (error) {
+            if (error instanceof WorkspaceError)
+              return {
+                text: 'This invitation is invalid, already used by someone else, or expired. Ask the business for a new link.',
+              };
+            throw error;
+          }
+        },
+        leadMessage: async (input) => {
+          const r = await leads.fromLead({
+            channel: 'telegram',
+            identity: input.externalUserId,
+            text: input.text.slice(0, 4000),
+            dedupeKey: input.eventId,
+          });
+          if (!r) return null;
+          if (r.message.duplicate) return { text: '' };
+          const reply = await sales.respond(r.lead, r.message.messageId);
+          return { text: reply?.text ?? '' };
+        },
+      };
+      registerAppRoutes(app, {
+        store: workspaces,
+        devices,
+        contributions: vault?.contributions,
+        governance: vault?.governance,
+        balances: vault
+          ? { address: (a) => vault.readAddressBalance(a) }
+          : undefined,
+        leads,
+        offers,
+        events: agentEvents,
+        approvals: new AppApprovals(workspaces, {
+          setups: vault
+            ? { service: vault.setups, wake: vault.wake }
+            : undefined,
+          finance,
+          payouts: vault
+            ? { service: vault.payouts, wake: vault.wake }
+            : undefined,
+          governance: vault
+            ? { service: vault.governance, wake: vault.wake }
+            : undefined,
+          revenue: finance ? new WorkspaceRevenue(finance) : undefined,
+          offers,
+        }),
+        invoices: () => workspaceInvoices,
+        books: vault?.books,
+        capabilities: () =>
+          workspaceCapabilities(
+            Boolean(vault),
+            Boolean(workspaceChannels),
+            Boolean(finance),
+            Boolean(vault),
+            vault?.screening(),
+          ),
+      });
     }
     const readModel = {
       reader,
@@ -1166,6 +1302,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       app,
       workspaceOnboarding: process.env.SYNQ_WORKSPACES_ENABLED === '1',
       ...(workspaceMessage ? { workspaceMessage } : {}),
+      ...(leadPorts ?? {}),
       env: {
         TELEGRAM_BOT_TOKEN: token,
         SYNQ_TELEGRAM_MODE: 'poll',
@@ -1203,6 +1340,14 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         ? { telegramBaseUrl: options.telegramBaseUrl }
         : {}),
     });
+    const leadBot = channels?.telegram;
+    if (leadBot)
+      leadTelegram = {
+        username: leadBot.botUsername ?? null,
+        send: async (chatId, text) => {
+          await leadBot.send(chatId, { text });
+        },
+      };
     if (!channels?.telegram) throw new Error('TELEGRAM_NOT_CONFIGURED');
     evidence.bot = {
       username: channels.telegram.botUsername,
