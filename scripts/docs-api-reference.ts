@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { format, resolveConfig } from 'prettier';
+import { z } from 'zod';
 import { NAMED_SCHEMAS, ROUTES, type Route } from '@synq/contracts';
 import { componentSchemas } from '../packages/contracts/src/codegen.js';
 import { FIXTURES } from '../packages/contracts/src/fixtures.js';
@@ -125,13 +126,6 @@ function resolve(schema: unknown): { name: string | undefined; json: Json } {
   return { name: undefined, json: { type: 'object' } };
 }
 
-function queryTable(r: Route): string {
-  if (!r.query) return '';
-  const json = (SCHEMAS as Record<string, Json>)[`__query:${r.id}`];
-  return json ? table(json) : '';
-}
-
-import { z } from 'zod';
 function inlineJson(schema: z.ZodType): Json {
   const { $schema: _s, ...rest } = z.toJSONSchema(schema, {
     unrepresentable: 'any',
