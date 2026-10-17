@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as agreements from './agreements.js';
 import * as amane from './amane.js';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
@@ -245,6 +246,95 @@ export const ROUTES: readonly Route[] = [
     response: business.LeadInviteRedeemResultSchema,
     status: 'IMPLEMENTED',
     summary: 'Bind a private session to the redeeming identity, once.',
+  },
+  // Deal agreements and escrow funding with outside clients
+  {
+    id: 'client.leadWalletTypedData',
+    method: 'GET',
+    path: '/v3/client/leads/{leadId}/wallet-link',
+    auth: 'session',
+    roles: "the lead's bound web identity (never a workspace member)",
+    query: z.strictObject({ wallet: common.AddressSchema }),
+    response: agreements.ClientWalletTypedDataSchema,
+    status: 'IMPLEMENTED',
+    summary: 'The statement the client wallet signs to link itself to a lead.',
+  },
+  {
+    id: 'client.leadWalletLink',
+    method: 'POST',
+    path: '/v3/client/leads/{leadId}/wallet',
+    auth: 'mutation',
+    roles: "the lead's bound web identity (never a workspace member)",
+    request: agreements.ClientWalletLinkSchema,
+    response: agreements.ClientWalletSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Link the wallet that signs and pays, proven by its own signature.',
+  },
+  {
+    id: 'client.leadAgreement',
+    method: 'GET',
+    path: '/v3/client/leads/{leadId}/agreement',
+    auth: 'session',
+    roles: "the lead's bound web identity (never a workspace member)",
+    response: agreements.LeadAgreementSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'The agreement for the accepted offer, with the typed data to sign.',
+  },
+  {
+    id: 'client.leadAgreementSign',
+    method: 'POST',
+    path: '/v3/client/leads/{leadId}/agreement/signature',
+    auth: 'mutation',
+    roles: "the lead's bound web identity (never a workspace member)",
+    request: agreements.AgreementSignatureSubmitSchema,
+    response: agreements.AgreementSchema,
+    status: 'IMPLEMENTED',
+    summary: "Submit the client wallet's signature over the exact agreement.",
+  },
+  {
+    id: 'client.leadEscrowCall',
+    method: 'POST',
+    path: '/v3/client/leads/{leadId}/agreement/escrow',
+    auth: 'mutation',
+    roles: "the lead's bound web identity (never a workspace member)",
+    response: agreements.EscrowCallSchema,
+    status: 'IMPLEMENTED',
+    summary: 'The exact escrow approve and open calls the client wallet sends.',
+  },
+  {
+    id: 'client.leadEscrowSubmit',
+    method: 'POST',
+    path: '/v3/client/leads/{leadId}/agreement/escrow/submit',
+    auth: 'mutation',
+    roles: "the lead's bound web identity (never a workspace member)",
+    request: agreements.EscrowFundingSubmitSchema,
+    response: agreements.AgreementSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Submit the open transaction hash; funded only once proven on chain.',
+  },
+  {
+    id: 'workspace.leadAgreement',
+    method: 'GET',
+    path: '/v3/workspaces/{workspaceId}/leads/{leadId}/agreement',
+    auth: 'session',
+    roles: 'OWNER, ADMIN',
+    response: agreements.LeadAgreementSchema,
+    status: 'IMPLEMENTED',
+    summary: 'Agreement, signature and escrow status for a lead.',
+  },
+  {
+    id: 'workspace.leadAgreementSign',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/leads/{leadId}/agreement/owner-signature',
+    auth: 'mutation',
+    roles: 'OWNER',
+    request: agreements.AgreementSignatureSubmitSchema,
+    response: agreements.AgreementSchema,
+    status: 'IMPLEMENTED',
+    summary: "Submit the owner wallet's signature over the exact agreement.",
   },
   {
     id: 'leadSessions.list',

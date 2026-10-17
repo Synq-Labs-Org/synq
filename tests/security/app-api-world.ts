@@ -16,6 +16,8 @@ import {
 import { AgentEvents } from '../../packages/workspaces/src/agent-events.js';
 import { WorkspaceNotifications } from '../../packages/workspaces/src/notifications.js';
 import { WorkspaceAmane } from '../../packages/workspaces/src/amane.js';
+import { WorkspaceAgreements } from '../../packages/workspaces/src/agreements.js';
+import { AgreementEscrow } from '../../workers/execution/src/agreement-escrow.js';
 import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
 import { registerAppRoutes } from '../../apps/demo/src/app-routes.js';
 import { registerWorkspaceRoutes } from '../../apps/demo/src/workspace-routes.js';
@@ -37,6 +39,8 @@ export type Services = {
   events: AgentEvents;
   notifications: WorkspaceNotifications;
   amane: WorkspaceAmane;
+  agreements: WorkspaceAgreements;
+  escrow: AgreementEscrow;
   approvals: AppApprovals;
   delivered: { deliveryRef: string; text: string }[];
 };
@@ -67,6 +71,16 @@ export async function services(
     isController: async () => false,
     ...chain,
   });
+  const agreements = new WorkspaceAgreements(store, { events });
+  // Escrow funding is served, but any call that reaches the chain fails: the
+  // client checks in front of it are what these suites attack.
+  const noChain = new Proxy(
+    {} as ConstructorParameters<typeof AgreementEscrow>[1],
+    {
+      get: () => unreachable,
+    },
+  );
+  const escrow = new AgreementEscrow(agreements, noChain, unreachable);
   await store.migrate();
   await Promise.all([
     leads.migrate(),
@@ -75,6 +89,8 @@ export async function services(
     notifications.migrate(),
     amane.migrate(),
   ]);
+  // Agreements reference leads and offers.
+  await agreements.migrate();
   return {
     store,
     devices: new WorkspaceDeviceSessions(store),
@@ -83,6 +99,8 @@ export async function services(
     events,
     notifications,
     amane,
+    agreements,
+    escrow,
     approvals: new AppApprovals(store, { offers }),
     delivered,
   };
@@ -102,6 +120,8 @@ export function buildApp(
     events: s.events,
     notifications: s.notifications,
     amane: s.amane,
+    agreements: s.agreements,
+    agreementEscrow: () => s.escrow,
     approvals: s.approvals,
     streamWindowMs: over.streamWindowMs ?? 50,
     streamPollMs: over.streamPollMs ?? 10,

@@ -130,6 +130,7 @@ import { CONSENT_SCOPE, WorkspaceLeads } from '@synq/workspaces/leads';
 import { WorkspaceOffers } from '@synq/workspaces/offers';
 import { SalesAgent } from '@synq/workspaces/sales-agent';
 import { AgentEvents } from '@synq/workspaces/agent-events';
+import { WorkspaceAgreements } from '@synq/workspaces/agreements';
 import {
   WorkspaceNotifications as AppNotifications,
   deepLinks,
@@ -752,6 +753,13 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         },
       });
       await offers.migrate();
+      const agreements = new WorkspaceAgreements(workspaces, {
+        events: agentEvents,
+        publish: (workspaceId, leadId) =>
+          agentEvents.publish('LEAD_UPDATED', { workspaceId }, leadId),
+      });
+      await agreements.migrate();
+      const agreementEscrow = vault?.agreementEscrowFor(agreements);
       const sales = new SalesAgent(
         leads,
         offers,
@@ -811,6 +819,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         leads,
         offers,
         sales,
+        agreements,
+        ...(agreementEscrow ? { agreementEscrow: () => agreementEscrow } : {}),
         events: agentEvents,
         amane: amaneRuntime?.amane,
         notifications,

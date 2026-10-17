@@ -31,6 +31,7 @@
     "./split-executor": "./src/split-executor.ts",
     "./workspace-splits": "./src/workspace-splits.ts",
     "./workspace-escrow": "./src/workspace-escrow.ts",
+    "./agreement-escrow": "./src/agreement-escrow.ts",
     "./workspace-signing": "./src/workspace-signing.ts",
     "./workspace-treasury": "./src/workspace-treasury.ts"
   },

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as agreements from './agreements.js';
 import * as amane from './amane.js';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
@@ -9,6 +10,7 @@ import * as contexts from './contexts.js';
 import * as notifications from './notifications.js';
 import { MetaRouteSchema, MetaSchema } from './routes.js';
 
+export * from './agreements.js';
 export * from './amane.js';
 export * from './approvals.js';
 export * from './auth.js';
@@ -93,6 +95,19 @@ export const NAMED_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   OfferCheck: commercial.OfferCheckSchema,
   OfferSendRequest: commercial.OfferSendRequestSchema,
   OfferSendResult: commercial.OfferSendResultSchema,
+  AgreementStatus: agreements.AgreementStatusSchema,
+  ClientWalletTypedData: agreements.ClientWalletTypedDataSchema,
+  ClientWalletLink: agreements.ClientWalletLinkSchema,
+  ClientWallet: agreements.ClientWalletSchema,
+  AgreementMilestone: agreements.AgreementMilestoneSchema,
+  AgreementSignature: agreements.AgreementSignatureSchema,
+  AgreementEscrow: agreements.AgreementEscrowSchema,
+  Agreement: agreements.AgreementSchema,
+  LeadAgreement: agreements.LeadAgreementSchema,
+  AgreementSignatureSubmit: agreements.AgreementSignatureSubmitSchema,
+  EscrowTransaction: agreements.EscrowTransactionSchema,
+  EscrowCall: agreements.EscrowCallSchema,
+  EscrowFundingSubmit: agreements.EscrowFundingSubmitSchema,
   AmaneAccountRegister: amane.AmaneAccountRegisterSchema,
   AmaneAccount: amane.AmaneAccountSchema,
   AmaneLeaseRegister: amane.AmaneLeaseRegisterSchema,

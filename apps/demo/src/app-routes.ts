@@ -17,6 +17,8 @@ import type { LeadRow, WorkspaceLeads } from '@synq/workspaces/leads';
 import type { WorkspaceOffers } from '@synq/workspaces/offers';
 import type { AgentEvents } from '@synq/workspaces/agent-events';
 import type { WorkspaceAmane } from '@synq/workspaces/amane';
+import type { WorkspaceAgreements } from '@synq/workspaces/agreements';
+import type { AgreementEscrow } from '@synq/execution-worker/agreement-escrow';
 import { amaneCapability } from '@synq/plugin-amane';
 import type { WorkspaceNotifications } from '@synq/workspaces/notifications';
 import type { AppApprovals } from './app-approvals.js';
@@ -56,6 +58,10 @@ export type AppRouteDeps = {
   events?: AgentEvents;
   /** Amane agent payments; absent when no agent key and code hash are configured. */
   amane?: WorkspaceAmane;
+  /** Deal agreements with outside clients (signing and escrow funding). */
+  agreements?: WorkspaceAgreements;
+  /** Escrow funding for signed agreements; absent when the escrow is not connected. */
+  agreementEscrow?: () => AgreementEscrow | undefined;
   notifications?: WorkspaceNotifications;
   /** Push delivery status for the business overview; absent means not configured. */
   pushCapability?: () => { status: string; reason: string };
@@ -984,6 +990,127 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
       }
       res.end();
     });
+  }
+
+  // MARK: Deal agreements with outside clients
+
+  const agreements = deps.agreements;
+  if (agreements) {
+    const clientParams = (req: FastifyRequest) =>
+      z.strictObject({ leadId: z.uuid() }).parse(req.params);
+    const staffParams = (req: FastifyRequest) =>
+      z
+        .strictObject({ workspaceId: z.uuid(), leadId: z.uuid() })
+        .parse(req.params);
+    route('client.leadWalletTypedData');
+    app.get('/v3/client/leads/:leadId/wallet-link', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const q = z
+          .strictObject({ wallet: z.string().regex(/^0x[0-9a-fA-F]{40}$/) })
+          .parse(req.query);
+        return agreements.walletLinkTypedData(
+          s.principalId,
+          clientParams(req).leadId,
+          q.wallet,
+        );
+      }),
+    );
+    route('client.leadWalletLink');
+    app.post('/v3/client/leads/:leadId/wallet', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const body = z
+          .strictObject({
+            wallet: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+            expiresAt: z.iso.datetime(),
+            signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+          })
+          .parse(req.body);
+        return agreements.linkWallet(
+          s.principalId,
+          clientParams(req).leadId,
+          body,
+        );
+      }),
+    );
+    route('client.leadAgreement');
+    app.get('/v3/client/leads/:leadId/agreement', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return agreements.clientView(s.principalId, clientParams(req).leadId);
+      }),
+    );
+    route('client.leadAgreementSign');
+    app.post('/v3/client/leads/:leadId/agreement/signature', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        return agreements.signAsClient(
+          s.principalId,
+          clientParams(req).leadId,
+          req.body,
+        );
+      }),
+    );
+    const escrow = () => {
+      const e = deps.agreementEscrow?.();
+      if (!e) throw new WorkspaceError('AGREEMENT_ESCROW_UNAVAILABLE', 503);
+      return e;
+    };
+    if (deps.agreementEscrow) {
+      route('client.leadEscrowCall');
+      app.post('/v3/client/leads/:leadId/agreement/escrow', (req, reply) =>
+        handle(reply, async () => {
+          const s = await mutation(req);
+          await store.throttle(`agreement-escrow:${s.principalId}`, 30);
+          return escrow().prepare(s.principalId, clientParams(req).leadId);
+        }),
+      );
+      route('client.leadEscrowSubmit');
+      app.post(
+        '/v3/client/leads/:leadId/agreement/escrow/submit',
+        (req, reply) =>
+          handle(reply, async () => {
+            const s = await mutation(req);
+            await store.throttle(`agreement-escrow:${s.principalId}`, 30);
+            const body = z
+              .strictObject({
+                openTxHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+              })
+              .parse(req.body);
+            return escrow().submit(
+              s.principalId,
+              clientParams(req).leadId,
+              body.openTxHash,
+            );
+          }),
+      );
+    }
+    route('workspace.leadAgreement');
+    app.get(
+      '/v3/workspaces/:workspaceId/leads/:leadId/agreement',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req);
+          const p = staffParams(req);
+          return agreements.staffView(p.workspaceId, s.principalId, p.leadId);
+        }),
+    );
+    route('workspace.leadAgreementSign');
+    app.post(
+      '/v3/workspaces/:workspaceId/leads/:leadId/agreement/owner-signature',
+      (req, reply) =>
+        handle(reply, async () => {
+          const s = await mutation(req);
+          const p = staffParams(req);
+          return agreements.signAsOwner(
+            p.workspaceId,
+            s.principalId,
+            p.leadId,
+            req.body,
+          );
+        }),
+    );
   }
 
   // MARK: Amane agent payments

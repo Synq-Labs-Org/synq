@@ -143,6 +143,49 @@ const SPECS: Record<string, Spec> = {
   'devices.revoke': { kind: 'owned', body: () => ({}) },
   'events.stream': { kind: 'principal' },
   'events.poll': { kind: 'principal' },
+  'leadSessions.list': { kind: 'principal' },
+  'leadSessions.detail': { kind: 'owned' },
+  'leadSessions.message': {
+    kind: 'owned',
+    body: () => ({ text: 'Hello from a client' }),
+  },
+  'client.leadWalletTypedData': {
+    kind: 'owned',
+    query: `?wallet=${addr()}`,
+  },
+  'client.leadWalletLink': {
+    kind: 'owned',
+    body: () => ({
+      wallet: addr(),
+      expiresAt: new Date(clock * 1000 + 600_000).toISOString(),
+      signature: sig(),
+    }),
+  },
+  'client.leadAgreement': { kind: 'owned' },
+  'client.leadAgreementSign': {
+    kind: 'owned',
+    body: () => ({
+      agreementId: randomUUID(),
+      offerVersion: 1,
+      termsHash: lease(),
+      signature: sig(),
+    }),
+  },
+  'client.leadEscrowCall': { kind: 'owned', body: () => ({}) },
+  'client.leadEscrowSubmit': {
+    kind: 'owned',
+    body: () => ({ openTxHash: lease() }),
+  },
+  'workspace.leadAgreement': { kind: 'workspace' },
+  'workspace.leadAgreementSign': {
+    kind: 'workspace',
+    body: () => ({
+      agreementId: randomUUID(),
+      offerVersion: 1,
+      termsHash: lease(),
+      signature: sig(),
+    }),
+  },
 };
 
 let A: Business;

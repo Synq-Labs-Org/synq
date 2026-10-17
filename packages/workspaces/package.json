@@ -28,6 +28,7 @@
     "./sales-agent": "./src/sales-agent.ts",
     "./agent-events": "./src/agent-events.ts",
     "./amane": "./src/amane.ts",
+    "./agreements": "./src/agreements.ts",
     "./notifications": "./src/notifications.ts"
   },
   "dependencies": {

@@ -1614,6 +1614,248 @@ public struct OfferSendResult: Codable, Sendable, Equatable {
     }
 }
 
+public enum AgreementStatus: String, Codable, Sendable, CaseIterable, Equatable {
+    case pendingSignatures = "PENDING_SIGNATURES"
+    case signed = "SIGNED"
+    case fundingPending = "FUNDING_PENDING"
+    case funded = "FUNDED"
+    case void = "VOID"
+    case expired = "EXPIRED"
+    /// A value this client version does not know yet.
+    case unknown = "__unknown__"
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct ClientWalletTypedData: Codable, Sendable, Equatable {
+    /// UTC ISO-8601 timestamp
+    public var expiresAt: String
+    public var typedData: TypedData
+
+    public init(expiresAt: String, typedData: TypedData) {
+        self.expiresAt = expiresAt
+        self.typedData = typedData
+    }
+}
+
+public struct ClientWalletLink: Codable, Sendable, Equatable {
+    /// EVM address
+    public var wallet: String
+    /// UTC ISO-8601 timestamp
+    public var expiresAt: String
+    public var signature: String
+
+    public init(wallet: String, expiresAt: String, signature: String) {
+        self.wallet = wallet
+        self.expiresAt = expiresAt
+        self.signature = signature
+    }
+}
+
+public struct ClientWallet: Codable, Sendable, Equatable {
+    /// EVM address
+    public var wallet: String
+    /// UTC ISO-8601 timestamp
+    public var linkedAt: String
+
+    public init(wallet: String, linkedAt: String) {
+        self.wallet = wallet
+        self.linkedAt = linkedAt
+    }
+}
+
+public struct AgreementMilestone: Codable, Sendable, Equatable {
+    public var label: String
+    public var amount: Money
+    public var dueInDays: Int
+
+    public init(label: String, amount: Money, dueInDays: Int) {
+        self.label = label
+        self.amount = amount
+        self.dueInDays = dueInDays
+    }
+}
+
+public struct AgreementSignature: Codable, Sendable, Equatable {
+    /// EVM address
+    public var wallet: String
+    /// UTC ISO-8601 timestamp
+    public var signedAt: String
+
+    public init(wallet: String, signedAt: String) {
+        self.wallet = wallet
+        self.signedAt = signedAt
+    }
+}
+
+public struct AgreementEscrow: Codable, Sendable, Equatable {
+    public var state: State
+    public var openTxHash: String?
+    public var escrowDealId: JSONValue
+    public var proofLevel: ProofLevel
+
+    public init(state: State, openTxHash: String? = nil, escrowDealId: JSONValue, proofLevel: ProofLevel) {
+        self.state = state
+        self.openTxHash = openTxHash
+        self.escrowDealId = escrowDealId
+        self.proofLevel = proofLevel
+    }
+
+    public enum State: String, Codable, Sendable, CaseIterable, Equatable {
+        case prepared = "PREPARED"
+        case pendingConfirmation = "PENDING_CONFIRMATION"
+        case funded = "FUNDED"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct Agreement: Codable, Sendable, Equatable {
+    public var agreementId: String
+    public var workspaceId: String
+    public var leadId: String
+    public var offerId: String
+    public var offerVersion: Int
+    public var termsHash: String
+    public var agreementHash: String
+    public var status: AgreementStatus
+    /// EVM address
+    public var clientWallet: String
+    /// EVM address
+    public var ownerWallet: String
+    /// EVM address
+    public var payee: String
+    public var arbiter: String?
+    public var total: Money
+    public var milestones: [AgreementMilestone]
+    /// UTC ISO-8601 timestamp
+    public var expiresAt: String
+    public var signatures: Signatures
+    public var typedData: TypedData
+    public var escrow: AgreementEscrow?
+
+    public init(agreementId: String, workspaceId: String, leadId: String, offerId: String, offerVersion: Int, termsHash: String, agreementHash: String, status: AgreementStatus, clientWallet: String, ownerWallet: String, payee: String, arbiter: String? = nil, total: Money, milestones: [AgreementMilestone], expiresAt: String, signatures: Signatures, typedData: TypedData, escrow: AgreementEscrow? = nil) {
+        self.agreementId = agreementId
+        self.workspaceId = workspaceId
+        self.leadId = leadId
+        self.offerId = offerId
+        self.offerVersion = offerVersion
+        self.termsHash = termsHash
+        self.agreementHash = agreementHash
+        self.status = status
+        self.clientWallet = clientWallet
+        self.ownerWallet = ownerWallet
+        self.payee = payee
+        self.arbiter = arbiter
+        self.total = total
+        self.milestones = milestones
+        self.expiresAt = expiresAt
+        self.signatures = signatures
+        self.typedData = typedData
+        self.escrow = escrow
+    }
+
+    public struct Signatures: Codable, Sendable, Equatable {
+        public var client: AgreementSignature?
+        public var owner: AgreementSignature?
+
+        public init(client: AgreementSignature? = nil, owner: AgreementSignature? = nil) {
+            self.client = client
+            self.owner = owner
+        }
+    }
+}
+
+public struct LeadAgreement: Codable, Sendable, Equatable {
+    public var clientWallet: String?
+    public var agreement: Agreement?
+    /// Why no agreement exists yet, when none does
+    public var blocked: String?
+
+    public init(clientWallet: String? = nil, agreement: Agreement? = nil, blocked: String? = nil) {
+        self.clientWallet = clientWallet
+        self.agreement = agreement
+        self.blocked = blocked
+    }
+}
+
+public struct AgreementSignatureSubmit: Codable, Sendable, Equatable {
+    public var agreementId: String
+    public var offerVersion: Int
+    public var termsHash: String
+    public var signature: String
+
+    public init(agreementId: String, offerVersion: Int, termsHash: String, signature: String) {
+        self.agreementId = agreementId
+        self.offerVersion = offerVersion
+        self.termsHash = termsHash
+        self.signature = signature
+    }
+}
+
+public struct EscrowTransaction: Codable, Sendable, Equatable {
+    public var step: Step
+    public var label: String
+    /// EVM address
+    public var to: String
+    public var data: String
+    public var value: String
+
+    public init(step: Step, label: String, to: String, data: String, value: String) {
+        self.step = step
+        self.label = label
+        self.to = to
+        self.data = data
+        self.value = value
+    }
+
+    public enum Step: String, Codable, Sendable, CaseIterable, Equatable {
+        case approve = "APPROVE"
+        case open = "OPEN"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct EscrowCall: Codable, Sendable, Equatable {
+    public var agreementId: String
+    public var chainId: Int
+    /// EVM address
+    public var from: String
+    public var transactions: [EscrowTransaction]
+    /// UTC ISO-8601 timestamp
+    public var refundAfter: String
+
+    public init(agreementId: String, chainId: Int, from: String, transactions: [EscrowTransaction], refundAfter: String) {
+        self.agreementId = agreementId
+        self.chainId = chainId
+        self.from = from
+        self.transactions = transactions
+        self.refundAfter = refundAfter
+    }
+}
+
+public struct EscrowFundingSubmit: Codable, Sendable, Equatable {
+    public var openTxHash: String
+
+    public init(openTxHash: String) {
+        self.openTxHash = openTxHash
+    }
+}
+
 public struct AmaneAccountRegister: Codable, Sendable, Equatable {
     /// EVM address
     public var account: String
@@ -2107,6 +2349,14 @@ public struct Route: Sendable, Equatable {
         Route(id: "workspace.leadTakeover", method: "POST", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/takeover", mutation: true),
         Route(id: "workspace.leadInvite", method: "POST", path: "/v3/workspaces/{workspaceId}/lead-invites", mutation: true),
         Route(id: "leadInvite.redeem", method: "POST", path: "/v3/lead-invites/redeem", mutation: false),
+        Route(id: "client.leadWalletTypedData", method: "GET", path: "/v3/client/leads/{leadId}/wallet-link", mutation: false),
+        Route(id: "client.leadWalletLink", method: "POST", path: "/v3/client/leads/{leadId}/wallet", mutation: true),
+        Route(id: "client.leadAgreement", method: "GET", path: "/v3/client/leads/{leadId}/agreement", mutation: false),
+        Route(id: "client.leadAgreementSign", method: "POST", path: "/v3/client/leads/{leadId}/agreement/signature", mutation: true),
+        Route(id: "client.leadEscrowCall", method: "POST", path: "/v3/client/leads/{leadId}/agreement/escrow", mutation: true),
+        Route(id: "client.leadEscrowSubmit", method: "POST", path: "/v3/client/leads/{leadId}/agreement/escrow/submit", mutation: true),
+        Route(id: "workspace.leadAgreement", method: "GET", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/agreement", mutation: false),
+        Route(id: "workspace.leadAgreementSign", method: "POST", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/agreement/owner-signature", mutation: true),
         Route(id: "leadSessions.list", method: "GET", path: "/v3/lead-sessions", mutation: false),
         Route(id: "leadSessions.detail", method: "GET", path: "/v3/lead-sessions/{leadId}", mutation: false),
         Route(id: "leadSessions.message", method: "POST", path: "/v3/lead-sessions/{leadId}/message", mutation: true),
