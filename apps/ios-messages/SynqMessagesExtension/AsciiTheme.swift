@@ -7,6 +7,9 @@ import SwiftUI
 
 struct AsciiTheme: SynqTheme {
     let id = "ascii"
+    let name = "ASCII"
+    let summary = "Black terminal, mono type, character art"
+    let colorScheme = ColorScheme.dark
 
     static func hex(_ v: UInt32) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
@@ -61,25 +64,9 @@ struct AsciiTheme: SynqTheme {
                    .risk: "安心して、\n進む", .agent: "みんなで\n考える"],
         tabs: [.home: "ホーム", .trips: "旅行", .gifts: "ギフト", .group: "グループ", .ask: "S"],
         centreTab: "S", seeAll: "すべて見る", flightsHeadline: "どこへ行きますか？",
-        places: [
-            "GOI": "15.3808°N\n73.8314°E", "DEL": "28.5562°N\n77.1000°E", "BOM": "19.0896°N\n72.8656°E",
-            "BLR": "13.1986°N\n77.7066°E", "DXB": "25.2532°N\n55.3657°E", "SIN": "1.3644°N\n103.9915°E",
-            "HND": "35.5494°N\n139.7798°E", "BKK": "13.6900°N\n100.7501°E", "DPS": "8.7482°S\n115.1672°E",
-            "LHR": "51.4700°N\n0.4543°W", "JFK": "40.6413°N\n73.7781°W",
-        ])
+        places: SynqFlavor.airportCoordinates)
 
-    let icons = SynqIcons(symbols: [
-        .back: "arrow.left", .forward: "arrow.right", .close: "xmark", .more: "ellipsis", .settings: "gearshape", .scan: "viewfinder",
-        .copy: "doc.on.doc", .share: "square.and.arrow.up", .invite: "plus", .plus: "plus", .check: "checkmark",
-        .clock: "clock", .warning: "exclamationmark.triangle", .refresh: "arrow.clockwise",
-        .external: "arrow.up.right.square", .flight: "airplane", .flightLand: "airplane.arrival", .gift: "gift",
-        .send: "creditcard", .grid: "square.grid.2x2", .swap: "arrow.left.arrow.right", .pin: "mappin",
-        .calendar: "calendar", .people: "person.2", .passkey: "key", .home: "house", .trips: "airplane",
-        .group: "person.2", .ask: "sparkle", .search: "magnifyingglass", .receipt: "doc.text", .shield: "lock.shield",
-        .vote: "hand.thumbsup", .voted: "hand.thumbsup.fill", .money: "dollarsign.circle",
-        .deal: "signature", .team: "person.3", .split: "chart.pie", .bank: "building.columns",
-        .contractor: "person.crop.circle.badge.checkmark",
-    ], weight: .light)
+    let icons = SynqIcons(symbols: [:], weight: .light)
 
     let looks = SynqLooks(panelLabel: .notched, panelFilled: false, avatar: .pixel, progress: .outlined,
                           uppercaseTitles: true, ruledSections: true)

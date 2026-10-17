@@ -16,7 +16,7 @@ swiftc -O SynqMessagesExtension/SynqCard.swift SynqMessagesExtension/CardLink.sw
 rm -f "$out"
 # Screens style only through the themed components (see THEMING.md): no colours,
 # fonts, radii, raw symbols, bracket glyphs or art outside the theme layer.
-screens="SynqMessagesExtension/FundViews.swift SynqMessagesExtension/DetailViews.swift SynqMessagesExtension/Sheets.swift SynqMessagesExtension/CardViews.swift SynqMessagesExtension/FundCards.swift SynqMessagesExtension/BusinessViews.swift"
+screens="SynqMessagesExtension/FundViews.swift SynqMessagesExtension/DetailViews.swift SynqMessagesExtension/Sheets.swift SynqMessagesExtension/CardViews.swift SynqMessagesExtension/FundCards.swift SynqMessagesExtension/BusinessViews.swift SynqMessagesExtension/ThemeSettings.swift"
 if grep -nE 'Color[.(]|\.font\(|cornerRadius|RoundedRectangle|Capsule\(|Image\(systemName|\.foregroundStyle\(|\.system\(|AsciiArt|"\[|\]"|"\{|\}"' $screens; then
   echo "theming: screens must use SynqTheme components, not raw styling" >&2
   exit 1

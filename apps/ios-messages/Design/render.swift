@@ -1,7 +1,7 @@
 // Renders the Synq app icons and design previews from the same SwiftUI views the
 // Messages extension uses, with sample data (Design/Samples.swift).
 //
-//   apps/ios-messages/Design/render.sh <out-dir> [theme]     (theme: ascii | holo)
+//   apps/ios-messages/Design/render.sh <out-dir> [theme]     (theme: ascii | paper | holo)
 //
 // Writes into <out-dir>: every screen and state as an iPhone mock (393×852 @3x),
 // transcript bubbles in a dark Messages-like transcript, the card bubbles, the art
@@ -19,7 +19,7 @@ func png(_ view: some View, width: CGFloat, height: CGFloat, scale: CGFloat, to 
         .frame(width: width, height: height)
         .environment(\.synqRenderMode, .still(phase: phase))
         .environment(\.synqTheme, theme)
-        .environment(\.colorScheme, .dark))
+        .environment(\.colorScheme, theme.colorScheme))
     renderer.scale = scale
     guard let cg = renderer.cgImage else { fatalError("render failed: \(url.lastPathComponent)") }
     let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
@@ -42,10 +42,10 @@ struct ExpandedPhone<Content: View>: View {
             VStack(spacing: 0) {
                 StatusBar().frame(height: 54)
                 ZStack {
-                    Capsule().fill(Color.white.opacity(0.28)).frame(width: 36, height: 5)
+                    Capsule().fill(theme.colors.inkPrimary.opacity(0.28)).frame(width: 36, height: 5)
                     HStack {
                         Spacer()
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 22)).foregroundStyle(Color.white.opacity(0.3))
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 22)).foregroundStyle(theme.colors.inkPrimary.opacity(0.3))
                     }
                     .padding(.horizontal, 16)
                 }
@@ -58,6 +58,10 @@ struct ExpandedPhone<Content: View>: View {
 }
 
 struct StatusBar: View {
+    @Environment(\.synqTheme) private var theme
+    /// Over the Messages transcript (always dark) rather than the theme's canvas.
+    var onTranscript = false
+
     var body: some View {
         HStack {
             Text("9:41").font(.system(size: 17, weight: .semibold))
@@ -69,7 +73,7 @@ struct StatusBar: View {
             }
             .font(.system(size: 15, weight: .semibold))
         }
-        .foregroundStyle(Color.white)
+        .foregroundStyle(onTranscript ? Color.white : theme.colors.inkPrimary)
         .padding(.horizontal, 32)
         .padding(.top, 14)
     }
@@ -84,7 +88,7 @@ struct Transcript<Content: View>: View {
         ZStack(alignment: .top) {
             Color.black
             VStack(spacing: 0) {
-                StatusBar().frame(height: 54)
+                StatusBar(onTranscript: true).frame(height: 54)
                 VStack(spacing: 4) {
                     HStack(spacing: -8) {
                         ForEach(Samples.members.prefix(3)) { m in SynqAvatar(id: m.principalId, name: m.name, size: 26) }
@@ -210,6 +214,8 @@ struct Render {
         let out = URL(fileURLWithPath: args.count > 1 ? args[1] : "design-out")
         let icons = URL(fileURLWithPath: args.count > 2 ? args[2] : "icons")
         theme = SynqThemes.named(args.count > 3 ? args[3] : SynqThemes.all[0].id)
+        // Screens that read the saved choice (the theme sheet) see the theme being rendered.
+        UserDefaults.standard.register(defaults: [SynqThemes.storageKey: theme.id])
         SynqFonts.register(from: URL(fileURLWithPath: "SynqMessagesExtension/Fonts"))
         for f in [AsciiTheme.mono, AsciiTheme.pixel, AsciiTheme.japanese] where !SynqFonts.isAvailable(f) {
             print("warning: font \(f) not registered; falling back to system fonts")
@@ -418,6 +424,7 @@ struct Render {
                                     onExplorer: { _ in }, onShare: {}, onBack: {}))
         }
 
+        shot("sheet-theme.png", ThemeSheet(onClose: {}))
         shot("sheet-send.png", SendSheet(view: Samples.activeFund, prefill: SendPrefill(recipientId: "r1", amount: "26.99"),
                                          onContinue: { _, _ in }, onCancel: {}))
         shot("sheet-gift.png", GiftSheet(prefill: GiftPrefill(query: "gifts for car lovers", maxPrice: "50"), maxBudget: 500,

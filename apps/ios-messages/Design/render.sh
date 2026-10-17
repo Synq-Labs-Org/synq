@@ -3,7 +3,7 @@
 # (default: the app's default theme, which also rewrites the app icons in the
 # asset catalog), from the extension's own SwiftUI views (everything except the
 # Messages controller, which needs UIKit) plus Design/Samples.swift.
-#   sh Design/render.sh <out-dir> [ascii|holo]
+#   sh Design/render.sh <out-dir> [ascii|paper|holo]
 set -eu
 cd "$(dirname "$0")/.."
 out="${1:-${TMPDIR:-/tmp}/synq-design}"

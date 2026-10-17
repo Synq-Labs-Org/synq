@@ -55,7 +55,7 @@ struct SynqScreen<Content: View>: View {
             theme.colors.background.ignoresSafeArea()
             content()
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.colorScheme)
         .tint(theme.colors.inkPrimary)
     }
 }
@@ -127,6 +127,7 @@ struct SynqWordmarkBar: View {
     let network: String
     var action: SynqHeaderAction? = nil
     var compact = false
+    @State private var choosingTheme = false
 
     var body: some View {
         HStack(alignment: .top, spacing: theme.space.s) {
@@ -146,8 +147,12 @@ struct SynqWordmarkBar: View {
             if let action {
                 SynqIconButton(icon: action.icon, label: action.label, action: action.action).padding(.top, compact ? -2 : 4)
             }
+            if !compact {
+                SynqIconButton(icon: .theme, label: "Theme") { choosingTheme = true }.padding(.top, 4)
+            }
         }
         .padding(.horizontal, theme.space.gutter)
+        .sheet(isPresented: $choosingTheme) { ThemeSheet { choosingTheme = false } }
     }
 }
 

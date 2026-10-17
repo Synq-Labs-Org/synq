@@ -9,6 +9,11 @@ import SwiftUI
 
 protocol SynqTheme {
     var id: String { get }
+    /// Name and one line shown in the theme picker.
+    var name: String { get }
+    var summary: String { get }
+    /// Light or dark system chrome (keyboard, sheets) under this theme.
+    var colorScheme: ColorScheme { get }
     var colors: SynqColors { get }
     var type: SynqTypography { get }
     var space: SynqSpacing { get }
@@ -161,19 +166,43 @@ struct SynqFlavor {
     var places: [String: String]
 }
 
+extension SynqFlavor {
+    /// Airport coordinates any theme may show beside hero art.
+    static let airportCoordinates: [String: String] = [
+        "GOI": "15.3808°N\n73.8314°E", "DEL": "28.5562°N\n77.1000°E", "BOM": "19.0896°N\n72.8656°E",
+        "BLR": "13.1986°N\n77.7066°E", "DXB": "25.2532°N\n55.3657°E", "SIN": "1.3644°N\n103.9915°E",
+        "HND": "35.5494°N\n139.7798°E", "BKK": "13.6900°N\n100.7501°E", "DPS": "8.7482°S\n115.1672°E",
+        "LHR": "51.4700°N\n0.4543°W", "JFK": "40.6413°N\n73.7781°W",
+    ]
+}
+
 /// Semantic icon names, mapped by the theme to SF Symbols.
 enum SynqIcon: String, CaseIterable {
     case back, forward, close, more, settings, scan, copy, share, invite, plus, check, clock, warning, refresh
     case external, flight, flightLand, gift, send, grid, swap, pin, calendar, people, passkey
     case home, trips, group, ask, search, receipt, shield, vote, voted, money
-    case deal, team, split, bank, contractor
+    case deal, team, split, bank, contractor, theme
 }
 
 struct SynqIcons {
     var symbols: [SynqIcon: String]
     var weight: Font.Weight
 
-    func name(_ i: SynqIcon) -> String { symbols[i] ?? "circle" }
+    func name(_ i: SynqIcon) -> String { symbols[i] ?? Self.standard[i] ?? "circle" }
+
+    /// The plain SF Symbol for every icon; themes override what they want.
+    static let standard: [SynqIcon: String] = [
+        .back: "arrow.left", .forward: "arrow.right", .close: "xmark", .more: "ellipsis", .settings: "gearshape", .scan: "viewfinder",
+        .copy: "doc.on.doc", .share: "square.and.arrow.up", .invite: "plus", .plus: "plus", .check: "checkmark",
+        .clock: "clock", .warning: "exclamationmark.triangle", .refresh: "arrow.clockwise",
+        .external: "arrow.up.right.square", .flight: "airplane", .flightLand: "airplane.arrival", .gift: "gift",
+        .send: "creditcard", .grid: "square.grid.2x2", .swap: "arrow.left.arrow.right", .pin: "mappin",
+        .calendar: "calendar", .people: "person.2", .passkey: "key", .home: "house", .trips: "airplane",
+        .group: "person.2", .ask: "sparkle", .search: "magnifyingglass", .receipt: "doc.text", .shield: "lock.shield",
+        .vote: "hand.thumbsup", .voted: "hand.thumbsup.fill", .money: "dollarsign.circle",
+        .deal: "signature", .team: "person.3", .split: "chart.pie", .bank: "building.columns",
+        .contractor: "person.crop.circle.badge.checkmark", .theme: "paintpalette",
+    ]
 }
 
 /// How the components draw themselves.
@@ -216,7 +245,7 @@ enum SynqTab: String, CaseIterable, Identifiable {
 // MARK: - Environment
 
 private struct ThemeKey: EnvironmentKey {
-    static let defaultValue: any SynqTheme = AsciiTheme()
+    static let defaultValue: any SynqTheme = SynqThemes.all[0]
 }
 
 extension EnvironmentValues {
@@ -228,9 +257,26 @@ extension EnvironmentValues {
 
 enum SynqThemes {
     /// Every theme the app ships; the first is the default.
-    static let all: [any SynqTheme] = [AsciiTheme(), HoloTheme()]
+    static let all: [any SynqTheme] = [AsciiTheme(), PaperTheme(), HoloTheme()]
 
     static func named(_ id: String) -> any SynqTheme { all.first { $0.id == id } ?? all[0] }
+
+    /// The person's choice, kept on this device (Settings → Theme).
+    static let storageKey = "synq.theme"
+    static var current: any SynqTheme { named(UserDefaults.standard.string(forKey: storageKey) ?? all[0].id) }
+}
+
+/// Applies the chosen theme to everything inside it and follows changes live.
+struct SynqThemeRoot<Content: View>: View {
+    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        let theme = SynqThemes.named(themeId)
+        content()
+            .environment(\.synqTheme, theme)
+            .preferredColorScheme(theme.colorScheme)
+    }
 }
 
 // MARK: - Fonts

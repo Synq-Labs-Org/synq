@@ -19,8 +19,6 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         case invoice
     }
 
-    /// The one place the look is chosen: every screen and card reads it from the environment.
-    private let theme: any SynqTheme = SynqThemes.all[0]
     private let config = SynqConfig.fromBundle()
     private lazy var model = FundModel(client: FundClient(host: config.webHost))
     private let book = FundBook()
@@ -164,12 +162,12 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
                     self?.requestPresentationStyle(.expanded)
                 })
         }
-        view = AnyView(view
-            .environment(\.synqCompact, presentationStyle == .compact)
-            .environment(\.synqTheme, theme)
-            .preferredColorScheme(.dark))
+        // The look is the person's saved choice (Settings → Theme); every screen and
+        // card reads it from the environment and follows a change at once.
+        let compact = presentationStyle == .compact
+        view = AnyView(SynqThemeRoot { view.environment(\.synqCompact, compact) })
         let controller = UIHostingController(rootView: view)
-        controller.view.backgroundColor = UIColor(theme.colors.background)
+        controller.view.backgroundColor = UIColor(SynqThemes.current.colors.background)
         hosted?.willMove(toParent: nil)
         hosted?.view.removeFromSuperview()
         hosted?.removeFromParent()

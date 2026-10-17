@@ -23,6 +23,7 @@ import { InvoicePanel } from './invoice-panel';
 import { RevenuePanel } from './revenue-panel';
 import { DealPanel } from './deal-panel';
 import { TeamPanel } from './team-panel';
+import { ThemePicker, useWorkspaceTheme } from './theme-picker';
 
 type Provider = {
   request(input: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -64,6 +65,7 @@ const InviteResponseSchema = z.strictObject({
 type View = z.output<typeof WorkspaceViewSchema>;
 
 export default function WorkspacesPage() {
+  const [theme, setTheme] = useWorkspaceTheme();
   const [items, setItems] = useState<Workspace[]>([]);
   const [view, setView] = useState<View | null>(null);
   const [name, setName] = useState('');
@@ -213,10 +215,11 @@ export default function WorkspacesPage() {
       (m) => m.principalId === principal && m.role === 'OWNER',
     ) ?? false;
   return (
-    <div className="workspace-shell" data-theme="ascii">
+    <div className="workspace-shell" data-theme={theme}>
       <p className="workspace-network">
         Arc testnet · identity and workspace setup
       </p>
+      <ThemePicker value={theme} onChange={setTheme} />
       <h1>Workspaces</h1>
       <p>
         Connect your wallet to create or join a workspace. Signing in grants no

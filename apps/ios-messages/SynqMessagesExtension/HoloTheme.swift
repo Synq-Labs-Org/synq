@@ -1,11 +1,14 @@
 import SwiftUI
 
-// A second, minimal theme (the earlier dark "holo" look: violet glass, rounded
+// A minimal theme (the earlier dark "holo" look: violet glass, rounded
 // system type, no brackets, symbol art). It exists to prove a theme swap needs no
 // screen changes: `render.sh <out> holo` renders every screen with it.
 
 struct HoloTheme: SynqTheme {
     let id = "holo"
+    let name = "Holo"
+    let summary = "Violet glass, rounded type, symbol art"
+    let colorScheme = ColorScheme.dark
 
     static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
@@ -46,7 +49,7 @@ struct HoloTheme: SynqTheme {
     let copy = SynqFlavor(wordmark: "Synq", wordmarkSub: nil, taglines: [:],
                           tabs: [.home: "Home", .trips: "Flights", .gifts: "Gifts", .group: "Group", .ask: "S"],
                           centreTab: "S", seeAll: "See all", flightsHeadline: "Where to?", places: [:])
-    let icons = SynqIcons(symbols: AsciiTheme().icons.symbols.merging([
+    let icons = SynqIcons(symbols: SynqIcons.standard.merging([
         .flight: "airplane", .gift: "gift.fill", .send: "arrow.up.right", .home: "house.fill",
         .group: "person.2.fill", .people: "person.2.fill", .passkey: "faceid", .ask: "sparkles",
     ]) { _, new in new }, weight: .semibold)

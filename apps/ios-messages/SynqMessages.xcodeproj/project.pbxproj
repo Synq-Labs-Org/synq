@@ -29,6 +29,8 @@
 		5E00000000000000000000B8 /* AsciiTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A8 /* AsciiTheme.swift */; };
 		5E00000000000000000000B9 /* AsciiArtData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A9 /* AsciiArtData.swift */; };
 		5E00000000000000000000BA /* HoloTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AA /* HoloTheme.swift */; };
+		5E00000000000000000001A4 /* ThemeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000001A3 /* ThemeSettings.swift */; };
+		5E00000000000000000001A2 /* PaperTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000001A1 /* PaperTheme.swift */; };
 		5E00000000000000000000BB /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AB /* Components.swift */; };
 		5E00000000000000000000D0 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */; };
 		5E00000000000000000000D1 /* JetBrainsMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */; };
@@ -90,6 +92,8 @@
 		5E00000000000000000000A8 /* AsciiTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiTheme.swift; sourceTree = "<group>"; };
 		5E00000000000000000000A9 /* AsciiArtData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiArtData.swift; sourceTree = "<group>"; };
 		5E00000000000000000000AA /* HoloTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloTheme.swift; sourceTree = "<group>"; };
+		5E00000000000000000001A3 /* ThemeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettings.swift; sourceTree = "<group>"; };
+		5E00000000000000000001A1 /* PaperTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTheme.swift; sourceTree = "<group>"; };
 		5E00000000000000000000AB /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Regular.ttf; sourceTree = "<group>"; };
 		5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Medium.ttf; sourceTree = "<group>"; };
@@ -162,6 +166,8 @@
 				5E00000000000000000000A8 /* AsciiTheme.swift */,
 				5E00000000000000000000A9 /* AsciiArtData.swift */,
 				5E00000000000000000000AA /* HoloTheme.swift */,
+				5E00000000000000000001A3 /* ThemeSettings.swift */,
+				5E00000000000000000001A1 /* PaperTheme.swift */,
 				5E00000000000000000000AB /* Components.swift */,
 				5E00000000000000000000C8 /* Fonts */,
 				5E0000000000000000000025 /* Info.plist */,
@@ -305,6 +311,8 @@
 				5E00000000000000000000B8 /* AsciiTheme.swift in Sources */,
 				5E00000000000000000000B9 /* AsciiArtData.swift in Sources */,
 				5E00000000000000000000BA /* HoloTheme.swift in Sources */,
+				5E00000000000000000001A4 /* ThemeSettings.swift in Sources */,
+				5E00000000000000000001A2 /* PaperTheme.swift in Sources */,
 				5E00000000000000000000BB /* Components.swift in Sources */,
 				5E0000000000000000000038 /* FundViews.swift in Sources */,
 				5E0000000000000000000037 /* Fund.swift in Sources */,
