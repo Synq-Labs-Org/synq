@@ -3,6 +3,7 @@ import { redact } from '@synq/plugin-risk';
 import { WorkspaceError } from './contracts.js';
 import { parseWorkspacePay } from './payout-command.js';
 import type { WorkspacePayouts } from './payouts.js';
+import type { WorkspaceBooks } from './books.js';
 import { getAddress } from 'viem';
 import { token } from '@synq/chain-registry/arc';
 import { Ledger, PostgresLedgerStore, migrateArcIndexer } from '@synq/ledger';
@@ -32,6 +33,7 @@ export class WorkspaceTeam {
     readonly providers: readonly ProviderProbe[],
     private readonly reasoner?: () => StructuredReasoner | undefined,
     readonly payouts?: WorkspacePayouts,
+    readonly books?: WorkspaceBooks,
   ) {
     this.budget = new PostgresFinanceBudgetLedger(
       finance.workspaces.pool,
@@ -225,7 +227,42 @@ export class WorkspaceTeam {
             })),
           'invoice-store',
         ),
-        payables: unknown,
+        payables: this.books
+          ? async () => {
+              const [view, vendors] = await Promise.all([
+                this.books!.view(workspaceId, principalId),
+                this.finance.workspaces.pool.query(
+                  'SELECT id,name,address,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1',
+                  [workspaceId],
+                ),
+              ]);
+              const byId = new Map(vendors.rows.map((v) => [String(v.id), v]));
+              return {
+                value: view.payables
+                  .filter((p) => p.status === 'OPEN' || p.status === 'PAID')
+                  .map((p) => {
+                    const v = byId.get(p.vendorId);
+                    return {
+                      vendorInvoiceId: p.id,
+                      vendorId: p.vendorId,
+                      vendorName: v ? String(v.name) : 'Unknown vendor',
+                      number: p.number,
+                      amount: p.amount,
+                      dueOn: p.dueOn,
+                      payTo: p.payTo,
+                      verifiedPayTo:
+                        v && Number(v.eligible_at) <= at
+                          ? getAddress(String(v.address))
+                          : null,
+                      status: p.status === 'PAID' ? 'PAID' : 'OPEN',
+                    } as const;
+                  }),
+                provenance: 'POSTGRES' as const,
+                source: `workspace:${workspaceId}:quorum-approved-books`,
+                observedAt: at,
+              };
+            }
+          : unknown,
         mandates: active.error
           ? async () => {
               throw new Error('REVENUE_AUTHORITY_UNAVAILABLE');
@@ -291,12 +328,16 @@ export class WorkspaceTeam {
         ),
         blockers: db(
           [
-            {
-              code: 'PAYABLE_DOCUMENTS_UNAVAILABLE',
-              detail:
-                'No complete workspace AP/bill document source; available cash is not decision-grade.',
-              ref: null,
-            },
+            ...(this.books
+              ? []
+              : [
+                  {
+                    code: 'PAYABLE_DOCUMENTS_UNAVAILABLE',
+                    detail:
+                      'No complete workspace AP/bill document source; available cash is not decision-grade.',
+                    ref: null,
+                  },
+                ]),
             ...risk.rows
               .filter((r) =>
                 ['HELD', 'IN_REVIEW', 'APPEALED', 'BLOCKED'].includes(r.status),

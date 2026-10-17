@@ -568,6 +568,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               [],
               () => fundReasoner?.structured,
               vault.payouts,
+              vault.books,
             )
           : undefined;
       if (workspaceTeam) await workspaceTeam.migrate();

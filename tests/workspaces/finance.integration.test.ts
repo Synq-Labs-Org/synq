@@ -2233,6 +2233,48 @@ describe('G10/G14 scoped workspace team — LOCAL_FIXTURE with Postgres', () => 
       /grantKey|mandateSignature|"mac"/,
     );
   });
+  it('G10 gives the finance team quorum-approved payables as fresh facts once books are connected', async () => {
+    const f = await payoutFixture();
+    const payableId = randomUUID();
+    const c = await f.finance.propose(f.w.id, f.owner.principalId, {
+      kind: 'PAYABLE',
+      payableId,
+      vendorId: f.vendorId,
+      number: 'INV-77',
+      amount: '12000',
+      issuedOn: '2033-05-01',
+      dueOn: '2033-05-30',
+      reference: null,
+      documentText: 'Supplier invoice INV-77',
+    });
+    await f.approve(c);
+    await f.approve(c, f.coowner);
+    const team = new WorkspaceTeam(
+      f.finance,
+      async () => ({
+        amount: '0',
+        blockNumber: '1',
+        observedAt: f.store.now(),
+      }),
+      [],
+      undefined,
+      f.payouts,
+      new WorkspaceBooks(f.finance),
+    );
+    await team.migrate();
+    const data = await team.snapshot(f.w.id, f.owner.principalId);
+    expect(data.world.obligations.payables.meta.freshness).toBe('FRESH');
+    expect(data.world.obligations.payables.value).toEqual([
+      expect.objectContaining({
+        vendorInvoiceId: payableId,
+        number: 'INV-77',
+        amount: '12000',
+        status: 'OPEN',
+        verifiedPayTo: f.payee.address,
+      }),
+    ]);
+    expect(JSON.stringify(data)).not.toContain('PAYABLE_DOCUMENTS_UNAVAILABLE');
+  });
   it('turns explicit team instructions into an immutable payout proposal that still needs owner signatures', async () => {
     const f = await payoutFixture();
     const team = new WorkspaceTeam(
