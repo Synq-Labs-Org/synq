@@ -20,14 +20,6 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>UIAppFonts</key>
-	<array>
-		<string>JetBrainsMono-Regular.ttf</string>
-		<string>JetBrainsMono-Medium.ttf</string>
-		<string>JetBrainsMono-Bold.ttf</string>
-		<string>DepartureMono-Regular.otf</string>
-		<string>NotoSansJP-Synq.ttf</string>
-	</array>
 	<key>SynqWebHost</key>
 	<string>$(SYNQ_WEB_HOST)</string>
 	<key>NSExtension</key>

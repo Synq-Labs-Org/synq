@@ -1,6 +1,7 @@
 import Messages
 import SafariServices
 import SwiftUI
+import SynqShared
 import UIKit
 
 /// Synq Messages extension. A group fund starts, gathers members and pays out from
@@ -122,17 +123,12 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
 
     // MARK: Rendering
 
+    /// The shared screens reach the conversation and Safari only through these
+    /// two ports, which this controller implements.
     private var actions: FundActions {
-        FundActions(
-            insertInvite: { [weak self] ref, view in self?.insertInvite(ref, view: view) },
-            insertProposal: { [weak self] ref, proposal in self?.insertProposal(ref, proposal) },
-            insertTrip: { [weak self] ref, trip in self?.insertTrip(ref, trip) },
-            insertInvoice: { [weak self] invoice in self?.insertInvoice(invoice) },
-            open: { [weak self] url in self?.openSecurely(url) },
-            expand: { [weak self] in
-                if self?.presentationStyle == .compact { self?.requestPresentationStyle(.expanded) }
-            }
-        )
+        FundActions(cards: self, links: self, expand: { [weak self] in
+            if self?.presentationStyle == .compact { self?.requestPresentationStyle(.expanded) }
+        })
     }
 
     private func render() {
@@ -182,9 +178,11 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         hosted = controller
     }
 
-    // MARK: Cards
+    // MARK: Cards (MessagesCardPort)
 
-    private func insertInvite(_ ref: FundRef, view: FundView?) {
+    var canInsert: Bool { true }
+
+    func insertInvite(_ ref: FundRef, view: FundView?) {
         guard let conversation = activeConversation else { return }
         let name = view?.name ?? ref.name
         let template = MSMessageTemplateLayout()
@@ -198,7 +196,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         insert(message, into: conversation)
     }
 
-    private func insertProposal(_ ref: FundRef, _ proposal: FundProposal) {
+    func insertProposal(_ ref: FundRef, _ proposal: FundProposal) {
         guard let conversation = activeConversation else { return }
         let url = FundLink.proposal(fundId: ref.fundId, key: ref.key, intentHash: proposal.intentHash)
             .url(host: config.webHost)
@@ -217,7 +215,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         insert(message, into: conversation)
     }
 
-    private func insertTrip(_ ref: FundRef, _ trip: TripView) {
+    func insertTrip(_ ref: FundRef, _ trip: TripView) {
         guard let conversation = activeConversation else { return }
         let url = FundLink.trip(fundId: ref.fundId, key: ref.key, tripId: trip.tripId).url(host: config.webHost)
         let template = MSMessageTemplateLayout()
@@ -234,7 +232,7 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
     }
 
     /// An issued invoice's checkout link as an INVOICE card. Without a checkout link there is nothing to share.
-    private func insertInvoice(_ invoice: BusinessInvoice) {
+    func insertInvoice(_ invoice: BusinessInvoice) {
         guard let conversation = activeConversation,
               let url = InvoiceLink.messageURL(for: invoice, allowedHost: config.webHost)
         else {
@@ -285,12 +283,12 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         requestPresentationStyle(.compact)
     }
 
-    // MARK: Safari hand-off
+    // MARK: Safari hand-off (DeepLinkPort)
 
     /// Shows the Synq site in Safari's in-app browser, where the passkey lives; the
     /// ceremony (Face ID) happens there, never in the extension. Messages extensions
     /// cannot hand a web link to Safari itself, so the page opens inside the panel.
-    private func openSecurely(_ url: URL) {
+    func openSecurely(_ url: URL) {
         guard url.scheme == "https" else { return }
         if presentationStyle != .expanded { requestPresentationStyle(.expanded) }
         let browser = SFSafariViewController(url: url)
@@ -377,3 +375,5 @@ final class MessagesViewController: MSMessagesAppViewController, SFSafariViewCon
         insert(message, into: conversation)
     }
 }
+
+extension MessagesViewController: MessagesCardPort, DeepLinkPort {}

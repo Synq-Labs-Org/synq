@@ -3,47 +3,29 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		5E0000000000000000000030 /* MessagesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000020 /* MessagesViewController.swift */; };
-		5E0000000000000000000031 /* SynqCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000021 /* SynqCard.swift */; };
-		5E0000000000000000000032 /* CardLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000022 /* CardLink.swift */; };
-		5E0000000000000000000033 /* CardViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000023 /* CardViews.swift */; };
-		5E0000000000000000000034 /* CardStatusClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000024 /* CardStatusClient.swift */; };
 		5E0000000000000000000035 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000027 /* Assets.xcassets */; };
 		5E0000000000000000000036 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		5E0000000000000000000037 /* Fund.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000028 /* Fund.swift */; };
-		5E0000000000000000000038 /* FundViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000029 /* FundViews.swift */; };
-		5E00000000000000000000B0 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A0 /* Theme.swift */; };
-		5E00000000000000000000B2 /* FundCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A2 /* FundCards.swift */; };
-		5E00000000000000000000B3 /* QuickParse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A3 /* QuickParse.swift */; };
-		5E00000000000000000000F6 /* BusinessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F5 /* BusinessViews.swift */; };
-		5E00000000000000000000F4 /* BusinessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F3 /* BusinessModel.swift */; };
-		5E00000000000000000000F2 /* Business.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000F1 /* Business.swift */; };
-		5E00000000000000000000B4 /* FundModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A4 /* FundModel.swift */; };
-		5E00000000000000000000B5 /* DetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A5 /* DetailViews.swift */; };
-		5E00000000000000000000B6 /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A6 /* Sheets.swift */; };
-		5E00000000000000000000B7 /* SynqTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A7 /* SynqTheme.swift */; };
-		5E00000000000000000000B8 /* AsciiTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A8 /* AsciiTheme.swift */; };
-		5E00000000000000000000B9 /* AsciiArtData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000A9 /* AsciiArtData.swift */; };
-		5E00000000000000000000BA /* HoloTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AA /* HoloTheme.swift */; };
-		5E00000000000000000001A4 /* ThemeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000001A3 /* ThemeSettings.swift */; };
-		5E00000000000000000001A2 /* PaperTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000001A1 /* PaperTheme.swift */; };
-		5E00000000000000000000BB /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000AB /* Components.swift */; };
-		5E00000000000000000000D0 /* JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */; };
-		5E00000000000000000000D1 /* JetBrainsMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */; };
-		5E00000000000000000000D2 /* JetBrainsMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */; };
-		5E00000000000000000000D3 /* DepartureMono-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C3 /* DepartureMono-Regular.otf */; };
-		5E00000000000000000000D4 /* NotoSansJP-Synq.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */; };
-		5E00000000000000000000D5 /* OFL-JetBrainsMono.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */; };
-		5E00000000000000000000D6 /* OFL-DepartureMono.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C6 /* OFL-DepartureMono.txt */; };
-		5E00000000000000000000D7 /* OFL-NotoSansJP.txt in Resources */ = {isa = PBXBuildFile; fileRef = 5E00000000000000000000C7 /* OFL-NotoSansJP.txt */; };
+		5E0000000000000000000202 /* SynqShared in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000201 /* SynqShared */; };
+		5E0000000000000000000310 /* SynqApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000301 /* SynqApp.swift */; };
+		5E0000000000000000000311 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000304 /* Assets.xcassets */; };
+		5E0000000000000000000312 /* SynqShared in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000320 /* SynqShared */; };
+		5E0000000000000000000313 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		5E0000000000000000000051 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5E0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E0000000000000000000041;
+			remoteInfo = SynqMessagesExtension;
+		};
+		5E0000000000000000000341 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5E0000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -64,45 +46,32 @@
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000334 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5E0000000000000000000313 /* SynqMessagesExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		5E0000000000000000000010 /* SynqMessages.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynqMessages.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E0000000000000000000011 /* SynqMessagesExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SynqMessagesExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E0000000000000000000020 /* MessagesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesViewController.swift; sourceTree = "<group>"; };
-		5E0000000000000000000021 /* SynqCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynqCard.swift; sourceTree = "<group>"; };
-		5E0000000000000000000022 /* CardLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardLink.swift; sourceTree = "<group>"; };
-		5E0000000000000000000023 /* CardViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardViews.swift; sourceTree = "<group>"; };
-		5E0000000000000000000024 /* CardStatusClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardStatusClient.swift; sourceTree = "<group>"; };
 		5E0000000000000000000025 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5E0000000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5E0000000000000000000027 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		5E0000000000000000000028 /* Fund.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fund.swift; sourceTree = "<group>"; };
-		5E0000000000000000000029 /* FundViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundViews.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A2 /* FundCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundCards.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A3 /* QuickParse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickParse.swift; sourceTree = "<group>"; };
-		5E00000000000000000000F5 /* BusinessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessViews.swift; sourceTree = "<group>"; };
-		5E00000000000000000000F3 /* BusinessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessModel.swift; sourceTree = "<group>"; };
-		5E00000000000000000000F1 /* Business.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Business.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A4 /* FundModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FundModel.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A5 /* DetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailViews.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A6 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A7 /* SynqTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynqTheme.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A8 /* AsciiTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiTheme.swift; sourceTree = "<group>"; };
-		5E00000000000000000000A9 /* AsciiArtData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsciiArtData.swift; sourceTree = "<group>"; };
-		5E00000000000000000000AA /* HoloTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoloTheme.swift; sourceTree = "<group>"; };
-		5E00000000000000000001A3 /* ThemeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSettings.swift; sourceTree = "<group>"; };
-		5E00000000000000000001A1 /* PaperTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTheme.swift; sourceTree = "<group>"; };
-		5E00000000000000000000AB /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
-		5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Regular.ttf; sourceTree = "<group>"; };
-		5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Medium.ttf; sourceTree = "<group>"; };
-		5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = JetBrainsMono-Bold.ttf; sourceTree = "<group>"; };
-		5E00000000000000000000C3 /* DepartureMono-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = DepartureMono-Regular.otf; sourceTree = "<group>"; };
-		5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NotoSansJP-Synq.ttf; sourceTree = "<group>"; };
-		5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-JetBrainsMono.txt; sourceTree = "<group>"; };
-		5E00000000000000000000C6 /* OFL-DepartureMono.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-DepartureMono.txt; sourceTree = "<group>"; };
-		5E00000000000000000000C7 /* OFL-NotoSansJP.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL-NotoSansJP.txt; sourceTree = "<group>"; };
+		5E0000000000000000000203 /* SynqShared */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = SynqShared; sourceTree = "<group>"; };
+		5E0000000000000000000300 /* SynqApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynqApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E0000000000000000000301 /* SynqApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynqApp.swift; sourceTree = "<group>"; };
+		5E0000000000000000000302 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5E0000000000000000000303 /* SynqApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SynqApp.entitlements; sourceTree = "<group>"; };
+		5E0000000000000000000304 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -110,6 +79,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5E0000000000000000000202 /* SynqShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000332 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000312 /* SynqShared in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -119,8 +97,10 @@
 		5E0000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				5E0000000000000000000305 /* SynqApp */,
 				5E0000000000000000000004 /* SynqMessages */,
 				5E0000000000000000000005 /* SynqMessagesExtension */,
+				5E0000000000000000000203 /* SynqShared */,
 				5E0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -128,6 +108,7 @@
 		5E0000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				5E0000000000000000000300 /* SynqApp.app */,
 				5E0000000000000000000010 /* SynqMessages.app */,
 				5E0000000000000000000011 /* SynqMessagesExtension.appex */,
 			);
@@ -147,45 +128,20 @@
 			isa = PBXGroup;
 			children = (
 				5E0000000000000000000020 /* MessagesViewController.swift */,
-				5E0000000000000000000021 /* SynqCard.swift */,
-				5E0000000000000000000022 /* CardLink.swift */,
-				5E0000000000000000000023 /* CardViews.swift */,
-				5E0000000000000000000024 /* CardStatusClient.swift */,
-				5E0000000000000000000029 /* FundViews.swift */,
-				5E0000000000000000000028 /* Fund.swift */,
-				5E00000000000000000000A0 /* Theme.swift */,
-				5E00000000000000000000A2 /* FundCards.swift */,
-				5E00000000000000000000A3 /* QuickParse.swift */,
-				5E00000000000000000000F5 /* BusinessViews.swift */,
-				5E00000000000000000000F3 /* BusinessModel.swift */,
-				5E00000000000000000000F1 /* Business.swift */,
-				5E00000000000000000000A4 /* FundModel.swift */,
-				5E00000000000000000000A5 /* DetailViews.swift */,
-				5E00000000000000000000A6 /* Sheets.swift */,
-				5E00000000000000000000A7 /* SynqTheme.swift */,
-				5E00000000000000000000A8 /* AsciiTheme.swift */,
-				5E00000000000000000000A9 /* AsciiArtData.swift */,
-				5E00000000000000000000AA /* HoloTheme.swift */,
-				5E00000000000000000001A3 /* ThemeSettings.swift */,
-				5E00000000000000000001A1 /* PaperTheme.swift */,
-				5E00000000000000000000AB /* Components.swift */,
-				5E00000000000000000000C8 /* Fonts */,
 				5E0000000000000000000025 /* Info.plist */,
 			);
 			path = SynqMessagesExtension;
 			sourceTree = "<group>";
 		};
-		5E00000000000000000000C8 /* Fonts */ = {isa = PBXGroup; children = (
-				5E00000000000000000000C0 /* JetBrainsMono-Regular.ttf */,
-				5E00000000000000000000C1 /* JetBrainsMono-Medium.ttf */,
-				5E00000000000000000000C2 /* JetBrainsMono-Bold.ttf */,
-				5E00000000000000000000C3 /* DepartureMono-Regular.otf */,
-				5E00000000000000000000C4 /* NotoSansJP-Synq.ttf */,
-				5E00000000000000000000C5 /* OFL-JetBrainsMono.txt */,
-				5E00000000000000000000C6 /* OFL-DepartureMono.txt */,
-				5E00000000000000000000C7 /* OFL-NotoSansJP.txt */,
+		5E0000000000000000000305 /* SynqApp */ = {
+			isa = PBXGroup;
+			children = (
+				5E0000000000000000000301 /* SynqApp.swift */,
+				5E0000000000000000000304 /* Assets.xcassets */,
+				5E0000000000000000000302 /* Info.plist */,
+				5E0000000000000000000303 /* SynqApp.entitlements */,
 			);
-			path = Fonts;
+			path = SynqApp;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -221,9 +177,34 @@
 			dependencies = (
 			);
 			name = SynqMessagesExtension;
+			packageProductDependencies = (
+				5E0000000000000000000201 /* SynqShared */,
+			);
 			productName = SynqMessagesExtension;
 			productReference = 5E0000000000000000000011 /* SynqMessagesExtension.appex */;
 			productType = "com.apple.product-type.app-extension.messages";
+		};
+		5E0000000000000000000330 /* SynqApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5E0000000000000000000350 /* Build configuration list for PBXNativeTarget "SynqApp" */;
+			buildPhases = (
+				5E0000000000000000000331 /* Sources */,
+				5E0000000000000000000332 /* Frameworks */,
+				5E0000000000000000000333 /* Resources */,
+				5E0000000000000000000334 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5E0000000000000000000340 /* PBXTargetDependency */,
+			);
+			name = SynqApp;
+			packageProductDependencies = (
+				5E0000000000000000000320 /* SynqShared */,
+			);
+			productName = SynqApp;
+			productReference = 5E0000000000000000000300 /* SynqApp.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -235,6 +216,9 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					5E0000000000000000000330 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					5E0000000000000000000040 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -252,10 +236,14 @@
 				Base,
 			);
 			mainGroup = 5E0000000000000000000002;
+			packageReferences = (
+				5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */,
+			);
 			productRefGroup = 5E0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				5E0000000000000000000330 /* SynqApp */,
 				5E0000000000000000000040 /* SynqMessages */,
 				5E0000000000000000000041 /* SynqMessagesExtension */,
 			);
@@ -275,14 +263,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5E00000000000000000000D0 /* JetBrainsMono-Regular.ttf in Resources */,
-				5E00000000000000000000D1 /* JetBrainsMono-Medium.ttf in Resources */,
-				5E00000000000000000000D2 /* JetBrainsMono-Bold.ttf in Resources */,
-				5E00000000000000000000D3 /* DepartureMono-Regular.otf in Resources */,
-				5E00000000000000000000D4 /* NotoSansJP-Synq.ttf in Resources */,
-				5E00000000000000000000D5 /* OFL-JetBrainsMono.txt in Resources */,
-				5E00000000000000000000D6 /* OFL-DepartureMono.txt in Resources */,
-				5E00000000000000000000D7 /* OFL-NotoSansJP.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000333 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000311 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -294,28 +282,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				5E0000000000000000000030 /* MessagesViewController.swift in Sources */,
-				5E0000000000000000000031 /* SynqCard.swift in Sources */,
-				5E0000000000000000000032 /* CardLink.swift in Sources */,
-				5E0000000000000000000033 /* CardViews.swift in Sources */,
-				5E0000000000000000000034 /* CardStatusClient.swift in Sources */,
-				5E00000000000000000000B0 /* Theme.swift in Sources */,
-				5E00000000000000000000B2 /* FundCards.swift in Sources */,
-				5E00000000000000000000B3 /* QuickParse.swift in Sources */,
-				5E00000000000000000000F6 /* BusinessViews.swift in Sources */,
-				5E00000000000000000000F4 /* BusinessModel.swift in Sources */,
-				5E00000000000000000000F2 /* Business.swift in Sources */,
-				5E00000000000000000000B4 /* FundModel.swift in Sources */,
-				5E00000000000000000000B5 /* DetailViews.swift in Sources */,
-				5E00000000000000000000B6 /* Sheets.swift in Sources */,
-				5E00000000000000000000B7 /* SynqTheme.swift in Sources */,
-				5E00000000000000000000B8 /* AsciiTheme.swift in Sources */,
-				5E00000000000000000000B9 /* AsciiArtData.swift in Sources */,
-				5E00000000000000000000BA /* HoloTheme.swift in Sources */,
-				5E00000000000000000001A4 /* ThemeSettings.swift in Sources */,
-				5E00000000000000000001A2 /* PaperTheme.swift in Sources */,
-				5E00000000000000000000BB /* Components.swift in Sources */,
-				5E0000000000000000000038 /* FundViews.swift in Sources */,
-				5E0000000000000000000037 /* Fund.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E0000000000000000000331 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000310 /* SynqApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -326,6 +300,11 @@
 			isa = PBXTargetDependency;
 			target = 5E0000000000000000000041 /* SynqMessagesExtension */;
 			targetProxy = 5E0000000000000000000051 /* PBXContainerItemProxy */;
+		};
+		5E0000000000000000000340 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5E0000000000000000000041 /* SynqMessagesExtension */;
+			targetProxy = 5E0000000000000000000341 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -438,6 +417,52 @@
 			};
 			name = Release;
 		};
+		5E0000000000000000000351 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SynqApp/SynqApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = SynqApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
+				SYNQ_WEB_HOST = synqlabs.world;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5E0000000000000000000352 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SynqApp/SynqApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = SynqApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
+				SYNQ_WEB_HOST = synqlabs.world;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -468,7 +493,36 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		5E0000000000000000000350 /* Build configuration list for PBXNativeTarget "SynqApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E0000000000000000000351 /* Debug */,
+				5E0000000000000000000352 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SynqShared;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5E0000000000000000000201 /* SynqShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */;
+			productName = SynqShared;
+		};
+		5E0000000000000000000320 /* SynqShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */;
+			productName = SynqShared;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5E0000000000000000000001 /* Project object */;
 }

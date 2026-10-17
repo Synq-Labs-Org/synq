@@ -216,7 +216,7 @@ struct Render {
         theme = SynqThemes.named(args.count > 3 ? args[3] : SynqThemes.all[0].id)
         // Screens that read the saved choice (the theme sheet) see the theme being rendered.
         UserDefaults.standard.register(defaults: [SynqThemes.storageKey: theme.id])
-        SynqFonts.register(from: URL(fileURLWithPath: "SynqMessagesExtension/Fonts"))
+        SynqFonts.register(from: URL(fileURLWithPath: "SynqShared/Sources/SynqShared/DesignSystem/Fonts"))
         for f in [AsciiTheme.mono, AsciiTheme.pixel, AsciiTheme.japanese] where !SynqFonts.isAvailable(f) {
             print("warning: font \(f) not registered; falling back to system fonts")
         }
@@ -534,6 +534,7 @@ struct Render {
             }, width: 1100, height: 330, scale: 2, to: card("cards-invoice.png"))
             shot("screen-invoice-card.png", InvoiceLinkView(link: link, status: nil, error: nil, onCheckout: {}, onRefresh: {}))
         }
+        renderAppScreens(out)
         print("wrote \(out.path) with theme \(theme.id)")
     }
 }
