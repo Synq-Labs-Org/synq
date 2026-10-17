@@ -5,16 +5,37 @@ export type WorkspacePayCommand = {
   purpose: string;
   obligation: string;
 };
+const AMOUNT = String.raw`((?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?)`;
+const REF = String.raw`(?:ref|reference|invoice|bill|#)\s*:?\s*([^\s,;]+(?:\s+[^\s,;]+)?)`;
+/**
+ * Deterministic payout grammar: every field is read from the message itself,
+ * never inferred. Accepted forms:
+ *  - pay <vendor> <amount> USDC for <purpose> ref <reference>
+ *  - pay|send <amount> USDC to <vendor> for <purpose>, invoice <reference>
+ */
 export function parseWorkspacePay(text: string): WorkspacePayCommand | null {
-  const m =
+  const t = text.trim().replace(/[.!]+$/, '');
+  const a =
     /^(?:\/pay(?:@[a-z0-9_]+)?|pay(?:\s+(?:a\s+)?contractor)?)\s+(.+?)\s+((?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?)\s+usdc\s+for\s+(.+?)\s+(?:ref|#)\s*:?\s*(.+)$/i.exec(
-      text.trim(),
+      t,
     );
-  if (!m) return null;
-  return {
-    vendor: m[1]!.trim(),
-    amount: String(parseUnits(m[2]!, 6)),
-    purpose: m[3]!.trim(),
-    obligation: m[4]!.trim(),
-  };
+  if (a)
+    return {
+      vendor: a[1]!.trim(),
+      amount: String(parseUnits(a[2]!, 6)),
+      purpose: a[3]!.trim(),
+      obligation: a[4]!.trim(),
+    };
+  const b = new RegExp(
+    String.raw`^(?:\/?pay|send)\s+${AMOUNT}\s+usdc\s+to\s+(.+?)\s+for\s+(.+?)\s*[,;]?\s+${REF}$`,
+    'i',
+  ).exec(t);
+  if (b)
+    return {
+      vendor: b[2]!.trim(),
+      amount: String(parseUnits(b[1]!, 6)),
+      purpose: b[3]!.trim(),
+      obligation: b[4]!.trim(),
+    };
+  return null;
 }
