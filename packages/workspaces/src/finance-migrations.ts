@@ -81,4 +81,10 @@ CREATE INDEX synq_ws_escrow_ops_deal ON synq_ws_escrow_ops(deal_id,op,milestone)
     up: `CREATE TABLE synq_ws_treasury_ops(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),kind text NOT NULL CHECK(kind IN ('SWAP')),data jsonb NOT NULL,state text NOT NULL CHECK(state IN ('APPROVE','EXECUTE','DONE','FAILED')),approve_action_id uuid,execute_action_id uuid,evidence jsonb,last_error text,created_at bigint NOT NULL,updated_at bigint NOT NULL);`,
     down: `DROP TABLE synq_ws_treasury_ops;`,
   },
+  {
+    version: 12,
+    up: `CREATE TABLE synq_ws_contributions(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),principal_id text NOT NULL,wallet text NOT NULL,amount numeric(78,0) NOT NULL CHECK(amount>0),payment_ref text NOT NULL UNIQUE,note text NOT NULL DEFAULT '',state text NOT NULL CHECK(state IN ('OPEN','PAID','REVIEW')),receipt_key text,created_at bigint NOT NULL,paid_at bigint,expires_at bigint NOT NULL);
+CREATE TABLE synq_ws_refunds(id uuid PRIMARY KEY,workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),principal_id text NOT NULL,recipient text NOT NULL,amount numeric(78,0) NOT NULL CHECK(amount>0),state text NOT NULL CHECK(state IN ('REVIEW','SIGNED','PAID','FAILED')),action_id uuid,tx_hash text,created_at bigint NOT NULL);`,
+    down: `DROP TABLE synq_ws_refunds; DROP TABLE synq_ws_contributions;`,
+  },
 ] as const;

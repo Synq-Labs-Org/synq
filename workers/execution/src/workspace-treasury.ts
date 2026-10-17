@@ -332,7 +332,7 @@ export class WorkspaceTreasury {
     });
   }
   /** USDC the vault may convert without touching reserves, held funds or near-term obligations. */
-  async freeUsdc(workspaceId: string, vault: Address) {
+  async freeUsdc(workspaceId: string, vault: Address, keepReserve = true) {
     const usdc = token('arc-testnet', 'USDC');
     const [bal, reserved, held, budget] = await Promise.all([
       this.balance('USDC', vault),
@@ -371,7 +371,7 @@ export class WorkspaceTreasury {
       BigInt(reserved.rows[0].n) -
       BigInt(held.rows[0].n) -
       restricted -
-      BigInt(budget.rows[0]?.reserve ?? 0) -
+      (keepReserve ? BigInt(budget.rows[0]?.reserve ?? 0) : 0n) -
       due
     );
   }

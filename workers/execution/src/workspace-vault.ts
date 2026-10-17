@@ -3,6 +3,7 @@ import { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDeals } from '@synq/workspaces/deals';
 import { WorkspaceDealEscrow } from './workspace-escrow.js';
 import { WorkspaceTreasury } from './workspace-treasury.js';
+import { WorkspaceContributions } from '@synq/workspaces/contributions';
 import { readFileSync, statSync } from 'node:fs';
 import {
   encodeAbiParameters,
@@ -516,6 +517,12 @@ export async function workspaceVaultRuntime(input: {
     screening,
   );
   const books = new WorkspaceBooks(finance);
+  const treasury = new WorkspaceTreasury(
+    finance,
+    chain,
+    input.rpcUrl ?? chain.profile.rpcUrls[0]!,
+    books,
+  );
   const splits = new WorkspaceSplitWorker(
     finance,
     chain,
@@ -633,12 +640,17 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
     governance: governance.governance,
     screening: () => payouts.screening.status(),
     books,
-    treasury: new WorkspaceTreasury(
-      finance,
-      chain,
-      input.rpcUrl ?? chain.profile.rpcUrls[0]!,
-      books,
-    ),
+    treasury,
+    contributions: {
+      service: new WorkspaceContributions(finance),
+      /** Spendable for refunds: after payouts in flight, held funds, money owed to others and bills due. */
+      available: async (workspaceId: string) =>
+        treasury.freeUsdc(
+          workspaceId,
+          (await finance.authority(workspaceId)).vault,
+          false,
+        ),
+    },
     /** Party-wallet deal escrow under the same Kernel key and recipient screening. */
     escrowFor: (deals: WorkspaceDeals) =>
       new WorkspaceDealEscrow(

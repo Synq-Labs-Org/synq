@@ -624,6 +624,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               ? vault.escrowFor(workspaceDeals)
               : undefined),
         vault?.treasury,
+        vault?.contributions,
       );
     }
     const readModel = {

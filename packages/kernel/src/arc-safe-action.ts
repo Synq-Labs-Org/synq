@@ -46,6 +46,15 @@ export const SafeActionSchema = z.discriminatedUnion('kind', [
     vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
     amount: units.refine((v) => BigInt(v) > 0n, 'amount must be positive'),
   }),
+  // Group fund wind-down: return one member's equity to that member's wallet.
+  z.strictObject({
+    ...actionBase,
+    kind: z.literal('REFUND_MEMBER'),
+    refundId: z.string().uuid(),
+    principalId: z.string().min(1).max(200),
+    recipient: wallet,
+    amount: units.refine((v) => BigInt(v) > 0n, 'amount must be positive'),
+  }),
   // Treasury: the Safe allows the registry App Kit adapter to take an exact amount.
   z.strictObject({
     ...actionBase,
@@ -128,14 +137,17 @@ export function safeActionCall(a: SafeAction) {
       nonce: BigInt(a.nonce),
     } as const;
   // An above-cap payment is a direct token transfer signed by the full Safe quorum.
-  if (a.kind === 'PAY_VENDOR')
+  if (a.kind === 'PAY_VENDOR' || a.kind === 'REFUND_MEMBER')
     return {
       to: a.token,
       value: 0n,
       data: encodeFunctionData({
         abi: tokenAbi,
         functionName: 'transfer',
-        args: [a.vendorAddress, BigInt(a.amount)],
+        args: [
+          a.kind === 'PAY_VENDOR' ? a.vendorAddress : a.recipient,
+          BigInt(a.amount),
+        ],
       }),
       operation: 0,
       nonce: BigInt(a.nonce),
@@ -229,12 +241,19 @@ export function safeActionApprovalTypedData(a: SafeAction) {
                   [a.treasuryOpId, a.kind],
                 ),
               )
-            : keccak256(
-                encodeAbiParameters(
-                  [{ type: 'uint256' }, { type: 'uint256' }],
-                  [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+            : a.kind === 'REFUND_MEMBER'
+              ? keccak256(
+                  encodeAbiParameters(
+                    [{ type: 'string' }, { type: 'string' }],
+                    [a.refundId, a.principalId],
+                  ),
+                )
+              : keccak256(
+                  encodeAbiParameters(
+                    [{ type: 'uint256' }, { type: 'uint256' }],
+                    [BigInt(a.perPaymentCap), BigInt(a.windowCap)],
+                  ),
                 ),
-              ),
       expiresAt: BigInt(a.expiresAt),
     },
   };
@@ -248,13 +267,15 @@ export function safeActionGrantCall(a: SafeAction) {
     recipient:
       a.kind === 'PAY_VENDOR'
         ? a.vendorAddress
-        : a.kind === 'TREASURY_APPROVE'
-          ? a.spender
-          : a.kind === 'TREASURY_EXECUTE'
-            ? a.target
-            : a.policy,
+        : a.kind === 'REFUND_MEMBER'
+          ? a.recipient
+          : a.kind === 'TREASURY_APPROVE'
+            ? a.spender
+            : a.kind === 'TREASURY_EXECUTE'
+              ? a.target
+              : a.policy,
     amount:
-      a.kind === 'PAY_VENDOR'
+      a.kind === 'PAY_VENDOR' || a.kind === 'REFUND_MEMBER'
         ? BigInt(a.amount)
         : a.kind === 'TREASURY_EXECUTE'
           ? BigInt(a.amountIn)

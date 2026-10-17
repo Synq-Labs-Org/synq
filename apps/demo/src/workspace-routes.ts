@@ -23,6 +23,7 @@ import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
 import type { WorkspaceTreasury } from '@synq/execution-worker/workspace-treasury';
+import type { WorkspaceContributions } from '@synq/workspaces/contributions';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
@@ -116,6 +117,10 @@ export function registerWorkspaceRoutes(
   books?: WorkspaceBooks,
   escrow?: () => WorkspaceDealEscrow | undefined,
   treasury?: WorkspaceTreasury,
+  contributions?: {
+    service: WorkspaceContributions;
+    available: (workspaceId: string) => Promise<bigint>;
+  },
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -191,6 +196,15 @@ export function registerWorkspaceRoutes(
         Boolean(payouts),
         payouts?.screening?.(),
       ),
+      ...(contributions
+        ? {
+            groupFunds: {
+              status: 'AVAILABLE',
+              reason:
+                'Members contribute USDC from their own wallets to the workspace vault with a one-time Memo reference; each contribution is credited to that member only when the reference, amount and paying wallet match. Spending and refunds need the Safe owner quorum.',
+            },
+          }
+        : {}),
       ...(treasury
         ? {
             swap: {
@@ -378,6 +392,58 @@ export function registerWorkspaceRoutes(
         return finance.list(await id(req), session.principalId);
       }),
     );
+    if (contributions && governance) {
+      const c = contributions.service;
+      app.get('/v2/workspaces/:workspaceId/contributions', (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req),
+            ws = await id(req);
+          return {
+            ...(await c.view(ws, s.principalId)),
+            refunds: await c.refunds(ws, s.principalId),
+          };
+        }),
+      );
+      app.post('/v2/workspaces/:workspaceId/contributions', (req, reply) =>
+        handle(reply, async () => {
+          const s = await auth(req, true);
+          return c.request(await id(req), s.principalId, req.body);
+        }),
+      );
+      app.post(
+        '/v2/workspaces/:workspaceId/contributions/refunds',
+        (req, reply) =>
+          handle(reply, async () => {
+            const s = await auth(req, true),
+              ws = await id(req);
+            return {
+              refunds: await c.proposeRefunds(
+                ws,
+                s.principalId,
+                await contributions.available(ws),
+              ),
+            };
+          }),
+      );
+      app.post(
+        '/v2/workspaces/:workspaceId/contributions/refunds/:refundId/prepare',
+        (req, reply) =>
+          handle(reply, async () => {
+            const s = await auth(req, true),
+              p = z
+                .strictObject({
+                  workspaceId: WorkspaceIdSchema,
+                  refundId: z.uuid(),
+                })
+                .parse(req.params);
+            return governance.service.proposeRefund(
+              p.workspaceId,
+              s.principalId,
+              p.refundId,
+            );
+          }),
+      );
+    }
     if (treasury) {
       const op = (req: FastifyRequest) =>
         z

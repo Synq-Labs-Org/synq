@@ -12,6 +12,7 @@ import {
   type Ledger,
 } from '@synq/ledger';
 import type { WorkspaceFinance } from './finance.js';
+import { WorkspaceContributions } from './contributions.js';
 
 /** Called only for finalized events from the code-pinned persistent indexer. */
 export class WorkspaceReceipts {
@@ -111,6 +112,33 @@ export class WorkspaceReceipts {
     }
     if (saved.state === 'REVIEW') return 'REVIEW';
     if (saved.state === 'PENDING_POLICY') return 'DUPLICATE';
+    if (payment) {
+      // Group-fund contributions are members' equity, matched before invoices.
+      const contributed = await this.finance.workspaces.transaction((sql) =>
+        new WorkspaceContributions(this.finance).match(
+          sql,
+          workspaceId,
+          payment,
+          key,
+          getAddress(vault),
+          Number(saved.created_at),
+        ),
+      );
+      if (contributed === 'REVIEW') {
+        await pool.query(
+          "UPDATE synq_ws_receipts SET state='REVIEW',reason='CONTRIBUTION_MISMATCH' WHERE key=$1",
+          [key],
+        );
+        return 'REVIEW:CONTRIBUTION_MISMATCH';
+      }
+      if (contributed === 'CONTRIBUTION') {
+        await pool.query(
+          "UPDATE synq_ws_receipts SET state='PENDING_POLICY',reason='CONTRIBUTION' WHERE key=$1 AND state='BOOKING'",
+          [key],
+        );
+        return 'CONTRIBUTION';
+      }
+    }
     let invoiceId: string | null = null;
     if (payment) {
       const known = await this.invoices.store.byPaymentRef(payment.paymentRef);

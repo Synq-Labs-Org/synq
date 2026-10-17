@@ -49,6 +49,7 @@ import { connectChain } from '@synq/execution-worker/arc';
 import { WorkspacePayoutExecutor } from '@synq/execution-worker/workspace-payout';
 import { WorkspacePayouts } from '@synq/workspaces/payouts';
 import { WorkspaceBooks } from '@synq/workspaces/books';
+import { WorkspaceContributions } from '@synq/workspaces/contributions';
 import {
   intentApprovalTypedData,
   mandateTypedData,
@@ -1107,6 +1108,89 @@ async function governanceFixture(
   };
 }
 describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signed EVM bytes', () => {
+  it('G3 credits contributions only to the paying member and refunds each member by quorum', async () => {
+    const f = await governanceFixture();
+    const c = new WorkspaceContributions(f.finance);
+    const req = await c.request(f.w.id, f.coowner.principalId, {
+      amount: '30000',
+    });
+    expect(req.transaction.to).toBe(contract('arc-testnet', 'MEMO').address);
+    const payment = (payer: string, amount = 30000n) => ({
+      chainId: 5042002,
+      txHash: keccak256(toHex(randomUUID())),
+      logIndex: 1,
+      paymentRef: req.paymentRef,
+      payer: getAddress(payer),
+      recipient: getAddress(f.authority.vault),
+      amount,
+    });
+    const match = (p: ReturnType<typeof payment>) =>
+      f.store.transaction((sql) =>
+        c.match(sql, f.w.id, p, `k:${p.txHash}`, f.authority.vault, 1),
+      );
+    // Someone else paying the same reference is not this member's money.
+    const other = await c.request(f.w.id, f.owner.principalId, {
+      amount: '5000',
+    });
+    expect(
+      await f.store.transaction((sql) =>
+        c.match(
+          sql,
+          f.w.id,
+          {
+            ...payment(f.coowner.a.address, 5000n),
+            paymentRef: other.paymentRef,
+          },
+          'k:other',
+          f.authority.vault,
+          1,
+        ),
+      ),
+    ).toBe('REVIEW');
+    expect(await match(payment(f.coowner.a.address))).toBe('CONTRIBUTION');
+    expect(await match(payment(f.coowner.a.address))).toBe('CONTRIBUTION');
+    const equity = await c.equity(f.w.id);
+    expect(equity.get(f.coowner.principalId)).toBe(30000n);
+    expect(equity.get(f.owner.principalId)).toBeUndefined();
+    // Pro rata when the vault holds less than members put in.
+    expect(
+      (await c.refundPlan(f.w.id, 15000n)).find(
+        (p) => p.principalId === f.coowner.principalId,
+      )?.amount,
+    ).toBe(15000n);
+    const refunds = await c.proposeRefunds(
+      f.w.id,
+      f.owner.principalId,
+      1_000_000n,
+    );
+    expect(refunds).toMatchObject([
+      { amount: '30000', state: 'REVIEW', recipient: f.coowner.a.address },
+    ]);
+    await expect(
+      c.proposeRefunds(f.w.id, f.owner.principalId, 1_000_000n),
+    ).rejects.toMatchObject({ code: 'REFUNDS_IN_PROGRESS' });
+    const action = await f.gov.proposeRefund(
+      f.w.id,
+      f.owner.principalId,
+      refunds[0]!.id,
+    );
+    await f.approveAction(action);
+    await f.approveAction(action, f.coowner);
+    expect((await f.govExecutor.execute(action.action.id)).state).toBe(
+      'CONFIRMED',
+    );
+    expect(f.govFake.transfers).toEqual([
+      { to: f.coowner.a.address, amount: 30000n },
+    ]);
+    expect((await c.equity(f.w.id)).get(f.coowner.principalId)).toBe(0n);
+    expect((await c.refunds(f.w.id, f.owner.principalId))[0]).toMatchObject({
+      state: 'PAID',
+    });
+    expect((await f.restartGov().execute(action.action.id)).state).toBe(
+      'CONFIRMED',
+    );
+    expect(f.govSigned()).toBe(1);
+  });
   it('G4/G5 pays an above-budget payout only through a fresh full Safe quorum, screened, reserve-checked and booked once', async () => {
     const f = await governanceFixture();
     const p = await f.payouts.propose(f.w.id, f.owner.principalId, {

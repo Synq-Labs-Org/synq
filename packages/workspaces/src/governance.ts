@@ -256,6 +256,66 @@ export class WorkspaceGovernance {
     );
     return this.view(workspaceId, principalId, action.id);
   }
+  /** The vault action for one planned member refund (one at a time: Safe nonces are sequential). */
+  async proposeRefund(
+    workspaceId: string,
+    principalId: string,
+    refundId: string,
+  ) {
+    const m = await this.workspaces.membership(workspaceId, principalId);
+    if (m.role !== 'OWNER') throw new WorkspaceError('OWNER_REQUIRED', 403);
+    const a = await this.finance.authority(workspaceId);
+    return this.workspaces.transaction(async (sql) => {
+      const r = (
+        await sql.query(
+          'SELECT * FROM synq_ws_refunds WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
+          [refundId, workspaceId],
+        )
+      ).rows[0];
+      if (!r) throw new WorkspaceError('REFUND_NOT_FOUND', 404);
+      if (r.state !== 'REVIEW') throw new WorkspaceError('REFUND_NOT_PENDING');
+      if (r.action_id) {
+        const prior = await this.record(String(r.action_id));
+        if (
+          prior &&
+          (prior.state === 'READY' ||
+            (prior.state === 'REVIEW' &&
+              prior.action.expiresAt > this.workspaces.now()))
+        )
+          return this.view(workspaceId, principalId, prior.action.id);
+      }
+      const action = SafeActionSchema.parse({
+        id: randomUUID(),
+        workspaceId,
+        chainId: 5042002,
+        safe: a.vault,
+        policy: a.policy,
+        token: a.token,
+        kind: 'REFUND_MEMBER',
+        refundId,
+        principalId: String(r.principal_id),
+        recipient: getAddress(String(r.recipient)),
+        amount: String(r.amount),
+        nonce: String(a.nonce),
+        expiresAt: this.workspaces.now() + 900,
+      });
+      await sql.query(
+        "INSERT INTO synq_ws_safe_actions(id,workspace_id,data,state) VALUES($1,$2,$3,'REVIEW')",
+        [action.id, workspaceId, action],
+      );
+      await sql.query('UPDATE synq_ws_refunds SET action_id=$2 WHERE id=$1', [
+        refundId,
+        action.id,
+      ]);
+      return {
+        action,
+        signedBy: [],
+        state: 'REVIEW' as const,
+        evidence: null,
+        lastError: null,
+      };
+    });
+  }
   async approve(
     workspaceId: string,
     principalId: string,

@@ -32,6 +32,10 @@ import { WorkspacePayouts } from '@synq/workspaces/payouts';
 import { Ledger, PostgresLedgerStore, walletTag } from '@synq/ledger';
 import { bookWorkspacePayout } from './workspace-payout.js';
 import { assertTreasuryAction } from './workspace-treasury.js';
+import {
+  WorkspaceContributions,
+  memberTag,
+} from '@synq/workspaces/contributions';
 import { WorkspaceError } from '@synq/workspaces';
 import {
   WorkspaceGovernance,
@@ -140,6 +144,30 @@ export class WorkspaceGovernanceExecutor {
         if ('vendorId' in a && !vendor)
           throw new WorkspaceError('VENDOR_NOT_VERIFIED');
         await assertTreasuryAction(sql, a);
+        if (a.kind === 'REFUND_MEMBER') {
+          const r = (
+            await sql.query(
+              'SELECT * FROM synq_ws_refunds WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
+              [a.refundId, a.workspaceId],
+            )
+          ).rows[0];
+          const owed =
+            (
+              await new WorkspaceContributions(this.finance).equity(
+                a.workspaceId,
+              )
+            ).get(a.principalId) ?? 0n;
+          if (
+            !r ||
+            r.state !== 'REVIEW' ||
+            r.action_id !== a.id ||
+            r.principal_id !== a.principalId ||
+            String(r.recipient).toLowerCase() !== a.recipient.toLowerCase() ||
+            String(r.amount) !== a.amount ||
+            BigInt(a.amount) > owed
+          )
+            throw new WorkspaceError('REFUND_ACTION_MISMATCH');
+        }
         if (a.kind === 'PAY_VENDOR') {
           const refuse = async (reason: string) => {
             await sql.query(
@@ -330,6 +358,11 @@ export class WorkspaceGovernanceExecutor {
             "UPDATE synq_ws_payouts SET state='SIGNED',tx_hash=$2,reason=NULL WHERE id=$1 AND state='REVIEW'",
             [a.payoutId, record.hash],
           );
+        if (a.kind === 'REFUND_MEMBER')
+          await sql.query(
+            "UPDATE synq_ws_refunds SET state='SIGNED',tx_hash=$2 WHERE id=$1 AND state='REVIEW'",
+            [a.refundId, record.hash],
+          );
         await sql.query('COMMIT');
         inTx = false;
         await afterRecord?.();
@@ -454,6 +487,61 @@ export class WorkspaceGovernanceExecutor {
             grantKey: this.authority.grantKey,
           }),
         );
+      } else if (a.kind === 'REFUND_MEMBER') {
+        const sent = parseEventLogs({
+          abi: erc20Abi,
+          eventName: 'Transfer',
+          logs: receipt.logs,
+        }).filter(
+          (e) =>
+            e.address.toLowerCase() === a.token.toLowerCase() &&
+            getAddress(e.args.from) === getAddress(a.safe) &&
+            getAddress(e.args.to) === getAddress(a.recipient) &&
+            e.args.value === BigInt(a.amount),
+        );
+        if (sent.length !== 1)
+          throw new ArcExecutionError(
+            'TRANSFER_MISMATCH',
+            'member refund receipt is missing',
+          );
+        const usdc = token('arc-testnet', 'USDC'),
+          id = `refund:${a.refundId}`;
+        await store.transaction(async (sql) => {
+          await new Ledger(new PostgresLedgerStore(sql)).post({
+            entryId: id,
+            workspaceId: a.workspaceId,
+            occurredAt: store.now(),
+            memo: 'Group fund refund to a member',
+            source: { kind: 'CHAIN_TX', ref: a.refundId },
+            evidence: {
+              chainId: 5042002,
+              txHash: record!.hash,
+              logIndex: sent[0]!.logIndex,
+              recipient: getAddress(a.recipient),
+            },
+            idempotencyKey: id,
+            reversalOf: null,
+            postings: [
+              {
+                account: 'OWNER_EQUITY',
+                assetId: usdc.assetId,
+                amount: BigInt(a.amount),
+                counterpartyId: memberTag(a.principalId),
+              },
+              {
+                account: 'CASH_ARC_USDC',
+                assetId: usdc.assetId,
+                amount: -BigInt(a.amount),
+                counterpartyId: walletTag(getAddress(a.safe)),
+              },
+            ],
+          });
+          await sql.query(
+            "UPDATE synq_ws_refunds SET state='PAID',tx_hash=$2 WHERE id=$1",
+            [a.refundId, record!.hash],
+          );
+        });
+        evidence = { ...evidence, refundId: a.refundId, amount: a.amount };
       } else if (a.kind === 'TREASURY_APPROVE') {
         const ok = parseEventLogs({
           abi: erc20Abi,
