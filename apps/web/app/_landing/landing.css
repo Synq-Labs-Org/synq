@@ -222,6 +222,7 @@ html:has(.lp-shell) {
 
 /* ------------------------------------------------------------------ header */
 .lp-header {
+  min-width: 0;
   position: sticky;
   top: 0;
   z-index: 50;
@@ -363,7 +364,8 @@ html:has(.lp-shell) {
   gap: 12px;
   margin: 28px 0 0;
 }
-.lp-btn {
+.lp-shell .lp-btn {
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 0.6ch;
@@ -380,17 +382,17 @@ html:has(.lp-shell) {
     background 0.18s ease,
     color 0.18s ease;
 }
-.lp-btn-primary {
+.lp-shell .lp-btn-primary {
   background: var(--lp-accent);
   color: var(--lp-accent-ink);
   border-color: var(--lp-accent);
 }
-.lp-btn:hover {
+.lp-shell .lp-btn:hover {
   transform: translateY(-2px);
   background: var(--lp-ink);
   color: var(--lp-bg);
 }
-.lp-btn-primary:hover {
+.lp-shell .lp-btn-primary:hover {
   background: var(--lp-bg);
   color: var(--lp-ink);
 }
@@ -440,6 +442,8 @@ html:has(.lp-shell) {
   min-height: 150px;
 }
 .lp-hero-art {
+  container-type: inline-size;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -447,10 +451,11 @@ html:has(.lp-shell) {
   gap: 8px 32px;
 }
 .lp-wordmark {
-  font-size: min(17px, calc((100vw - 40px) / 19));
+  font-size: min(17px, calc(100cqw / 19));
 }
 .lp-coin {
-  font-size: min(11px, calc((100vw - 40px) / 34));
+  font-size: min(11px, calc(100cqw / 34.5));
+  max-width: 100%;
   margin-left: auto;
   color: var(--lp-ink);
 }
@@ -517,18 +522,23 @@ html:has(.lp-shell) {
   padding: 0;
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
 }
 .lp-facts li {
   display: flex;
   gap: 14px;
   align-items: flex-start;
+  min-width: 0;
   padding: 16px;
   border: 1px solid var(--lp-line);
   border-radius: var(--lp-radius-lg);
   background: color-mix(in srgb, var(--lp-bg) 80%, transparent);
   color: var(--lp-muted);
   font-size: 15px;
+}
+.lp-facts li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .lp-facts .lp-glyph-ascii {
   font-size: 7px;
@@ -755,7 +765,7 @@ html:has(.lp-shell) {
   padding: 0;
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
 }
 .lp-flow-steps li {
   border: 1px solid var(--lp-line);
@@ -1522,4 +1532,37 @@ html:has(.lp-shell) {
 .sc-drawer-row {
   border: 1px solid var(--lp-line);
   border-radius: min(var(--lp-radius), 12px);
+}
+
+/* ------------------------------------------------------------------ narrow screens */
+@media (max-width: 719px) {
+  .lp-header {
+    gap: 10px;
+    padding: 8px 16px;
+  }
+  .lp-header-r {
+    gap: 8px;
+    min-width: 0;
+  }
+  /* The "Theme" word is dropped visually; the select keeps its accessible name. */
+  .lp-shell label.workspace-theme {
+    font-size: 0;
+    gap: 0;
+  }
+  .lp-shell select {
+    max-width: 112px;
+  }
+  .lp-section,
+  .lp-hero-inner,
+  .lp-closing {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .lp-browser {
+    transform: none;
+    min-height: 0;
+  }
+  .lp-browser-body {
+    grid-template-columns: 84px 1fr;
+  }
 }

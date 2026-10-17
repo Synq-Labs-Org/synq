@@ -55,6 +55,20 @@ function scrambleFrame(now: number, start: number, seed: number): string {
 }
 
 const FINAL_WORDMARK = WORDMARK_LINES.join('\n');
+const DECODE_MS = 1700;
+
+/** The finished wordmark with three characters briefly swapped. */
+function glitchFrame(k: number, now: number): string {
+  const lines = WORDMARK_LINES.map((l) => l.split(''));
+  for (let n = 0; n < 3; n++) {
+    const line = lines[(k * 3 + n * 2) % lines.length]!;
+    const col = (k * 11 + n * 17 + 5) % line.length;
+    if (line[col] !== ' ') {
+      line[col] = SCRAMBLE[Math.floor(now / 50 + n) % SCRAMBLE.length]!;
+    }
+  }
+  return lines.map((l) => l.join('')).join('\n');
+}
 /** Rendered on the server too, so the art has its size before any script runs. */
 const INITIAL_COIN = renderCoin(0.7, 0.35);
 
@@ -67,7 +81,6 @@ export function AsciiHeroArt() {
   const reduced = useReducedMotion();
   const [armed, setArmed] = useState(false);
   const startRef = useRef(0);
-  const seedRef = useRef(0);
   const pointer = useRef(0);
 
   useEffect(() => setArmed(true), []);
@@ -83,14 +96,17 @@ export function AsciiHeroArt() {
       const mark = markRef.current;
       if (!mark) return;
       if (!startRef.current) startRef.current = now;
-      // Decode on load, then a short re-scramble every ~9 seconds.
-      const cycle = (now - startRef.current) % 9000;
-      if (cycle < 1600) {
-        if (cycle < 40) seedRef.current = Math.floor(now / 1000) % 50;
-        mark.textContent = scrambleFrame(cycle, 0, seedRef.current);
-      } else if (mark.textContent !== FINAL_WORDMARK) {
-        mark.textContent = FINAL_WORDMARK;
+      // Decode once on load, then stay readable. Every few seconds a handful
+      // of characters flicker for a moment; the word is never scrambled again.
+      const t = now - startRef.current;
+      if (t < DECODE_MS) {
+        mark.textContent = scrambleFrame(t, 0, 0);
+        return;
       }
+      const k = Math.floor((t - DECODE_MS) / 6500);
+      const phase = (t - DECODE_MS) % 6500;
+      const next = phase < 160 ? glitchFrame(k, now) : FINAL_WORDMARK;
+      if (mark.textContent !== next) mark.textContent = next;
     },
     40,
   );
