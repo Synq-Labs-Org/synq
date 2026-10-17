@@ -476,6 +476,8 @@ public final class SynqAppModel: ObservableObject, NavigationPort {
 
     /// A universal link or custom link opened the app.
     public func open(url: URL) {
+        // The wallet app hands control back with this scheme; there is nothing to route.
+        if url.scheme == "synq-wallet" { return }
         switch SynqLinkRouter.route(url, host: api.host) {
         case .destination(let d): navigate(to: d)
         case .fund(let link):

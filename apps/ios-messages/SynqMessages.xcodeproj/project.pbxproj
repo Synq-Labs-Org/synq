@@ -15,6 +15,9 @@
 		5E0000000000000000000311 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000304 /* Assets.xcassets */; };
 		5E0000000000000000000312 /* SynqShared in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000320 /* SynqShared */; };
 		5E0000000000000000000313 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5E0000000000000000000400 /* WalletConnectSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000401 /* WalletConnectSigner.swift */; };
+		5E0000000000000000000404 /* ReownAppKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000402 /* ReownAppKit */; };
+		5E0000000000000000000405 /* WalletConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000403 /* WalletConnect */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +75,7 @@
 		5E0000000000000000000302 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5E0000000000000000000303 /* SynqApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SynqApp.entitlements; sourceTree = "<group>"; };
 		5E0000000000000000000304 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5E0000000000000000000401 /* WalletConnectSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletConnectSigner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -88,6 +92,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				5E0000000000000000000312 /* SynqShared in Frameworks */,
+				5E0000000000000000000404 /* ReownAppKit in Frameworks */,
+				5E0000000000000000000405 /* WalletConnect in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,6 +143,7 @@
 			isa = PBXGroup;
 			children = (
 				5E0000000000000000000301 /* SynqApp.swift */,
+				5E0000000000000000000401 /* WalletConnectSigner.swift */,
 				5E0000000000000000000304 /* Assets.xcassets */,
 				5E0000000000000000000302 /* Info.plist */,
 				5E0000000000000000000303 /* SynqApp.entitlements */,
@@ -201,6 +208,8 @@
 			name = SynqApp;
 			packageProductDependencies = (
 				5E0000000000000000000320 /* SynqShared */,
+				5E0000000000000000000402 /* ReownAppKit */,
+				5E0000000000000000000403 /* WalletConnect */,
 			);
 			productName = SynqApp;
 			productReference = 5E0000000000000000000300 /* SynqApp.app */;
@@ -238,6 +247,7 @@
 			mainGroup = 5E0000000000000000000002;
 			packageReferences = (
 				5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */,
+				5E0000000000000000000406 /* XCRemoteSwiftPackageReference "reown-swift" */,
 			);
 			productRefGroup = 5E0000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -290,6 +300,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5E0000000000000000000310 /* SynqApp.swift in Sources */,
+				5E0000000000000000000400 /* WalletConnectSigner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -434,6 +445,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REOWN_PROJECT_ID = 2b35f3e06e4f7b5c12b6c19a377735df;
 				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
 				SYNQ_WEB_HOST = synqlabs.world;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -457,6 +469,7 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				REOWN_PROJECT_ID = 2b35f3e06e4f7b5c12b6c19a377735df;
 				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
 				SYNQ_WEB_HOST = synqlabs.world;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -511,6 +524,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		5E0000000000000000000406 /* XCRemoteSwiftPackageReference "reown-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/reown-com/reown-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 2.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		5E0000000000000000000201 /* SynqShared */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -521,6 +545,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */;
 			productName = SynqShared;
+		};
+		5E0000000000000000000402 /* ReownAppKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0000000000000000000406 /* XCRemoteSwiftPackageReference "reown-swift" */;
+			productName = ReownAppKit;
+		};
+		5E0000000000000000000403 /* WalletConnect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0000000000000000000406 /* XCRemoteSwiftPackageReference "reown-swift" */;
+			productName = WalletConnect;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
