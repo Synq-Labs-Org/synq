@@ -50,6 +50,7 @@ public final class ContextScope: ObservableObject {
     }
 
     func cancelAll() {
+        stopSync()
         cancels.forEach { $0() }
         cancels = []
         remotes = [:]
@@ -162,6 +163,79 @@ public final class ContextScope: ObservableObject {
         remote("auth.sessions", route: "auth.sessions") { try await $0.api.call("auth.sessions", as: SessionList.self) }
     }
 
+    // MARK: Live updates
+
+    private var syncTask: Task<Void, Never>?
+    private lazy var feed: EventCursorFeed = {
+        let api = self.api
+        return EventCursorFeed { cursor in
+            try await api.call("events.poll", query: cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [],
+                               as: StreamEventPage.self)
+        }
+    }()
+
+    /// Polls `GET /v3/events/since` while the app is in front (when the server
+    /// serves it): resumes from the last cursor after a gap and refreshes only
+    /// what an event touches. Events of another workspace are ignored.
+    func startSync(every seconds: UInt64 = 15) {
+        guard syncTask == nil else { return }
+        let api = self.api
+        syncTask = Task { [weak self] in
+            // Holds the scope only while applying events, never across a wait.
+            while !Task.isCancelled {
+                if await api.availability("events.poll") == .live, let feed = self?.feed {
+                    do {
+                        let events = try await feed.poll()
+                        guard !Task.isCancelled else { return }
+                        self?.apply(events)
+                    } catch APIFailure.sessionEnded(let revoked) {
+                        self?.onSessionEnded?(revoked)
+                        return
+                    } catch {}
+                }
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            }
+        }
+    }
+
+    func stopSync() {
+        syncTask?.cancel()
+        syncTask = nil
+    }
+
+    func apply(_ events: [StreamEvent]) {
+        for e in events {
+            if let ws = e.workspaceId, context.isBusiness, ws != context.workspaceId { continue }
+            switch e.type {
+            case .contextRevoked:
+                onSessionEnded?(true)
+                return
+            case .leadUpdated, .leadMessage, .offerUpdated:
+                reload(prefix: "workspace.inbox")
+                if let id = e.entityId { reload(prefix: "workspace.lead:\(id)") }
+            case .agentEvent:
+                reload(prefix: "workspace.agentRuns")
+                if let id = e.entityId { reload(prefix: "workspace.agentRun:\(id)") }
+            case .approvalChanged:
+                reload(prefix: "approvals.list")
+            case .balanceChanged:
+                reload(prefix: "workspace.overview")
+                reload(prefix: "personal.")
+            case .notification:
+                reload(prefix: "notifications.list")
+            case .unknown:
+                break
+            }
+        }
+    }
+
+    /// Refreshes remotes already on screen; nothing new is fetched for an event alone.
+    private func reload(prefix: String) {
+        for (key, r) in remotes where key.hasPrefix(prefix) {
+            (r as? Reloadable)?.reload()
+        }
+    }
+
     // MARK: Helpers
 
     func requireWorkspace() throws -> String {
@@ -207,4 +281,11 @@ public enum InboxFilter: String, CaseIterable, Identifiable, Sendable {
         case .frozen: return [URLQueryItem(name: "handling", value: "FROZEN")]
         }
     }
+}
+
+/// Remotes of any value type can be refreshed by an event.
+@MainActor
+protocol Reloadable: AnyObject { func reload() }
+extension Remote: Reloadable {
+    func reload() { load(force: true) }
 }

@@ -195,11 +195,15 @@ public final class SynqAppModel: ObservableObject, NavigationPort {
     /// turned on App Lock. Unlocking only shows the app again; it approves nothing.
     public func didEnterBackground() {
         lock.noteBackground()
+        scope?.stopSync()
     }
 
     public func willEnterForeground() {
         if phase == .ready, lock.shouldLock() { phase = .locked }
-        Task { await api.meta.refresh() }
+        Task {
+            await api.meta.refresh()
+            scope?.startSync()
+        }
     }
 
     public func unlock() async {
@@ -347,6 +351,7 @@ public final class SynqAppModel: ObservableObject, NavigationPort {
         let next = ContextScope(context: context, api: api, token: tokenProvider)
         next.onSessionEnded = { [weak self] revoked in self?.sessionEnded(revoked: revoked) }
         scope = next
+        next.startSync()
     }
 
     var tokenProvider: @Sendable () async throws -> String {

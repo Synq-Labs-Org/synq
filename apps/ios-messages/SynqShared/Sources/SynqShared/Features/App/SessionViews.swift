@@ -133,6 +133,7 @@ struct AccountSheet: View {
     @ObservedObject var model: SynqAppModel
     @ObservedObject var scope: ContextScope
     @ObservedObject private var lock: AppLock
+    @ObservedObject private var push: PushCenter
     @State private var confirmRevoke = false
     @State private var choosingTheme = false
     @Environment(\.synqTheme) private var theme
@@ -141,6 +142,18 @@ struct AccountSheet: View {
         self.model = model
         self.scope = scope
         _lock = ObservedObject(wrappedValue: model.lock)
+        _push = ObservedObject(wrappedValue: model.push)
+    }
+
+    private var pushLine: String {
+        switch push.status {
+        case .off: return push.optedIn ? "On for this iPhone" : "Off. Alerts show only the kind of event, never names or amounts."
+        case .asking: return "Asking iOS…"
+        case .registered: return "On. Alerts show only the kind of event, never names or amounts."
+        case .serverNotReady: return "Allowed on this iPhone, but this Synq server cannot send notifications yet."
+        case .denied: return "Turned off in iOS Settings."
+        case .failed(let m): return m
+        }
     }
 
     var body: some View {
@@ -168,6 +181,10 @@ struct AccountSheet: View {
                             subtitle: "Ask for \(AppLock.biometryName) when you come back to Synq. It only hides the app; it never approves.",
                             trailing: .text(lock.isEnabled ? "Turn off" : "Turn on")) {
                         Task { await lock.setEnabled(!lock.isEnabled) }
+                    }
+                    SynqRow(icon: .bell, title: "Notifications", subtitle: pushLine,
+                            trailing: .text(push.optedIn ? "Turn off" : "Turn on"), divider: true) {
+                        Task { if push.optedIn { await push.disable() } else { await push.enable() } }
                     }
                     SynqRow(icon: .theme, title: "Theme", subtitle: SynqThemes.current.name, trailing: .chevron, divider: true) {
                         choosingTheme = true

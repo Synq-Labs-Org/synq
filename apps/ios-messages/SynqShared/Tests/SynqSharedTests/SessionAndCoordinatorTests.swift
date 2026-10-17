@@ -154,6 +154,7 @@ final class SessionAndCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.scope?.remoteCount, 0, "the new context starts empty")
         XCTAssertTrue(model.paths.isEmpty, "navigation stacks start over")
         XCTAssertEqual(model.tab, .home)
+        await until("previous scope released") { old == nil }
         XCTAssertNil(old, "the previous context's scope (and every record in it) is released")
     }
 
@@ -207,6 +208,21 @@ final class SessionAndCoordinatorTests: XCTestCase {
         model.open(url: URL(string: "https://\(server.host)/w/other-tenant/inbox/lead-1")!)
         XCTAssertEqual(model.notice, APIFailure.notFound.message)
         XCTAssertEqual(model.stateName, "personal")
+    }
+
+    func testContextRevokedEventWipesAndOtherWorkspacesAreIgnored() async throws {
+        let model = try await signedInApp(contexts: Self.twoContexts)
+        model.select(model.contexts.first { $0.isBusiness }!)
+        let scope = model.scope!
+        func ev(_ type: StreamEvent.TypeValue, ws: String?) -> StreamEvent {
+            StreamEvent(cursor: "c", eventId: UUID().uuidString, type: type, workspaceId: ws, observedAt: "2026-10-17T10:00:00Z")
+        }
+        scope.apply([ev(.contextRevoked, ws: "another-workspace")])
+        XCTAssertEqual(model.stateName, "business", "another workspace's event changes nothing here")
+        scope.apply([ev(.contextRevoked, ws: "00000000-0000-4000-8000-000000000001")])
+        XCTAssertEqual(model.stateName, "revoked")
+        XCTAssertNil(model.scope)
+        XCTAssertNil(model.api.store.load())
     }
 
     func testCodeIsValidatedBeforeAnyRequest() async {
