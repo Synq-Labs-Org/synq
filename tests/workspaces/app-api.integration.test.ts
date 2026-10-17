@@ -3,8 +3,16 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { getAddress } from 'viem';
+import { getAddress, zeroAddress } from 'viem';
+import { contract, token } from '@synq/chain-registry/arc';
+import { vaultSetupTypedData } from '@synq/kernel/arc-vault-setup';
+import { WorkspaceVaultSetups } from '../../packages/workspaces/src/vault-setup.js';
+import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
 import {
+  ApprovalPageSchema,
+  SignatureResultSchema,
+  SigningRequestSchema,
+  WorkspaceOverviewSchema,
   ContextsSchema,
   CircleDetailSchema,
   CirclePageSchema,
@@ -485,5 +493,160 @@ describe('v3 contexts and personal view', () => {
       '/v3/auth/sessions',
     ])
       expect((await app.inject({ url })).statusCode).toBe(401);
+  });
+});
+
+describe('v3 approvals inbox', () => {
+  it('lists a vault setup waiting for this owner, gives the exact payload and records the signature', async () => {
+    const sponsor = account();
+    const setups = new WorkspaceVaultSetups(store, {
+      factory: contract('arc-testnet', 'SYNQ_ARC_VAULT_FACTORY').address,
+      token: token('arc-testnet', 'USDC').address,
+      sponsor: sponsor.address,
+      operator: sponsor.address,
+      guardian: zeroAddress,
+      maxGasNativeWei: '40',
+    });
+    const inbox = Fastify();
+    registerAppRoutes(inbox, {
+      store,
+      devices: new WorkspaceDeviceSessions(store),
+      approvals: new AppApprovals(store, {
+        setups: { service: setups, wake: () => undefined },
+      }),
+    });
+    try {
+      const a = await deviceSession();
+      const b = await deviceSession();
+      const viewer = await deviceSession();
+      const { workspace: w } = await store.create(a.session.principalId, {
+        displayName: 'Two owners',
+        kind: 'GROUP',
+      });
+      await store.accept(
+        b.session.principalId,
+        (await store.invite(w.id, a.session.principalId, { role: 'OWNER' }))
+          .token,
+      );
+      await store.accept(
+        viewer.session.principalId,
+        (await store.invite(w.id, a.session.principalId, { role: 'VIEWER' }))
+          .token,
+      );
+      const proposal = (await setups.propose(w.id, a.session.principalId, {}))!;
+      await setups.approve(
+        w.id,
+        a.session.principalId,
+        await a.a.signTypedData(vaultSetupTypedData(proposal.setup)),
+      );
+
+      const list = (t: string) =>
+        inbox
+          .inject({ url: '/v3/approvals', headers: bearer(t) })
+          .then((r) => ApprovalPageSchema.parse(r.json()));
+      // A already signed and the viewer is not an owner: nothing waits for them.
+      expect((await list(a.session.accessToken)).items).toHaveLength(0);
+      expect((await list(viewer.session.accessToken)).items).toHaveLength(0);
+      const items = (await list(b.session.accessToken)).items;
+      expect(items).toHaveLength(1);
+      expect(items[0]!.purpose).toBe('VAULT_SETUP');
+      expect(items[0]!.approvals).toBe(1);
+
+      const detail = SigningRequestSchema.parse(
+        (
+          await inbox.inject({
+            url: `/v3/approvals/${items[0]!.requestId}`,
+            headers: bearer(b.session.accessToken),
+          })
+        ).json(),
+      );
+      expect(detail.steps).toHaveLength(1);
+      const expected = JSON.parse(
+        JSON.stringify(vaultSetupTypedData(proposal.setup), (_k, v: unknown) =>
+          typeof v === 'bigint' ? String(v) : v,
+        ),
+      );
+      expect(detail.steps[0]!.typedData).toEqual(expected);
+      // Another principal cannot read B's request, and an unknown id looks the same.
+      for (const [t, id] of [
+        [viewer.session.accessToken, items[0]!.requestId],
+        [b.session.accessToken, randomUUID()],
+      ] as const)
+        expect(
+          (
+            await inbox.inject({
+              url: `/v3/approvals/${id}`,
+              headers: bearer(t),
+            })
+          ).statusCode,
+        ).toBe(404);
+
+      const url = `/v3/approvals/${items[0]!.requestId}/signature`;
+      const good = await b.a.signTypedData(vaultSetupTypedData(proposal.setup));
+      // Wrong number of signatures, then a signature from the wrong wallet.
+      expect(
+        (
+          await inbox.inject({
+            method: 'POST',
+            url,
+            headers: { ...bearer(b.session.accessToken), ...key() },
+            payload: { signatures: [good, good] },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const forged = await viewer.a.signTypedData(
+        vaultSetupTypedData(proposal.setup),
+      );
+      expect(
+        (
+          await inbox.inject({
+            method: 'POST',
+            url,
+            headers: { ...bearer(b.session.accessToken), ...key() },
+            payload: { signatures: [forged] },
+          })
+        ).statusCode,
+      ).toBeGreaterThanOrEqual(400);
+      const signed = await inbox.inject({
+        method: 'POST',
+        url,
+        headers: { ...bearer(b.session.accessToken), ...key() },
+        payload: { signatures: [good] },
+      });
+      expect(signed.statusCode).toBe(200);
+      expect(SignatureResultSchema.parse(signed.json())).toMatchObject({
+        status: 'READY',
+        approvals: 2,
+      });
+      expect((await list(b.session.accessToken)).items).toHaveLength(0);
+    } finally {
+      await inbox.close();
+    }
+  });
+
+  it('shows a member the business overview and hides it from others', async () => {
+    const owner = await deviceSession();
+    const stranger = await deviceSession();
+    const { workspace: w } = await store.create(owner.session.principalId, {
+      displayName: 'Overview Co',
+      kind: 'BUSINESS',
+    });
+    const r = await app.inject({
+      url: `/v3/workspaces/${w.id}/overview`,
+      headers: bearer(owner.session.accessToken),
+    });
+    expect(r.statusCode).toBe(200);
+    const o = WorkspaceOverviewSchema.parse(r.json());
+    expect(o.role).toBe('OWNER');
+    expect(o.balances).toEqual([]);
+    expect(o.capabilities.leadInbox!.status).toBe('NOT_CONFIGURED');
+    expect(
+      (
+        await app.inject({
+          url: `/v3/workspaces/${w.id}/overview`,
+          headers: bearer(stranger.session.accessToken),
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 });

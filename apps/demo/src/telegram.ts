@@ -111,8 +111,12 @@ import {
 import { FUND_LIMITS, FundService, PostgresFundStore } from './fund-service.js';
 import { registerFundRoutes } from './fund-routes.js';
 import { registerBusinessRoutes } from './business-routes.js';
-import { registerWorkspaceRoutes } from './workspace-routes.js';
+import {
+  registerWorkspaceRoutes,
+  workspaceCapabilities,
+} from './workspace-routes.js';
 import { registerAppRoutes } from './app-routes.js';
+import { AppApprovals } from './app-approvals.js';
 import {
   PostgresWorkspaceStore,
   WorkspaceIdSchema,
@@ -640,6 +644,29 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         balances: vault
           ? { address: (a) => vault.readAddressBalance(a) }
           : undefined,
+        approvals: new AppApprovals(workspaces, {
+          setups: vault
+            ? { service: vault.setups, wake: vault.wake }
+            : undefined,
+          finance,
+          payouts: vault
+            ? { service: vault.payouts, wake: vault.wake }
+            : undefined,
+          governance: vault
+            ? { service: vault.governance, wake: vault.wake }
+            : undefined,
+          revenue: finance ? new WorkspaceRevenue(finance) : undefined,
+        }),
+        invoices: () => workspaceInvoices,
+        books: vault?.books,
+        capabilities: () =>
+          workspaceCapabilities(
+            Boolean(vault),
+            Boolean(workspaceChannels),
+            Boolean(finance),
+            Boolean(vault),
+            vault?.screening(),
+          ),
       });
     }
     const readModel = {

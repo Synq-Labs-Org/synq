@@ -82,6 +82,7 @@ export const NAMED_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   ApprovalItem: approvals.ApprovalItemSchema,
   ApprovalPage: approvals.ApprovalPageSchema,
   TypedData: approvals.TypedDataSchema,
+  SigningStep: approvals.SigningStepSchema,
   SigningRequest: approvals.SigningRequestSchema,
   SignatureSubmit: approvals.SignatureSubmitSchema,
   SignatureResult: approvals.SignatureResultSchema,

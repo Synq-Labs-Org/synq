@@ -42,6 +42,7 @@ import {
 } from '@synq/allocations/policy-data';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { getAddress, keccak256, type Hex } from 'viem';
@@ -896,6 +897,64 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
     expect(
       (await f.payouts.view(f.w.id, f.owner.principalId, p.data.id)).state,
     ).toBe('PAID');
+  });
+  it('serves each owner the exact payout signatures through the approvals inbox', async () => {
+    const f = await payoutFixture();
+    const p = await f.propose();
+    const inbox = new AppApprovals(f.finance.workspaces, {
+      payouts: { service: f.payouts, wake: () => undefined },
+    });
+    const json = (d: unknown) =>
+      JSON.parse(
+        JSON.stringify(d, (_k, v: unknown) =>
+          typeof v === 'bigint' ? String(v) : v,
+        ),
+      );
+    const mandate = mandateTypedData(payoutMandate(p.data));
+    const intent = intentApprovalTypedData(
+      payoutIntent(p.data),
+      p.data.approval,
+    );
+    const mine = await inbox.pending(f.owner.principalId, f.owner.a.address);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.item.purpose).toBe('PAYOUT');
+    expect(mine[0]!.steps.map((s) => s.typedData)).toEqual([
+      json(mandate),
+      json(intent),
+    ]);
+    const theirs = await inbox.pending(
+      f.coowner.principalId,
+      f.coowner.a.address,
+    );
+    expect(theirs[0]!.steps.map((s) => s.typedData)).toEqual([json(intent)]);
+    const id = mine[0]!.item.requestId;
+    await expect(
+      inbox.sign(f.owner.principalId, f.owner.a.address, id, {
+        signatures: [await f.owner.a.signTypedData(intent)],
+      }),
+    ).rejects.toMatchObject({ code: 'SIGNATURES_REQUIRED' });
+    expect(
+      await inbox.sign(f.owner.principalId, f.owner.a.address, id, {
+        signatures: [
+          await f.owner.a.signTypedData(mandate),
+          await f.owner.a.signTypedData(intent),
+        ],
+      }),
+    ).toMatchObject({ status: 'RECORDED', approvals: 1 });
+    expect(
+      await inbox.pending(f.owner.principalId, f.owner.a.address),
+    ).toHaveLength(0);
+    expect(
+      await inbox.sign(
+        f.coowner.principalId,
+        f.coowner.a.address,
+        theirs[0]!.item.requestId,
+        { signatures: [await f.coowner.a.signTypedData(intent)] },
+      ),
+    ).toMatchObject({ status: 'READY', approvals: 2 });
+    expect(
+      (await f.payouts.view(f.w.id, f.owner.principalId, p.data.id)).state,
+    ).toBe('READY');
   });
   it('atomically admits grant, approval nonce, obligation and signed bytes; crash recovers without signing again', async () => {
     const f = await payoutFixture(),

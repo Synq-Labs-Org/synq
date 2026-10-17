@@ -444,7 +444,7 @@
         "summary": "Balances, receivables, payables, leads, approvals, agent highlights.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN, MEMBER, VIEWER",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1149,7 +1149,7 @@
         "summary": "Requests waiting for this wallet's signature, across workspaces.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1202,7 +1202,7 @@
         "summary": "Exact typed data to sign.",
         "x-synq-auth": "session",
         "x-synq-roles": "a required signer",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "requestId",
@@ -1243,7 +1243,7 @@
         "summary": "Submit a wallet signature; the server verifies the signer.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "a required signer",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "requestId",
@@ -3988,10 +3988,18 @@
             "maximum": 9007199254740991
           },
           "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-            "description": "UTC ISO-8601 timestamp"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "description": "UTC ISO-8601 timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the request does not expire"
           }
         },
         "required": [
@@ -4090,6 +4098,23 @@
         ],
         "additionalProperties": false
       },
+      "SigningStep": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "typedData": {
+            "$ref": "#/components/schemas/TypedData"
+          }
+        },
+        "required": [
+          "label",
+          "typedData"
+        ],
+        "additionalProperties": false
+      },
       "SigningRequest": {
         "type": "object",
         "properties": {
@@ -4106,28 +4131,38 @@
             "maxLength": 120,
             "description": "Contract or service that enforces it"
           },
-          "typedData": {
-            "$ref": "#/components/schemas/TypedData"
+          "steps": {
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SigningStep"
+            }
           }
         },
         "required": [
           "request",
           "signer",
           "enforcedBy",
-          "typedData"
+          "steps"
         ],
         "additionalProperties": false
       },
       "SignatureSubmit": {
         "type": "object",
         "properties": {
-          "signature": {
-            "type": "string",
-            "pattern": "^0x[0-9a-fA-F]{130}$"
+          "signatures": {
+            "minItems": 1,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{130}$"
+            }
           }
         },
         "required": [
-          "signature"
+          "signatures"
         ],
         "additionalProperties": false
       },

@@ -171,7 +171,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'OWNER, ADMIN, MEMBER, VIEWER',
     response: business.WorkspaceOverviewSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary:
       'Balances, receivables, payables, leads, approvals, agent highlights.',
   },
@@ -306,7 +306,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal',
     query: PageQuery,
     response: approvals.ApprovalPageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: "Requests waiting for this wallet's signature, across workspaces.",
   },
   {
@@ -316,7 +316,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'a required signer',
     response: approvals.SigningRequestSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Exact typed data to sign.',
   },
   {
@@ -327,7 +327,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'a required signer',
     request: approvals.SignatureSubmitSchema,
     response: approvals.SignatureResultSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Submit a wallet signature; the server verifies the signer.',
   },
   // Notifications, devices, events

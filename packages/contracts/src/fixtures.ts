@@ -290,12 +290,17 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
     request: approvalItem,
     signer: hint(me),
     enforcedBy: 'Workspace Safe and its policy guard',
-    typedData: {
-      domain: { name: 'Example', version: '1', chainId: 5042002 },
-      types: { Example: [{ name: 'amount', type: 'uint256' }] },
-      primaryType: 'Example',
-      message: { amount: '40000000' },
-    },
+    steps: [
+      {
+        label: 'Approve this payment',
+        typedData: {
+          domain: { name: 'Example', version: '1', chainId: 5042002 },
+          types: { Example: [{ name: 'amount', type: 'uint256' }] },
+          primaryType: 'Example',
+          message: { amount: '40000000' },
+        },
+      },
+    ],
   },
   NotificationPage: {
     items: [

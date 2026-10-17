@@ -11,6 +11,9 @@ import {
 } from '@synq/workspaces';
 import type { WorkspaceContributions } from '@synq/workspaces/contributions';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
+import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
+import type { WorkspaceBooks } from '@synq/workspaces/books';
+import type { AppApprovals } from './app-approvals.js';
 import { workspaceHttp } from './workspace-http.js';
 
 /*
@@ -33,6 +36,11 @@ export type AppRouteDeps = {
     /** USDC balance of an address at the latest block. */
     address: (address: Address) => Promise<bigint>;
   };
+  approvals?: AppApprovals;
+  invoices?: () => WorkspaceInvoices | undefined;
+  books?: WorkspaceBooks;
+  /** The /v2 capability report; entries with a status and reason are passed on. */
+  capabilities?: () => Record<string, unknown>;
 };
 
 const USDC = {
@@ -52,6 +60,15 @@ const balance = (settled: bigint, reserved = 0n) => ({
   quarantined: '0',
 });
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
+const STATUSES = new Set([
+  'AVAILABLE',
+  'BLOCKED',
+  'NOT_CONFIGURED',
+  'UNSUPPORTED',
+  'OFFCHAIN_ONLY',
+  'ONCHAIN_AUTHENTICATED',
+  'VERIFIED_TESTNET',
+]);
 const hint = (wallet: string) => `${wallet.slice(0, 6)}…${wallet.slice(-4)}`;
 const txHash = (key: unknown) => {
   const m = /^(0x[0-9a-fA-F]{64})/.exec(String(key ?? ''));
@@ -452,6 +469,145 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
                 status: 'BLOCKED' as const,
                 reason: 'The workspace vault runtime is not configured.',
               },
+        },
+      };
+    }),
+  );
+
+  // MARK: Approvals
+
+  const approvals = deps.approvals;
+  if (approvals) {
+    route('approvals.list');
+    app.get('/v3/approvals', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const q = PageQuery.parse(req.query);
+        const after = cursorValue(q.cursor);
+        const limit = q.limit ?? 20;
+        const all = (await approvals.pending(s.principalId, s.wallet)).map(
+          (p) => p.item,
+        );
+        const start =
+          after === null ? 0 : all.findIndex((i) => i.requestId === after) + 1;
+        const page = all.slice(start, start + limit);
+        return {
+          items: page,
+          nextCursor:
+            start + limit < all.length
+              ? cursorOf(page.at(-1)!.requestId)
+              : null,
+        };
+      }),
+    );
+    route('approvals.get');
+    app.get('/v3/approvals/:requestId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        const { requestId } = z
+          .strictObject({ requestId: z.uuid() })
+          .parse(req.params);
+        const p = await approvals.find(s.principalId, s.wallet, requestId);
+        return {
+          request: p.item,
+          signer: hint(getAddress(s.wallet)),
+          enforcedBy: p.enforcedBy,
+          steps: p.steps,
+        };
+      }),
+    );
+    route('approvals.sign');
+    app.post('/v3/approvals/:requestId/signature', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const { requestId } = z
+          .strictObject({ requestId: z.uuid() })
+          .parse(req.params);
+        return approvals.sign(s.principalId, s.wallet, requestId, req.body);
+      }),
+    );
+  }
+
+  // MARK: Business overview
+
+  route('workspace.overview');
+  app.get('/v3/workspaces/:workspaceId/overview', (req, reply) =>
+    handle(reply, async () => {
+      const s = await auth(req);
+      const { workspaceId } = z
+        .strictObject({ workspaceId: z.uuid() })
+        .parse(req.params);
+      await store.throttle(`workspace:${workspaceId}`, 240);
+      const found = (await store.listWithRoles(s.principalId)).find(
+        (w) => w.workspace.id === workspaceId,
+      );
+      if (!found) throw new WorkspaceError('NOT_FOUND', 404);
+      const w = found.workspace;
+      const invoices = deps.invoices?.();
+      const [held, open, payables, pending] = await Promise.all([
+        vaultBalance(w),
+        invoices
+          ? optional(null, () => invoices.list(w.id, s.principalId))
+          : Promise.resolve(null),
+        deps.books
+          ? optional(null, () => deps.books!.view(w.id, s.principalId))
+          : Promise.resolve(null),
+        approvals
+          ? approvals.pending(s.principalId, s.wallet)
+          : Promise.resolve([]),
+      ]);
+      const receivable = (open ?? []).filter(
+        (i) => i.status === 'ISSUED' || i.status === 'PARTIALLY_PAID',
+      );
+      const owed = (payables?.payables ?? []).filter(
+        (p) => p.status === 'OPEN',
+      );
+      const capabilities: Record<string, { status: string; reason: string }> =
+        {};
+      for (const [key, value] of Object.entries(deps.capabilities?.() ?? {}))
+        if (
+          value &&
+          typeof value === 'object' &&
+          STATUSES.has(String((value as { status?: unknown }).status)) &&
+          typeof (value as { reason?: unknown }).reason === 'string'
+        )
+          capabilities[key] = {
+            status: String((value as { status: string }).status),
+            reason: String((value as { reason: string }).reason).slice(0, 600),
+          };
+      capabilities.leadInbox = {
+        status: 'NOT_CONFIGURED',
+        reason: 'The private lead inbox is not available yet.',
+      };
+      capabilities.agentRuns = {
+        status: 'NOT_CONFIGURED',
+        reason: 'Agent run history is not recorded yet.',
+      };
+      return {
+        workspaceId: w.id,
+        displayName: w.displayName,
+        status: w.status,
+        role: found.role,
+        balances: held ? [held] : [],
+        receivables: {
+          open: receivable.length,
+          units: String(
+            receivable.reduce((n, i) => n + BigInt(i.amountDue), 0n),
+          ),
+        },
+        payables: {
+          open: owed.length,
+          units: String(owed.reduce((n, p) => n + BigInt(p.amount), 0n)),
+        },
+        leads: { open: 0, needsOwner: 0 },
+        pendingApprovals: pending.filter((p) => p.item.workspaceId === w.id)
+          .length,
+        agentHighlights: [],
+        capabilities,
+        freshness: {
+          observedAt: iso(now()),
+          source: held ? ('CHAIN' as const) : ('LEDGER' as const),
+          stale: !held && w.status === 'ACTIVE',
         },
       };
     }),

@@ -37,7 +37,9 @@ export const ApprovalItemSchema = z.strictObject({
   recipientHint: AddressHintSchema.nullable(),
   approvals: z.number().int().min(0),
   threshold: z.number().int().positive(),
-  expiresAt: TimestampSchema,
+  expiresAt: TimestampSchema.nullable().describe(
+    'Null when the request does not expire',
+  ),
 });
 export const ApprovalPageSchema = pageOf(ApprovalItemSchema);
 
@@ -52,6 +54,12 @@ export const TypedDataSchema = z.strictObject({
   message: z.record(z.string(), z.unknown()),
 });
 
+/** One signature the wallet must make; some approvals need two, in order. */
+export const SigningStepSchema = z.strictObject({
+  label: z.string().max(80),
+  typedData: TypedDataSchema,
+});
+
 export const SigningRequestSchema = z.strictObject({
   request: ApprovalItemSchema,
   signer: AddressHintSchema.describe('The wallet that must sign'),
@@ -59,11 +67,15 @@ export const SigningRequestSchema = z.strictObject({
     .string()
     .max(120)
     .describe('Contract or service that enforces it'),
-  typedData: TypedDataSchema,
+  steps: z.array(SigningStepSchema).min(1).max(3),
 });
 
+/** One signature per step, in the same order as `steps`. */
 export const SignatureSubmitSchema = z.strictObject({
-  signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+  signatures: z
+    .array(z.string().regex(/^0x[0-9a-fA-F]{130}$/))
+    .min(1)
+    .max(3),
 });
 export const SignatureResultSchema = z.strictObject({
   status: z.enum(['RECORDED', 'READY', 'SUBMITTED', 'REJECTED']),

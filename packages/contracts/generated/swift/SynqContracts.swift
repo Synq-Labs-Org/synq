@@ -1381,10 +1381,10 @@ public struct ApprovalItem: Codable, Sendable, Equatable {
     public var recipientHint: String?
     public var approvals: Int
     public var threshold: Int
-    /// UTC ISO-8601 timestamp
-    public var expiresAt: String
+    /// Null when the request does not expire
+    public var expiresAt: String?
 
-    public init(requestId: String, workspaceId: String, workspaceName: String, purpose: ApprovalPurpose, summary: String, amount: Money? = nil, recipientHint: String? = nil, approvals: Int, threshold: Int, expiresAt: String) {
+    public init(requestId: String, workspaceId: String, workspaceName: String, purpose: ApprovalPurpose, summary: String, amount: Money? = nil, recipientHint: String? = nil, approvals: Int, threshold: Int, expiresAt: String? = nil) {
         self.requestId = requestId
         self.workspaceId = workspaceId
         self.workspaceName = workspaceName
@@ -1432,27 +1432,37 @@ public struct TypedData: Codable, Sendable, Equatable {
     }
 }
 
+public struct SigningStep: Codable, Sendable, Equatable {
+    public var label: String
+    public var typedData: TypedData
+
+    public init(label: String, typedData: TypedData) {
+        self.label = label
+        self.typedData = typedData
+    }
+}
+
 public struct SigningRequest: Codable, Sendable, Equatable {
     public var request: ApprovalItem
     /// The wallet that must sign
     public var signer: String
     /// Contract or service that enforces it
     public var enforcedBy: String
-    public var typedData: TypedData
+    public var steps: [SigningStep]
 
-    public init(request: ApprovalItem, signer: String, enforcedBy: String, typedData: TypedData) {
+    public init(request: ApprovalItem, signer: String, enforcedBy: String, steps: [SigningStep]) {
         self.request = request
         self.signer = signer
         self.enforcedBy = enforcedBy
-        self.typedData = typedData
+        self.steps = steps
     }
 }
 
 public struct SignatureSubmit: Codable, Sendable, Equatable {
-    public var signature: String
+    public var signatures: [String]
 
-    public init(signature: String) {
-        self.signature = signature
+    public init(signatures: [String]) {
+        self.signatures = signatures
     }
 }
 
