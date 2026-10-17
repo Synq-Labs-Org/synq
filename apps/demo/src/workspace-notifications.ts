@@ -232,47 +232,12 @@ export class WorkspaceNotifications {
         payout.txHash !== payload.txHash
       )
         continue;
-      const p = payout.data,
-        at = Number(e.executed_at);
-      const card = ContractorPaymentCardSchema.parse({
-        ...arcCardBase(
-          {
-            groupId: p.workspaceId,
-            groupLabel: String(e.display_name),
-            issuedAt: at,
-            executionMode: this.mode,
-            actions: [
-              {
-                kind: 'EXPLORER',
-                label: 'View receipt',
-                url: `https://explorer.testnet.arc.io/tx/${payout.txHash}`,
-                style: 'SECONDARY',
-              },
-            ],
-          },
-          at,
-          'payout',
-          p.id,
-          payout.txHash!,
-        ),
-        type: 'CONTRACTOR_PAYMENT',
-        chainId: 5042002,
-        paymentId: p.id,
-        recipient: {
-          label: 'Verified supplier',
-          address: p.recipient,
-          verified: true,
-        },
-        amount: { amount: formatUnits(BigInt(p.amount), 6), symbol: 'USDC' },
-        route: 'VAULT_POLICY_PAY',
-        obligationRef: null,
-        approvals: {
-          counted: Object.keys(payout.signatures).length,
-          required: Number(e.threshold),
-        },
-        status: 'CONFIRMED',
-        transactionHash: payout.txHash,
-        evidenceHash: p.vendorChangeHash,
+      const p = payout.data;
+      const card = payoutReceiptCard(payout, {
+        displayName: String(e.display_name),
+        threshold: Number(e.threshold),
+        executedAt: Number(e.executed_at),
+        mode: this.mode,
       });
       if (
         await this.enqueue(
@@ -314,4 +279,58 @@ export class WorkspaceNotifications {
       this.deliveryAuthorized(ws, dest, eventId),
     );
   }
+}
+
+/** The receipt card for a PAID workspace payout, as relayed to verified chat bindings. */
+export function payoutReceiptCard(
+  payout: NonNullable<Awaited<ReturnType<WorkspacePayouts['record']>>>,
+  input: {
+    displayName: string;
+    threshold: number;
+    executedAt: number;
+    mode: 'LIVE_ARC_TESTNET' | 'LOCAL_FIXTURE';
+  },
+) {
+  const p = payout.data,
+    at = input.executedAt;
+  return ContractorPaymentCardSchema.parse({
+    ...arcCardBase(
+      {
+        groupId: p.workspaceId,
+        groupLabel: input.displayName,
+        issuedAt: at,
+        executionMode: input.mode,
+        actions: [
+          {
+            kind: 'EXPLORER',
+            label: 'View receipt',
+            url: `https://explorer.testnet.arc.io/tx/${payout.txHash}`,
+            style: 'SECONDARY',
+          },
+        ],
+      },
+      at,
+      'payout',
+      p.id,
+      payout.txHash!,
+    ),
+    type: 'CONTRACTOR_PAYMENT',
+    chainId: 5042002,
+    paymentId: p.id,
+    recipient: {
+      label: 'Verified supplier',
+      address: p.recipient,
+      verified: true,
+    },
+    amount: { amount: formatUnits(BigInt(p.amount), 6), symbol: 'USDC' },
+    route: 'VAULT_POLICY_PAY',
+    obligationRef: null,
+    approvals: {
+      counted: Object.keys(payout.signatures).length,
+      required: input.threshold,
+    },
+    status: 'CONFIRMED',
+    transactionHash: payout.txHash,
+    evidenceHash: p.vendorChangeHash,
+  });
 }
