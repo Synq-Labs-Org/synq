@@ -26,12 +26,14 @@ final class ContractFixtureTests: XCTestCase {
         _ = try fixture("ApprovalPage", as: ApprovalPage.self)
         _ = try fixture("SigningRequest", as: SigningRequest.self)
         _ = try fixture("NotificationPage", as: NotificationPage.self)
+        _ = try fixture("ClientLeadList", as: ClientLeadList.self)
+        _ = try fixture("ClientLeadDetail", as: ClientLeadDetail.self)
     }
 
     /// Every fixture the generator writes is covered by the test above.
     func testNoFixtureIsSkipped() throws {
         let names = try FileManager.default.contentsOfDirectory(atPath: Self.fixtures.path).filter { $0.hasSuffix(".json") }.sorted()
-        XCTAssertEqual(names, ["AgentRunDetail.json", "ApprovalPage.json", "Contexts.json", "InboxPage.json", "LeadDetail.json",
+        XCTAssertEqual(names, ["AgentRunDetail.json", "ApprovalPage.json", "ClientLeadDetail.json", "ClientLeadList.json", "Contexts.json", "InboxPage.json", "LeadDetail.json",
                                "Mandates.json", "Meta.json", "NotificationPage.json", "PersonalOverview.json",
                                "SigningRequest.json", "WorkspaceOverview.json"])
     }
