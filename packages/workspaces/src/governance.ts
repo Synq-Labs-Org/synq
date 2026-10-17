@@ -52,6 +52,20 @@ export class WorkspaceGovernance {
   get workspaces() {
     return this.finance.workspaces;
   }
+  /** A confirmed action already used this Safe nonce: the authority read is behind the chain. */
+  private async assertNonceFresh(
+    sql: {
+      query(q: string, v?: unknown[]): Promise<{ rowCount: number | null }>;
+    },
+    workspaceId: string,
+    nonce: bigint,
+  ) {
+    const used = await sql.query(
+      "SELECT 1 FROM synq_ws_safe_actions WHERE workspace_id=$1 AND state='CONFIRMED' AND data->>'nonce'=$2",
+      [workspaceId, String(nonce)],
+    );
+    if (used.rowCount) throw new WorkspaceError('SAFE_NONCE_PENDING', 409);
+  }
   async record(id: string) {
     const r = await this.workspaces.pool.query(
       'SELECT * FROM synq_ws_safe_actions WHERE id=$1',
@@ -91,6 +105,7 @@ export class WorkspaceGovernance {
       await sql.query('SELECT id FROM synq_workspaces WHERE id=$1 FOR UPDATE', [
         workspaceId,
       ]);
+      await this.assertNonceFresh(sql, workspaceId, a.nonce);
       const fields =
         b.kind === 'PAY_VENDOR'
           ? await (async () => {
@@ -239,6 +254,7 @@ export class WorkspaceGovernance {
     const m = await this.workspaces.membership(workspaceId, principalId);
     if (m.role !== 'OWNER') throw new WorkspaceError('OWNER_REQUIRED', 403);
     const a = await this.finance.authority(workspaceId);
+    await this.assertNonceFresh(this.workspaces.pool, workspaceId, a.nonce);
     const action = SafeActionSchema.parse({
       id: randomUUID(),
       workspaceId,
@@ -273,6 +289,7 @@ export class WorkspaceGovernance {
         )
       ).rows[0];
       if (!r) throw new WorkspaceError('REFUND_NOT_FOUND', 404);
+      await this.assertNonceFresh(sql, workspaceId, a.nonce);
       if (r.state !== 'REVIEW') throw new WorkspaceError('REFUND_NOT_PENDING');
       if (r.action_id) {
         const prior = await this.record(String(r.action_id));

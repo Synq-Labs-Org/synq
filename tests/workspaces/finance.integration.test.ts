@@ -1190,6 +1190,14 @@ describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signe
       'CONFIRMED',
     );
     expect(f.govSigned()).toBe(1);
+    // The authority read still shows the spent nonce: no new action until it catches up.
+    await expect(
+      f.gov.propose(f.w.id, f.owner.principalId, {
+        kind: 'QUEUE_CAPS',
+        perPaymentCap: '1000',
+        windowCap: '2000',
+      }),
+    ).rejects.toMatchObject({ code: 'SAFE_NONCE_PENDING' });
   });
   it('G4/G5 pays an above-budget payout only through a fresh full Safe quorum, screened, reserve-checked and booked once', async () => {
     const f = await governanceFixture();
