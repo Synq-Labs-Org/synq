@@ -410,7 +410,8 @@ if (process.env.SYNQ_DYNAMIC_ESCROW_LIVE !== '1') {
       BigInt(view.deal.escrow!.escrowDealId),
     );
     const freelancerGain =
-      (await balance(freelancer.address)) - BigInt(manifest.before!.freelancer!);
+      (await balance(freelancer.address)) -
+      BigInt(manifest.before!.freelancer!);
     if (freelancerGain !== 5000n) throw new Error('FREELANCER_RECONCILIATION');
     if (
       onChain.milestones[0]!.status !== 'Withdrawn' ||
