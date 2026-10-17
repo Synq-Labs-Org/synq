@@ -182,6 +182,33 @@ export class WorkspaceDeviceSessions {
     await sql.query('DELETE FROM synq_ws_sessions WHERE device_session_id=$1', [
       sessionId,
     ]);
+    await this.dropPush(sql, 'device_session_id', sessionId, now);
+  }
+
+  /**
+   * Push tokens registered by a signed-out session stop receiving pushes, and
+   * their queued deliveries are skipped. (The notification tables belong to a
+   * separate module that may not be installed.)
+   */
+  private async dropPush(
+    sql: PoolClient,
+    column: 'device_session_id' | 'principal_id',
+    value: string,
+    now: number,
+  ) {
+    const exists = await sql.query(
+      "SELECT to_regclass('synq_device_push_tokens') AS t",
+    );
+    if (!exists.rows[0]?.t) return;
+    const gone = await sql.query(
+      `UPDATE synq_device_push_tokens SET revoked_at=$2 WHERE ${column}::text=$1 AND revoked_at IS NULL RETURNING device_id`,
+      [value, now],
+    );
+    if (gone.rowCount)
+      await sql.query(
+        "UPDATE synq_push_deliveries SET state='SKIPPED', updated_at=$2 WHERE state='PENDING' AND device_id = ANY($1::uuid[])",
+        [gone.rows.map((r) => String(r.device_id)), now],
+      );
   }
 
   /** Ends the caller's session: its device session too, when it has one. */
@@ -209,6 +236,7 @@ export class WorkspaceDeviceSessions {
       await sql.query('DELETE FROM synq_ws_sessions WHERE principal_id=$1', [
         principalId,
       ]);
+      await this.dropPush(sql, 'principal_id', principalId, this.now());
       return { revoked: devices.rowCount! + plain.rowCount! };
     });
   }

@@ -32,6 +32,19 @@ CREATE INDEX synq_push_deliveries_pending ON synq_push_deliveries(state, updated
 `,
     down: `DROP TABLE synq_push_deliveries, synq_device_push_tokens, synq_user_notifications;`,
   },
+  {
+    // The device session that registered a push token, so signing that session
+    // out (or revoking it) also stops the pushes.
+    version: 2,
+    up: `
+ALTER TABLE synq_device_push_tokens ADD COLUMN device_session_id uuid;
+CREATE INDEX synq_device_push_session ON synq_device_push_tokens(device_session_id);
+`,
+    down: `
+DROP INDEX synq_device_push_session;
+ALTER TABLE synq_device_push_tokens DROP COLUMN device_session_id;
+`,
+  },
 ] as const;
 
 export type NotificationCategory = z.output<typeof NotificationCategorySchema>;
@@ -72,7 +85,8 @@ export function notificationEventId(purpose: string, ...parts: string[]) {
 
 const digest = (s: string) => createHash('sha256').update(s).digest('hex');
 const iso = (s: number) => new Date(s * 1000).toISOString();
-const DEEP_LINK = /^\/[A-Za-z0-9/_-]{1,200}$/;
+// One site-relative path. A second leading slash would be a protocol-relative URL.
+const DEEP_LINK = /^\/(?!\/)[A-Za-z0-9/_-]{1,200}$/;
 const STAFF = ['OWNER', 'ADMIN'];
 
 export type NotifyInput = {
@@ -292,7 +306,11 @@ export class WorkspaceNotifications {
     return { ok: true as const };
   }
 
-  async registerDevice(principalId: string, body: unknown) {
+  async registerDevice(
+    principalId: string,
+    body: unknown,
+    deviceSessionId: string | null = null,
+  ) {
     const d = DeviceRegistrationSchema.parse(body);
     const now = this.now();
     return this.store.transaction(async (sql) => {
@@ -310,9 +328,9 @@ export class WorkspaceNotifications {
         [tokenDigest, principalId, now],
       );
       await sql.query(
-        `INSERT INTO synq_device_push_tokens(device_id,principal_id,apns_token_digest,apns_token,environment,locale,muted,quiet_hours,registered_at,revoked_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL)
-         ON CONFLICT(principal_id,device_id) DO UPDATE SET apns_token_digest=$3, apns_token=$4, environment=$5, locale=$6, muted=$7, quiet_hours=$8, registered_at=$9, revoked_at=NULL`,
+        `INSERT INTO synq_device_push_tokens(device_id,principal_id,apns_token_digest,apns_token,environment,locale,muted,quiet_hours,registered_at,revoked_at,device_session_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10)
+         ON CONFLICT(principal_id,device_id) DO UPDATE SET apns_token_digest=$3, apns_token=$4, environment=$5, locale=$6, muted=$7, quiet_hours=$8, registered_at=$9, revoked_at=NULL, device_session_id=$10`,
         [
           d.deviceId,
           principalId,
@@ -323,6 +341,7 @@ export class WorkspaceNotifications {
           JSON.stringify(d.mutedCategories),
           d.quietHours === null ? null : JSON.stringify(d.quietHours),
           now,
+          deviceSessionId,
         ],
       );
       return { deviceId: d.deviceId, registeredAt: iso(now) };

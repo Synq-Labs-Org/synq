@@ -105,6 +105,16 @@ export type StreamType =
 
 const iso = (s: number) => new Date(s * 1000).toISOString();
 const READERS: Role[] = ['OWNER', 'ADMIN', 'MEMBER'];
+const STAFF: Role[] = ['OWNER', 'ADMIN'];
+const ALL_ROLES: Role[] = ['OWNER', 'ADMIN', 'MEMBER', 'VIEWER'];
+/** Stream markers by who may open the thing they point at. */
+const STAFF_TYPES: StreamType[] = [
+  'LEAD_UPDATED',
+  'LEAD_MESSAGE',
+  'OFFER_UPDATED',
+];
+const READER_TYPES: StreamType[] = ['AGENT_EVENT'];
+const INT8_MAX = 9223372036854775807n;
 const FINAL: RunStatus[] = ['FINALIZED', 'RECONCILED'];
 const ARC_TESTNET = chainProfile('arc-testnet').chainId;
 
@@ -433,13 +443,33 @@ export class AgentEvents {
    * new ones immediately).
    */
   async since(principalId: string, cursor: string | undefined, limit = 100) {
-    const after = cursor === undefined ? null : z.coerce.bigint().parse(cursor);
+    const parsed =
+      cursor === undefined ? null : z.coerce.bigint().min(0n).parse(cursor);
+    // A cursor beyond the newest event is just "nothing new"; it must not overflow the column.
+    const after =
+      parsed === null ? null : parsed > INT8_MAX ? INT8_MAX : parsed;
+    // Lead, offer and run markers carry ids of things only some roles may open.
     const r = await this.store.pool.query(
       `SELECT s.* FROM synq_stream_events s
         WHERE ($2::bigint IS NULL OR s.cursor > $2::bigint)
-          AND (s.principal_id = $1 OR s.workspace_id IN (SELECT workspace_id FROM synq_ws_members WHERE principal_id=$1))
+          AND (s.principal_id = $1 OR EXISTS (
+            SELECT 1 FROM synq_ws_members m
+             WHERE m.workspace_id = s.workspace_id AND m.principal_id = $1
+               AND m.role = ANY(CASE
+                 WHEN s.type = ANY($4::text[]) THEN $5::text[]
+                 WHEN s.type = ANY($6::text[]) THEN $7::text[]
+                 ELSE $8::text[] END)))
         ORDER BY s.cursor LIMIT $3`,
-      [principalId, after === null ? null : String(after), limit + 1],
+      [
+        principalId,
+        after === null ? null : String(after),
+        limit + 1,
+        STAFF_TYPES,
+        STAFF,
+        READER_TYPES,
+        READERS,
+        ALL_ROLES,
+      ],
     );
     const page = r.rows.slice(0, limit);
     return {
