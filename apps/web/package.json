@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@category-labs/mera": "0.2.0",
+    "@synq/contracts": "workspace:*",
     "@synq/identity": "workspace:*",
     "@synq/schemas": "workspace:*",
     "@synq/workspaces": "workspace:*",

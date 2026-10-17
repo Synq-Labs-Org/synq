@@ -1,3 +1,14 @@
+.workspace-shell[data-theme='ledger'] {
+  --workspace-bg: #f6f5f1;
+  --workspace-panel: #ffffff;
+  --workspace-ink: #16191d;
+  --workspace-muted: #5a606a;
+  --workspace-line: #dedbd2;
+  --workspace-font: ui-sans-serif, system-ui, sans-serif;
+  --workspace-heading-font: ui-serif, Georgia, serif;
+  --workspace-heading-case: none;
+  --workspace-radius: 6px;
+}
 .workspace-shell[data-theme='ascii'] {
   --workspace-bg: #000;
   --workspace-ink: #f2f2f2;
