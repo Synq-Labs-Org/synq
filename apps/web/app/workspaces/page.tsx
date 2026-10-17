@@ -1,16 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getAddress } from 'viem';
 import { z } from 'zod';
 import {
-  ARC_WORKSPACE_CHAIN,
-  WalletSchema,
   WorkspaceListSchema,
   WorkspaceViewSchema,
   type Workspace,
 } from '@synq/workspaces/contracts';
 import { api, ApiFailure, describeError } from '../../lib/api';
+import {
+  injectedProvider,
+  NO_WALLET_MESSAGE,
+  signInWithWallet,
+} from '../../lib/wallet-login';
 import './theme.css';
 import { VaultPanel } from './vault-panel';
 import { ChannelPanel } from './channel-panel';
@@ -25,39 +27,6 @@ import { DealPanel } from './deal-panel';
 import { TeamPanel } from './team-panel';
 import { ThemePicker, useWorkspaceTheme } from './theme-picker';
 
-type Provider = {
-  request(input: { method: string; params?: unknown[] }): Promise<unknown>;
-};
-const ChallengeSchema = z.strictObject({
-  challengeId: z.string().uuid(),
-  typedData: z.strictObject({
-    domain: z.strictObject({
-      name: z.literal('Synq Workspace Login'),
-      version: z.literal('1'),
-      chainId: z.literal(ARC_WORKSPACE_CHAIN),
-    }),
-    primaryType: z.literal('WorkspaceLogin'),
-    types: z.record(
-      z.string(),
-      z.array(z.strictObject({ name: z.string(), type: z.string() })),
-    ),
-    message: z.strictObject({
-      challengeId: z.string().uuid(),
-      wallet: WalletSchema,
-      origin: z.string().url(),
-      audience: z.literal('web'),
-      nonce: z.string().regex(/^[0-9a-f]{64}$/),
-      expiresAt: z.string().regex(/^\d+$/),
-      statement: z.literal(
-        'Sign in to Synq on Arc testnet. This signature does not approve payments or vault setup.',
-      ),
-    }),
-  }),
-});
-const SessionSchema = z.strictObject({
-  principalId: z.string(),
-  expiresAt: z.number(),
-});
 const InviteResponseSchema = z.strictObject({
   token: z.string(),
   expiresAt: z.number(),
@@ -159,46 +128,12 @@ export default function WorkspacesPage() {
     };
   }, []);
   async function signIn() {
-    const provider = (window as unknown as { ethereum?: Provider }).ethereum;
-    if (!provider) {
-      setError(
-        'Open this page in a browser with an injected Ethereum wallet. WalletConnect is not connected yet.',
-      );
+    if (!injectedProvider()) {
+      setError(NO_WALLET_MESSAGE);
       return;
     }
     await run(async () => {
-      const wallets = z
-        .array(WalletSchema)
-        .min(1)
-        .parse(await provider.request({ method: 'eth_requestAccounts' }));
-      const wallet = wallets[0]!;
-      const c = await api.post('/v2/auth/challenge', ChallengeSchema, {
-        wallet,
-        audience: 'web',
-      });
-      const m = c.typedData.message;
-      const now = Math.floor(Date.now() / 1000);
-      if (
-        m.origin !== window.location.origin ||
-        m.wallet !== getAddress(wallet) ||
-        m.challengeId !== c.challengeId ||
-        Number(m.expiresAt) <= now ||
-        Number(m.expiresAt) > now + 300
-      )
-        throw new Error('Invalid sign-in challenge');
-      const signature = z
-        .string()
-        .regex(/^0x[0-9a-fA-F]{130}$/)
-        .parse(
-          await provider.request({
-            method: 'eth_signTypedData_v4',
-            params: [wallet, JSON.stringify(c.typedData)],
-          }),
-        );
-      const session = await api.post('/v2/auth/session', SessionSchema, {
-        challengeId: c.challengeId,
-        signature,
-      });
+      const session = await signInWithWallet();
       setPrincipal(session.principalId);
       await refresh();
       const requested = new URLSearchParams(window.location.search).get(
@@ -220,6 +155,10 @@ export default function WorkspacesPage() {
         Arc testnet · identity and workspace setup
       </p>
       <ThemePicker value={theme} onChange={setTheme} />
+      <p>
+        <a href="/personal">Open the new hub</a> for your personal view,
+        business inbox, agents and approvals.
+      </p>
       <h1>Workspaces</h1>
       <p>
         Connect your wallet to create or join a workspace. Signing in grants no

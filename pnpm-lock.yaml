@@ -443,6 +443,9 @@ importers:
       '@synq/allocations':
         specifier: workspace:*
         version: link:../../packages/allocations
+      '@synq/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@synq/dealroom':
         specifier: workspace:*
         version: link:../../packages/dealroom

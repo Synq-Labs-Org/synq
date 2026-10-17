@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 /** Looks the workspace page ships; the first is the default. Matches the iMessage themes. */
 export const WORKSPACE_THEMES = [
+  { id: 'ledger', name: 'Ledger' },
   { id: 'ascii', name: 'ASCII' },
   { id: 'paper', name: 'Paper' },
   { id: 'holo', name: 'Holo' },

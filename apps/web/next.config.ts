@@ -20,6 +20,7 @@ const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   transpilePackages: [
+    '@synq/contracts',
     '@synq/identity',
     '@synq/schemas',
     '@synq/workspaces',
