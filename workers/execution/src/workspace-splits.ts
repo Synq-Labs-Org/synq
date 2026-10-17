@@ -215,7 +215,7 @@ export class WorkspaceSplitWorker {
     ).rows[0]?.data;
     const payouts = (
       await pool.query(
-        "SELECT COALESCE(sum((data->>'amount')::numeric),0) AS spent FROM synq_ws_payouts WHERE workspace_id=$1 AND state IN ('READY','HOLD','SIGNED','PAID') AND (state<>'PAID' OR executed_at>$2)",
+        "SELECT COALESCE(sum((data->>'amount')::numeric),0) AS spent FROM synq_ws_payouts WHERE workspace_id=$1 AND state IN ('READY','HOLD','SIGNED','PAID') AND (state<>'PAID' OR executed_at>$2) AND COALESCE(data->>'route','VAULT_POLICY')='VAULT_POLICY'",
         [p.workspaceId, this.finance.workspaces.now() - 86400],
       )
     ).rows[0];

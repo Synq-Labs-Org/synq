@@ -1101,6 +1101,10 @@ describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signe
     // The operator route never picks it up.
     await expect(f.executor.execute(p.data.id)).rejects.toBeDefined();
     expect(f.signed()).toBe(0);
+    // A full-quorum transfer does not consume the operator's daily budget (100000).
+    const next = await f.propose();
+    await f.approvePayout(next);
+    expect((await f.approvePayout(next, f.coowner)).state).toBe('READY');
   });
   it('G4/G11 refuses a Safe-quorum payout on a sanctions hit or a breached reserve without signing', async () => {
     const hitPort = (listed: Address): WalletScreeningPort => ({
