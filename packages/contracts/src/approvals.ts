@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AddressSchema,
   AddressHintSchema,
   IdSchema,
   MoneySchema,
@@ -63,7 +64,10 @@ export const SigningStepSchema = z.strictObject({
 
 export const SigningRequestSchema = z.strictObject({
   request: ApprovalItemSchema,
-  signer: AddressHintSchema.describe('The wallet that must sign'),
+  signer: AddressHintSchema.describe('The wallet that must sign (display)'),
+  signerAddress: AddressSchema.describe(
+    'Full address of the wallet that must sign; refuse to sign from any other',
+  ),
   enforcedBy: z
     .string()
     .max(120)
@@ -83,3 +87,27 @@ export const SignatureResultSchema = z.strictObject({
   approvals: z.number().int().min(0),
   threshold: z.number().int().positive(),
 });
+
+/**
+ * Typed data exactly as a wallet should receive it: every integer inside
+ * `message` (bigint or number) becomes a decimal string, so no client parses a
+ * uint256 into a float. `domain.chainId` stays a number (always below 2^53).
+ */
+export function walletTypedData(data: unknown): Record<string, unknown> {
+  const plain = JSON.parse(
+    JSON.stringify(data, (_k, v: unknown) =>
+      typeof v === 'bigint' ? String(v) : v,
+    ),
+  ) as { message?: unknown; [k: string]: unknown };
+  const strings = (v: unknown): unknown =>
+    typeof v === 'number'
+      ? String(v)
+      : Array.isArray(v)
+        ? v.map(strings)
+        : v && typeof v === 'object'
+          ? Object.fromEntries(
+              Object.entries(v).map(([k, x]) => [k, strings(x)]),
+            )
+          : v;
+  return { ...plain, message: strings(plain.message) };
+}

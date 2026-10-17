@@ -289,6 +289,7 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
   SigningRequest: {
     request: approvalItem,
     signer: hint(me),
+    signerAddress: me,
     enforcedBy: 'Workspace Safe and its policy guard',
     steps: [
       {

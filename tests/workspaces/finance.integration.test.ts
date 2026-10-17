@@ -43,6 +43,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
+import { walletTypedData } from '@synq/contracts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { getAddress, keccak256, type Hex } from 'viem';
@@ -904,12 +905,7 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
     const inbox = new AppApprovals(f.finance.workspaces, {
       payouts: { service: f.payouts, wake: () => undefined },
     });
-    const json = (d: unknown) =>
-      JSON.parse(
-        JSON.stringify(d, (_k, v: unknown) =>
-          typeof v === 'bigint' ? String(v) : v,
-        ),
-      );
+    const json = walletTypedData;
     const mandate = mandateTypedData(payoutMandate(p.data));
     const intent = intentApprovalTypedData(
       payoutIntent(p.data),

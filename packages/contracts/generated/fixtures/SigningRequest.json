@@ -18,6 +18,7 @@
     "expiresAt": "2026-10-17T11:00:00.000Z"
   },
   "signer": "0x1111…1111",
+  "signerAddress": "0x1111111111111111111111111111111111111111",
   "enforcedBy": "Workspace Safe and its policy guard",
   "steps": [
     {

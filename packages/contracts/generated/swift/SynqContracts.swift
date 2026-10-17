@@ -1613,15 +1613,18 @@ public struct SigningStep: Codable, Sendable, Equatable {
 
 public struct SigningRequest: Codable, Sendable, Equatable {
     public var request: ApprovalItem
-    /// The wallet that must sign
+    /// The wallet that must sign (display)
     public var signer: String
+    /// Full address of the wallet that must sign; refuse to sign from any other
+    public var signerAddress: String
     /// Contract or service that enforces it
     public var enforcedBy: String
     public var steps: [SigningStep]
 
-    public init(request: ApprovalItem, signer: String, enforcedBy: String, steps: [SigningStep]) {
+    public init(request: ApprovalItem, signer: String, signerAddress: String, enforcedBy: String, steps: [SigningStep]) {
         self.request = request
         self.signer = signer
+        self.signerAddress = signerAddress
         self.enforcedBy = enforcedBy
         self.steps = steps
     }
@@ -1683,7 +1686,7 @@ public enum NotificationCategory: String, Codable, Sendable, CaseIterable, Equat
     }
 }
 
-public struct Notification: Codable, Sendable, Equatable {
+public struct AppNotification: Codable, Sendable, Equatable {
     public var notificationId: String
     public var eventId: String
     public var category: NotificationCategory
@@ -1709,11 +1712,11 @@ public struct Notification: Codable, Sendable, Equatable {
 }
 
 public struct NotificationPage: Codable, Sendable, Equatable {
-    public var items: [Notification]
+    public var items: [AppNotification]
     public var nextCursor: String?
     public var unreadCount: Int
 
-    public init(items: [Notification], nextCursor: String? = nil, unreadCount: Int) {
+    public init(items: [AppNotification], nextCursor: String? = nil, unreadCount: Int) {
         self.items = items
         self.nextCursor = nextCursor
         self.unreadCount = unreadCount

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { walletTypedData } from '@synq/contracts';
 import { formatUnits, getAddress, type Hex } from 'viem';
 import { z } from 'zod';
 import {
@@ -91,13 +92,8 @@ const hint = (a: string) => {
   return `${w.slice(0, 6)}…${w.slice(-4)}`;
 };
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
-/** JSON-safe typed data (bigints as decimal strings), as wallets expect it. */
-const plain = (data: unknown) =>
-  JSON.parse(
-    JSON.stringify(data, (_k, v: unknown) =>
-      typeof v === 'bigint' ? String(v) : v,
-    ),
-  ) as Record<string, unknown>;
+/** Typed data as wallets receive it (integers in the message as decimal strings). */
+const plain = walletTypedData;
 /** A stable id per request, so the same pending item keeps its id across reads. */
 export function approvalId(
   purpose: string,
@@ -166,7 +162,10 @@ export class AppApprovals {
             },
             enforcedBy: 'Safe vault factory on Arc testnet',
             steps: [
-              { label: 'Approve the vault setup', typedData: v.typedData },
+              {
+                label: 'Approve the vault setup',
+                typedData: plain(v.typedData),
+              },
             ],
             submit: async ([s]) => {
               const p = await setups.service.approve(w.id, principalId, s!);

@@ -11,6 +11,7 @@ import { AppApprovals } from '../../apps/demo/src/app-approvals.js';
 import { WorkspaceLeads } from '../../packages/workspaces/src/leads.js';
 import { WorkspaceOffers } from '../../packages/workspaces/src/offers.js';
 import {
+  walletTypedData,
   InboxPageSchema,
   LeadDetailSchema,
   LeadInviteSchema,
@@ -566,11 +567,15 @@ describe('v3 approvals inbox', () => {
         ).json(),
       );
       expect(detail.steps).toHaveLength(1);
-      const expected = JSON.parse(
-        JSON.stringify(vaultSetupTypedData(proposal.setup), (_k, v: unknown) =>
-          typeof v === 'bigint' ? String(v) : v,
-        ),
-      );
+      expect(getAddress(detail.signerAddress)).toBe(getAddress(b.a.address));
+      // Wallets get integers as decimal strings, never JSON numbers.
+      const numbers = (v: unknown): boolean =>
+        typeof v === 'number' ||
+        (Array.isArray(v)
+          ? v.some(numbers)
+          : !!v && typeof v === 'object' && Object.values(v).some(numbers));
+      expect(numbers(detail.steps[0]!.typedData.message)).toBe(false);
+      const expected = walletTypedData(vaultSetupTypedData(proposal.setup));
       expect(detail.steps[0]!.typedData).toEqual(expected);
       // Another principal cannot read B's request, and an unknown id looks the same.
       for (const [t, id] of [

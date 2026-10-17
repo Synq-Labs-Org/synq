@@ -515,6 +515,7 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
         return {
           request: p.item,
           signer: hint(getAddress(s.wallet)),
+          signerAddress: getAddress(s.wallet),
           enforcedBy: p.enforcedBy,
           steps: p.steps,
         };

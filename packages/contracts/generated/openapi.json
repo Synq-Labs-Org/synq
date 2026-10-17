@@ -549,7 +549,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["AGENT", "HUMAN", "FROZEN"]
+              "enum": [
+                "AGENT",
+                "HUMAN",
+                "FROZEN"
+              ]
             }
           }
         ],
@@ -1771,7 +1775,10 @@
             "type": "boolean"
           }
         },
-        "required": ["error", "message"],
+        "required": [
+          "error",
+          "message"
+        ],
         "additionalProperties": false
       },
       "Ok": {
@@ -1782,7 +1789,9 @@
             "const": true
           }
         },
-        "required": ["ok"],
+        "required": [
+          "ok"
+        ],
         "additionalProperties": false
       },
       "ProofLevel": {
@@ -1819,20 +1828,36 @@
             "maxLength": 600
           }
         },
-        "required": ["status", "reason"],
+        "required": [
+          "status",
+          "reason"
+        ],
         "additionalProperties": false
       },
       "WorkspaceKind": {
         "type": "string",
-        "enum": ["PERSONAL", "GROUP", "BUSINESS"]
+        "enum": [
+          "PERSONAL",
+          "GROUP",
+          "BUSINESS"
+        ]
       },
       "WorkspaceStatus": {
         "type": "string",
-        "enum": ["FORMING", "LAUNCHING", "ACTIVE"]
+        "enum": [
+          "FORMING",
+          "LAUNCHING",
+          "ACTIVE"
+        ]
       },
       "Role": {
         "type": "string",
-        "enum": ["OWNER", "ADMIN", "MEMBER", "VIEWER"]
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "MEMBER",
+          "VIEWER"
+        ]
       },
       "Money": {
         "type": "object",
@@ -1862,7 +1887,13 @@
             "description": "Integer token base units as a decimal string"
           }
         },
-        "required": ["assetId", "symbol", "chainId", "decimals", "units"],
+        "required": [
+          "assetId",
+          "symbol",
+          "chainId",
+          "decimals",
+          "units"
+        ],
         "additionalProperties": false
       },
       "Balance": {
@@ -1930,13 +1961,22 @@
           },
           "source": {
             "type": "string",
-            "enum": ["CHAIN", "PROVIDER", "LEDGER", "CACHE"]
+            "enum": [
+              "CHAIN",
+              "PROVIDER",
+              "LEDGER",
+              "CACHE"
+            ]
           },
           "stale": {
             "type": "boolean"
           }
         },
-        "required": ["observedAt", "source", "stale"],
+        "required": [
+          "observedAt",
+          "source",
+          "stale"
+        ],
         "additionalProperties": false
       },
       "MetaRoute": {
@@ -1947,10 +1987,16 @@
           },
           "status": {
             "type": "string",
-            "enum": ["PLANNED", "IMPLEMENTED"]
+            "enum": [
+              "PLANNED",
+              "IMPLEMENTED"
+            ]
           }
         },
-        "required": ["id", "status"],
+        "required": [
+          "id",
+          "status"
+        ],
         "additionalProperties": false
       },
       "Meta": {
@@ -1966,7 +2012,10 @@
             }
           }
         },
-        "required": ["contractVersion", "routes"],
+        "required": [
+          "contractVersion",
+          "routes"
+        ],
         "additionalProperties": false
       },
       "Device": {
@@ -1985,10 +2034,17 @@
           },
           "platform": {
             "type": "string",
-            "enum": ["ios", "web"]
+            "enum": [
+              "ios",
+              "web"
+            ]
           }
         },
-        "required": ["deviceId", "name", "platform"],
+        "required": [
+          "deviceId",
+          "name",
+          "platform"
+        ],
         "additionalProperties": false
       },
       "DeviceSessionRequest": {
@@ -2007,7 +2063,11 @@
             "$ref": "#/components/schemas/Device"
           }
         },
-        "required": ["challengeId", "signature", "device"],
+        "required": [
+          "challengeId",
+          "signature",
+          "device"
+        ],
         "additionalProperties": false
       },
       "DeviceCodeSessionRequest": {
@@ -2021,7 +2081,10 @@
             "$ref": "#/components/schemas/Device"
           }
         },
-        "required": ["code", "device"],
+        "required": [
+          "code",
+          "device"
+        ],
         "additionalProperties": false
       },
       "RefreshRequest": {
@@ -2037,7 +2100,10 @@
             "pattern": "^[0-9a-f]{64}$"
           }
         },
-        "required": ["deviceId", "refreshToken"],
+        "required": [
+          "deviceId",
+          "refreshToken"
+        ],
         "additionalProperties": false
       },
       "DeviceSession": {
@@ -2097,7 +2163,10 @@
           },
           "platform": {
             "type": "string",
-            "enum": ["ios", "web"]
+            "enum": [
+              "ios",
+              "web"
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -2135,7 +2204,9 @@
             }
           }
         },
-        "required": ["sessions"],
+        "required": [
+          "sessions"
+        ],
         "additionalProperties": false
       },
       "RevokeAll": {
@@ -2147,7 +2218,9 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["revoked"],
+        "required": [
+          "revoked"
+        ],
         "additionalProperties": false
       },
       "Context": {
@@ -2160,7 +2233,10 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["PERSONAL", "BUSINESS"]
+            "enum": [
+              "PERSONAL",
+              "BUSINESS"
+            ]
           },
           "workspaceId": {
             "anyOf": [
@@ -2234,7 +2310,11 @@
             }
           }
         },
-        "required": ["principalId", "walletHint", "contexts"],
+        "required": [
+          "principalId",
+          "walletHint",
+          "contexts"
+        ],
         "additionalProperties": false
       },
       "WalletBalance": {
@@ -2259,7 +2339,12 @@
             "$ref": "#/components/schemas/Freshness"
           }
         },
-        "required": ["address", "label", "balances", "freshness"],
+        "required": [
+          "address",
+          "label",
+          "balances",
+          "freshness"
+        ],
         "additionalProperties": false
       },
       "CircleSummary": {
@@ -2448,7 +2533,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["PENDING", "FINAL", "FAILED", "REFUNDED"]
+            "enum": [
+              "PENDING",
+              "FINAL",
+              "FAILED",
+              "REFUNDED"
+            ]
           },
           "txHash": {
             "anyOf": [
@@ -2512,7 +2602,13 @@
             }
           }
         },
-        "required": ["principalId", "wallets", "circles", "vaults", "recent"],
+        "required": [
+          "principalId",
+          "wallets",
+          "circles",
+          "vaults",
+          "recent"
+        ],
         "additionalProperties": false
       },
       "CirclePage": {
@@ -2537,7 +2633,10 @@
             ]
           }
         },
-        "required": ["items", "nextCursor"],
+        "required": [
+          "items",
+          "nextCursor"
+        ],
         "additionalProperties": false
       },
       "CircleMember": {
@@ -2592,7 +2691,13 @@
           },
           "status": {
             "type": "string",
-            "enum": ["REQUESTED", "PENDING", "CREDITED", "REFUNDED", "EXPIRED"]
+            "enum": [
+              "REQUESTED",
+              "PENDING",
+              "CREDITED",
+              "REFUNDED",
+              "EXPIRED"
+            ]
           },
           "txHash": {
             "anyOf": [
@@ -2631,7 +2736,12 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["PAYMENT", "REFUND", "SETTINGS", "OTHER"]
+            "enum": [
+              "PAYMENT",
+              "REFUND",
+              "SETTINGS",
+              "OTHER"
+            ]
           },
           "title": {
             "type": "string",
@@ -2769,7 +2879,13 @@
       },
       "EventActor": {
         "type": "string",
-        "enum": ["MODEL", "DETERMINISTIC", "HUMAN", "CHAIN", "PROVIDER"]
+        "enum": [
+          "MODEL",
+          "DETERMINISTIC",
+          "HUMAN",
+          "CHAIN",
+          "PROVIDER"
+        ]
       },
       "AgentRunSummary": {
         "type": "object",
@@ -3034,7 +3150,11 @@
           },
           "finality": {
             "type": "string",
-            "enum": ["PENDING", "FINALIZED", "REORGED"]
+            "enum": [
+              "PENDING",
+              "FINALIZED",
+              "REORGED"
+            ]
           },
           "explorerUrl": {
             "anyOf": [
@@ -3091,7 +3211,10 @@
             ]
           }
         },
-        "required": ["items", "nextCursor"],
+        "required": [
+          "items",
+          "nextCursor"
+        ],
         "additionalProperties": false
       },
       "AgentRunDetail": {
@@ -3113,7 +3236,11 @@
             }
           }
         },
-        "required": ["run", "events", "receipts"],
+        "required": [
+          "run",
+          "events",
+          "receipts"
+        ],
         "additionalProperties": false
       },
       "AgentLease": {
@@ -3225,7 +3352,10 @@
             }
           }
         },
-        "required": ["capability", "leases"],
+        "required": [
+          "capability",
+          "leases"
+        ],
         "additionalProperties": false
       },
       "WorkspaceOverview": {
@@ -3266,7 +3396,10 @@
                 "description": "Integer token base units as a decimal string"
               }
             },
-            "required": ["open", "units"],
+            "required": [
+              "open",
+              "units"
+            ],
             "additionalProperties": false
           },
           "payables": {
@@ -3283,7 +3416,10 @@
                 "description": "Integer token base units as a decimal string"
               }
             },
-            "required": ["open", "units"],
+            "required": [
+              "open",
+              "units"
+            ],
             "additionalProperties": false
           },
           "leads": {
@@ -3300,7 +3436,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": ["open", "needsOwner"],
+            "required": [
+              "open",
+              "needsOwner"
+            ],
             "additionalProperties": false
           },
           "pendingApprovals": {
@@ -3369,11 +3508,19 @@
       },
       "LeadHandling": {
         "type": "string",
-        "enum": ["AGENT", "HUMAN", "FROZEN"]
+        "enum": [
+          "AGENT",
+          "HUMAN",
+          "FROZEN"
+        ]
       },
       "LeadSource": {
         "type": "string",
-        "enum": ["TELEGRAM", "WEB", "IMESSAGE"]
+        "enum": [
+          "TELEGRAM",
+          "WEB",
+          "IMESSAGE"
+        ]
       },
       "LeadSummary": {
         "type": "object",
@@ -3452,7 +3599,10 @@
             ]
           }
         },
-        "required": ["items", "nextCursor"],
+        "required": [
+          "items",
+          "nextCursor"
+        ],
         "additionalProperties": false
       },
       "LeadMessage": {
@@ -3465,7 +3615,12 @@
           },
           "author": {
             "type": "string",
-            "enum": ["LEAD", "AGENT", "STAFF", "SYSTEM"]
+            "enum": [
+              "LEAD",
+              "AGENT",
+              "STAFF",
+              "SYSTEM"
+            ]
           },
           "text": {
             "type": "string",
@@ -3522,7 +3677,12 @@
             "description": "Integer token base units as a decimal string"
           }
         },
-        "required": ["description", "quantity", "unitUnits", "totalUnits"],
+        "required": [
+          "description",
+          "quantity",
+          "unitUnits",
+          "totalUnits"
+        ],
         "additionalProperties": false
       },
       "OfferMilestone": {
@@ -3551,7 +3711,11 @@
             ]
           }
         },
-        "required": ["label", "units", "dueAt"],
+        "required": [
+          "label",
+          "units",
+          "dueAt"
+        ],
         "additionalProperties": false
       },
       "OfferVersion": {
@@ -3602,7 +3766,10 @@
           },
           "createdBy": {
             "type": "string",
-            "enum": ["AGENT", "STAFF"]
+            "enum": [
+              "AGENT",
+              "STAFF"
+            ]
           },
           "total": {
             "$ref": "#/components/schemas/Money"
@@ -3683,7 +3850,11 @@
                 "maxLength": 200
               }
             },
-            "required": ["granted", "grantedAt", "scope"],
+            "required": [
+              "granted",
+              "grantedAt",
+              "scope"
+            ],
             "additionalProperties": false
           },
           "messages": {
@@ -3730,7 +3901,9 @@
             "maxLength": 4000
           }
         },
-        "required": ["text"],
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "TakeoverRequest": {
@@ -3751,7 +3924,10 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["action", "expectedVersion"],
+        "required": [
+          "action",
+          "expectedVersion"
+        ],
         "additionalProperties": false
       },
       "TakeoverResult": {
@@ -3766,7 +3942,10 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["handling", "handlingVersion"],
+        "required": [
+          "handling",
+          "handlingVersion"
+        ],
         "additionalProperties": false
       },
       "LeadInviteRequest": {
@@ -3774,7 +3953,10 @@
         "properties": {
           "source": {
             "type": "string",
-            "enum": ["TELEGRAM", "WEB"]
+            "enum": [
+              "TELEGRAM",
+              "WEB"
+            ]
           },
           "expiresInSeconds": {
             "type": "integer",
@@ -3782,7 +3964,10 @@
             "maximum": 604800
           }
         },
-        "required": ["source", "expiresInSeconds"],
+        "required": [
+          "source",
+          "expiresInSeconds"
+        ],
         "additionalProperties": false
       },
       "LeadInvite": {
@@ -3815,7 +4000,12 @@
             "description": "UTC ISO-8601 timestamp"
           }
         },
-        "required": ["inviteId", "telegramUrl", "webUrl", "expiresAt"],
+        "required": [
+          "inviteId",
+          "telegramUrl",
+          "webUrl",
+          "expiresAt"
+        ],
         "additionalProperties": false
       },
       "LeadInviteRedeem": {
@@ -3826,7 +4016,9 @@
             "pattern": "^[A-Za-z0-9_-]{16,64}$"
           }
         },
-        "required": ["token"],
+        "required": [
+          "token"
+        ],
         "additionalProperties": false
       },
       "LeadInviteRedeemResult": {
@@ -3841,7 +4033,10 @@
             "type": "boolean"
           }
         },
-        "required": ["leadId", "bound"],
+        "required": [
+          "leadId",
+          "bound"
+        ],
         "additionalProperties": false
       },
       "OfferValidation": {
@@ -3872,12 +4067,20 @@
                   "maxLength": 300
                 }
               },
-              "required": ["rule", "passed", "detail"],
+              "required": [
+                "rule",
+                "passed",
+                "detail"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["allowed", "policyVersion", "checks"],
+        "required": [
+          "allowed",
+          "policyVersion",
+          "checks"
+        ],
         "additionalProperties": false
       },
       "CommercialPolicy": {
@@ -3939,7 +4142,10 @@
                           "description": "UTC ISO-8601 timestamp"
                         }
                       },
-                      "required": ["unitsAvailable", "asOf"],
+                      "required": [
+                        "unitsAvailable",
+                        "asOf"
+                      ],
                       "additionalProperties": false
                     },
                     {
@@ -4012,7 +4218,11 @@
           },
           "state": {
             "type": "string",
-            "enum": ["REVIEW", "ACTIVE", "SUPERSEDED"]
+            "enum": [
+              "REVIEW",
+              "ACTIVE",
+              "SUPERSEDED"
+            ]
           },
           "policyHash": {
             "type": "string",
@@ -4022,10 +4232,19 @@
             "$ref": "#/components/schemas/CommercialPolicy"
           },
           "approvedBy": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": ["version", "state", "policyHash", "policy", "approvedBy"],
+        "required": [
+          "version",
+          "state",
+          "policyHash",
+          "policy",
+          "approvedBy"
+        ],
         "additionalProperties": false
       },
       "CommercialPolicyList": {
@@ -4038,7 +4257,9 @@
             }
           }
         },
-        "required": ["policies"],
+        "required": [
+          "policies"
+        ],
         "additionalProperties": false
       },
       "OfferTerms": {
@@ -4065,7 +4286,11 @@
                   "pattern": "^(0|[1-9][0-9]{0,30})$"
                 }
               },
-              "required": ["sku", "quantity", "unitUnits"],
+              "required": [
+                "sku",
+                "quantity",
+                "unitUnits"
+              ],
               "additionalProperties": false
             }
           },
@@ -4099,7 +4324,11 @@
                   "maximum": 365
                 }
               },
-              "required": ["label", "units", "dueInDays"],
+              "required": [
+                "label",
+                "units",
+                "dueInDays"
+              ],
               "additionalProperties": false
             }
           },
@@ -4137,7 +4366,11 @@
             "maxLength": 300
           }
         },
-        "required": ["rule", "passed", "detail"],
+        "required": [
+          "rule",
+          "passed",
+          "detail"
+        ],
         "additionalProperties": false
       },
       "OfferSendRequest": {
@@ -4152,7 +4385,9 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
           }
         },
-        "required": ["terms"],
+        "required": [
+          "terms"
+        ],
         "additionalProperties": false
       },
       "OfferSendResult": {
@@ -4181,7 +4416,12 @@
             ]
           }
         },
-        "required": ["sent", "checks", "needsOwner", "offer"],
+        "required": [
+          "sent",
+          "checks",
+          "needsOwner",
+          "offer"
+        ],
         "additionalProperties": false
       },
       "ApprovalPurpose": {
@@ -4307,7 +4547,10 @@
             ]
           }
         },
-        "required": ["items", "nextCursor"],
+        "required": [
+          "items",
+          "nextCursor"
+        ],
         "additionalProperties": false
       },
       "TypedData": {
@@ -4337,7 +4580,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["name", "type"],
+                "required": [
+                  "name",
+                  "type"
+                ],
                 "additionalProperties": false
               }
             }
@@ -4353,7 +4599,12 @@
             "additionalProperties": {}
           }
         },
-        "required": ["domain", "types", "primaryType", "message"],
+        "required": [
+          "domain",
+          "types",
+          "primaryType",
+          "message"
+        ],
         "additionalProperties": false
       },
       "SigningStep": {
@@ -4367,7 +4618,10 @@
             "$ref": "#/components/schemas/TypedData"
           }
         },
-        "required": ["label", "typedData"],
+        "required": [
+          "label",
+          "typedData"
+        ],
         "additionalProperties": false
       },
       "SigningRequest": {
@@ -4379,7 +4633,12 @@
           "signer": {
             "type": "string",
             "maxLength": 16,
-            "description": "The wallet that must sign"
+            "description": "The wallet that must sign (display)"
+          },
+          "signerAddress": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "Full address of the wallet that must sign; refuse to sign from any other"
           },
           "enforcedBy": {
             "type": "string",
@@ -4395,7 +4654,13 @@
             }
           }
         },
-        "required": ["request", "signer", "enforcedBy", "steps"],
+        "required": [
+          "request",
+          "signer",
+          "signerAddress",
+          "enforcedBy",
+          "steps"
+        ],
         "additionalProperties": false
       },
       "SignatureSubmit": {
@@ -4411,7 +4676,9 @@
             }
           }
         },
-        "required": ["signatures"],
+        "required": [
+          "signatures"
+        ],
         "additionalProperties": false
       },
       "SignatureResult": {
@@ -4419,7 +4686,12 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["RECORDED", "READY", "SUBMITTED", "REJECTED"]
+            "enum": [
+              "RECORDED",
+              "READY",
+              "SUBMITTED",
+              "REJECTED"
+            ]
           },
           "approvals": {
             "type": "integer",
@@ -4432,7 +4704,11 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["status", "approvals", "threshold"],
+        "required": [
+          "status",
+          "approvals",
+          "threshold"
+        ],
         "additionalProperties": false
       },
       "NotificationCategory": {
@@ -4452,7 +4728,7 @@
           "SECURITY_PAUSE"
         ]
       },
-      "Notification": {
+      "AppNotification": {
         "type": "object",
         "properties": {
           "notificationId": {
@@ -4528,7 +4804,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Notification"
+              "$ref": "#/components/schemas/AppNotification"
             }
           },
           "nextCursor": {
@@ -4549,7 +4825,11 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["items", "nextCursor", "unreadCount"],
+        "required": [
+          "items",
+          "nextCursor",
+          "unreadCount"
+        ],
         "additionalProperties": false
       },
       "MarkRead": {
@@ -4566,7 +4846,9 @@
             }
           }
         },
-        "required": ["notificationIds"],
+        "required": [
+          "notificationIds"
+        ],
         "additionalProperties": false
       },
       "DeviceRegistration": {
@@ -4583,7 +4865,10 @@
           },
           "environment": {
             "type": "string",
-            "enum": ["SANDBOX", "PRODUCTION"]
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ]
           },
           "locale": {
             "type": "string",
@@ -4613,7 +4898,11 @@
                     "maxLength": 60
                   }
                 },
-                "required": ["start", "end", "timeZone"],
+                "required": [
+                  "start",
+                  "end",
+                  "timeZone"
+                ],
                 "additionalProperties": false
               },
               {
@@ -4647,7 +4936,10 @@
             "description": "UTC ISO-8601 timestamp"
           }
         },
-        "required": ["deviceId", "registeredAt"],
+        "required": [
+          "deviceId",
+          "registeredAt"
+        ],
         "additionalProperties": false
       },
       "StreamEvent": {
@@ -4738,7 +5030,10 @@
             ]
           }
         },
-        "required": ["items", "nextCursor"],
+        "required": [
+          "items",
+          "nextCursor"
+        ],
         "additionalProperties": false
       }
     }

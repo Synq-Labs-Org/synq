@@ -96,7 +96,7 @@ export const NAMED_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   SignatureSubmit: approvals.SignatureSubmitSchema,
   SignatureResult: approvals.SignatureResultSchema,
   NotificationCategory: notifications.NotificationCategorySchema,
-  Notification: notifications.NotificationSchema,
+  AppNotification: notifications.NotificationSchema,
   NotificationPage: notifications.NotificationPageSchema,
   MarkRead: notifications.MarkReadSchema,
   DeviceRegistration: notifications.DeviceRegistrationSchema,
