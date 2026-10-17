@@ -19,22 +19,22 @@ A vendor is a name plus a **verified payout wallet**. Signing attests that you i
 
 ## Budgets
 
-| Field | Meaning |
-| --- | --- |
+| Field       | Meaning                                                               |
+| ----------- | --------------------------------------------------------------------- |
 | Per payment | Largest single payment; above it a payout takes the Safe quorum route |
-| Daily | Total for a day |
-| Reserve | Cash to keep untouched |
-| AI daily | How much agent-initiated payments may total in a day |
+| Daily       | Total for a day                                                       |
+| Reserve     | Cash to keep untouched                                                |
+| AI daily    | How much agent-initiated payments may total in a day                  |
 
 Per payment and AI daily cannot exceed daily. A budget can be revoked with a reason.
 
 ## Bills and obligations
 
-| Record | Fields |
-| --- | --- |
-| Vendor bill (payable) | vendor, number, amount, issued and due dates, reference, document text |
-| Milestone (obligation) | reference, vendor, approved amount, status: Approved, Delivered, Accepted, Disputed |
-| Recurring bill | label, kind (Bill, Payroll, Rent, Subscription), amount, next due date, cadence 1 to 366 days |
+| Record                 | Fields                                                                                        |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| Vendor bill (payable)  | vendor, number, amount, issued and due dates, reference, document text                        |
+| Milestone (obligation) | reference, vendor, approved amount, status: Approved, Delivered, Accepted, Disputed           |
+| Recurring bill         | label, kind (Bill, Payroll, Rent, Subscription), amount, next due date, cadence 1 to 366 days |
 
 A payable can be closed as `PAID_ELSEWHERE` or `VOID` with a reason. Recurring bills can be removed with a reason.
 

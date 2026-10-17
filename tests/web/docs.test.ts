@@ -6,7 +6,7 @@ import {
   loadDocs,
   parseFrontmatter,
   renderMarkdown,
-} from '../../apps/web/lib/docs/content';
+} from '../../apps/web/lib/docs/content.js';
 
 const root = path.join(process.cwd(), 'apps/web/content/docs');
 

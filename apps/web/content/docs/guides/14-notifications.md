@@ -7,20 +7,20 @@ Synq tells you that **something happened**, never **what it was**. Notification 
 
 ## Categories
 
-| Category | Title shown |
-| --- | --- |
-| `NEW_LEAD` | New enquiry |
-| `OFFER_ACCEPTED` | An offer was accepted |
-| `CLIENT_DEPOSIT_FINALIZED` | A deposit settled |
-| `AGENT_PAYMENT_FINALIZED` | An agent payment settled |
-| `PAYMENT_BLOCKED` | A payment was blocked |
-| `RISK_REVIEW` | Something needs a review |
-| `ESCROW_DISPUTED` | An escrow was disputed |
-| `CIRCLE_CONTRIBUTION_RECEIVED` | New contribution |
-| `FUND_PROPOSAL` | New fund proposal |
-| `APPROVAL_REQUESTED` | Something needs your signature |
-| `LEASE_EXPIRING` | A lease is expiring |
-| `SECURITY_PAUSE` | Security pause |
+| Category                       | Title shown                    |
+| ------------------------------ | ------------------------------ |
+| `NEW_LEAD`                     | New enquiry                    |
+| `OFFER_ACCEPTED`               | An offer was accepted          |
+| `CLIENT_DEPOSIT_FINALIZED`     | A deposit settled              |
+| `AGENT_PAYMENT_FINALIZED`      | An agent payment settled       |
+| `PAYMENT_BLOCKED`              | A payment was blocked          |
+| `RISK_REVIEW`                  | Something needs a review       |
+| `ESCROW_DISPUTED`              | An escrow was disputed         |
+| `CIRCLE_CONTRIBUTION_RECEIVED` | New contribution               |
+| `FUND_PROPOSAL`                | New fund proposal              |
+| `APPROVAL_REQUESTED`           | Something needs your signature |
+| `LEASE_EXPIRING`               | A lease is expiring            |
+| `SECURITY_PAUSE`               | Security pause                 |
 
 Owners and admins of the workspace are the usual recipients of business alerts. One notification exists per event and person, so a retried job never sends you two.
 
@@ -32,8 +32,8 @@ Open **Notifications** in the hub (or the app) for the list. Each item links to 
 
 Push is **off until you turn it on**. Open **Account**, then **Notifications**, then **Turn on**. iOS asks for permission, and only after you agree does the app register a token.
 
-| What the push contains | What it never contains |
-| --- | --- |
+| What the push contains                           | What it never contains                       |
+| ------------------------------------------------ | -------------------------------------------- |
 | The generic title, the category and the event id | Names, prices, amounts, addresses, deal text |
 
 When you tap a push, the app **only navigates**. The destination loads after your session and membership are checked, and **nothing is approved by the tap**. A device token authenticates nothing.

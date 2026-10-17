@@ -7,21 +7,21 @@ The sales agent is a language model working for your business inside a narrow ca
 
 ## Guarantees
 
-| # | Guarantee | Enforced by |
-| --- | --- | --- |
-| 1 | It never signs and never moves money | It has no key and no signing path; money needs wallet signatures |
-| 2 | An offer is sent only if the validator allows it | Deterministic `validateOffer` against the signed policy |
-| 3 | Prices, discounts and dates in text come from a validated offer | The server builds the offer description from validated terms and strips amounts from model text |
-| 4 | It cannot exceed the owner-approval threshold | `OWNER_THRESHOLD` check; above it the agent hands over |
-| 5 | It cannot sell outside the catalog | `SKU_KNOWN` check |
-| 6 | It cannot go below floors or beyond the discount cap | `PRICE_FLOOR`, `DISCOUNT_CAP` |
-| 7 | It cannot promise rush work without fresh declared capacity | `RUSH_CAPACITY` |
-| 8 | It cannot change the policy | Policy changes need an owner's wallet signature |
-| 9 | "Accepted" in chat is not a signature | Acceptance moves a lead to AGREED_PENDING_SIGNATURES only |
-| 10 | It stops when a person takes over | Handling is re-checked at write time; its in-flight reply is dropped |
-| 11 | A client's message cannot instruct it to break rules | Client text is wrapped as untrusted data; rules are outside the model |
-| 12 | Every step is recorded | Typed agent events, append-only |
-| 13 | It sees only its own lead | One lead's transcript and the catalog; no books, vaults or other leads |
+| #   | Guarantee                                                       | Enforced by                                                                                     |
+| --- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 1   | It never signs and never moves money                            | It has no key and no signing path; money needs wallet signatures                                |
+| 2   | An offer is sent only if the validator allows it                | Deterministic `validateOffer` against the signed policy                                         |
+| 3   | Prices, discounts and dates in text come from a validated offer | The server builds the offer description from validated terms and strips amounts from model text |
+| 4   | It cannot exceed the owner-approval threshold                   | `OWNER_THRESHOLD` check; above it the agent hands over                                          |
+| 5   | It cannot sell outside the catalog                              | `SKU_KNOWN` check                                                                               |
+| 6   | It cannot go below floors or beyond the discount cap            | `PRICE_FLOOR`, `DISCOUNT_CAP`                                                                   |
+| 7   | It cannot promise rush work without fresh declared capacity     | `RUSH_CAPACITY`                                                                                 |
+| 8   | It cannot change the policy                                     | Policy changes need an owner's wallet signature                                                 |
+| 9   | "Accepted" in chat is not a signature                           | Acceptance moves a lead to AGREED_PENDING_SIGNATURES only                                       |
+| 10  | It stops when a person takes over                               | Handling is re-checked at write time; its in-flight reply is dropped                            |
+| 11  | A client's message cannot instruct it to break rules            | Client text is wrapped as untrusted data; rules are outside the model                           |
+| 12  | Every step is recorded                                          | Typed agent events, append-only                                                                 |
+| 13  | It sees only its own lead                                       | One lead's transcript and the catalog; no books, vaults or other leads                          |
 
 ## What the model is given
 

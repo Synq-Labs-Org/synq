@@ -7,22 +7,22 @@ An **approval** in Synq is a signature, made by your own wallet, over a structur
 
 ## Why typed data
 
-A raw hex blob tells you nothing. EIP-712 gives every field a name and a type, and the wallet can display them, for example *recipient*, *amount*, *deadline*. The signature also commits to a **domain**: a name, a version and the chain id (5042002). A signature made for one Synq message type can never be accepted as another.
+A raw hex blob tells you nothing. EIP-712 gives every field a name and a type, and the wallet can display them, for example _recipient_, _amount_, _deadline_. The signature also commits to a **domain**: a name, a version and the chain id (5042002). A signature made for one Synq message type can never be accepted as another.
 
 ## The messages you may be asked to sign
 
-| Domain name | Primary type | What it covers |
-| --- | --- | --- |
-| `Synq Workspace Login` | `WorkspaceLogin` | Proves wallet ownership. **Not an approval** |
-| `Synq Client Wallet` | `ClientWallet` | Links a client's wallet to one lead |
-| `Synq Commercial Policy` | `CommercialPolicy` | The exact policy hash the sales agent may act within |
-| `Synq Deal Agreement` | `DealAgreement` | Client and owner terms: wallets, payee, milestones, total, expiry |
-| `Synq Payment Mandate` | `PaymentMandate` | An owner's limits: recipients, purposes, per-action cap, budget, window |
-| `Synq Payment Approval` | `PaymentApproval` | One exact payment: intent, recipient, amount, obligation reference, nonce, deadline |
-| `Synq Workspace Finance` | `FinanceChange` | A vendor, budget, bill or payable edit, with revision and nonce |
-| `Synq Workspace Revenue Revocation` | `RevokeRevenuePolicy` | Ending a revenue policy |
-| Vault setup | setup typed data | Owners, threshold, caps, delay, gas ceiling |
-| Safe action | action typed data | Vault governance call, payout through the Safe, etc. |
+| Domain name                         | Primary type          | What it covers                                                                      |
+| ----------------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
+| `Synq Workspace Login`              | `WorkspaceLogin`      | Proves wallet ownership. **Not an approval**                                        |
+| `Synq Client Wallet`                | `ClientWallet`        | Links a client's wallet to one lead                                                 |
+| `Synq Commercial Policy`            | `CommercialPolicy`    | The exact policy hash the sales agent may act within                                |
+| `Synq Deal Agreement`               | `DealAgreement`       | Client and owner terms: wallets, payee, milestones, total, expiry                   |
+| `Synq Payment Mandate`              | `PaymentMandate`      | An owner's limits: recipients, purposes, per-action cap, budget, window             |
+| `Synq Payment Approval`             | `PaymentApproval`     | One exact payment: intent, recipient, amount, obligation reference, nonce, deadline |
+| `Synq Workspace Finance`            | `FinanceChange`       | A vendor, budget, bill or payable edit, with revision and nonce                     |
+| `Synq Workspace Revenue Revocation` | `RevokeRevenuePolicy` | Ending a revenue policy                                                             |
+| Vault setup                         | setup typed data      | Owners, threshold, caps, delay, gas ceiling                                         |
+| Safe action                         | action typed data     | Vault governance call, payout through the Safe, etc.                                |
 
 Some approvals need **two or three** signatures in a fixed order (for example a mandate and then the exact payment approval). The approvals page lists them in order.
 

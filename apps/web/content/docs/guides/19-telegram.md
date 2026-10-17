@@ -25,19 +25,19 @@ A chat is bound to one workspace. Until you link your own wallet, the bot says: 
 
 These work in a chat bound to a workspace:
 
-| You type | What happens |
-| --- | --- |
-| `/vendors` | Lists verified vendors and a button to open settings |
-| `pay <vendor> <amount> USDC for <purpose> ref <reference>` | Proposes a payout. Also: `pay <amount> USDC to <vendor> for <purpose>, invoice <reference>` |
-| `/pay status` | Shows payout status |
-| `/bills` | Lists open bills |
-| `/invoices` | Lists invoices |
-| `invoice <payer> <amount> USDC due <YYYY-MM-DD> for <work>` | Drafts an invoice (a draft moves nothing) |
-| `/deals` | Lists deals |
-| `/splits` | Lists revenue allocations |
-| `/swaps` | Lists treasury swap operations |
-| `/treasury` | Shows the vault balance and block |
-| `/team <question>` or `/ask <question>` | Asks the workspace finance team (CFO and risk agents) a question |
+| You type                                                    | What happens                                                                                |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `/vendors`                                                  | Lists verified vendors and a button to open settings                                        |
+| `pay <vendor> <amount> USDC for <purpose> ref <reference>`  | Proposes a payout. Also: `pay <amount> USDC to <vendor> for <purpose>, invoice <reference>` |
+| `/pay status`                                               | Shows payout status                                                                         |
+| `/bills`                                                    | Lists open bills                                                                            |
+| `/invoices`                                                 | Lists invoices                                                                              |
+| `invoice <payer> <amount> USDC due <YYYY-MM-DD> for <work>` | Drafts an invoice (a draft moves nothing)                                                   |
+| `/deals`                                                    | Lists deals                                                                                 |
+| `/splits`                                                   | Lists revenue allocations                                                                   |
+| `/swaps`                                                    | Lists treasury swap operations                                                              |
+| `/treasury`                                                 | Shows the vault balance and block                                                           |
+| `/team <question>` or `/ask <question>`                     | Asks the workspace finance team (CFO and risk agents) a question                            |
 
 Every reply carries an **Open workspace** button. Rate limits apply (30 messages per minute per person, 60 per workspace chat). If a command is not recognised the bot lists the commands above.
 

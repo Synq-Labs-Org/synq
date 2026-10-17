@@ -18,16 +18,16 @@ Synq meets you in three places. They share one account (your wallet), one backen
 
 ## Capability matrix
 
-| Capability | iPhone app | iMessage extension | Web hub | Telegram |
-| --- | --- | --- | --- | --- |
-| Sign in with wallet | Yes (WalletConnect or code) | Via the app | Yes (injected wallet) | Link once with a wallet signature |
-| Approvals inbox and signing | Yes | Hands off to the web page | Yes | No: points you to the secure page |
-| Business inbox, take over a conversation | Yes | No | Yes | Staff messages are delivered to the client's chat |
-| Agents and activity feed | Yes | No | Yes | No |
-| Money, vault, payouts, invoices | View in app | Invoice checkout card | Full | Propose payouts and drafts by text |
-| Client conversation with the sales agent | No | No | Yes (client page) | Yes (via an invite link) |
-| Notifications | Push (generic) plus in-app list | No | In-app list | Replies in chat |
-| Themes | Yes | Own choice | Yes | Not applicable |
+| Capability                               | iPhone app                      | iMessage extension        | Web hub               | Telegram                                          |
+| ---------------------------------------- | ------------------------------- | ------------------------- | --------------------- | ------------------------------------------------- |
+| Sign in with wallet                      | Yes (WalletConnect or code)     | Via the app               | Yes (injected wallet) | Link once with a wallet signature                 |
+| Approvals inbox and signing              | Yes                             | Hands off to the web page | Yes                   | No: points you to the secure page                 |
+| Business inbox, take over a conversation | Yes                             | No                        | Yes                   | Staff messages are delivered to the client's chat |
+| Agents and activity feed                 | Yes                             | No                        | Yes                   | No                                                |
+| Money, vault, payouts, invoices          | View in app                     | Invoice checkout card     | Full                  | Propose payouts and drafts by text                |
+| Client conversation with the sales agent | No                              | No                        | Yes (client page)     | Yes (via an invite link)                          |
+| Notifications                            | Push (generic) plus in-app list | No                        | In-app list           | Replies in chat                                   |
+| Themes                                   | Yes                             | Own choice                | Yes                   | Not applicable                                    |
 
 > **Note**
 > The table describes what is in the codebase today. Some screens (for example a client-side screen for signing an agreement and funding escrow) exist as API routes first; see [Client agreements and escrow](/docs/guides/client-agreements).

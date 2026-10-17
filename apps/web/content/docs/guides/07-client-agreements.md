@@ -42,14 +42,14 @@ The client asks for a wallet-link message, signs it and posts the signature.
 
 Fetching the agreement creates it from the **accepted** offer if none exists. If it cannot yet be created the response says why in `blocked`:
 
-| `blocked` | Meaning |
-| --- | --- |
-| `NO_ACCEPTED_OFFER` | The lead is not in AGREED_PENDING_SIGNATURES or the latest offer is not ACCEPTED |
-| `CLIENT_WALLET_REQUIRED` | Link a wallet first |
-| `NO_OWNER` | The workspace has no owner to sign |
-| `CLIENT_WALLET_CONFLICT` | Client wallet equals the owner wallet or payee |
-| `AGREEMENT_STALE` | The offer changed after the agreement was drafted; it is voided and a new one is built |
-| `AGREEMENT_TERMS_TAMPERED` | Stored fields no longer match their hash |
+| `blocked`                  | Meaning                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `NO_ACCEPTED_OFFER`        | The lead is not in AGREED_PENDING_SIGNATURES or the latest offer is not ACCEPTED       |
+| `CLIENT_WALLET_REQUIRED`   | Link a wallet first                                                                    |
+| `NO_OWNER`                 | The workspace has no owner to sign                                                     |
+| `CLIENT_WALLET_CONFLICT`   | Client wallet equals the owner wallet or payee                                         |
+| `AGREEMENT_STALE`          | The offer changed after the agreement was drafted; it is voided and a new one is built |
+| `AGREEMENT_TERMS_TAMPERED` | Stored fields no longer match their hash                                               |
 
 The agreement binds: workspace, lead, offer id and version, the offer's terms hash, client wallet, owner wallet, **payee** (the vault if the workspace has one, otherwise the owner wallet), no arbiter, the milestones with amounts and due days, the total, delivery days and an expiry **7 days** after creation.
 

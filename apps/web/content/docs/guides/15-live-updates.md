@@ -3,7 +3,7 @@ title: Live updates
 description: How the hub and apps stay current with a server-sent event stream that carries markers, not content, and how to replay missed events.
 ---
 
-Pages refresh themselves when something changes. The mechanism is a **stream of markers**: each says *what* changed, never the content. The client then re-fetches the thing it cares about.
+Pages refresh themselves when something changes. The mechanism is a **stream of markers**: each says _what_ changed, never the content. The client then re-fetches the thing it cares about.
 
 ```text
  server                                        client
@@ -15,16 +15,16 @@ Pages refresh themselves when something changes. The mechanism is a **stream of 
 
 ## Event types
 
-| Type | Meaning |
-| --- | --- |
-| `LEAD_UPDATED` | A lead's stage or handling changed |
-| `LEAD_MESSAGE` | A new message in a lead |
-| `OFFER_UPDATED` | An offer version changed |
-| `AGENT_EVENT` | An agent run advanced |
-| `APPROVAL_CHANGED` | An approval request changed |
-| `BALANCE_CHANGED` | A balance changed |
-| `NOTIFICATION` | A new notification |
-| `CONTEXT_REVOKED` | Your session or membership no longer allows this context |
+| Type               | Meaning                                                  |
+| ------------------ | -------------------------------------------------------- |
+| `LEAD_UPDATED`     | A lead's stage or handling changed                       |
+| `LEAD_MESSAGE`     | A new message in a lead                                  |
+| `OFFER_UPDATED`    | An offer version changed                                 |
+| `AGENT_EVENT`      | An agent run advanced                                    |
+| `APPROVAL_CHANGED` | An approval request changed                              |
+| `BALANCE_CHANGED`  | A balance changed                                        |
+| `NOTIFICATION`     | A new notification                                       |
+| `CONTEXT_REVOKED`  | Your session or membership no longer allows this context |
 
 Markers are filtered by **who may open the thing**: lead, offer and run markers go only to owners and admins, member-visible markers go to members, and so on. A viewer does not receive staff markers.
 

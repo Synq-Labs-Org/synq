@@ -33,12 +33,12 @@ The same idea protects other writes: payout proposals use an **idempotency key**
 
 ## Who may produce which status
 
-| Status | Source allowed |
-| --- | --- |
-| `FINALIZED` | Chain evidence only |
-| `RECONCILED` | Ledger evidence only |
-| `AUTHORIZED` | Deterministic rules or a human signature |
-| Others | Models, rules, humans, chain or providers as appropriate |
+| Status       | Source allowed                                           |
+| ------------ | -------------------------------------------------------- |
+| `FINALIZED`  | Chain evidence only                                      |
+| `RECONCILED` | Ledger evidence only                                     |
+| `AUTHORIZED` | Deterministic rules or a human signature                 |
+| Others       | Models, rules, humans, chain or providers as appropriate |
 
 A model can produce `DECISION` events with status `PENDING`; it cannot mark anything final.
 
@@ -52,10 +52,10 @@ Owners, admins and members can read agent events. Viewers cannot. Some marker ty
 
 ## Where events come from today
 
-| Producer | Events |
-| --- | --- |
-| Sales agent | Decisions, rule checks, handovers per conversation turn |
-| Agreements | "Deal agreement signed" and "Deal escrow funded" |
-| Settlement and workers | Invoice settlement, deposits, payments |
+| Producer               | Events                                                  |
+| ---------------------- | ------------------------------------------------------- |
+| Sales agent            | Decisions, rule checks, handovers per conversation turn |
+| Agreements             | "Deal agreement signed" and "Deal escrow funded"        |
+| Settlement and workers | Invoice settlement, deposits, payments                  |
 
 See [Proof levels](/docs/concepts/proof-levels).

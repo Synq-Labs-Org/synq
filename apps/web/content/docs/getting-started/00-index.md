@@ -10,15 +10,15 @@ Synq gives a small team the back office of a finance department, delivered where
 
 ## What Synq does
 
-| Job | What happens | Who decides |
-| --- | --- | --- |
-| Talk to prospects | An AI sales agent answers questions and proposes offers inside rules you sign | You sign the rules; a validator enforces them |
-| Agree a deal | Client and owner each sign the exact terms with their own wallets | Both wallets |
-| Hold the deposit | The client funds a milestone escrow contract from their own wallet | The client |
-| Invoice and get paid | Issue invoices with a pay link; payments are matched from the chain | The owner signs the invoice |
-| Pay contractors | Propose payouts to verified vendors; small ones follow the vault policy, large ones need owner signatures | The vault policy or the Safe owners |
-| Keep books | Vendors, bills, budgets, revenue splits and an audit trail of agent work | Owners approve changes |
-| Keep you informed | Generic push notifications and a live activity feed | Not applicable |
+| Job                  | What happens                                                                                              | Who decides                                   |
+| -------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Talk to prospects    | An AI sales agent answers questions and proposes offers inside rules you sign                             | You sign the rules; a validator enforces them |
+| Agree a deal         | Client and owner each sign the exact terms with their own wallets                                         | Both wallets                                  |
+| Hold the deposit     | The client funds a milestone escrow contract from their own wallet                                        | The client                                    |
+| Invoice and get paid | Issue invoices with a pay link; payments are matched from the chain                                       | The owner signs the invoice                   |
+| Pay contractors      | Propose payouts to verified vendors; small ones follow the vault policy, large ones need owner signatures | The vault policy or the Safe owners           |
+| Keep books           | Vendors, bills, budgets, revenue splits and an audit trail of agent work                                  | Owners approve changes                        |
+| Keep you informed    | Generic push notifications and a live activity feed                                                       | Not applicable                                |
 
 ## What Synq deliberately does not do
 

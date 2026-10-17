@@ -43,16 +43,16 @@ Telegram answers with a card and a button to review. **Chat never approves or si
 
 ## States
 
-| State | Meaning |
-| --- | --- |
-| `REVIEW` | Proposed, waiting for approval |
-| `READY` | Enough signatures; waiting to execute |
-| `HOLD` | Approved but not executing right now; it still counts against the rolling cap, and a reason is shown |
-| `SIGNED` | Transaction signed and recorded before broadcast |
-| `PAID` | Final on chain |
-| `FAILED` | Did not execute |
-| `NEEDS_REVIEW` | Outcome uncertain; a person must reconcile before any retry |
-| `CANCELLED` | Cancelled by an owner |
+| State          | Meaning                                                                                              |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| `REVIEW`       | Proposed, waiting for approval                                                                       |
+| `READY`        | Enough signatures; waiting to execute                                                                |
+| `HOLD`         | Approved but not executing right now; it still counts against the rolling cap, and a reason is shown |
+| `SIGNED`       | Transaction signed and recorded before broadcast                                                     |
+| `PAID`         | Final on chain                                                                                       |
+| `FAILED`       | Did not execute                                                                                      |
+| `NEEDS_REVIEW` | Outcome uncertain; a person must reconcile before any retry                                          |
+| `CANCELLED`    | Cancelled by an owner                                                                                |
 
 An owner can cancel while `REVIEW`, `READY` or `HOLD`, unless a signed transaction already exists (`SIGNED_PAYOUT_REQUIRES_RECONCILIATION`).
 
@@ -66,14 +66,14 @@ The approval has a deadline (15 minutes by default). If it expires, propose agai
 
 ## What stops a bad payout
 
-| Guard | Where |
-| --- | --- |
-| Recipient must be a verified vendor | Synq finance |
-| New or changed vendor addresses wait 24 hours | Synq finance |
-| Per-payment, daily and AI-daily budget | Signed budget and Kernel |
-| Vendor on the vault allowlist | Vault policy contract |
-| Rolling 24-hour operator cap | Vault policy contract |
-| Pause by the guardian | Vault policy contract |
-| Owner quorum for anything larger | Safe |
+| Guard                                         | Where                    |
+| --------------------------------------------- | ------------------------ |
+| Recipient must be a verified vendor           | Synq finance             |
+| New or changed vendor addresses wait 24 hours | Synq finance             |
+| Per-payment, daily and AI-daily budget        | Signed budget and Kernel |
+| Vendor on the vault allowlist                 | Vault policy contract    |
+| Rolling 24-hour operator cap                  | Vault policy contract    |
+| Pause by the guardian                         | Vault policy contract    |
+| Owner quorum for anything larger              | Safe                     |
 
 See [The vault](/docs/concepts/vault) and [Kernel and grants](/docs/concepts/kernel-grants).

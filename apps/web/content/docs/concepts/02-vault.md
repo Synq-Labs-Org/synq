@@ -42,14 +42,14 @@ The policy contract has no proxy, no admin, no delegate call and no self-destruc
 
 ## How it appears in the product
 
-| Product action | Vault mechanism |
-| --- | --- |
-| Vault setup | A factory creates the Safe, installs the policy and verifies the result in one transaction |
-| Small payout (within the signed budget) | Operator pays within caps after owner approval and a Kernel grant |
-| Large payout | Safe-quorum `PAY_VENDOR` action |
-| Add a vendor to the allowlist | `QUEUE_VENDOR`, wait the delay, then `ALLOW_VENDOR` |
-| Change caps | `QUEUE_CAPS`, then `SET_CAPS` after the delay |
-| Emergency | Guardian pause |
+| Product action                          | Vault mechanism                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Vault setup                             | A factory creates the Safe, installs the policy and verifies the result in one transaction |
+| Small payout (within the signed budget) | Operator pays within caps after owner approval and a Kernel grant                          |
+| Large payout                            | Safe-quorum `PAY_VENDOR` action                                                            |
+| Add a vendor to the allowlist           | `QUEUE_VENDOR`, wait the delay, then `ALLOW_VENDOR`                                        |
+| Change caps                             | `QUEUE_CAPS`, then `SET_CAPS` after the delay                                              |
+| Emergency                               | Guardian pause                                                                             |
 
 ## Other places value sits
 

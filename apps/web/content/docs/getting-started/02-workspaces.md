@@ -7,11 +7,11 @@ A **workspace** is the container for everything shared: members and their roles,
 
 ## The three kinds
 
-| Kind | Typical use | Notes |
-| --- | --- | --- |
-| `PERSONAL` | Your own wallets and vaults | Only you; owner invitations are not allowed |
-| `GROUP` | Friends or a club pooling money (a "circle") | Members contribute; a contribution is the member's equity, never revenue |
-| `BUSINESS` | A freelancer or small company | The only kind that can receive client leads, run the sales agent and send offers |
+| Kind       | Typical use                                  | Notes                                                                            |
+| ---------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| `PERSONAL` | Your own wallets and vaults                  | Only you; owner invitations are not allowed                                      |
+| `GROUP`    | Friends or a club pooling money (a "circle") | Members contribute; a contribution is the member's equity, never revenue         |
+| `BUSINESS` | A freelancer or small company                | The only kind that can receive client leads, run the sales agent and send offers |
 
 In the iPhone app, personal contexts show Home, Circles, Activity, Money and Approvals. Business contexts show Home, Inbox, Deals, Agents and Money.
 

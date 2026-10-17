@@ -15,18 +15,18 @@ The vault is a Safe multisig on Arc testnet plus a policy contract. Only **owner
 
 On the workspaces page, open **Vault setup**. Fill in:
 
-| Field | Default | Rule |
-| --- | --- | --- |
-| Signature threshold | Computed from owner count | 1 to 20 |
-| Per-payment cap | 5 USDC | The most the operator may pay in one payment |
-| Window cap | 20 USDC | The most the operator may pay in any rolling 24 hours |
-| Governance delay | 86,400 seconds (24 hours) | 3,600 to 2,592,000 seconds (1 hour to 30 days) |
+| Field               | Default                   | Rule                                                  |
+| ------------------- | ------------------------- | ----------------------------------------------------- |
+| Signature threshold | Computed from owner count | 1 to 20                                               |
+| Per-payment cap     | 5 USDC                    | The most the operator may pay in one payment          |
+| Window cap          | 20 USDC                   | The most the operator may pay in any rolling 24 hours |
+| Governance delay    | 86,400 seconds (24 hours) | 3,600 to 2,592,000 seconds (1 hour to 30 days)        |
 
 The default threshold is `min(owners, 3, ceil(owners / 2) + 1)`.
 
-| Owners | 1 | 2 | 3 | 4 | 5 | 6 | 10 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Default threshold | 1 | 2 | 3 | 3 | 3 | 3 | 3 |
+| Owners            | 1   | 2   | 3   | 4   | 5   | 6   | 10  |
+| ----------------- | --- | --- | --- | --- | --- | --- | --- |
+| Default threshold | 1   | 2   | 3   | 3   | 3   | 3   | 3   |
 
 The initial **payee allowlist is empty**. Nobody can be paid by the operator until an allowlist entry is added through the timelock.
 
@@ -40,11 +40,11 @@ Tick **I reviewed the owners, threshold, caps and gas ceiling.** The sign button
 
 Each owner chooses **Sign vault setup in my wallet** and signs the EIP-712 setup. The same typed data is also available in the [approvals inbox](/docs/guides/approvals) as `VAULT_SETUP`.
 
-| State | Meaning |
-| --- | --- |
-| `AWAITING_SIGNATURES` | Not every owner has signed |
-| `READY` | All signatures recorded; waiting for the execution worker and receipt reconciliation |
-| `ACTIVE` | The vault exists on chain; the workspace is `ACTIVE` |
+| State                       | Meaning                                                                                                          |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `AWAITING_SIGNATURES`       | Not every owner has signed                                                                                       |
+| `READY`                     | All signatures recorded; waiting for the execution worker and receipt reconciliation                             |
+| `ACTIVE`                    | The vault exists on chain; the workspace is `ACTIVE`                                                             |
 | `REVERTED` / `NEEDS_REVIEW` | The deployment failed or the outcome is uncertain. No replacement transaction is signed for an uncertain outcome |
 
 ## Step 4: fund and use

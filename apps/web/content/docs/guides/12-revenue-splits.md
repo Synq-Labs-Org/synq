@@ -24,17 +24,17 @@ All math is integer base units. Rounding dust goes to free cash, so the legs alw
 
 ## Policy fields
 
-| Field | Meaning |
-| --- | --- |
-| Tax estimate reserve | Share of each receipt held back, in basis points (0 to 5,000; 100 = 1%) |
-| Operating floor | Minimum cash to keep |
-| Obligation horizon | How many days ahead of bills and payables to cover (1 to 120) |
-| Vendors | 1 to 20 verified vendors whose payables may be paid |
-| Distributions | Up to 10: `FIXED` amount, or `PERCENT_OF_SURPLUS` in basis points, each to a beneficiary |
-| Maximum transfer | Largest autonomous transfer per leg |
-| Maximum automatic transfers per window | Total per window (60 seconds to 31 days) |
-| Maximum splits per window | Receipts allocated per window |
-| Valid for | 15 minutes to 30 days |
+| Field                                  | Meaning                                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Tax estimate reserve                   | Share of each receipt held back, in basis points (0 to 5,000; 100 = 1%)                  |
+| Operating floor                        | Minimum cash to keep                                                                     |
+| Obligation horizon                     | How many days ahead of bills and payables to cover (1 to 120)                            |
+| Vendors                                | 1 to 20 verified vendors whose payables may be paid                                      |
+| Distributions                          | Up to 10: `FIXED` amount, or `PERCENT_OF_SURPLUS` in basis points, each to a beneficiary |
+| Maximum transfer                       | Largest autonomous transfer per leg                                                      |
+| Maximum automatic transfers per window | Total per window (60 seconds to 31 days)                                                 |
+| Maximum splits per window              | Receipts allocated per window                                                            |
+| Valid for                              | 15 minutes to 30 days                                                                    |
 
 ## Approval
 

@@ -8,14 +8,14 @@ description: Why everything runs on Arc testnet, the network details, how to get
 
 ## Network facts
 
-| Item | Value |
-| --- | --- |
-| Network | Arc testnet |
-| Chain id | `5042002` (network id `eip155:5042002`) |
-| Asset | USDC, 6 decimals (1 USDC = 1,000,000 base units). Asset id `arc-testnet:USDC` |
-| Gas | Paid in native testnet USDC. Vault setup is sponsored by a gas sponsor with a ceiling shown to you before you sign |
-| Block explorer | `https://explorer.testnet.arc.io` |
-| Mainnet broadcast | Disabled (`SYNQ_ALLOW_MAINNET_BROADCAST=false`) |
+| Item              | Value                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Network           | Arc testnet                                                                                                        |
+| Chain id          | `5042002` (network id `eip155:5042002`)                                                                            |
+| Asset             | USDC, 6 decimals (1 USDC = 1,000,000 base units). Asset id `arc-testnet:USDC`                                      |
+| Gas               | Paid in native testnet USDC. Vault setup is sponsored by a gas sponsor with a ceiling shown to you before you sign |
+| Block explorer    | `https://explorer.testnet.arc.io`                                                                                  |
+| Mainnet broadcast | Disabled (`SYNQ_ALLOW_MAINNET_BROADCAST=false`)                                                                    |
 
 Contract addresses and expected code hashes for the deployment live in the repository registry file `sources/arc_registry.json`.
 

@@ -6,7 +6,7 @@ description: How the deterministic Kernel turns an agent proposal plus an owner'
 The **Kernel** is the part of Synq that decides whether a proposed action is allowed. It contains **no AI model and no signing key for your money**. It is a rule engine with an injected clock.
 
 > **Security**
-> Agents propose; only the Kernel authorizes. The Kernel itself cannot spend: it issues a *grant*, and a separate executor verifies the grant before it signs.
+> Agents propose; only the Kernel authorizes. The Kernel itself cannot spend: it issues a _grant_, and a separate executor verifies the grant before it signs.
 
 ## The flow for a payment
 
@@ -63,12 +63,12 @@ For escrow calls the grant identity includes a hash of the exact call: a grant f
 
 ## Other Kernel decisions in Synq
 
-| Decision | What it binds |
-| --- | --- |
-| Vault creation | All proposed owners signed the exact setup; sponsor gas was reserved |
-| Safe governance action | The current Safe quorum signed this bounded call and expiry |
-| Escrow open, release, refund | The exact call, with who pays whom |
-| Amane leased pay | The lease read back from the contract, plus the agent's signed intent |
+| Decision                     | What it binds                                                         |
+| ---------------------------- | --------------------------------------------------------------------- |
+| Vault creation               | All proposed owners signed the exact setup; sponsor gas was reserved  |
+| Safe governance action       | The current Safe quorum signed this bounded call and expiry           |
+| Escrow open, release, refund | The exact call, with who pays whom                                    |
+| Amane leased pay             | The lease read back from the contract, plus the agent's signed intent |
 
 ## Why a database cannot cheat
 

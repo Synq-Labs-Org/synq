@@ -7,9 +7,9 @@ An **offer** is a set of terms: line items, rush or not, delivery days, mileston
 
 ## Who sends offers
 
-| Sender | When allowed | Validator actor |
-| --- | --- | --- |
-| Sales agent | Lead handling is `AGENT` | Agent: owner threshold applies |
+| Sender                 | When allowed             | Validator actor                          |
+| ---------------------- | ------------------------ | ---------------------------------------- |
+| Sales agent            | Lead handling is `AGENT` | Agent: owner threshold applies           |
 | Staff (owner or admin) | Lead handling is `HUMAN` | Staff; an owner may exceed the threshold |
 
 Staff cannot send an offer while the agent is handling the lead. Take over first ([The AI sales agent](/docs/guides/sales-agent)).
@@ -19,14 +19,14 @@ Staff cannot send an offer while the agent is handling the lead. Take over first
 
 ## Offer terms
 
-| Field | Rule |
-| --- | --- |
-| `lines` | 1 to 20 lines of `sku`, `quantity` (1 to 1000) and `unitUnits` (USDC base units as a string) |
-| `rush` | true or false |
-| `deliveryDays` | 1 to 365 |
-| `milestones` | 1 to 6 items of `label`, `units`, `dueInDays` |
-| `depositUnits` | USDC base units |
-| `note` | up to 400 chars |
+| Field          | Rule                                                                                         |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `lines`        | 1 to 20 lines of `sku`, `quantity` (1 to 1000) and `unitUnits` (USDC base units as a string) |
+| `rush`         | true or false                                                                                |
+| `deliveryDays` | 1 to 365                                                                                     |
+| `milestones`   | 1 to 6 items of `label`, `units`, `dueInDays`                                                |
+| `depositUnits` | USDC base units                                                                              |
+| `note`         | up to 400 chars                                                                              |
 
 Amounts are integers in USDC base units: `12500000` is 12.5 USDC. See [Units and money](/docs/concepts/units-and-money).
 

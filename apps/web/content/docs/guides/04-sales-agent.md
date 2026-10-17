@@ -9,12 +9,12 @@ When a prospect writes, an AI assistant can answer for your business. It is desi
 
 For each client message the model returns one typed decision:
 
-| Action | Meaning |
-| --- | --- |
-| `ASK` | Ask the client a clarifying question |
-| `OFFER` | Propose offer terms from your catalog |
+| Action          | Meaning                                                                       |
+| --------------- | ----------------------------------------------------------------------------- |
+| `ASK`           | Ask the client a clarifying question                                          |
+| `OFFER`         | Propose offer terms from your catalog                                         |
 | `ACCEPT_LATEST` | Record that the client clearly accepted the latest offer, quoting its version |
-| `ESCALATE` | Hand the conversation to a person, with a reason |
+| `ESCALATE`      | Hand the conversation to a person, with a reason                              |
 
 ## What it cannot do
 
@@ -40,22 +40,22 @@ Each handover is a typed [agent event](/docs/concepts/agent-events) with status 
 
 ## Handling states
 
-| State | Who may reply | Offers |
-| --- | --- | --- |
-| `AGENT` | The sales agent | Agent may send offers within policy |
-| `HUMAN` | Only staff | Staff may send offers (owner-only above the threshold) |
-| `FROZEN` | Nobody new | No new offers |
+| State    | Who may reply   | Offers                                                 |
+| -------- | --------------- | ------------------------------------------------------ |
+| `AGENT`  | The sales agent | Agent may send offers within policy                    |
+| `HUMAN`  | Only staff      | Staff may send offers (owner-only above the threshold) |
+| `FROZEN` | Nobody new      | No new offers                                          |
 
 ## Taking over a conversation
 
 In the inbox choose a handling button:
 
-| Button | Available when | Effect |
-| --- | --- | --- |
-| Take over | Agent or Frozen | You reply; the agent stops and sends no new offers |
-| Hand back | Human or Frozen | The agent resumes, still inside the policy |
-| Freeze offers | Agent or Human | No new offers until unfrozen |
-| Escalate to owner | Any | Flags the lead for an owner |
+| Button            | Available when  | Effect                                             |
+| ----------------- | --------------- | -------------------------------------------------- |
+| Take over         | Agent or Frozen | You reply; the agent stops and sends no new offers |
+| Hand back         | Human or Frozen | The agent resumes, still inside the policy         |
+| Freeze offers     | Agent or Human  | No new offers until unfrozen                       |
+| Escalate to owner | Any             | Flags the lead for an owner                        |
 
 Every change is versioned. The button sends the version it saw; if someone else changed it first, you get a conflict and the page reloads. Staff messages sent after a takeover are delivered to the client's private chat when a Telegram channel is bound.
 

@@ -7,12 +7,12 @@ The business side of a deal is deliberately small: an **owner** signs the exact 
 
 ## Who can do what
 
-| Action | Role |
-| --- | --- |
-| See the lead's agreement | Owner, admin |
-| Sign the agreement | Owner only |
-| Fund the escrow | Never the business: the client pays |
-| Release or refund a milestone | The parties' wallets; see below |
+| Action                        | Role                                |
+| ----------------------------- | ----------------------------------- |
+| See the lead's agreement      | Owner, admin                        |
+| Sign the agreement            | Owner only                          |
+| Fund the escrow               | Never the business: the client pays |
+| Release or refund a milestone | The parties' wallets; see below     |
 
 ## View the agreement
 

@@ -43,13 +43,13 @@ The client becomes an **external counterparty**. They are never a workspace memb
 
 ## The inbox
 
-| Element | Meaning |
-| --- | --- |
-| Leads list | Filter by handling (Agent, Human, Frozen) and stage |
-| Needs you | A lead flagged for an owner (escalation, or an accepted offer) |
-| Conversation | The transcript. Older messages are not shown on the page |
-| Offers | Each offer version with its checks; **Re-check** runs the validator again |
-| Handling buttons | Take over, Hand back, Freeze offers, Escalate to owner |
+| Element          | Meaning                                                                   |
+| ---------------- | ------------------------------------------------------------------------- |
+| Leads list       | Filter by handling (Agent, Human, Frozen) and stage                       |
+| Needs you        | A lead flagged for an owner (escalation, or an accepted offer)            |
+| Conversation     | The transcript. Older messages are not shown on the page                  |
+| Offers           | Each offer version with its checks; **Re-check** runs the validator again |
+| Handling buttons | Take over, Hand back, Freeze offers, Escalate to owner                    |
 
 ## Lead stages
 

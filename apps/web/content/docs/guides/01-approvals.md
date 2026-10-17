@@ -16,18 +16,18 @@ The approvals inbox lists everything waiting for **your wallet's signature**, ac
 
 ## What kinds of requests appear
 
-| Purpose | What you are approving |
-| --- | --- |
-| `VAULT_SETUP` | The exact vault: owners, threshold, caps, delay, gas ceiling |
-| `VAULT_ACTION` | A Safe action: allow or remove a vendor, change caps, or a large vendor payment |
-| `PAYOUT` | A payment to a verified vendor |
-| `FINANCE_CHANGE` | Adding or changing vendors, budgets, bills, payables |
-| `REVENUE_POLICY` | How incoming revenue is split |
-| `DEAL_TERMS` | Terms of a deal |
-| `ESCROW` | An escrow action (fund, release, refund, dispute) |
-| `LEASE_ISSUE` / `LEASE_REVOKE` | Granting or ending an agent's payment lease |
-| `CIRCLE_REFUND` | Refunding a group-fund contribution |
-| `COMMERCIAL_POLICY` | The sales policy your agent must stay within |
+| Purpose                        | What you are approving                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `VAULT_SETUP`                  | The exact vault: owners, threshold, caps, delay, gas ceiling                    |
+| `VAULT_ACTION`                 | A Safe action: allow or remove a vendor, change caps, or a large vendor payment |
+| `PAYOUT`                       | A payment to a verified vendor                                                  |
+| `FINANCE_CHANGE`               | Adding or changing vendors, budgets, bills, payables                            |
+| `REVENUE_POLICY`               | How incoming revenue is split                                                   |
+| `DEAL_TERMS`                   | Terms of a deal                                                                 |
+| `ESCROW`                       | An escrow action (fund, release, refund, dispute)                               |
+| `LEASE_ISSUE` / `LEASE_REVOKE` | Granting or ending an agent's payment lease                                     |
+| `CIRCLE_REFUND`                | Refunding a group-fund contribution                                             |
+| `COMMERCIAL_POLICY`            | The sales policy your agent must stay within                                    |
 
 ## Step by step
 
@@ -39,12 +39,12 @@ The approvals inbox lists everything waiting for **your wallet's signature**, ac
 6. **Sign.** Your wallet shows the exact typed data (EIP-712) for each step. Compare it to the page. Approve each prompt.
 7. **Read the result.**
 
-| Result | Meaning |
-| --- | --- |
-| `RECORDED` | Your signature is stored. More owners still need to sign (for example 1 of 2) |
-| `READY` | Enough signatures. Ready to submit; **nothing has moved yet** |
-| `SUBMITTED` | Sent to the chain. Not final until the receipt shows finality |
-| `REJECTED` | The server did not accept the signature. Nothing was approved |
+| Result      | Meaning                                                                       |
+| ----------- | ----------------------------------------------------------------------------- |
+| `RECORDED`  | Your signature is stored. More owners still need to sign (for example 1 of 2) |
+| `READY`     | Enough signatures. Ready to submit; **nothing has moved yet**                 |
+| `SUBMITTED` | Sent to the chain. Not final until the receipt shows finality                 |
+| `REJECTED`  | The server did not accept the signature. Nothing was approved                 |
 
 ## Quorum
 

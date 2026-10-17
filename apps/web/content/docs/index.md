@@ -32,26 +32,26 @@ Synq is a finance team in chat for freelancers and small businesses. Specialist 
 
 ## Start here
 
-| If you want to... | Read |
-| --- | --- |
-| Understand what Synq is and does | [What is Synq](/docs/getting-started) |
-| Sign in and set up a workspace | [Sign in with a wallet](/docs/getting-started/sign-in), [Create a workspace](/docs/getting-started/workspaces) |
-| Run a small business end to end | [Quickstart for a business](/docs/getting-started/quickstart-business) |
-| Sign your first approval | [Approvals and signing](/docs/guides/approvals) |
-| Let an AI assistant talk to clients | [The AI sales agent](/docs/guides/sales-agent), [Commercial policy](/docs/guides/commercial-policy) |
-| Understand why it is safe | [Security overview](/docs/security), [What agents can and cannot do](/docs/security/agents) |
-| Look up a word | [Glossary](/docs/glossary) |
+| If you want to...                   | Read                                                                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Understand what Synq is and does    | [What is Synq](/docs/getting-started)                                                                          |
+| Sign in and set up a workspace      | [Sign in with a wallet](/docs/getting-started/sign-in), [Create a workspace](/docs/getting-started/workspaces) |
+| Run a small business end to end     | [Quickstart for a business](/docs/getting-started/quickstart-business)                                         |
+| Sign your first approval            | [Approvals and signing](/docs/guides/approvals)                                                                |
+| Let an AI assistant talk to clients | [The AI sales agent](/docs/guides/sales-agent), [Commercial policy](/docs/guides/commercial-policy)            |
+| Understand why it is safe           | [Security overview](/docs/security), [What agents can and cannot do](/docs/security/agents)                    |
+| Look up a word                      | [Glossary](/docs/glossary)                                                                                     |
 
 ## How the documentation is organised
 
-| Section | What it covers |
-| --- | --- |
-| [Getting started](/docs/getting-started) | What Synq is, signing in, workspaces, roles, the three surfaces, testnet |
-| [Guides](/docs/guides) | Step-by-step tasks: approvals, leads, offers, escrow, invoices, payouts, notifications |
-| [Concepts](/docs/concepts) | How the pieces work: roles, vault, Kernel, EIP-712, proof levels, escrow, Amane |
-| [Security](/docs/security) | Threat model, custody, sessions, privacy, the mainnet lock, reporting |
-| [FAQ](/docs/faq) | Short answers and a table of error codes |
-| [Glossary](/docs/glossary) | Every term used in these docs |
+| Section                                  | What it covers                                                                         |
+| ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| [Getting started](/docs/getting-started) | What Synq is, signing in, workspaces, roles, the three surfaces, testnet               |
+| [Guides](/docs/guides)                   | Step-by-step tasks: approvals, leads, offers, escrow, invoices, payouts, notifications |
+| [Concepts](/docs/concepts)               | How the pieces work: roles, vault, Kernel, EIP-712, proof levels, escrow, Amane        |
+| [Security](/docs/security)               | Threat model, custody, sessions, privacy, the mainnet lock, reporting                  |
+| [FAQ](/docs/faq)                         | Short answers and a table of error codes                                               |
+| [Glossary](/docs/glossary)               | Every term used in these docs                                                          |
 
 Further sections (architecture, API reference, contracts, Amane, self-hosting) are written for integrators and operators and appear in the navigation as they are published.
 

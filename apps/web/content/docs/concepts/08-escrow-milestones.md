@@ -18,15 +18,15 @@ Each milestone moves exactly once along one of two paths:
 
 ## Who may do what
 
-| Action | Who | Condition |
-| --- | --- | --- |
-| Open and fund a deal | Anyone (becomes the **payer**) | One transfer of the whole total; payee, arbiter and refund time are fixed here |
-| Release a milestone | The payer, or the arbiter | Milestone is Funded; a payer release is frozen during an active dispute |
-| Withdraw | Anyone may trigger | Pays **only** the payee, only a Released milestone |
-| Refund | The payee, or the arbiter, at any time | Funds go to the original payer |
-| Refund | Anyone, after the refund time | Milestone unreleased and not under dispute |
-| Dispute | Payer or payee, once each | Needs an arbiter; freezes payer release and timeout refund for 30 days |
-| Withdraw a dispute | The party who raised it | Anytime while active |
+| Action               | Who                                    | Condition                                                                      |
+| -------------------- | -------------------------------------- | ------------------------------------------------------------------------------ |
+| Open and fund a deal | Anyone (becomes the **payer**)         | One transfer of the whole total; payee, arbiter and refund time are fixed here |
+| Release a milestone  | The payer, or the arbiter              | Milestone is Funded; a payer release is frozen during an active dispute        |
+| Withdraw             | Anyone may trigger                     | Pays **only** the payee, only a Released milestone                             |
+| Refund               | The payee, or the arbiter, at any time | Funds go to the original payer                                                 |
+| Refund               | Anyone, after the refund time          | Milestone unreleased and not under dispute                                     |
+| Dispute              | Payer or payee, once each              | Needs an arbiter; freezes payer release and timeout refund for 30 days         |
+| Withdraw a dispute   | The party who raised it                | Anytime while active                                                           |
 
 Rules that cannot be bypassed:
 

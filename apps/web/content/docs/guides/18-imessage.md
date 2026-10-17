@@ -10,12 +10,12 @@ The extension lets you use Synq from inside a conversation in Apple Messages. It
 
 ## What it shows
 
-| Mode | What you see |
-| --- | --- |
-| Start | A way to start a fund or an Arc workspace, sign in with a private code, or paste a Synq link |
-| Fund | A shared fund for a conversation: total, members, the group's approval threshold and pending proposals |
-| Invoice | A shared invoice checkout card with live status |
-| Review | A group-bound review card for an approval link another Synq channel issued |
+| Mode    | What you see                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------ |
+| Start   | A way to start a fund or an Arc workspace, sign in with a private code, or paste a Synq link           |
+| Fund    | A shared fund for a conversation: total, members, the group's approval threshold and pending proposals |
+| Invoice | A shared invoice checkout card with live status                                                        |
+| Review  | A group-bound review card for an approval link another Synq channel issued                             |
 
 The extension recognises Synq links only on the configured Synq host. It remembers which fund belongs to a conversation on your device; it cannot read the transcript.
 

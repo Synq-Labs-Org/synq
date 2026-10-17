@@ -7,25 +7,25 @@ Invoices are how a business asks to be paid. They are drafted by an owner, **iss
 
 ## Who can do what
 
-| Action | Role |
-| --- | --- |
-| Draft an invoice | Owner |
-| Issue it (sign) | Owner, and the signer must be the issuer wallet and a current vault owner |
-| See invoices | Any member |
-| Pay | Anyone with the pay link and a wallet |
+| Action           | Role                                                                      |
+| ---------------- | ------------------------------------------------------------------------- |
+| Draft an invoice | Owner                                                                     |
+| Issue it (sign)  | Owner, and the signer must be the issuer wallet and a current vault owner |
+| See invoices     | Any member                                                                |
+| Pay              | Anyone with the pay link and a wallet                                     |
 
 ## Draft
 
 On the workspaces page (or the hub's Money area), use **Workspace invoices**. Enter:
 
-| Field | Rule |
-| --- | --- |
-| Number | up to 80 chars, your own numbering |
-| Payer name | up to 120 chars |
-| Due date | `YYYY-MM-DD` |
+| Field      | Rule                                                                          |
+| ---------- | ----------------------------------------------------------------------------- |
+| Number     | up to 80 chars, your own numbering                                            |
+| Payer name | up to 120 chars                                                               |
+| Due date   | `YYYY-MM-DD`                                                                  |
 | Line items | 1 to 30; description (up to 200), quantity (whole number), unit price in USDC |
-| Tax rate | basis points, 0 to 10,000, with an optional label |
-| Memo | up to 300 chars |
+| Tax rate   | basis points, 0 to 10,000, with an optional label                             |
+| Memo       | up to 300 chars                                                               |
 
 From Telegram you can draft with one line, in a chat bound to your workspace: `invoice Acme 120 USDC due 2026-11-15 for logo design`. A draft moves nothing; issuing needs your wallet signature on the secure page.
 
@@ -37,14 +37,14 @@ Issuing signs the invoice terms. After it, the invoice has a hash (`termsHash`),
 
 ## Status
 
-| Status | Meaning |
-| --- | --- |
-| `DRAFT` | Not yet issued |
-| `ISSUED` | Open for payment |
-| `PARTIALLY_PAID` | Some amount received |
-| `PAID` | Paid in full |
-| `OVERPAID` | More than the total received |
-| `VOID` | Cancelled |
+| Status           | Meaning                      |
+| ---------------- | ---------------------------- |
+| `DRAFT`          | Not yet issued               |
+| `ISSUED`         | Open for payment             |
+| `PARTIALLY_PAID` | Some amount received         |
+| `PAID`           | Paid in full                 |
+| `OVERPAID`       | More than the total received |
+| `VOID`           | Cancelled                    |
 
 Separately, `reconciliation` says how the chain evidence stands: `NOT_PAID`, `PENDING` (waiting for a finalized receipt), `FINALIZED`, or `REVIEW` (the proof needs a human look; payments are paused until reviewed).
 

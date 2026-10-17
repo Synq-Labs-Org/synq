@@ -3,7 +3,7 @@ title: Amane leased payments
 description: How Amane lets an owner pre-authorise an agent to pay a specific recipient within hard limits that a contract enforces.
 ---
 
-**Amane** is a payment account contract on Arc testnet that lets an owner delegate *bounded* spending to an agent. In Synq it powers jobs such as "pay this contractor when this invoice is paid" without asking for a new signature each time.
+**Amane** is a payment account contract on Arc testnet that lets an owner delegate _bounded_ spending to an agent. In Synq it powers jobs such as "pay this contractor when this invoice is paid" without asking for a new signature each time.
 
 ## The pieces
 
@@ -20,13 +20,13 @@ description: How Amane lets an owner pre-authorise an agent to pay a specific re
    JOB: "pay 40 USDC, purpose, trigger = invoice paid"
 ```
 
-| Term | Meaning |
-| --- | --- |
-| Account | The contract that holds funds for leased payments. Controlled by the owner on chain |
-| Root policy | The owner-signed rules of the account: recipient, token, adapter |
-| Lease | An owner-signed grant to one agent: per-action limit, total, expiry, recipient |
-| Job | A request to pay inside a lease, with a trigger |
-| Trigger | `INVOICE_PAID` (waits until the invoice is paid in full with finalized receipts) or `OWNER_REQUEST` |
+| Term        | Meaning                                                                                             |
+| ----------- | --------------------------------------------------------------------------------------------------- |
+| Account     | The contract that holds funds for leased payments. Controlled by the owner on chain                 |
+| Root policy | The owner-signed rules of the account: recipient, token, adapter                                    |
+| Lease       | An owner-signed grant to one agent: per-action limit, total, expiry, recipient                      |
+| Job         | A request to pay inside a lease, with a trigger                                                     |
+| Trigger     | `INVOICE_PAID` (waits until the invoice is paid in full with finalized receipts) or `OWNER_REQUEST` |
 
 ## What Synq does and does not do
 
@@ -51,13 +51,13 @@ The owner approves the account and the lease with wallet signatures. After that,
 
 ## When things go wrong
 
-| Situation | Result |
-| --- | --- |
+| Situation                                 | Result                                        |
+| ----------------------------------------- | --------------------------------------------- |
 | Amount above the lease's per-action limit | Job creation fails (`ABOVE_LEASE_PER_ACTION`) |
-| Lease expired or revoked | Job `REFUSED` with a reason |
-| Recipient not the lease recipient | Refused by the contract |
-| Same trigger and lease twice | `JOB_EXISTS`; one payment per trigger |
-| Transaction reverts or outcome unclear | `NEEDS_REVIEW`; no blind retry |
+| Lease expired or revoked                  | Job `REFUSED` with a reason                   |
+| Recipient not the lease recipient         | Refused by the contract                       |
+| Same trigger and lease twice              | `JOB_EXISTS`; one payment per trigger         |
+| Transaction reverts or outcome unclear    | `NEEDS_REVIEW`; no blind retry                |
 
 ## Notifications
 

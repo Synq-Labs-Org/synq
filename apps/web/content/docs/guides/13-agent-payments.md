@@ -10,10 +10,10 @@ An **Amane lease** lets an owner say once: "this agent may pay this recipient up
 
 ## Who can do this
 
-| Action | Role |
-| --- | --- |
-| Register an Amane account, a lease, create a job | Owner |
-| See leases, limits and jobs | Owner, admin |
+| Action                                           | Role         |
+| ------------------------------------------------ | ------------ |
+| Register an Amane account, a lease, create a job | Owner        |
+| See leases, limits and jobs                      | Owner, admin |
 
 ## Step 1: create the Amane account (outside Synq)
 
@@ -43,26 +43,26 @@ The Leases table then shows lease, per-action limit, available amount, expiry, s
 
 Choose **Create a contractor job**:
 
-| Field | Meaning |
-| --- | --- |
-| Lease | Which lease to spend from |
-| Trigger | `INVOICE_PAID` (wait until that invoice is paid in full with finalized receipts) or `OWNER_REQUEST` (ready now) |
-| Trigger reference | The invoice id for `INVOICE_PAID` |
-| Amount | USDC base units; must not exceed the lease's per-action limit (`ABOVE_LEASE_PER_ACTION`) |
-| Purpose | Up to 160 chars |
+| Field             | Meaning                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| Lease             | Which lease to spend from                                                                                       |
+| Trigger           | `INVOICE_PAID` (wait until that invoice is paid in full with finalized receipts) or `OWNER_REQUEST` (ready now) |
+| Trigger reference | The invoice id for `INVOICE_PAID`                                                                               |
+| Amount            | USDC base units; must not exceed the lease's per-action limit (`ABOVE_LEASE_PER_ACTION`)                        |
+| Purpose           | Up to 160 chars                                                                                                 |
 
 The page notes: "Once a job is ready the agent pays it with no new signature from you, but only within the lease. If the lease limit, recipient or expiry does not allow it, the job is refused."
 
 ## Job states
 
-| State | Meaning |
-| --- | --- |
-| `WAITING` | Trigger not met yet |
-| `READY` | Trigger met; queued for the worker |
-| `SENT` | Transaction broadcast |
-| `PAID` | Final on chain |
-| `REFUSED` | The lease, a check or the contract refused; a reason is stored |
-| `NEEDS_REVIEW` | The transaction reverted or the outcome is uncertain |
+| State          | Meaning                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `WAITING`      | Trigger not met yet                                            |
+| `READY`        | Trigger met; queued for the worker                             |
+| `SENT`         | Transaction broadcast                                          |
+| `PAID`         | Final on chain                                                 |
+| `REFUSED`      | The lease, a check or the contract refused; a reason is stored |
+| `NEEDS_REVIEW` | The transaction reverted or the outcome is uncertain           |
 
 ## What the worker does for each job
 

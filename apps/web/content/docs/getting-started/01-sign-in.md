@@ -30,23 +30,23 @@ Synq has no passwords and no email accounts. You prove you control an Ethereum-s
 
 The login message is EIP-712 typed data with the domain name `Synq Workspace Login`, version `1`, chain id `5042002` (Arc testnet). It contains:
 
-| Field | Meaning |
-| --- | --- |
-| `challengeId` | A random id; the challenge can be used once |
-| `wallet` | Your address |
-| `origin` | The site asking you to sign. The page refuses a challenge whose origin is not its own |
-| `audience` | `web` or `native`, so a web login cannot be replayed as a native one |
-| `nonce` | Random value that makes each message unique |
-| `expiresAt` | Challenge deadline, at most 5 minutes ahead |
-| `statement` | The human sentence quoted above |
+| Field         | Meaning                                                                               |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `challengeId` | A random id; the challenge can be used once                                           |
+| `wallet`      | Your address                                                                          |
+| `origin`      | The site asking you to sign. The page refuses a challenge whose origin is not its own |
+| `audience`    | `web` or `native`, so a web login cannot be replayed as a native one                  |
+| `nonce`       | Random value that makes each message unique                                           |
+| `expiresAt`   | Challenge deadline, at most 5 minutes ahead                                           |
+| `statement`   | The human sentence quoted above                                                       |
 
 ## Sessions
 
-| Surface | What you hold | Lifetime |
-| --- | --- | --- |
-| Web hub | An `HttpOnly`, `Secure`, `SameSite=Strict` cookie | 15 minutes, then sign in again |
-| iPhone app (device session) | A short access token and a rotating refresh token | Access token 15 minutes; refresh token up to 30 days |
-| iPhone app (legacy code session) | A 15-minute token from a one-time code | 15 minutes, then a new code |
+| Surface                          | What you hold                                     | Lifetime                                             |
+| -------------------------------- | ------------------------------------------------- | ---------------------------------------------------- |
+| Web hub                          | An `HttpOnly`, `Secure`, `SameSite=Strict` cookie | 15 minutes, then sign in again                       |
+| iPhone app (device session)      | A short access token and a rotating refresh token | Access token 15 minutes; refresh token up to 30 days |
+| iPhone app (legacy code session) | A 15-minute token from a one-time code            | 15 minutes, then a new code                          |
 
 A **device session** is what the app uses when the server supports it. The app renews quietly while you use it. The refresh token rotates every time it is used. If an old, already-used refresh token is ever presented again, Synq assumes a copy leaked and revokes that whole device session. See [Sessions and token rotation](/docs/security/sessions).
 
@@ -72,9 +72,9 @@ On iPhone you can turn on **App Lock** under Account. It asks for Face ID or Tou
 
 ## Troubleshooting
 
-| Problem | Likely cause |
-| --- | --- |
+| Problem                                                        | Likely cause                                                                                 |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | "Open this page in a browser with an injected Ethereum wallet" | No browser wallet detected; use a wallet-enabled browser or sign in on the phone with a code |
-| "Invalid sign-in challenge" | The challenge origin, wallet or expiry did not match; reload and try again |
-| Signed in but sees no workspaces | You have none yet. [Create one](/docs/getting-started/workspaces) or accept an invitation |
-| Asked to sign in again after a short time | Web sessions last 15 minutes |
+| "Invalid sign-in challenge"                                    | The challenge origin, wallet or expiry did not match; reload and try again                   |
+| Signed in but sees no workspaces                               | You have none yet. [Create one](/docs/getting-started/workspaces) or accept an invitation    |
+| Asked to sign in again after a short time                      | Web sessions last 15 minutes                                                                 |

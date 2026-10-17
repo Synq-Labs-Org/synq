@@ -5,12 +5,12 @@ description: How USDC amounts are written in Synq: base units, six decimals, str
 
 All money in Synq is **test USDC on Arc testnet** (asset id `arc-testnet:USDC`), written as an integer count of **base units**.
 
-| Display | Base units |
-| --- | --- |
-| 1 USDC | `1000000` |
+| Display    | Base units |
+| ---------- | ---------- |
+| 1 USDC     | `1000000`  |
 | 12.50 USDC | `12500000` |
-| 0.001 USDC | `1000` |
-| 5 USDC | `5000000` |
+| 0.001 USDC | `1000`     |
+| 5 USDC     | `5000000`  |
 
 USDC has **6 decimals**. Amounts in APIs are **strings** of digits, such as `"12500000"`, so that no client ever turns a large number into a floating-point value.
 
@@ -32,11 +32,11 @@ Where a split must divide an amount, math is integer and any remainder (rounding
 
 ## Other fields you will meet
 
-| Field | Format |
-| --- | --- |
-| Timestamps | Unix seconds on the server; ISO dates in views |
-| Hashes | `0x` followed by 64 hex characters (terms hashes, evidence hashes, transaction hashes) |
-| Addresses | 40 hex characters with `0x`, shown shortened as `0x1234...abcd` for other people |
-| Ids | UUIDs; invoices `inv_` plus hex |
+| Field      | Format                                                                                 |
+| ---------- | -------------------------------------------------------------------------------------- |
+| Timestamps | Unix seconds on the server; ISO dates in views                                         |
+| Hashes     | `0x` followed by 64 hex characters (terms hashes, evidence hashes, transaction hashes) |
+| Addresses  | 40 hex characters with `0x`, shown shortened as `0x1234...abcd` for other people       |
+| Ids        | UUIDs; invoices `inv_` plus hex                                                        |
 
 See [Glossary](/docs/glossary).

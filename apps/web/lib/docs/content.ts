@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Marked, type Tokens } from 'marked';
-import { highlight } from './highlight';
+import { highlight } from './highlight.js';
 
 export type Heading = { depth: 2 | 3; text: string; id: string };
 

@@ -7,12 +7,12 @@ Only an **owner** can invite people. Invitations are single-use tokens that expi
 
 ## Roles at a glance
 
-| Role | In one line |
-| --- | --- |
-| `OWNER` | A signer. Holds signing authority over money and policy |
-| `ADMIN` | Runs the day-to-day (inbox, offers within policy) with **no signing authority** |
-| `MEMBER` | Participates, can read agent activity and propose payouts |
-| `VIEWER` | Read-only participant; cannot propose payouts or be a deal party |
+| Role     | In one line                                                                     |
+| -------- | ------------------------------------------------------------------------------- |
+| `OWNER`  | A signer. Holds signing authority over money and policy                         |
+| `ADMIN`  | Runs the day-to-day (inbox, offers within policy) with **no signing authority** |
+| `MEMBER` | Participates, can read agent activity and propose payouts                       |
+| `VIEWER` | Read-only participant; cannot propose payouts or be a deal party                |
 
 The full permission table is in [Workspaces and roles](/docs/concepts/workspaces-roles).
 

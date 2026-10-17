@@ -7,12 +7,12 @@ Synq separates **function** from **look**. Every screen is layout and plain-Engl
 
 ## The themes
 
-| Theme | iPhone and iMessage | Web | Character |
-| --- | --- | --- | --- |
-| ASCII | Yes | Yes | Black terminal, monospace type, character art |
-| Paper | Yes | Yes | Light print look, serif type, riso-style art |
-| Holo | Yes | Yes | Violet glass, rounded type, symbol art |
-| Ledger | No | Yes | Plain light accounting look with serif headings |
+| Theme  | iPhone and iMessage | Web | Character                                       |
+| ------ | ------------------- | --- | ----------------------------------------------- |
+| ASCII  | Yes                 | Yes | Black terminal, monospace type, character art   |
+| Paper  | Yes                 | Yes | Light print look, serif type, riso-style art    |
+| Holo   | Yes                 | Yes | Violet glass, rounded type, symbol art          |
+| Ledger | No                  | Yes | Plain light accounting look with serif headings |
 
 The iPhone app starts in **Paper**; the Messages extension starts in the first theme in the list (ASCII). The docs site defaults to ASCII.
 
