@@ -104,17 +104,20 @@ public enum WalletApprovalError: Error, Equatable, Sendable {
     }
 }
 
-/// Signs the exact typed data of one approval request with a user-controlled
-/// wallet (an external wallet hand-off or a supported user-controlled wallet
-/// SDK). Sign-in, Face ID and notification taps are never approvals; the wallet
-/// is the only thing that produces a signature, and it shows the person the
-/// typed data itself.
+/// Signs the exact typed data of one step of an approval request with a
+/// user-controlled wallet (an external wallet hand-off or a supported
+/// user-controlled wallet SDK). Sign-in, Face ID and notification taps are never
+/// approvals; the wallet is the only thing that produces a signature, and it
+/// shows the person the typed data itself. An implementation must refuse when
+/// the connected wallet is not `request.signerAddress`.
 @MainActor
 public protocol WalletApprovalPort: AnyObject {
     /// Whether this build can sign at all, with the honest reason when it cannot.
     var availability: Capability { get }
-    /// - Parameter typedDataJSON: the server's `typedData` bytes, passed on unmodified.
-    func sign(_ request: SigningRequest, typedDataJSON: Data, gesture: UserApprovalGesture) async throws -> String
+    /// - Parameters:
+    ///   - step: index into `request.steps`; steps are signed in order.
+    ///   - typedDataJSON: that step's `typedData` as the server sent it.
+    func sign(_ request: SigningRequest, step: Int, typedDataJSON: Data, gesture: UserApprovalGesture) async throws -> String
 }
 
 @MainActor
@@ -124,7 +127,7 @@ public final class NoWalletSigner: WalletApprovalPort {
         Capability(status: .notConfigured,
                    reason: "No wallet is connected to this app yet. Approve on the Synq page with your wallet.")
     }
-    public func sign(_ request: SigningRequest, typedDataJSON: Data, gesture: UserApprovalGesture) async throws -> String {
+    public func sign(_ request: SigningRequest, step: Int, typedDataJSON: Data, gesture: UserApprovalGesture) async throws -> String {
         throw WalletApprovalError.notConfigured(availability.reason)
     }
 }

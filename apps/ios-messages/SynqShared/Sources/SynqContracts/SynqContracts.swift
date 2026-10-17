@@ -165,7 +165,7 @@ public struct Balance: Codable, Sendable, Equatable {
     public var symbol: String
     public var chainId: Int
     public var decimals: Int
-    /// Integer token base units as a decimal string
+    /// Final on chain; includes reserved
     public var settled: String
     /// Settled but held for bills, deals or members
     public var reserved: String
@@ -655,6 +655,7 @@ public struct CircleProposal: Codable, Sendable, Equatable {
         case submitted = "SUBMITTED"
         case confirmed = "CONFIRMED"
         case failed = "FAILED"
+        case needsReview = "NEEDS_REVIEW"
         case cancelled = "CANCELLED"
         case expired = "EXPIRED"
         /// A value this client version does not know yet.
@@ -1350,6 +1351,174 @@ public struct OfferValidation: Codable, Sendable, Equatable {
     }
 }
 
+public struct CommercialPolicy: Codable, Sendable, Equatable {
+    public var catalog: [CatalogItem]
+    public var maxDiscountBps: Int
+    public var minDepositBps: Int
+    public var maxMilestones: Int
+    public var offerTtlSeconds: Int
+    public var ownerApprovalAboveUnits: String
+    public var capacityFreshSeconds: Int
+
+    public init(catalog: [CatalogItem], maxDiscountBps: Int, minDepositBps: Int, maxMilestones: Int, offerTtlSeconds: Int, ownerApprovalAboveUnits: String, capacityFreshSeconds: Int) {
+        self.catalog = catalog
+        self.maxDiscountBps = maxDiscountBps
+        self.minDepositBps = minDepositBps
+        self.maxMilestones = maxMilestones
+        self.offerTtlSeconds = offerTtlSeconds
+        self.ownerApprovalAboveUnits = ownerApprovalAboveUnits
+        self.capacityFreshSeconds = capacityFreshSeconds
+    }
+
+    public struct CatalogItem: Codable, Sendable, Equatable {
+        public var sku: String
+        public var description: String
+        public var unitUnits: String
+        public var floorUnits: String
+        public var maxQuantity: Int
+        public var leadTimeDays: Int
+        public var rushSurchargeBps: Int
+        public var capacity: Capacity?
+
+        public init(sku: String, description: String, unitUnits: String, floorUnits: String, maxQuantity: Int, leadTimeDays: Int, rushSurchargeBps: Int, capacity: Capacity? = nil) {
+            self.sku = sku
+            self.description = description
+            self.unitUnits = unitUnits
+            self.floorUnits = floorUnits
+            self.maxQuantity = maxQuantity
+            self.leadTimeDays = leadTimeDays
+            self.rushSurchargeBps = rushSurchargeBps
+            self.capacity = capacity
+        }
+
+        public struct Capacity: Codable, Sendable, Equatable {
+            public var unitsAvailable: Int
+            /// UTC ISO-8601 timestamp
+            public var asOf: String
+
+            public init(unitsAvailable: Int, asOf: String) {
+                self.unitsAvailable = unitsAvailable
+                self.asOf = asOf
+            }
+        }
+    }
+}
+
+public struct CommercialPolicyView: Codable, Sendable, Equatable {
+    public var version: Int
+    public var state: State
+    public var policyHash: String
+    public var policy: CommercialPolicy
+    public var approvedBy: JSONValue
+
+    public init(version: Int, state: State, policyHash: String, policy: CommercialPolicy, approvedBy: JSONValue) {
+        self.version = version
+        self.state = state
+        self.policyHash = policyHash
+        self.policy = policy
+        self.approvedBy = approvedBy
+    }
+
+    public enum State: String, Codable, Sendable, CaseIterable, Equatable {
+        case review = "REVIEW"
+        case active = "ACTIVE"
+        case superseded = "SUPERSEDED"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct CommercialPolicyList: Codable, Sendable, Equatable {
+    public var policies: [CommercialPolicyView]
+
+    public init(policies: [CommercialPolicyView]) {
+        self.policies = policies
+    }
+}
+
+public struct OfferTerms: Codable, Sendable, Equatable {
+    public var lines: [Line]
+    public var rush: Bool
+    public var deliveryDays: Int
+    public var milestones: [Milestone]
+    public var depositUnits: String
+    public var note: String
+
+    public init(lines: [Line], rush: Bool, deliveryDays: Int, milestones: [Milestone], depositUnits: String, note: String) {
+        self.lines = lines
+        self.rush = rush
+        self.deliveryDays = deliveryDays
+        self.milestones = milestones
+        self.depositUnits = depositUnits
+        self.note = note
+    }
+
+    public struct Line: Codable, Sendable, Equatable {
+        public var sku: String
+        public var quantity: Int
+        public var unitUnits: String
+
+        public init(sku: String, quantity: Int, unitUnits: String) {
+            self.sku = sku
+            self.quantity = quantity
+            self.unitUnits = unitUnits
+        }
+    }
+
+    public struct Milestone: Codable, Sendable, Equatable {
+        public var label: String
+        public var units: String
+        public var dueInDays: Int
+
+        public init(label: String, units: String, dueInDays: Int) {
+            self.label = label
+            self.units = units
+            self.dueInDays = dueInDays
+        }
+    }
+}
+
+public struct OfferCheck: Codable, Sendable, Equatable {
+    public var rule: String
+    public var passed: Bool
+    public var detail: String
+
+    public init(rule: String, passed: Bool, detail: String) {
+        self.rule = rule
+        self.passed = passed
+        self.detail = detail
+    }
+}
+
+public struct OfferSendRequest: Codable, Sendable, Equatable {
+    public var terms: OfferTerms
+    public var offerId: String?
+
+    public init(terms: OfferTerms, offerId: String? = nil) {
+        self.terms = terms
+        self.offerId = offerId
+    }
+}
+
+public struct OfferSendResult: Codable, Sendable, Equatable {
+    public var sent: Bool
+    public var checks: [OfferCheck]
+    public var needsOwner: Bool
+    public var offer: OfferVersion?
+
+    public init(sent: Bool, checks: [OfferCheck], needsOwner: Bool, offer: OfferVersion? = nil) {
+        self.sent = sent
+        self.checks = checks
+        self.needsOwner = needsOwner
+        self.offer = offer
+    }
+}
+
 public enum ApprovalPurpose: String, Codable, Sendable, CaseIterable, Equatable {
     case vaultSetup = "VAULT_SETUP"
     case vaultAction = "VAULT_ACTION"
@@ -1361,6 +1530,7 @@ public enum ApprovalPurpose: String, Codable, Sendable, CaseIterable, Equatable 
     case leaseIssue = "LEASE_ISSUE"
     case leaseRevoke = "LEASE_REVOKE"
     case circleRefund = "CIRCLE_REFUND"
+    case commercialPolicy = "COMMERCIAL_POLICY"
     /// A value this client version does not know yet.
     case unknown = "__unknown__"
 
@@ -1380,10 +1550,10 @@ public struct ApprovalItem: Codable, Sendable, Equatable {
     public var recipientHint: String?
     public var approvals: Int
     public var threshold: Int
-    /// UTC ISO-8601 timestamp
-    public var expiresAt: String
+    /// Null when the request does not expire
+    public var expiresAt: String?
 
-    public init(requestId: String, workspaceId: String, workspaceName: String, purpose: ApprovalPurpose, summary: String, amount: Money? = nil, recipientHint: String? = nil, approvals: Int, threshold: Int, expiresAt: String) {
+    public init(requestId: String, workspaceId: String, workspaceName: String, purpose: ApprovalPurpose, summary: String, amount: Money? = nil, recipientHint: String? = nil, approvals: Int, threshold: Int, expiresAt: String? = nil) {
         self.requestId = requestId
         self.workspaceId = workspaceId
         self.workspaceName = workspaceName
@@ -1431,27 +1601,40 @@ public struct TypedData: Codable, Sendable, Equatable {
     }
 }
 
-public struct SigningRequest: Codable, Sendable, Equatable {
-    public var request: ApprovalItem
-    /// The wallet that must sign
-    public var signer: String
-    /// Contract or service that enforces it
-    public var enforcedBy: String
+public struct SigningStep: Codable, Sendable, Equatable {
+    public var label: String
     public var typedData: TypedData
 
-    public init(request: ApprovalItem, signer: String, enforcedBy: String, typedData: TypedData) {
-        self.request = request
-        self.signer = signer
-        self.enforcedBy = enforcedBy
+    public init(label: String, typedData: TypedData) {
+        self.label = label
         self.typedData = typedData
     }
 }
 
-public struct SignatureSubmit: Codable, Sendable, Equatable {
-    public var signature: String
+public struct SigningRequest: Codable, Sendable, Equatable {
+    public var request: ApprovalItem
+    /// The wallet that must sign (display)
+    public var signer: String
+    /// Full address of the wallet that must sign; refuse to sign from any other
+    public var signerAddress: String
+    /// Contract or service that enforces it
+    public var enforcedBy: String
+    public var steps: [SigningStep]
 
-    public init(signature: String) {
-        self.signature = signature
+    public init(request: ApprovalItem, signer: String, signerAddress: String, enforcedBy: String, steps: [SigningStep]) {
+        self.request = request
+        self.signer = signer
+        self.signerAddress = signerAddress
+        self.enforcedBy = enforcedBy
+        self.steps = steps
+    }
+}
+
+public struct SignatureSubmit: Codable, Sendable, Equatable {
+    public var signatures: [String]
+
+    public init(signatures: [String]) {
+        self.signatures = signatures
     }
 }
 
@@ -1503,7 +1686,7 @@ public enum NotificationCategory: String, Codable, Sendable, CaseIterable, Equat
     }
 }
 
-public struct Notification: Codable, Sendable, Equatable {
+public struct AppNotification: Codable, Sendable, Equatable {
     public var notificationId: String
     public var eventId: String
     public var category: NotificationCategory
@@ -1529,11 +1712,11 @@ public struct Notification: Codable, Sendable, Equatable {
 }
 
 public struct NotificationPage: Codable, Sendable, Equatable {
-    public var items: [Notification]
+    public var items: [AppNotification]
     public var nextCursor: String?
     public var unreadCount: Int
 
-    public init(items: [Notification], nextCursor: String? = nil, unreadCount: Int) {
+    public init(items: [AppNotification], nextCursor: String? = nil, unreadCount: Int) {
         self.items = items
         self.nextCursor = nextCursor
         self.unreadCount = unreadCount
@@ -1676,6 +1859,9 @@ public struct Route: Sendable, Equatable {
         Route(id: "workspace.leadInvite", method: "POST", path: "/v3/workspaces/{workspaceId}/lead-invites", mutation: true),
         Route(id: "leadInvite.redeem", method: "POST", path: "/v3/lead-invites/redeem", mutation: false),
         Route(id: "workspace.offerValidate", method: "POST", path: "/v3/workspaces/{workspaceId}/offers/{offerId}/versions/{version}/validate", mutation: true),
+        Route(id: "workspace.leadOffer", method: "POST", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/offers", mutation: true),
+        Route(id: "workspace.commercialPolicies", method: "GET", path: "/v3/workspaces/{workspaceId}/commercial-policies", mutation: false),
+        Route(id: "workspace.commercialPolicyPropose", method: "POST", path: "/v3/workspaces/{workspaceId}/commercial-policies", mutation: true),
         Route(id: "workspace.agentRuns", method: "GET", path: "/v3/workspaces/{workspaceId}/agent-runs", mutation: false),
         Route(id: "workspace.agentRun", method: "GET", path: "/v3/workspaces/{workspaceId}/agent-runs/{runId}", mutation: false),
         Route(id: "workspace.mandates", method: "GET", path: "/v3/workspaces/{workspaceId}/mandates", mutation: false),

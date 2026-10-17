@@ -13,10 +13,10 @@ final class PortsAndRoutingTests: XCTestCase {
         let request = SigningRequest(
             request: ApprovalItem(requestId: "r1", workspaceId: "w1", workspaceName: "W", purpose: .payout,
                                   summary: "s", approvals: 0, threshold: 1, expiresAt: "2026-10-17T00:00:00Z"),
-            signer: "0x1", enforcedBy: "x",
-            typedData: TypedData(domain: [:], types: [:], primaryType: "X", message: [:]))
+            signer: "0x1…1", signerAddress: "0x" + String(repeating: "1", count: 40), enforcedBy: "x",
+            steps: [SigningStep(label: "Approve", typedData: TypedData(domain: [:], types: [:], primaryType: "X", message: [:]))])
         do {
-            _ = try await signer.sign(request, typedDataJSON: Data(), gesture: UserApprovalGesture(requestId: "r1"))
+            _ = try await signer.sign(request, step: 0, typedDataJSON: Data(), gesture: UserApprovalGesture(requestId: "r1"))
             XCTFail("the default signer must never return a signature")
         } catch let e as WalletApprovalError {
             XCTAssertEqual(e, .notConfigured(signer.availability.reason))

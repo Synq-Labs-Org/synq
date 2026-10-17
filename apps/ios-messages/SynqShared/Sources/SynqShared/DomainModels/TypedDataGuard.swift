@@ -2,51 +2,71 @@ import Foundation
 import SynqContracts
 
 /// Checks an approval's typed data before a wallet is asked to sign it, and
-/// extracts the exact `typedData` bytes the wallet receives. It refuses when:
-/// an integer field arrives as a JSON number (precision may already be lost),
-/// the domain's chain is not the chain of the amount, the request has expired,
-/// or the bytes are not the typed data the screen shows.
+/// extracts the exact `typedData` of each signing step for the wallet. It
+/// refuses when: an integer field arrives as a JSON number (precision may
+/// already be lost), a step's domain chain is not the chain of the amount, the
+/// request has expired, the expected signer is not a full address, or the bytes
+/// are not the typed data the screen shows.
 public enum TypedDataGuard {
-    public struct Prepared: Equatable, Sendable {
-        /// `typedData` serialised from the server's JSON object (keys sorted).
+    public struct Step: Equatable, Sendable {
+        public let label: String
+        /// The step's `typedData` taken from the server's JSON (keys sorted, numbers untouched).
         public let json: Data
+    }
+
+    public struct Prepared: Equatable, Sendable {
+        /// In the order the server requires them to be signed.
+        public let steps: [Step]
         public let problems: [String]
-        public var canSign: Bool { problems.isEmpty }
+        public var canSign: Bool { problems.isEmpty && !steps.isEmpty }
     }
 
     public static func prepare(responseBody: Data, request: SigningRequest, now: Date = Date()) -> Prepared {
         var problems: [String] = []
         guard let root = try? JSONSerialization.jsonObject(with: responseBody, options: [.fragmentsAllowed]) as? [String: Any],
-              let typed = root["typedData"] as? [String: Any],
-              let json = try? JSONSerialization.data(withJSONObject: typed, options: [.sortedKeys]) else {
-            return Prepared(json: Data(), problems: ["The approval did not include typed data."])
+              let rawSteps = root["steps"] as? [[String: Any]], !rawSteps.isEmpty,
+              rawSteps.count == request.steps.count else {
+            return Prepared(steps: [], problems: ["The approval did not include anything to sign."])
         }
-        let types = typed["types"] as? [String: [[String: Any]]] ?? [:]
-        let primary = typed["primaryType"] as? String ?? ""
-        if types[primary] == nil { problems.append("The typed data does not define its primary type.") }
-        if let message = typed["message"] as? [String: Any] {
-            problems += numericProblems(message, typeName: primary, types: types, path: "message")
-        } else {
-            problems.append("The typed data has no message.")
+        if request.signerAddress.range(of: "^0x[0-9a-fA-F]{40}$", options: .regularExpression) == nil {
+            problems.append("The request does not name the wallet that must sign.")
         }
-        if let domain = typed["domain"] as? [String: Any] {
-            if let chain = domain["chainId"] {
-                let id = (chain as? NSNumber)?.intValue ?? Int(chain as? String ?? "")
-                if let amountChain = request.request.amount?.chainId, let id, id != amountChain {
-                    problems.append("The signature is for chain \(id) but the amount is on chain \(amountChain).")
-                }
+        if let e = request.request.expiresAt, let expires = SynqTime.parse(e), expires <= now {
+            problems.append("This request expired \(SynqTime.short(e)).")
+        }
+        var steps: [Step] = []
+        for (i, raw) in rawSteps.enumerated() {
+            let n = rawSteps.count > 1 ? "Step \(i + 1): " : ""
+            guard let typed = raw["typedData"] as? [String: Any],
+                  let json = try? JSONSerialization.data(withJSONObject: typed, options: [.sortedKeys]) else {
+                problems.append("\(n)no typed data.")
+                continue
             }
-        } else {
-            problems.append("The typed data has no domain.")
+            let types = typed["types"] as? [String: [[String: Any]]] ?? [:]
+            let primary = typed["primaryType"] as? String ?? ""
+            if types[primary] == nil { problems.append("\(n)the typed data does not define its primary type.") }
+            if let message = typed["message"] as? [String: Any] {
+                problems += numericProblems(message, typeName: primary, types: types, path: "message").map { n + $0 }
+            } else {
+                problems.append("\(n)the typed data has no message.")
+            }
+            if let domain = typed["domain"] as? [String: Any] {
+                if let chain = domain["chainId"] {
+                    let id = (chain as? NSNumber)?.intValue ?? Int(chain as? String ?? "")
+                    if let amountChain = request.request.amount?.chainId, let id, id != amountChain {
+                        problems.append("\(n)the signature is for chain \(id) but the amount is on chain \(amountChain).")
+                    }
+                }
+            } else {
+                problems.append("\(n)the typed data has no domain.")
+            }
+            // The decoded model and the bytes must describe the same typed data.
+            if let decoded = try? JSONDecoder().decode(TypedData.self, from: json), decoded != request.steps[i].typedData {
+                problems.append("\(n)the typed data changed while it was read.")
+            }
+            steps.append(Step(label: request.steps[i].label, json: json))
         }
-        if let expires = SynqTime.parse(request.request.expiresAt), expires <= now {
-            problems.append("This request expired \(SynqTime.short(request.request.expiresAt)).")
-        }
-        // The decoded model and the bytes must describe the same typed data.
-        if let decoded = try? JSONDecoder().decode(TypedData.self, from: json), decoded != request.typedData {
-            problems.append("The typed data changed while it was read.")
-        }
-        return Prepared(json: json, problems: problems)
+        return Prepared(steps: steps, problems: problems)
     }
 
     /// Integer-typed fields must be decimal strings; nested structs are checked too.
@@ -107,6 +127,7 @@ extension ApprovalPurpose {
         case .leaseIssue: return "Give an agent a spending lease"
         case .leaseRevoke: return "Revoke an agent lease"
         case .circleRefund: return "Circle refund"
+        case .commercialPolicy: return "Approve a sales policy"
         case .unknown: return "Unknown request"
         }
     }

@@ -376,6 +376,7 @@ struct CircleDetailContent: View {
         case .submitted: return "Submitted"
         case .confirmed: return p.txHash == nil ? "Confirmed" : "Final"
         case .failed: return "Failed"
+        case .needsReview: return "Needs review"
         case .cancelled: return "Cancelled"
         case .expired: return "Expired"
         case .unknown: return "Unknown"

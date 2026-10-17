@@ -117,8 +117,8 @@ final class DomainRulesTests: XCTestCase {
     func signingRequest(message: String, chainId: Int = 5042002, expires: String = "2099-01-01T00:00:00Z") -> (Data, SigningRequest) {
         let json = #"""
         {"request":{"requestId":"r1","workspaceId":"w1","workspaceName":"Studio","purpose":"PAYOUT","summary":"Pay","amount":{"assetId":"arc-testnet:USDC","symbol":"USDC","chainId":5042002,"decimals":6,"units":"40000000"},"approvals":1,"threshold":2,"expiresAt":"\#(expires)"},
-         "signer":"0x1111…1111","enforcedBy":"Safe",
-         "typedData":{"domain":{"name":"Synq","version":"1","chainId":\#(chainId)},"types":{"Payout":[{"name":"amount","type":"uint256"},{"name":"to","type":"address"}]},"primaryType":"Payout","message":\#(message)}}
+         "signer":"0x1111…1111","signerAddress":"0x1111111111111111111111111111111111111111","enforcedBy":"Safe",
+         "steps":[{"label":"Approve this payment","typedData":{"domain":{"name":"Synq","version":"1","chainId":\#(chainId)},"types":{"Payout":[{"name":"amount","type":"uint256"},{"name":"to","type":"address"}]},"primaryType":"Payout","message":\#(message)}}]}
         """#
         let data = Data(json.utf8)
         return (data, try! JSONDecoder().decode(SigningRequest.self, from: data))
@@ -128,8 +128,9 @@ final class DomainRulesTests: XCTestCase {
         let (data, req) = signingRequest(message: #"{"amount":"40000000","to":"0x3333333333333333333333333333333333333333"}"#)
         let p = TypedDataGuard.prepare(responseBody: data, request: req)
         XCTAssertTrue(p.canSign, p.problems.joined())
-        XCTAssertFalse(p.json.isEmpty)
-        let lines = TypedDataGuard.lines(req.typedData)
+        XCTAssertEqual(p.steps.count, 1)
+        XCTAssertFalse(p.steps[0].json.isEmpty)
+        let lines = TypedDataGuard.lines(req.steps[0].typedData)
         XCTAssertTrue(lines.contains { $0.0 == "amount (uint256)" && $0.1 == "40000000" })
     }
 

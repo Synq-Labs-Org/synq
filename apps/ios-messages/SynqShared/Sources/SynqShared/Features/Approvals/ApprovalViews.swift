@@ -41,7 +41,7 @@ struct ApprovalRows: View {
                 ForEach(Array(items.enumerated()), id: \.element.requestId) { i, a in
                     SynqRow(icon: a.purpose.movesMoney ? .send : .passkey, title: a.purpose.label,
                             subtitle: [a.amount?.text, a.workspaceName].compactMap { $0 }.joined(separator: " · "),
-                            detail: "\(a.approvals) of \(a.threshold) signed · expires \(SynqTime.short(a.expiresAt))",
+                            detail: "\(a.approvals) of \(a.threshold) signed\(a.expiresAt.map { " · expires \(SynqTime.short($0))" } ?? "")",
                             trailing: .badge(.pending, "Review"), divider: i > 0) { onOpen(a.requestId) }
                 }
             }
@@ -165,9 +165,13 @@ struct ApprovalSheet: View {
         Task {
             defer { signing = false }
             do {
-                let signature = try await model.wallet.sign(request, typedDataJSON: prepared.json, gesture: gesture)
+                // Every step, in the server's order, each from the same tap; nothing is sent until all are signed.
+                var signatures: [String] = []
+                for (i, step) in prepared.steps.enumerated() {
+                    signatures.append(try await model.wallet.sign(request, step: i, typedDataJSON: step.json, gesture: gesture))
+                }
                 result = try await scope.api.call("approvals.sign", params: ["requestId": requestId],
-                                                  body: SignatureSubmit(signature: signature), idempotencyKey: submitKey,
+                                                  body: SignatureSubmit(signatures: signatures), idempotencyKey: submitKey,
                                                   as: SignatureResult.self)
                 scope.approvals.load(force: true)
             } catch let e as WalletApprovalError {
@@ -197,20 +201,24 @@ struct ApprovalTerms: View {
             SynqKeyValue("Workspace", r.workspaceName)
             if let to = r.recipientHint { SynqKeyValue("Recipient", to, mono: true) }
             SynqKeyValue("Signatures", "\(r.approvals) of \(r.threshold)")
-            SynqKeyValue("Expires", SynqTime.short(r.expiresAt))
-            SynqKeyValue("Signer", request.signer, mono: true)
+            if let e = r.expiresAt { SynqKeyValue("Expires", SynqTime.short(e)) }
+            SynqKeyValue("Signing wallet", request.signerAddress, mono: true)
             SynqKeyValue("Enforced by", request.enforcedBy)
             Text(r.purpose.movesMoney ? "Requires your signature: this authorises money to move under the terms below."
                                       : "Requires your signature: this changes terms or settings; it does not move money by itself.")
                 .synqType(.caption, .secondary).fixedSize(horizontal: false, vertical: true)
         }
-        SynqSectionLabel(text: "What your wallet signs")
-        SynqGroup {
-            let lines = TypedDataGuard.lines(request.typedData)
-            ForEach(Array(lines.enumerated()), id: \.offset) { i, l in
-                VStack(spacing: 0) {
-                    if i > 0 { SynqDivider() }
-                    SynqKeyValue(l.0, l.1, mono: true).padding(theme.space.m)
+        SynqSectionLabel(text: request.steps.count == 1 ? "What your wallet signs" : "What your wallet signs, in order",
+                         trailing: request.steps.count == 1 ? nil : "\(request.steps.count) signatures")
+        ForEach(Array(request.steps.enumerated()), id: \.offset) { n, step in
+            Text(request.steps.count == 1 ? step.label : "\(n + 1). \(step.label)").synqType(.bodyStrong)
+            SynqGroup {
+                let lines = TypedDataGuard.lines(step.typedData)
+                ForEach(Array(lines.enumerated()), id: \.offset) { i, l in
+                    VStack(spacing: 0) {
+                        if i > 0 { SynqDivider() }
+                        SynqKeyValue(l.0, l.1, mono: true).padding(theme.space.m)
+                    }
                 }
             }
         }
@@ -243,7 +251,7 @@ struct NotificationsSheet: View {
         }
     }
 
-    private func open(_ n: SynqContracts.Notification) {
+    private func open(_ n: AppNotification) {
         Task {
             _ = try? await scope.api.call("notifications.read", body: MarkRead(notificationIds: [n.notificationId]), as: Ok.self)
         }

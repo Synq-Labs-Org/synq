@@ -17,7 +17,6 @@ final class ContractFixtureTests: XCTestCase {
     func testEveryFixtureDecodes() throws {
         _ = try fixture("Meta", as: Meta.self)
         _ = try fixture("Contexts", as: Contexts.self)
-        _ = try fixture("DeviceSession", as: DeviceSession.self)
         _ = try fixture("PersonalOverview", as: PersonalOverview.self)
         _ = try fixture("WorkspaceOverview", as: WorkspaceOverview.self)
         _ = try fixture("InboxPage", as: InboxPage.self)
@@ -27,6 +26,14 @@ final class ContractFixtureTests: XCTestCase {
         _ = try fixture("ApprovalPage", as: ApprovalPage.self)
         _ = try fixture("SigningRequest", as: SigningRequest.self)
         _ = try fixture("NotificationPage", as: NotificationPage.self)
+    }
+
+    /// Every fixture the generator writes is covered by the test above.
+    func testNoFixtureIsSkipped() throws {
+        let names = try FileManager.default.contentsOfDirectory(atPath: Self.fixtures.path).filter { $0.hasSuffix(".json") }.sorted()
+        XCTAssertEqual(names, ["AgentRunDetail.json", "ApprovalPage.json", "Contexts.json", "InboxPage.json", "LeadDetail.json",
+                               "Mandates.json", "Meta.json", "NotificationPage.json", "PersonalOverview.json",
+                               "SigningRequest.json", "WorkspaceOverview.json"])
     }
 
     func testUnknownEnumValueDecodesAsUnknown() throws {
