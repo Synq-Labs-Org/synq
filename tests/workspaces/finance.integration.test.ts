@@ -966,8 +966,10 @@ describe('G4/G11 durable workspace payout authority — LOCAL_FIXTURE', () => {
   });
 });
 
-async function governanceFixture() {
-  const f = await payoutFixture(),
+async function governanceFixture(
+  screeningFor?: (payee: Address) => WalletScreeningPort,
+) {
+  const f = await payoutFixture(true, '0', screeningFor),
     operator = account();
   let signed = 0;
   const fake = fakeGovernanceChain({
@@ -977,6 +979,7 @@ async function governanceFixture() {
     threshold: 2,
     now: f.store.now,
     delay: 3600,
+    token: f.authority.token,
   });
   const service = new WorkspaceGovernance(f.finance);
   const signer = {
@@ -999,6 +1002,7 @@ async function governanceFixture() {
     fake.chain,
     signer,
     config,
+    f.executor.screening,
   );
   const propose = (kind: 'QUEUE_VENDOR' | 'ALLOW_VENDOR' | 'REMOVE_VENDOR') =>
     service.propose(f.w.id, f.owner.principalId, {
@@ -1024,10 +1028,142 @@ async function governanceFixture() {
     approveAction: approve,
     govSigned: () => signed,
     restartGov: () =>
-      new WorkspaceGovernanceExecutor(f.finance, fake.chain, signer, config),
+      new WorkspaceGovernanceExecutor(
+        f.finance,
+        fake.chain,
+        signer,
+        config,
+        f.executor.screening,
+      ),
   };
 }
 describe('G5 governed vendor allowlist — LOCAL_FIXTURE with Postgres and signed EVM bytes', () => {
+  it('G4/G5 pays an above-budget payout only through a fresh full Safe quorum, screened, reserve-checked and booked once', async () => {
+    const f = await governanceFixture();
+    const p = await f.payouts.propose(f.w.id, f.owner.principalId, {
+      vendorId: f.vendorId,
+      amount: '70000',
+      purpose: 'Quarterly supply above the operator budget',
+      obligation: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+    expect(p.data.route).toBe('SAFE_QUORUM');
+    await expect(f.approvePayout(p)).rejects.toMatchObject({
+      code: 'SAFE_QUORUM_SIGNATURES_REQUIRED',
+    });
+    const action = await f.gov.propose(f.w.id, f.owner.principalId, {
+      kind: 'PAY_VENDOR',
+      payoutId: p.data.id,
+    });
+    expect(action.action).toMatchObject({
+      kind: 'PAY_VENDOR',
+      amount: '70000',
+      vendorAddress: p.data.recipient,
+    });
+    await f.approveAction(action);
+    await expect(f.govExecutor.execute(action.action.id)).rejects.toMatchObject(
+      { code: 'ACTION_NOT_READY' },
+    );
+    await f.approveAction(action, f.coowner);
+    expect(await f.govExecutor.execute(action.action.id)).toMatchObject({
+      state: 'CONFIRMED',
+      evidence: { payoutId: p.data.id, amount: '70000' },
+    });
+    expect(f.govFake.transfers).toEqual([
+      { to: p.data.recipient, amount: 70000n },
+    ]);
+    const paid = await f.payouts.view(f.w.id, f.owner.principalId, p.data.id);
+    expect(paid.state).toBe('PAID');
+    expect(paid.txHash).toBe(f.govFake.broadcasts[0]);
+    expect((await f.restartGov().execute(action.action.id)).state).toBe(
+      'CONFIRMED',
+    );
+    expect(f.govSigned()).toBe(1);
+    expect(
+      (
+        await pool.query(
+          "SELECT count(*)::int AS n FROM synq_event_outbox WHERE payload->>'payoutId'=$1 AND payload->>'kind'='PAYOUT_SENT'",
+          [p.data.id],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+    // The operator route never picks it up.
+    await expect(f.executor.execute(p.data.id)).rejects.toBeDefined();
+    expect(f.signed()).toBe(0);
+  });
+  it('G4/G11 refuses a Safe-quorum payout on a sanctions hit or a breached reserve without signing', async () => {
+    const hitPort = (listed: Address): WalletScreeningPort => ({
+      providerId: 'FIXTURE_ONLY',
+      status: () => ({
+        providerId: 'FIXTURE_ONLY',
+        status: 'AVAILABLE',
+        missingCredentials: [],
+        reason: 'LOCAL_FIXTURE',
+      }),
+      screen: async (q) => ({
+        ...q,
+        providerId: 'FIXTURE_ONLY',
+        verdict:
+          q.address.toLowerCase() === listed.toLowerCase() ? 'HIT' : 'CLEAR',
+        reference: randomUUID(),
+        reason: 'LOCAL_FIXTURE',
+        screenedAt: q.now,
+      }),
+    });
+    for (const scenario of ['HIT', 'RESERVE'] as const) {
+      const f = await governanceFixture(
+        scenario === 'HIT' ? (payee) => hitPort(payee) : undefined,
+      );
+      if (scenario === 'RESERVE') f.govFake.setTokenBalance(75000n);
+      const p = await f.payouts.propose(f.w.id, f.owner.principalId, {
+        vendorId: f.vendorId,
+        amount: '70000',
+        purpose: 'Above budget',
+        obligation: randomUUID(),
+        idempotencyKey: randomUUID(),
+      });
+      const action = await f.gov.propose(f.w.id, f.owner.principalId, {
+        kind: 'PAY_VENDOR',
+        payoutId: p.data.id,
+      });
+      await f.approveAction(action);
+      await f.approveAction(action, f.coowner);
+      expect(await f.govExecutor.execute(action.action.id)).toEqual({
+        state: 'FAILED',
+        reason: scenario === 'HIT' ? 'SCREENING_HIT' : 'RESERVE_FLOOR',
+      });
+      expect(f.govSigned()).toBe(0);
+      expect(f.govFake.transfers).toHaveLength(0);
+      expect(
+        await f.payouts.view(f.w.id, f.owner.principalId, p.data.id),
+      ).toMatchObject({
+        state: 'REVIEW',
+        reason: scenario === 'HIT' ? 'SCREENING_HIT' : 'RESERVE_FLOOR',
+      });
+    }
+  });
+  it('G4 cancels an unsigned Safe-quorum payout and its pending action', async () => {
+    const f = await governanceFixture();
+    const p = await f.payouts.propose(f.w.id, f.owner.principalId, {
+      vendorId: f.vendorId,
+      amount: '70000',
+      purpose: 'Above budget',
+      obligation: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+    const action = await f.gov.propose(f.w.id, f.owner.principalId, {
+      kind: 'PAY_VENDOR',
+      payoutId: p.data.id,
+    });
+    await f.payouts.cancel(f.w.id, f.owner.principalId, p.data.id);
+    expect((await f.gov.record(action.action.id))?.state).toBe('FAILED');
+    await expect(
+      f.gov.propose(f.w.id, f.owner.principalId, {
+        kind: 'PAY_VENDOR',
+        payoutId: p.data.id,
+      }),
+    ).rejects.toMatchObject({ code: 'PAYOUT_NOT_REVIEWABLE' });
+  });
   it('G5 changes exact on-chain caps only after queue, delay and a fresh current Safe quorum', async () => {
     const f = await governanceFixture();
     const propose = (

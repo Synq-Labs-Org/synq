@@ -142,6 +142,8 @@ export const PayoutDataSchema = z.strictObject({
     deadline: z.number().int().safe(),
   }),
   createdAt: z.number().int().safe(),
+  /** VAULT_POLICY: operator pays within on-chain caps. SAFE_QUORUM: above the signed per-payment budget, the full Safe quorum signs a direct transfer. */
+  route: z.enum(['VAULT_POLICY', 'SAFE_QUORUM']).default('VAULT_POLICY'),
 });
 export type PayoutData = z.output<typeof PayoutDataSchema>;
 export function payoutMandate(p: PayoutData): PaymentMandate {

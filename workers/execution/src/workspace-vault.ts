@@ -499,12 +499,18 @@ export async function workspaceVaultRuntime(input: {
     screening,
   );
   await payouts.migrate();
-  const governance = new WorkspaceGovernanceExecutor(finance, chain, account, {
-    operator: 'workspace-governance-worker',
-    grantKey: Buffer.from(grantHex, 'hex'),
-    grantTtlSeconds: 60,
-    riskRequiredAbove: 0n,
-  });
+  const governance = new WorkspaceGovernanceExecutor(
+    finance,
+    chain,
+    account,
+    {
+      operator: 'workspace-governance-worker',
+      grantKey: Buffer.from(grantHex, 'hex'),
+      grantTtlSeconds: 60,
+      riskRequiredAbove: 0n,
+    },
+    screening,
+  );
   const splits = new WorkspaceSplitWorker(
     finance,
     chain,
@@ -580,7 +586,7 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
         }
       }
       const payments = await setups.workspaces.pool.query(
-        "SELECT id FROM synq_ws_payouts WHERE state IN ('READY','SIGNED') AND next_attempt_at<=$1 ORDER BY created_at LIMIT 5",
+        "SELECT id FROM synq_ws_payouts WHERE state IN ('READY','SIGNED') AND COALESCE(data->>'route','VAULT_POLICY')='VAULT_POLICY' AND next_attempt_at<=$1 ORDER BY created_at LIMIT 5",
         [setups.workspaces.now()],
       );
       for (const p of payments.rows) {

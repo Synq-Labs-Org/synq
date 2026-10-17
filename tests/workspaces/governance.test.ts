@@ -10,10 +10,12 @@ import {
 } from '@synq/kernel/arc';
 import {
   SafeActionSchema,
+  safeActionGrantCall,
   safeActionCall,
   safeActionApprovalTypedData,
   safeActionTypedData,
   safeActionExecution,
+  type SafeAction,
   type SafeActionSignature,
 } from '@synq/kernel/arc-safe-action';
 import { safeTxTypedData } from '@synq/execution-worker/vault';
@@ -38,7 +40,7 @@ async function fixture() {
   });
   if (!('vendorAddress' in parsed)) throw new Error('expected vendor action');
   const action = parsed;
-  const sign = async (a = action, who = owners) =>
+  const sign = async (a: SafeAction = action, who = owners) =>
     Promise.all(
       who.map(async (o) => ({
         owner: o.address,
@@ -152,5 +154,63 @@ describe('G5 Safe governance authority — LOCAL_FIXTURE', () => {
     expect(
       safeActionExecution(i.action, [...i.signatures].reverse()).data,
     ).toBe(check.executionCall.data);
+  });
+  it('G4 binds an above-budget PAY_VENDOR grant to the exact vendor, amount and direct token transfer', async () => {
+    const f = await fixture(),
+      base = f.input.action;
+    const pay = SafeActionSchema.parse({
+      id: randomUUID(),
+      workspaceId: base.workspaceId,
+      chainId: 5042002,
+      safe: base.safe,
+      policy: base.policy,
+      token: base.token,
+      kind: 'PAY_VENDOR',
+      payoutId: randomUUID(),
+      vendorId: base.vendorId,
+      vendorAddress: base.vendorAddress,
+      vendorChangeHash: base.vendorChangeHash,
+      amount: '70000',
+      nonce: '0',
+      expiresAt: base.expiresAt,
+    });
+    expect(safeActionCall(pay).to).toBe(base.token);
+    const signatures = await f.sign(pay);
+    const d = await decideWorkspaceSafeAction({
+      ...f.input,
+      action: pay,
+      signatures,
+    });
+    if (d.outcome !== 'ALLOW') throw new Error('expected allow');
+    expect(d.grant).toMatchObject({
+      recipient: base.vendorAddress,
+      amount: '70000',
+    });
+    const check = {
+      grant: d.grant,
+      grantKey: f.input.config.grantKey,
+      call: safeActionGrantCall(pay),
+      executionCall: safeActionExecution(pay, signatures),
+      now: f.input.now,
+      mandateRevoked: false,
+    };
+    await expect(
+      admitGrant({
+        ...check,
+        call: { ...check.call, amount: 70001n },
+        fence: new MemoryNonceFence(),
+      }),
+    ).rejects.toMatchObject({ code: 'GRANT_MISMATCH' });
+    await admitGrant({ ...check, fence: new MemoryNonceFence() });
+    expect(
+      (
+        await decideWorkspaceSafeAction({
+          ...f.input,
+          action: pay,
+          signatures,
+          vendor: { ...f.input.vendor, eligibleAt: f.input.now + 1 },
+        })
+      ).outcome,
+    ).toBe('DENY');
   });
 });

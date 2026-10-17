@@ -284,9 +284,11 @@ export function GovernancePanel({
           <h3>Review exact governance call</h3>
           <p>
             {selected.action.kind} ·{' '}
-            {'vendorAddress' in selected.action
-              ? `recipient ${selected.action.vendorAddress}`
-              : `per-payment ${formatUnits(BigInt(selected.action.perPaymentCap), 6)} USDC · 24-hour ${formatUnits(BigInt(selected.action.windowCap), 6)} USDC`}
+            {selected.action.kind === 'PAY_VENDOR'
+              ? `direct vault transfer of ${formatUnits(BigInt(selected.action.amount), 6)} USDC to verified vendor ${selected.action.vendorAddress} for payout ${selected.action.payoutId}`
+              : 'vendorAddress' in selected.action
+                ? `recipient ${selected.action.vendorAddress}`
+                : `per-payment ${formatUnits(BigInt(selected.action.perPaymentCap), 6)} USDC · 24-hour ${formatUnits(BigInt(selected.action.windowCap), 6)} USDC`}
           </p>
           <p>
             Safe {selected.action.safe} · policy {selected.action.policy} ·

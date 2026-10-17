@@ -27,6 +27,10 @@ const policyAbi = parseAbi([
   'function queue(address to,uint256 value,bytes data,uint8 operation) returns(bytes32)',
   'event RecipientSet(address indexed recipient,bool allowed)',
 ]);
+const tokenAbi = parseAbi([
+  'function transfer(address to,uint256 amount) returns(bool)',
+  'event Transfer(address indexed from,address indexed to,uint256 value)',
+]);
 /** LOCAL_FIXTURE: independently enforces Safe signatures and the policy delay on real serialized bytes. */
 export function fakeGovernanceChain(input: {
   safe: Address;
@@ -35,6 +39,9 @@ export function fakeGovernanceChain(input: {
   threshold: number;
   now: () => number;
   delay: number;
+  /** Token the Safe holds; a quorum-signed transfer of it is an ungoverned, immediate call. */
+  token?: Address;
+  tokenBalance?: bigint;
 }) {
   let safeNonce = 0n,
     senderNonce = 0;
@@ -43,6 +50,8 @@ export function fakeGovernanceChain(input: {
     allowed = new Set<string>(),
     receipts = new Map<Hex, Record<string, unknown>>();
   const broadcasts: Hex[] = [];
+  let tokenBalance = input.tokenBalance ?? 1_000_000n;
+  const transfers: { to: Address; amount: bigint }[] = [];
   const failure = { wait: 0 };
   const operationId = (data: Hex) =>
     keccak256(
@@ -72,8 +81,10 @@ export function fakeGovernanceChain(input: {
       refundReceiver,
       packed,
     ] = tx.args;
+    const tokenCall =
+      !!input.token && to.toLowerCase() === input.token.toLowerCase();
     if (
-      to.toLowerCase() !== input.policy.toLowerCase() ||
+      (to.toLowerCase() !== input.policy.toLowerCase() && !tokenCall) ||
       value !== 0n ||
       operation !== 0 ||
       safeTxGas !== 0n ||
@@ -104,8 +115,38 @@ export function fakeGovernanceChain(input: {
       signers.push(owner);
     }
     if (signers.length < input.threshold) throw new Error('quorum missing');
-    const action = decodeFunctionData({ abi: policyAbi, data: inner });
     const logs: { address: Address; topics: Hex[]; data: Hex }[] = [];
+    if (tokenCall) {
+      const t = decodeFunctionData({ abi: tokenAbi, data: inner });
+      if (t.functionName !== 'transfer') throw new Error('not a transfer');
+      const [recipient, amount] = t.args;
+      if (amount > tokenBalance) throw new Error('insufficient balance');
+      if (apply) {
+        tokenBalance -= amount;
+        transfers.push({ to: recipient, amount });
+        safeNonce++;
+      }
+      logs.push({
+        address: input.token!,
+        topics: encodeEventTopics({
+          abi: tokenAbi,
+          eventName: 'Transfer',
+          args: { from: input.safe, to: recipient },
+        }) as Hex[],
+        data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+      });
+      logs.push({
+        address: input.safe,
+        topics: encodeEventTopics({
+          abi: SAFE_ABI,
+          eventName: 'ExecutionSuccess',
+          args: { txHash: hash },
+        }) as Hex[],
+        data: encodeAbiParameters([{ type: 'uint256' }], [0n]),
+      });
+      return logs;
+    }
+    const action = decodeFunctionData({ abi: policyAbi, data: inner });
     if (action.functionName === 'queue') {
       const [target, v, call, op] = action.args;
       if (target !== input.policy || v !== 0n || op !== 0)
@@ -190,6 +231,10 @@ export function fakeGovernanceChain(input: {
     getChainId: async () => chainProfile('arc-testnet').chainId,
     getCode: async () => `0x${proxyCode.join('')}` as Hex,
     getBalance: async () => 10n ** 20n,
+    readContract: async ({ functionName }: { functionName: string }) => {
+      if (functionName !== 'balanceOf') throw new Error('unsupported read');
+      return tokenBalance;
+    },
     getTransactionCount: async () => senderNonce,
     estimateFeesPerGas: async () => ({
       maxFeePerGas: 21_000_000_000n,
@@ -253,6 +298,10 @@ export function fakeGovernanceChain(input: {
     },
     get safeNonce() {
       return safeNonce;
+    },
+    transfers,
+    setTokenBalance(v: bigint) {
+      tokenBalance = v;
     },
   };
 }

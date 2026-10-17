@@ -13,6 +13,7 @@ import {
   intentApprovalTypedData,
   mandateTypedData,
 } from '@synq/kernel/arc-payment-data';
+import { SafeActionViewSchema } from '@synq/kernel/arc-safe-action';
 import { api, describeError } from '../../lib/api';
 
 type Payout = z.output<typeof PayoutViewSchema>;
@@ -284,24 +285,54 @@ export function PayoutPanel({
               Cancel before signing by the worker
             </button>
           )}
-          {owner && review.state === 'REVIEW' && (
-            <>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => setChecked(e.target.checked)}
-                />
-                I reviewed the exact amount, destination and obligation.
-              </label>
-              <button
-                disabled={busy || !checked}
-                onClick={() => void run(sign)}
-              >
-                Sign payment approval
-              </button>
-            </>
-          )}
+          {owner &&
+            review.state === 'REVIEW' &&
+            review.data.route === 'SAFE_QUORUM' && (
+              <>
+                <p>
+                  This amount is above the signed per-payment budget, so the
+                  operator cannot pay it. Every Safe owner signs one direct
+                  vault transfer for exactly these terms; it is screened and
+                  reserve-checked before anything is broadcast. The prepared
+                  transfer appears under vault governance for 15 minutes.
+                </p>
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await api.post(
+                        `/v2/workspaces/${encodeURIComponent(workspaceId)}/vault/actions`,
+                        SafeActionViewSchema,
+                        { kind: 'PAY_VENDOR', payoutId: review.data.id },
+                      );
+                      await refresh();
+                    })
+                  }
+                >
+                  Prepare vault transfer for owner signatures
+                </button>
+              </>
+            )}
+          {owner &&
+            review.state === 'REVIEW' &&
+            review.data.route !== 'SAFE_QUORUM' && (
+              <>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => setChecked(e.target.checked)}
+                  />
+                  I reviewed the exact amount, destination and obligation.
+                </label>
+                <button
+                  disabled={busy || !checked}
+                  onClick={() => void run(sign)}
+                >
+                  Sign payment approval
+                </button>
+              </>
+            )}
         </section>
       )}
     </section>

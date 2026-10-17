@@ -26,6 +26,7 @@ import { hashTypedData } from 'viem';
 import {
   SafeActionSchema,
   safeActionApprovalTypedData,
+  safeActionGrantCall,
   safeActionTypedData,
   safeActionExecution,
   type SafeAction,
@@ -516,13 +517,7 @@ export async function decideWorkspaceSafeAction(input: {
     counted.add(lower(s.owner));
   }
   if (counted.size < c.threshold) return deny('current Safe quorum required');
-  const call = {
-    chainId: a.chainId,
-    token: a.token,
-    payer: a.safe,
-    recipient: a.policy,
-    amount: 0n,
-  };
+  const call = safeActionGrantCall(a);
   const body: Omit<ExecutionGrant, 'mac'> = {
     grantId: `grt_${randomBytes(12).toString('hex')}`,
     intentId: `workspace-action:${a.id}`,
@@ -532,8 +527,8 @@ export async function decideWorkspaceSafeAction(input: {
     chainId: a.chainId,
     token: a.token,
     payer: a.safe,
-    recipient: a.policy,
-    amount: '0',
+    recipient: call.recipient,
+    amount: String(call.amount),
     actionHash: transferActionHash(call),
     executionCallHash: executionCallHash(
       a.chainId,

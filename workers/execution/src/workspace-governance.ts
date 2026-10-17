@@ -1,4 +1,6 @@
 import {
+  erc20Abi,
+  getAddress,
   keccak256,
   parseTransaction,
   recoverTransactionAddress,
@@ -19,7 +21,15 @@ import {
   safeActionTypedData,
   safeActionExecution,
   safeActionCall,
+  safeActionGrantCall,
 } from '@synq/kernel/arc-safe-action';
+import {
+  screenSafely,
+  unavailableScreening,
+  type WalletScreeningPort,
+} from '@synq/plugin-risk';
+import { WorkspacePayouts } from '@synq/workspaces/payouts';
+import { bookWorkspacePayout } from './workspace-payout.js';
 import { WorkspaceError } from '@synq/workspaces';
 import {
   WorkspaceGovernance,
@@ -48,6 +58,7 @@ export class WorkspaceGovernanceExecutor {
     readonly chain: ArcChain,
     private readonly signer: TransferSigner,
     private readonly authority: AuthorityConfig,
+    readonly screening: WalletScreeningPort = unavailableScreening(),
   ) {
     this.governance = new WorkspaceGovernance(finance);
     this.outbox = new PostgresOutboxStore(finance.workspaces.pool);
@@ -126,6 +137,61 @@ export class WorkspaceGovernanceExecutor {
             : null;
         if ('vendorId' in a && !vendor)
           throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+        if (a.kind === 'PAY_VENDOR') {
+          const refuse = async (reason: string) => {
+            await sql.query(
+              "UPDATE synq_ws_safe_actions SET state='FAILED',last_error=$2 WHERE id=$1",
+              [id, reason],
+            );
+            await sql.query(
+              "UPDATE synq_ws_payouts SET reason=$2 WHERE id=$1 AND state='REVIEW'",
+              [a.payoutId, reason],
+            );
+            await sql.query('COMMIT');
+            inTx = false;
+            return { state: 'FAILED' as const, reason };
+          };
+          const payout = (
+            await sql.query(
+              'SELECT state,data FROM synq_ws_payouts WHERE id=$1 AND workspace_id=$2 FOR UPDATE',
+              [a.payoutId, a.workspaceId],
+            )
+          ).rows[0];
+          if (payout?.state !== 'REVIEW')
+            return refuse('PAYOUT_NOT_REVIEWABLE');
+          const screened = await screenSafely(this.screening, {
+            address: a.vendorAddress,
+            chainId: a.chainId,
+            now: store.now(),
+          });
+          if (screened.verdict !== 'CLEAR')
+            return refuse(
+              screened.verdict === 'HIT'
+                ? 'SCREENING_HIT'
+                : 'SCREENING_UNAVAILABLE',
+            );
+          const balance = await this.chain.client.readContract({
+            address: a.token,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [a.safe],
+          });
+          const reserved = await sql.query(
+            "SELECT COALESCE(sum((data->>'amount')::numeric),0) AS reserved FROM synq_ws_payouts WHERE workspace_id=$1 AND state IN ('READY','HOLD','SIGNED')",
+            [a.workspaceId],
+          );
+          const budget = (
+            await sql.query(
+              "SELECT data->>'reserve' AS reserve FROM synq_ws_budgets WHERE workspace_id=$1",
+              [a.workspaceId],
+            )
+          ).rows[0];
+          if (
+            balance - BigInt(reserved.rows[0].reserved) - BigInt(a.amount) <
+            BigInt(budget?.reserve ?? 0)
+          )
+            return refuse('RESERVE_FLOOR');
+        }
         const call = safeActionExecution(a, p.signatures);
         const sim = await simulate(
           this.chain,
@@ -192,13 +258,7 @@ export class WorkspaceGovernanceExecutor {
         const check = {
           grant: decision.grant,
           grantKey: this.authority.grantKey,
-          call: {
-            chainId: a.chainId,
-            token: a.token,
-            payer: a.safe,
-            recipient: a.policy,
-            amount: 0n,
-          },
+          call: safeActionGrantCall(a),
           executionCall: call,
           now: store.now(),
           mandateRevoked: false,
@@ -246,6 +306,11 @@ export class WorkspaceGovernanceExecutor {
           if (!record) throw new ArcExecutionError('TX_MISMATCH');
           await this.assertRecord(record, p);
         }
+        if (a.kind === 'PAY_VENDOR')
+          await sql.query(
+            "UPDATE synq_ws_payouts SET state='SIGNED',tx_hash=$2,reason=NULL WHERE id=$1 AND state='REVIEW'",
+            [a.payoutId, record.hash],
+          );
         await sql.query('COMMIT');
         inTx = false;
         await afterRecord?.();
@@ -273,6 +338,11 @@ export class WorkspaceGovernanceExecutor {
           'UPDATE synq_ws_safe_actions SET state=$2,last_error=$3 WHERE id=$1',
           [id, state, outcome],
         );
+        if (a.kind === 'PAY_VENDOR')
+          await store.pool.query(
+            "UPDATE synq_ws_payouts SET state=$2,reason=$3 WHERE id=$1 AND state='SIGNED'",
+            [a.payoutId, state, outcome],
+          );
         return { state };
       }
       const receipt = await this.chain.client.getTransactionReceipt({
@@ -324,6 +394,47 @@ export class WorkspaceGovernanceExecutor {
           readyAt: String(queued[0]!.args.eta),
           operationId: queued[0]!.args.id,
         };
+      } else if (a.kind === 'PAY_VENDOR') {
+        const paid = parseEventLogs({
+          abi: erc20Abi,
+          eventName: 'Transfer',
+          logs: receipt.logs,
+        }).filter(
+          (e) =>
+            e.address.toLowerCase() === a.token.toLowerCase() &&
+            getAddress(e.args.from) === getAddress(a.safe) &&
+            getAddress(e.args.to) === getAddress(a.vendorAddress) &&
+            e.args.value === BigInt(a.amount),
+        );
+        if (paid.length !== 1)
+          throw new ArcExecutionError(
+            'TRANSFER_MISMATCH',
+            'vendor transfer receipt is missing',
+          );
+        evidence = {
+          ...evidence,
+          payoutId: a.payoutId,
+          amount: a.amount,
+          logIndex: paid[0]!.logIndex,
+        };
+        const payout = await new WorkspacePayouts(this.finance).record(
+          a.payoutId,
+        );
+        if (
+          !payout ||
+          payout.data.recipient.toLowerCase() !==
+            a.vendorAddress.toLowerCase() ||
+          payout.data.amount !== a.amount
+        )
+          throw new ArcExecutionError('TRANSFER_MISMATCH');
+        await store.transaction((tx) =>
+          bookWorkspacePayout(tx, payout, {
+            txHash: record!.hash,
+            logIndex: paid[0]!.logIndex!,
+            now: store.now(),
+            grantKey: this.authority.grantKey,
+          }),
+        );
       } else if ('perPaymentCap' in a) {
         const set = parseEventLogs({
           abi: recipientAbi,

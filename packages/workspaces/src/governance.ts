@@ -8,13 +8,17 @@ import {
   type SafeAction,
   type SafeActionSignature,
 } from '@synq/kernel/arc-safe-action';
-import { UnitsSchema } from './finance-contracts.js';
+import { PayoutDataSchema, UnitsSchema } from './finance-contracts.js';
 import { WorkspaceError } from './contracts.js';
 import type { WorkspaceFinance } from './finance.js';
 export const ProposeSafeActionSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.enum(['QUEUE_VENDOR', 'ALLOW_VENDOR', 'REMOVE_VENDOR']),
     vendorId: z.uuid(),
+  }),
+  z.strictObject({
+    kind: z.literal('PAY_VENDOR'),
+    payoutId: z.uuid(),
   }),
   z
     .strictObject({
@@ -88,27 +92,68 @@ export class WorkspaceGovernance {
         workspaceId,
       ]);
       const fields =
-        'vendorId' in b
+        b.kind === 'PAY_VENDOR'
           ? await (async () => {
-              const vendor = await sql.query(
-                'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
-                [workspaceId, b.vendorId],
+              // An above-budget payout: every Safe owner signs one direct transfer for exactly its terms.
+              const r = await sql.query(
+                'SELECT data,state FROM synq_ws_payouts WHERE workspace_id=$1 AND id=$2 FOR UPDATE',
+                [workspaceId, b.payoutId],
               );
-              const v = vendor.rows[0];
-              if (!v) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+              if (!r.rows[0]) throw new WorkspaceError('PAYOUT_NOT_FOUND', 404);
+              const p = PayoutDataSchema.parse(r.rows[0].data);
+              if (p.route !== 'SAFE_QUORUM')
+                throw new WorkspaceError('PAYOUT_USES_VAULT_POLICY');
+              if (r.rows[0].state !== 'REVIEW')
+                throw new WorkspaceError('PAYOUT_NOT_REVIEWABLE');
               if (
-                b.kind !== 'REMOVE_VENDOR' &&
-                Number(v.eligible_at) > this.workspaces.now()
+                getAddress(p.vault) !== a.vault ||
+                getAddress(p.token) !== a.token
               )
+                throw new WorkspaceError('PAYOUT_VAULT_MISMATCH');
+              const v = (
+                await sql.query(
+                  'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+                  [workspaceId, p.vendorId],
+                )
+              ).rows[0];
+              if (
+                !v ||
+                String(v.address).toLowerCase() !== p.recipient.toLowerCase() ||
+                v.change_hash !== p.vendorChangeHash
+              )
+                throw new WorkspaceError('PAYOUT_ADDRESS_CHANGED');
+              if (Number(v.eligible_at) > this.workspaces.now())
                 throw new WorkspaceError('VENDOR_COOLING');
               return {
-                kind: b.kind,
-                vendorId: b.vendorId,
-                vendorAddress: v.address,
-                vendorChangeHash: v.change_hash,
+                kind: 'PAY_VENDOR' as const,
+                payoutId: p.id,
+                vendorId: p.vendorId,
+                vendorAddress: p.recipient,
+                vendorChangeHash: p.vendorChangeHash,
+                amount: p.amount,
               };
             })()
-          : b;
+          : 'vendorId' in b
+            ? await (async () => {
+                const vendor = await sql.query(
+                  'SELECT address,change_hash,eligible_at FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+                  [workspaceId, b.vendorId],
+                );
+                const v = vendor.rows[0];
+                if (!v) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+                if (
+                  b.kind !== 'REMOVE_VENDOR' &&
+                  Number(v.eligible_at) > this.workspaces.now()
+                )
+                  throw new WorkspaceError('VENDOR_COOLING');
+                return {
+                  kind: b.kind,
+                  vendorId: b.vendorId,
+                  vendorAddress: v.address,
+                  vendorChangeHash: v.change_hash,
+                };
+              })()
+            : b;
       const action = SafeActionSchema.parse({
         id: randomUUID(),
         workspaceId,
@@ -126,28 +171,38 @@ export class WorkspaceGovernance {
       );
       if (inserted.rows[0]) return action.id;
       const existing =
-        'vendorChangeHash' in action
+        action.kind === 'PAY_VENDOR'
           ? await sql.query(
-              "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'vendorChangeHash'=$3 AND data->>'nonce'=$4 AND data->>'expiresAt'=$5",
+              "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'='PAY_VENDOR' AND data->>'payoutId'=$2 AND data->>'nonce'=$3 AND data->>'expiresAt'=$4",
               [
                 workspaceId,
-                action.kind,
-                action.vendorChangeHash,
+                action.payoutId,
                 action.nonce,
                 String(action.expiresAt),
               ],
             )
-          : await sql.query(
-              "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'perPaymentCap'=$3 AND data->>'windowCap'=$4 AND data->>'nonce'=$5 AND data->>'expiresAt'=$6",
-              [
-                workspaceId,
-                action.kind,
-                action.perPaymentCap,
-                action.windowCap,
-                action.nonce,
-                String(action.expiresAt),
-              ],
-            );
+          : 'vendorChangeHash' in action
+            ? await sql.query(
+                "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'vendorChangeHash'=$3 AND data->>'nonce'=$4 AND data->>'expiresAt'=$5",
+                [
+                  workspaceId,
+                  action.kind,
+                  action.vendorChangeHash,
+                  action.nonce,
+                  String(action.expiresAt),
+                ],
+              )
+            : await sql.query(
+                "SELECT id FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'kind'=$2 AND data->>'perPaymentCap'=$3 AND data->>'windowCap'=$4 AND data->>'nonce'=$5 AND data->>'expiresAt'=$6",
+                [
+                  workspaceId,
+                  action.kind,
+                  action.perPaymentCap,
+                  action.windowCap,
+                  action.nonce,
+                  String(action.expiresAt),
+                ],
+              );
       if (!existing.rows[0]) throw new WorkspaceError('ACTION_CONFLICT');
       return String(existing.rows[0].id);
     });

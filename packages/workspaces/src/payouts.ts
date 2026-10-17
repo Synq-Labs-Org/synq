@@ -116,8 +116,10 @@ export class WorkspacePayouts {
       const current = budget.rows[0];
       if (!current) throw new WorkspaceError('SIGNED_BUDGET_REQUIRED');
       const limits = BudgetEditSchema.parse(current.data);
-      if (BigInt(b.amount) > BigInt(limits.perPayment))
-        throw new WorkspaceError('SAFE_MULTISIG_PROPOSAL_REQUIRED');
+      const route =
+        BigInt(b.amount) > BigInt(limits.perPayment)
+          ? 'SAFE_QUORUM'
+          : 'VAULT_POLICY';
       // Prefer the proposing owner; otherwise use the workspace creator's current owner wallet.
       const creator = await sql.query(
         "SELECT m.wallet FROM synq_workspaces w JOIN synq_ws_members m ON m.workspace_id=w.id AND m.principal_id=w.created_by AND m.role='OWNER' WHERE w.id=$1",
@@ -145,6 +147,7 @@ export class WorkspacePayouts {
         proposedBy: principalId,
         approval: newApprovalTerms(this.workspaces.now()),
         createdAt: this.workspaces.now(),
+        route,
       });
       const inserted = await sql.query(
         "INSERT INTO synq_ws_payouts(id,workspace_id,idempotency_key,obligation,data,state,created_at) VALUES($1,$2,$3,$4,$5,'REVIEW',$6) ON CONFLICT(workspace_id,obligation) WHERE state<>'CANCELLED' DO NOTHING RETURNING id",
@@ -173,14 +176,18 @@ export class WorkspacePayouts {
       if (!['REVIEW', 'READY', 'HOLD'].includes(String(r.rows[0].state)))
         throw new WorkspaceError('PAYOUT_NOT_CANCELLABLE');
       const signed = await sql.query(
-        'SELECT 1 FROM synq_arc_payout_outbox WHERE key=$1',
-        [`workspace-payout:${id}`],
+        "SELECT 1 FROM synq_arc_payout_outbox WHERE key=$1 OR key IN (SELECT 'workspace-action:'||a.id::text FROM synq_ws_safe_actions a WHERE a.workspace_id=$2 AND a.data->>'payoutId'=$3)",
+        [`workspace-payout:${id}`, workspaceId, id],
       );
       if (signed.rowCount)
         throw new WorkspaceError('SIGNED_PAYOUT_REQUIRES_RECONCILIATION');
       await sql.query(
         "UPDATE synq_ws_payouts SET state='CANCELLED',reason='CANCELLED_BY_OWNER' WHERE id=$1",
         [id],
+      );
+      await sql.query(
+        "UPDATE synq_ws_safe_actions SET state='FAILED',last_error='PAYOUT_CANCELLED' WHERE workspace_id=$1 AND data->>'payoutId'=$2 AND state IN ('REVIEW','READY')",
+        [workspaceId, id],
       );
     });
     return this.view(workspaceId, principalId, id);
@@ -227,6 +234,8 @@ export class WorkspacePayouts {
       );
       if (!r.rows[0]) throw new WorkspaceError('PAYOUT_NOT_FOUND', 404);
       const p = readRow(r.rows[0]);
+      if (p.data.route === 'SAFE_QUORUM')
+        throw new WorkspaceError('SAFE_QUORUM_SIGNATURES_REQUIRED');
       if (p.state !== 'REVIEW')
         throw new WorkspaceError('PAYOUT_NOT_REVIEWABLE');
       if (p.data.approval.deadline <= this.workspaces.now())

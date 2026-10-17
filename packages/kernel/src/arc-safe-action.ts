@@ -37,6 +37,15 @@ export const SafeActionSchema = z.discriminatedUnion('kind', [
     vendorAddress: wallet,
     vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
   }),
+  z.strictObject({
+    ...actionBase,
+    kind: z.literal('PAY_VENDOR'),
+    payoutId: z.string().uuid(),
+    vendorId: z.string().uuid(),
+    vendorAddress: wallet,
+    vendorChangeHash: z.string().regex(/^0x[0-9a-f]{64}$/),
+    amount: units.refine((v) => BigInt(v) > 0n, 'amount must be positive'),
+  }),
   z
     .strictObject({
       ...actionBase,
@@ -68,10 +77,26 @@ const policyAbi = parseAbi([
   'function removeRecipient(address recipient)',
   'function queue(address to,uint256 value,bytes data,uint8 operation) returns(bytes32)',
 ]);
+const tokenAbi = parseAbi([
+  'function transfer(address to,uint256 amount) returns(bool)',
+]);
 const safeAbi = parseAbi([
   'function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns(bool)',
 ]);
 export function safeActionCall(a: SafeAction) {
+  // An above-cap payment is a direct token transfer signed by the full Safe quorum.
+  if (a.kind === 'PAY_VENDOR')
+    return {
+      to: a.token,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: tokenAbi,
+        functionName: 'transfer',
+        args: [a.vendorAddress, BigInt(a.amount)],
+      }),
+      operation: 0,
+      nonce: BigInt(a.nonce),
+    } as const;
   const inner =
     'perPaymentCap' in a
       ? encodeFunctionData({
@@ -162,6 +187,16 @@ export function safeActionApprovalTypedData(a: SafeAction) {
             ),
       expiresAt: BigInt(a.expiresAt),
     },
+  };
+}
+/** The value movement a Kernel grant binds for this action (none for governance calls). */
+export function safeActionGrantCall(a: SafeAction) {
+  return {
+    chainId: a.chainId,
+    token: a.token,
+    payer: a.safe,
+    recipient: a.kind === 'PAY_VENDOR' ? a.vendorAddress : a.policy,
+    amount: a.kind === 'PAY_VENDOR' ? BigInt(a.amount) : 0n,
   };
 }
 export function safeActionExecution(

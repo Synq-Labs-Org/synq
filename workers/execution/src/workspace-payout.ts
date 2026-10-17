@@ -156,6 +156,8 @@ export class WorkspacePayoutExecutor {
         await this.settle(p, result.record);
         return result;
       }
+      if (p.data.route === 'SAFE_QUORUM')
+        throw new WorkspaceError('SAFE_QUORUM_ROUTE');
       if (p.state !== 'READY') throw new WorkspaceError('PAYOUT_NOT_READY');
       await sql.query('BEGIN');
       inTx = true;
@@ -404,87 +406,103 @@ export class WorkspacePayoutExecutor {
           evidence.amount.baseUnits !== BigInt(p.data.amount)
         )
           throw new ArcExecutionError('TRANSFER_MISMATCH');
-        const id = `workspace-payout:${p.data.id}:settled`,
-          cp = `vendor:${p.data.vendorId}`,
-          amount = BigInt(p.data.amount),
-          assetId = token('arc-testnet', 'USDC').assetId;
-        const ledger = new Ledger(new PostgresLedgerStore(sql), {
-          verifiedPayout: (counterparty, chainId) =>
-            counterparty === cp &&
-            chainId === chainProfile('arc-testnet').chainId
-              ? p.data.recipient
-              : null,
+        await bookWorkspacePayout(sql, p, {
+          txHash: r.hash,
+          logIndex: evidence.logIndex,
+          now: this.finance.workspaces.now(),
+          grantKey: this.authority.grantKey,
         });
-        const posted = await ledger.post(
-          {
-            entryId: id,
-            workspaceId: p.data.workspaceId,
-            occurredAt: this.finance.workspaces.now(),
-            memo: p.data.purpose,
-            source: { kind: 'CHAIN_TX', ref: p.data.id },
-            evidence: {
-              chainId: 5042002,
-              txHash: r.hash,
-              logIndex: evidence.logIndex,
-              recipient: p.data.recipient,
-            },
-            idempotencyKey: id,
-            reversalOf: null,
-            postings: [
-              {
-                account: 'CONTRACTOR_EXPENSE',
-                assetId,
-                amount,
-                counterpartyId: cp,
-                documentRef: p.data.obligation,
-              },
-              {
-                account: 'CASH_ARC_USDC',
-                assetId,
-                amount: -amount,
-                documentRef: p.data.obligation,
-              },
-            ],
-          },
-          [
-            {
-              eventId: id,
-              topic: 'workspace.money',
-              payload: {
-                eventId: id,
-                kind: 'PAYOUT_SENT',
-                workspaceId: p.data.workspaceId,
-                payoutId: p.data.id,
-                amount: p.data.amount,
-                chainId: 5042002,
-                txHash: r.hash,
-                recipientHint: `${p.data.recipient.slice(0, 6)}…${p.data.recipient.slice(-4)}`,
-              },
-            },
-          ],
-        );
-        if (posted.created)
-          await new RiskCaseService(
-            new PostgresRiskCaseStore({ query: sql.query.bind(sql) }),
-            this.finance.workspaces.now,
-            this.authority.grantKey,
-          ).record(
-            p.data.workspaceId,
-            'workspace-executor',
-            'PAYOUT_CONFIRMED',
-            { payoutId: p.data.id, txHash: r.hash, amount: p.data.amount },
-          );
+        return;
       }
       await sql.query(
-        "UPDATE synq_ws_payouts SET state=$2,tx_hash=$3,executed_at=CASE WHEN $2='PAID' THEN COALESCE(executed_at,$4) ELSE executed_at END,reason=$5 WHERE id=$1",
-        [
-          p.data.id,
-          state,
-          r.hash,
-          this.finance.workspaces.now(),
-          state === 'PAID' ? null : r.note,
-        ],
+        'UPDATE synq_ws_payouts SET state=$2,tx_hash=$3,reason=$4 WHERE id=$1',
+        [p.data.id, state, r.hash, r.note],
       );
     });
   }
+}
+
+/**
+ * Books a confirmed payout once: balanced ledger entry, PAYOUT_SENT event for
+ * receipt relays, risk audit, and the PAID state. Shared by the vault-policy
+ * route and the Safe-quorum route; idempotent on the ledger entry id.
+ */
+export async function bookWorkspacePayout(
+  sql: { query: SqlPool['query'] },
+  p: PayoutRecord,
+  input: { txHash: Hex; logIndex: number; now: number; grantKey: Uint8Array },
+) {
+  const id = `workspace-payout:${p.data.id}:settled`,
+    cp = `vendor:${p.data.vendorId}`,
+    amount = BigInt(p.data.amount),
+    assetId = token('arc-testnet', 'USDC').assetId;
+  const ledger = new Ledger(new PostgresLedgerStore(sql), {
+    verifiedPayout: (counterparty, chainId) =>
+      counterparty === cp && chainId === chainProfile('arc-testnet').chainId
+        ? p.data.recipient
+        : null,
+  });
+  const posted = await ledger.post(
+    {
+      entryId: id,
+      workspaceId: p.data.workspaceId,
+      occurredAt: input.now,
+      memo: p.data.purpose,
+      source: { kind: 'CHAIN_TX', ref: p.data.id },
+      evidence: {
+        chainId: 5042002,
+        txHash: input.txHash,
+        logIndex: input.logIndex,
+        recipient: p.data.recipient,
+      },
+      idempotencyKey: id,
+      reversalOf: null,
+      postings: [
+        {
+          account: 'CONTRACTOR_EXPENSE',
+          assetId,
+          amount,
+          counterpartyId: cp,
+          documentRef: p.data.obligation,
+        },
+        {
+          account: 'CASH_ARC_USDC',
+          assetId,
+          amount: -amount,
+          documentRef: p.data.obligation,
+        },
+      ],
+    },
+    [
+      {
+        eventId: id,
+        topic: 'workspace.money',
+        payload: {
+          eventId: id,
+          kind: 'PAYOUT_SENT',
+          workspaceId: p.data.workspaceId,
+          payoutId: p.data.id,
+          amount: p.data.amount,
+          chainId: 5042002,
+          txHash: input.txHash,
+          recipientHint: `${p.data.recipient.slice(0, 6)}…${p.data.recipient.slice(-4)}`,
+        },
+      },
+    ],
+  );
+  if (posted.created)
+    await new RiskCaseService(
+      new PostgresRiskCaseStore({ query: sql.query.bind(sql) }),
+      () => input.now,
+      input.grantKey,
+    ).record(p.data.workspaceId, 'workspace-executor', 'PAYOUT_CONFIRMED', {
+      payoutId: p.data.id,
+      txHash: input.txHash,
+      amount: p.data.amount,
+      route: p.data.route,
+    });
+  await sql.query(
+    "UPDATE synq_ws_payouts SET state='PAID',tx_hash=$2,executed_at=COALESCE(executed_at,$3),reason=NULL WHERE id=$1",
+    [p.data.id, input.txHash, input.now],
+  );
 }
