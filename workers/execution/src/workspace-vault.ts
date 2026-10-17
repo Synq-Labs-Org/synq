@@ -1,4 +1,12 @@
 import { WorkspaceSplitWorker } from './workspace-splits.js';
+import { AmanePayExecutor } from './amane-pay.js';
+import { WorkspaceAmane } from '@synq/workspaces/amane';
+import type { AgentEvents } from '@synq/workspaces/agent-events';
+import {
+  isController,
+  readAccountView,
+  readLeaseView,
+} from '@synq/plugin-amane';
 import { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDeals } from '@synq/workspaces/deals';
 import { WorkspaceDealEscrow } from './workspace-escrow.js';
@@ -433,6 +441,13 @@ export async function workspaceVaultRuntime(input: {
    * leaves screening UNAVAILABLE, so execution fails closed.
    */
   screening?: string;
+  /**
+   * Amane agent payments: a separate agent key (never the operator key) and
+   * the pinned code hash of the Amane account release. Without both, Amane
+   * stays NOT_CONFIGURED.
+   */
+  amaneAgentKeyFile?: string;
+  amaneAccountCodeHash?: string;
 }) {
   const secret = (path: string) => {
     const stat = statSync(path);
@@ -633,9 +648,55 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
   }, 5000);
   timer.unref();
   void pump().catch(() => undefined);
+  /** Amane services, built lazily so callers can pass their agent-event recorder. */
+  const amaneFor = (events?: AgentEvents) => {
+    if (!input.amaneAgentKeyFile || !input.amaneAccountCodeHash) return null;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(input.amaneAccountCodeHash))
+      throw new Error('AMANE_CODEHASH_FORMAT');
+    const agentText = secret(input.amaneAgentKeyFile);
+    const agentRaw = agentText.startsWith('0x') ? agentText : `0x${agentText}`;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(agentRaw))
+      throw new Error('AMANE_AGENT_KEY_FORMAT');
+    const agent = privateKeyToAccount(agentRaw as Hex);
+    if (agent.address === account.address)
+      throw new Error('AMANE_AGENT_MUST_DIFFER_FROM_OPERATOR');
+    const codeHash = input.amaneAccountCodeHash as Hex;
+    const amane = new WorkspaceAmane(setups.workspaces, {
+      agent: agent.address,
+      accountCodeHash: codeHash,
+      readAccount: (a) => readAccountView(chain.client, a as Address),
+      readLease: (a, id) =>
+        readLeaseView(chain.client, a as Address, codeHash, id as Hex),
+      isController: (a, w) =>
+        isController(chain.client, a as Address, w as Address),
+    });
+    const executor = new AmanePayExecutor(
+      amane,
+      {
+        client: chain.client,
+        chainId: chain.profile.chainId,
+        mutationEnabled: chain.profile.mutationEnabled,
+        minMaxFeePerGasWei: chain.profile.minMaxFeePerGasWei ?? 0n,
+        explorer: chain.profile.explorer,
+      },
+      account,
+      // The agent key only ever signs Amane intents, inside this worker.
+      { address: agent.address, signIntent: (t) => agent.signTypedData(t) },
+      {
+        operator: 'amane-pay-worker',
+        grantKey: Buffer.from(grantHex, 'hex'),
+        grantTtlSeconds: 120,
+        riskRequiredAbove: 0n,
+      },
+      screening,
+      events,
+    );
+    return { amane, executor, agent: agent.address };
+  };
   return {
     setups,
     finance,
+    amaneFor,
     payouts: payouts.payouts,
     governance: governance.governance,
     screening: () => payouts.screening.status(),

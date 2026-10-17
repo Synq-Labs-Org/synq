@@ -26,7 +26,8 @@
     "./leads": "./src/leads.ts",
     "./offers": "./src/offers.ts",
     "./sales-agent": "./src/sales-agent.ts",
-    "./agent-events": "./src/agent-events.ts"
+    "./agent-events": "./src/agent-events.ts",
+    "./amane": "./src/amane.ts"
   },
   "dependencies": {
     "@synq/agent-runtime": "workspace:*",

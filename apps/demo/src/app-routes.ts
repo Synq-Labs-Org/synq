@@ -16,6 +16,8 @@ import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceLeads } from '@synq/workspaces/leads';
 import type { WorkspaceOffers } from '@synq/workspaces/offers';
 import type { AgentEvents } from '@synq/workspaces/agent-events';
+import type { WorkspaceAmane } from '@synq/workspaces/amane';
+import { amaneCapability } from '@synq/plugin-amane';
 import type { AppApprovals } from './app-approvals.js';
 import { workspaceHttp } from './workspace-http.js';
 
@@ -47,6 +49,8 @@ export type AppRouteDeps = {
   leads?: WorkspaceLeads;
   offers?: WorkspaceOffers;
   events?: AgentEvents;
+  /** Amane agent payments; absent when no agent key and code hash are configured. */
+  amane?: WorkspaceAmane;
   /** How long one event-stream connection stays open (default 10 minutes). */
   streamWindowMs?: number;
   /** Poll interval of the event stream (default 2 seconds). */
@@ -916,6 +920,78 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
       }
       res.end();
     });
+  }
+
+  // MARK: Amane agent payments
+
+  const amane = deps.amane;
+  route('workspace.mandates');
+  app.get('/v3/workspaces/:workspaceId/mandates', (req, reply) =>
+    handle(reply, async () => {
+      const s = await auth(req);
+      const { workspaceId } = z
+        .strictObject({ workspaceId: z.uuid() })
+        .parse(req.params);
+      if (!amane) {
+        const m = await store.membership(workspaceId, s.principalId);
+        if (m.role !== 'OWNER' && m.role !== 'ADMIN')
+          throw new WorkspaceError('NOT_FOUND', 404);
+        return {
+          capability: {
+            status: 'NOT_CONFIGURED' as const,
+            reason:
+              'Amane agent payments are not configured on this server (agent key and pinned account release).',
+          },
+          leases: [],
+        };
+      }
+      const leases = await amane.mandates(workspaceId, s.principalId);
+      const jobs = await amane.jobs(workspaceId, s.principalId);
+      const c = amaneCapability({
+        accountConfigured: leases.length > 0,
+        codeVerified: leases.length > 0,
+        liveLease: leases.some((l) => l.proofLevel === 'LIVE_ARC_TESTNET'),
+        verifiedPayment: jobs.some((j) => j.state === 'PAID'),
+      });
+      return { capability: { status: c.status, reason: c.reason }, leases };
+    }),
+  );
+  if (amane) {
+    const ws = (req: FastifyRequest) =>
+      z.strictObject({ workspaceId: z.uuid() }).parse(req.params).workspaceId;
+    route('workspace.amaneAccountRegister');
+    app.post('/v3/workspaces/:workspaceId/amane/accounts', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        return amane.registerAccount(ws(req), s.principalId, req.body);
+      }),
+    );
+    route('workspace.amaneLeaseRegister');
+    app.post('/v3/workspaces/:workspaceId/amane/leases', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        return amane.registerLease(ws(req), s.principalId, req.body);
+      }),
+    );
+    route('workspace.amaneJobs');
+    app.get('/v3/workspaces/:workspaceId/amane/jobs', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return { jobs: await amane.jobs(ws(req), s.principalId) };
+      }),
+    );
+    route('workspace.amaneJobCreate');
+    app.post('/v3/workspaces/:workspaceId/amane/jobs', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const j = await amane.createJob(ws(req), s.principalId, req.body);
+        return {
+          ...j,
+          amount: String(j.amount),
+          nonce: j.nonce === null ? null : String(j.nonce),
+        };
+      }),
+    );
   }
 
   return { implemented };

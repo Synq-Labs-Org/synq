@@ -84,6 +84,16 @@ export class WorkspaceInvoices {
       ),
     );
   }
+  /** Paid in full (or over) and every receipt finalized on chain; no member needed. */
+  async settledInFull(workspaceId: string, id: string) {
+    const r = await this.service.store.get(id);
+    if (!r || r.invoice.workspaceId !== workspaceId) return false;
+    const v = await this.view(r.invoice);
+    return (
+      (v.status === 'PAID' || v.status === 'OVERPAID') &&
+      v.reconciliation === 'FINALIZED'
+    );
+  }
   async get(workspaceId: string, principalId: string, id: string) {
     await this.workspaces.membership(workspaceId, principalId);
     const r = await this.service.store.get(id);

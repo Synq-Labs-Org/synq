@@ -1217,7 +1217,7 @@
         "summary": "Agent leases with on-chain remaining limits.",
         "x-synq-auth": "session",
         "x-synq-roles": "OWNER, ADMIN",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "workspaceId",
@@ -1304,6 +1304,225 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/amane/accounts": {
+      "post": {
+        "operationId": "workspace.amaneAccountRegister",
+        "summary": "Attach an Amane account after checking its code and controller on chain.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER who controls the Amane account on chain",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmaneAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmaneAccountRegister"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/amane/leases": {
+      "post": {
+        "operationId": "workspace.amaneLeaseRegister",
+        "summary": "Record a live lease to Synq’s agent, read back from chain.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmaneLeaseRegistered"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmaneLeaseRegister"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/amane/jobs": {
+      "get": {
+        "operationId": "workspace.amaneJobs",
+        "summary": "Contractor jobs the agent pays inside a lease.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmaneJobList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "workspace.amaneJobCreate",
+        "summary": "Pay a contractor inside a lease once an invoice settles (or on request).",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmaneJob"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmaneJobCreate"
               }
             }
           }
@@ -4421,6 +4640,276 @@
           "checks",
           "needsOwner",
           "offer"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneAccountRegister": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "vendorId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "account": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "codeHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "recipient": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "adapterId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "rootHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "root": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "chainId",
+          "account",
+          "codeHash",
+          "token",
+          "recipient",
+          "adapterId",
+          "rootHash",
+          "root"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneLeaseRegister": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "leaseId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          }
+        },
+        "required": [
+          "accountId",
+          "leaseId"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneLeaseRegistered": {
+        "type": "object",
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": [
+          "leaseId",
+          "accountId"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneJobCreate": {
+        "type": "object",
+        "properties": {
+          "leaseId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "triggerKind": {
+            "type": "string",
+            "enum": [
+              "INVOICE_PAID",
+              "OWNER_REQUEST"
+            ]
+          },
+          "triggerRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,30}$"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "required": [
+          "leaseId",
+          "triggerKind",
+          "triggerRef",
+          "amount",
+          "purpose"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "leaseId": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "triggerKind": {
+            "type": "string",
+            "enum": [
+              "INVOICE_PAID",
+              "OWNER_REQUEST"
+            ]
+          },
+          "triggerRef": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "WAITING",
+              "READY",
+              "SENT",
+              "PAID",
+              "REFUSED",
+              "NEEDS_REVIEW"
+            ]
+          },
+          "nonce": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "txHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "accountId",
+          "leaseId",
+          "triggerKind",
+          "triggerRef",
+          "amount",
+          "purpose",
+          "state",
+          "nonce",
+          "txHash",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "AmaneJobList": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AmaneJob"
+            }
+          }
+        },
+        "required": [
+          "jobs"
         ],
         "additionalProperties": false
       },

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as amane from './amane.js';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
 import * as business from './business.js';
@@ -8,6 +9,7 @@ import * as contexts from './contexts.js';
 import * as notifications from './notifications.js';
 import { MetaRouteSchema, MetaSchema } from './routes.js';
 
+export * from './amane.js';
 export * from './approvals.js';
 export * from './auth.js';
 export * from './business.js';
@@ -87,6 +89,13 @@ export const NAMED_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   OfferCheck: commercial.OfferCheckSchema,
   OfferSendRequest: commercial.OfferSendRequestSchema,
   OfferSendResult: commercial.OfferSendResultSchema,
+  AmaneAccountRegister: amane.AmaneAccountRegisterSchema,
+  AmaneAccount: amane.AmaneAccountSchema,
+  AmaneLeaseRegister: amane.AmaneLeaseRegisterSchema,
+  AmaneLeaseRegistered: amane.AmaneLeaseRegisteredSchema,
+  AmaneJobCreate: amane.AmaneJobCreateSchema,
+  AmaneJob: amane.AmaneJobSchema,
+  AmaneJobList: amane.AmaneJobListSchema,
   ApprovalPurpose: approvals.ApprovalPurposeSchema,
   ApprovalItem: approvals.ApprovalItemSchema,
   ApprovalPage: approvals.ApprovalPageSchema,

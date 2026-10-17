@@ -1,0 +1,12 @@
+{
+  "source": "https://github.com/Kaushikh76/Amane (local release, not yet public)",
+  "sourceCommit": "a60a90a8751a98870a9d65779d4fce5230dc4c56",
+  "deployedContractSourceCommit": "2b21f294078576c027bafe1b565327e2f0f0f978",
+  "license": "MIT",
+  "scope": "Restricted singleton PAY on Arc testnet; everything else unsupported (see the Amane release manifest).",
+  "packages": {
+    "amane-arc-0.2.0.tgz": "f6ec1d83cb1b058c9b10c808b20dc339be538e3d5bd1b2d7c2832b76b7665c7a",
+    "amane-policy-0.2.0.tgz": "ae2b0fcc174163003c3478ed3fe6c6aebb6e02dbed7a15273bf02f9b02c2400f",
+    "amane-verify-0.2.0.tgz": "70ae08acb096ff0ae16941e01eeefdb775d5696227d8460b8fadd3c72ac20436"
+  }
+}

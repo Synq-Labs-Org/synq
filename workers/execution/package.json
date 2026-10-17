@@ -38,23 +38,24 @@
     "build": "tsc --noEmit -p ../../tsconfig.json"
   },
   "dependencies": {
-    "@synq/workspaces": "workspace:*",
+    "@circle-fin/adapter-viem-v2": "1.19.0",
+    "@circle-fin/swap-kit": "1.7.1",
+    "@synq/agent-runtime": "workspace:*",
+    "@synq/allocations": "workspace:*",
     "@synq/chain-registry": "workspace:*",
     "@synq/domain": "workspace:*",
     "@synq/governance": "workspace:*",
     "@synq/kernel": "workspace:*",
+    "@synq/ledger": "workspace:*",
+    "@synq/plugin-amane": "workspace:*",
+    "@synq/plugin-arc-swap": "workspace:*",
+    "@synq/plugin-circle-app-kit": "workspace:*",
     "@synq/plugin-circle-cctp": "workspace:*",
     "@synq/plugin-circle-gas": "workspace:*",
-    "@synq/schemas": "workspace:*",
-    "viem": "2.57.4",
-    "zod": "4.6.5",
-    "@synq/agent-runtime": "workspace:*",
     "@synq/plugin-risk": "workspace:*",
-    "@synq/ledger": "workspace:*",
-    "@synq/allocations": "workspace:*",
-    "@circle-fin/swap-kit": "1.7.1",
-    "@circle-fin/adapter-viem-v2": "1.19.0",
-    "@synq/plugin-arc-swap": "workspace:*",
-    "@synq/plugin-circle-app-kit": "workspace:*"
+    "@synq/schemas": "workspace:*",
+    "@synq/workspaces": "workspace:*",
+    "viem": "2.57.4",
+    "zod": "4.6.5"
   }
 }

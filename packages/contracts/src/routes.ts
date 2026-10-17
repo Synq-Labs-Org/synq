@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as amane from './amane.js';
 import * as approvals from './approvals.js';
 import * as auth from './auth.js';
 import * as business from './business.js';
@@ -318,7 +319,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'session',
     roles: 'OWNER, ADMIN',
     response: business.MandatesSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Agent leases with on-chain remaining limits.',
   },
   {
@@ -331,6 +332,51 @@ export const ROUTES: readonly Route[] = [
     status: 'PLANNED',
     summary:
       'Prepare a revoke for the issuer to sign; not revoked until on chain.',
+  },
+  {
+    id: 'workspace.amaneAccountRegister',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/amane/accounts',
+    auth: 'mutation',
+    roles: 'OWNER who controls the Amane account on chain',
+    request: amane.AmaneAccountRegisterSchema,
+    response: amane.AmaneAccountSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Attach an Amane account after checking its code and controller on chain.',
+  },
+  {
+    id: 'workspace.amaneLeaseRegister',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/amane/leases',
+    auth: 'mutation',
+    roles: 'OWNER',
+    request: amane.AmaneLeaseRegisterSchema,
+    response: amane.AmaneLeaseRegisteredSchema,
+    status: 'IMPLEMENTED',
+    summary: 'Record a live lease to Synq’s agent, read back from chain.',
+  },
+  {
+    id: 'workspace.amaneJobs',
+    method: 'GET',
+    path: '/v3/workspaces/{workspaceId}/amane/jobs',
+    auth: 'session',
+    roles: 'OWNER, ADMIN',
+    response: amane.AmaneJobListSchema,
+    status: 'IMPLEMENTED',
+    summary: 'Contractor jobs the agent pays inside a lease.',
+  },
+  {
+    id: 'workspace.amaneJobCreate',
+    method: 'POST',
+    path: '/v3/workspaces/{workspaceId}/amane/jobs',
+    auth: 'mutation',
+    roles: 'OWNER',
+    request: amane.AmaneJobCreateSchema,
+    response: amane.AmaneJobSchema,
+    status: 'IMPLEMENTED',
+    summary:
+      'Pay a contractor inside a lease once an invoice settles (or on request).',
   },
   // Approvals
   {

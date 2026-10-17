@@ -1,3 +1,5 @@
+import { chainProfile } from '@synq/chain-registry/arc';
+import { isLocalChain } from '@synq/chain-registry';
 import {
   mandateTypedData,
   intentApprovalTypedData,
@@ -787,4 +789,143 @@ export async function admitGrant(input: {
     ? await input.fence.consumeGrant(g, input.now)
     : await input.fence.consume(g.nonce);
   if (!fresh) throw new AuthorityError('GRANT_REPLAYED');
+}
+
+/**
+ * An agent payment under a standing Amane lease. The owner already signed the
+ * root policy and lease on chain, so no per-payment human signature is
+ * needed; the Kernel still checks that the job, the exact signed intent and
+ * the contract's live state all agree, that risk is clear, and that the
+ * simulation passed, then grants exactly one `execute(intent, signature)`
+ * call. The contract enforces the lease again, independently of Synq.
+ */
+export async function decideAmaneLeasedPay(input: {
+  config: AuthorityConfig;
+  job: {
+    jobId: string;
+    workspaceId: string;
+    account: Address;
+    token: Address;
+    recipient: Address;
+    amount: bigint;
+    chainId: number;
+  };
+  intent: {
+    leaseId: Hex;
+    nonce: bigint;
+    token: Address;
+    recipient: Address;
+    amount: bigint;
+    deadline: bigint;
+    intentHash: Hex;
+  };
+  onchain: {
+    leaseLive: boolean;
+    paused: boolean;
+    nonceUsed: boolean;
+    rootRecipient: Address;
+    rootToken: Address;
+    /** Remaining room under each cap, after what was already spent. */
+    remaining: {
+      perAction: bigint;
+      leasePeriod: bigint;
+      rootPeriod: bigint;
+      leaseTotal: bigint;
+      rootTotal: bigint;
+    };
+  };
+  risk: RiskInput;
+  simulationOk: boolean;
+  now: number;
+  executionCall: ExecutionCall;
+}): Promise<Decision> {
+  const { job: j, intent: i, onchain: o, config, now } = input;
+  const denials: string[] = [];
+  if (
+    config.grantKey.byteLength < 32 ||
+    !Number.isSafeInteger(config.grantTtlSeconds) ||
+    config.grantTtlSeconds <= 0
+  )
+    return { outcome: 'DENY', reasons: ['invalid Kernel grant configuration'] };
+  // Arc testnet only; a local chain is accepted for tests, never mainnet.
+  if (
+    j.chainId !== chainProfile('arc-testnet').chainId &&
+    !isLocalChain(j.chainId)
+  )
+    denials.push(`wrong chain ${j.chainId}`);
+  if (
+    lower(i.recipient) !== lower(j.recipient) ||
+    lower(o.rootRecipient) !== lower(j.recipient)
+  )
+    denials.push(
+      'recipient differs between job, intent and the on-chain policy',
+    );
+  if (
+    lower(i.token) !== lower(j.token) ||
+    lower(o.rootToken) !== lower(j.token)
+  )
+    denials.push('asset differs between job, intent and the on-chain policy');
+  if (i.amount <= 0n || i.amount !== j.amount)
+    denials.push('intent amount differs from the job');
+  if (!o.leaseLive) denials.push('lease is not live on chain');
+  if (o.paused) denials.push('account is paused');
+  if (o.nonceUsed) denials.push('intent nonce already used');
+  const r = o.remaining;
+  if (
+    i.amount > r.perAction ||
+    i.amount > r.leasePeriod ||
+    i.amount > r.rootPeriod ||
+    i.amount > r.leaseTotal ||
+    i.amount > r.rootTotal
+  )
+    denials.push('amount exceeds the remaining lease or policy budget');
+  if (i.deadline <= BigInt(now) || i.deadline > BigInt(now + 900))
+    denials.push('intent deadline expired or unbounded');
+  if (!input.risk.available) denials.push('risk screening unavailable');
+  if (input.risk.flags.some((f) => f.severity === 'HARD'))
+    denials.push(
+      `risk hold: ${input.risk.flags
+        .filter((f) => f.severity === 'HARD')
+        .map((f) => f.code)
+        .join(', ')}`,
+    );
+  if (!input.simulationOk) denials.push('simulation failed');
+  if (
+    lower(input.executionCall.to) !== lower(j.account) ||
+    input.executionCall.value !== 0n
+  )
+    denials.push('execution call does not target the Amane account');
+  if (denials.length) return { outcome: 'DENY', reasons: denials };
+  const body: Omit<ExecutionGrant, 'mac'> = {
+    grantId: `grt_${randomBytes(12).toString('hex')}`,
+    intentId: `amane-job:${j.jobId}`,
+    mandateId: `amane-lease:${i.leaseId}`,
+    mandateVersion: 1,
+    mandateHash: i.intentHash,
+    chainId: j.chainId,
+    token: j.token,
+    payer: j.account,
+    recipient: j.recipient,
+    amount: String(j.amount),
+    actionHash: transferActionHash({
+      chainId: j.chainId,
+      token: j.token,
+      payer: j.account,
+      recipient: j.recipient,
+      amount: j.amount,
+    }),
+    executionCallHash: executionCallHash(j.chainId, input.executionCall),
+    operator: config.operator,
+    nonce: `0x${randomBytes(32).toString('hex')}`,
+    issuedAt: now,
+    expiresAt: Math.min(Number(i.deadline), now + config.grantTtlSeconds),
+    issuedByKernel: true,
+  };
+  return {
+    outcome: 'ALLOW',
+    reasons: [
+      'job, signed intent and live lease agree; risk clear; simulation passed',
+    ],
+    grant: Object.freeze({ ...body, mac: macOf(config.grantKey, body) }),
+  };
 }

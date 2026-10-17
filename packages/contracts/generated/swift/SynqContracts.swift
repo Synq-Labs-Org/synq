@@ -1519,6 +1519,160 @@ public struct OfferSendResult: Codable, Sendable, Equatable {
     }
 }
 
+public struct AmaneAccountRegister: Codable, Sendable, Equatable {
+    /// EVM address
+    public var account: String
+    public var vendorId: String?
+
+    public init(account: String, vendorId: String? = nil) {
+        self.account = account
+        self.vendorId = vendorId
+    }
+}
+
+public struct AmaneAccount: Codable, Sendable, Equatable {
+    public var id: String
+    public var workspaceId: String
+    public var chainId: Int
+    /// EVM address
+    public var account: String
+    public var codeHash: String
+    /// EVM address
+    public var token: String
+    /// EVM address
+    public var recipient: String
+    public var adapterId: String
+    public var rootHash: String
+    public var root: [String: String]
+
+    public init(id: String, workspaceId: String, chainId: Int, account: String, codeHash: String, token: String, recipient: String, adapterId: String, rootHash: String, root: [String: String]) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.chainId = chainId
+        self.account = account
+        self.codeHash = codeHash
+        self.token = token
+        self.recipient = recipient
+        self.adapterId = adapterId
+        self.rootHash = rootHash
+        self.root = root
+    }
+}
+
+public struct AmaneLeaseRegister: Codable, Sendable, Equatable {
+    public var accountId: String
+    public var leaseId: String
+
+    public init(accountId: String, leaseId: String) {
+        self.accountId = accountId
+        self.leaseId = leaseId
+    }
+}
+
+public struct AmaneLeaseRegistered: Codable, Sendable, Equatable {
+    public var leaseId: String
+    public var accountId: String
+
+    public init(leaseId: String, accountId: String) {
+        self.leaseId = leaseId
+        self.accountId = accountId
+    }
+}
+
+public struct AmaneJobCreate: Codable, Sendable, Equatable {
+    public var leaseId: String
+    public var triggerKind: TriggerKind
+    public var triggerRef: String
+    public var amount: String
+    public var purpose: String
+
+    public init(leaseId: String, triggerKind: TriggerKind, triggerRef: String, amount: String, purpose: String) {
+        self.leaseId = leaseId
+        self.triggerKind = triggerKind
+        self.triggerRef = triggerRef
+        self.amount = amount
+        self.purpose = purpose
+    }
+
+    public enum TriggerKind: String, Codable, Sendable, CaseIterable, Equatable {
+        case invoicePaid = "INVOICE_PAID"
+        case ownerRequest = "OWNER_REQUEST"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct AmaneJob: Codable, Sendable, Equatable {
+    public var id: String
+    public var workspaceId: String
+    public var accountId: String
+    public var leaseId: String
+    public var triggerKind: TriggerKind
+    public var triggerRef: String
+    public var amount: String
+    public var purpose: String
+    public var state: State
+    public var nonce: JSONValue
+    public var txHash: JSONValue
+    public var reason: JSONValue
+
+    public init(id: String, workspaceId: String, accountId: String, leaseId: String, triggerKind: TriggerKind, triggerRef: String, amount: String, purpose: String, state: State, nonce: JSONValue, txHash: JSONValue, reason: JSONValue) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.accountId = accountId
+        self.leaseId = leaseId
+        self.triggerKind = triggerKind
+        self.triggerRef = triggerRef
+        self.amount = amount
+        self.purpose = purpose
+        self.state = state
+        self.nonce = nonce
+        self.txHash = txHash
+        self.reason = reason
+    }
+
+    public enum TriggerKind: String, Codable, Sendable, CaseIterable, Equatable {
+        case invoicePaid = "INVOICE_PAID"
+        case ownerRequest = "OWNER_REQUEST"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public enum State: String, Codable, Sendable, CaseIterable, Equatable {
+        case waiting = "WAITING"
+        case ready = "READY"
+        case sent = "SENT"
+        case paid = "PAID"
+        case refused = "REFUSED"
+        case needsReview = "NEEDS_REVIEW"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct AmaneJobList: Codable, Sendable, Equatable {
+    public var jobs: [AmaneJob]
+
+    public init(jobs: [AmaneJob]) {
+        self.jobs = jobs
+    }
+}
+
 public enum ApprovalPurpose: String, Codable, Sendable, CaseIterable, Equatable {
     case vaultSetup = "VAULT_SETUP"
     case vaultAction = "VAULT_ACTION"
@@ -1866,6 +2020,10 @@ public struct Route: Sendable, Equatable {
         Route(id: "workspace.agentRun", method: "GET", path: "/v3/workspaces/{workspaceId}/agent-runs/{runId}", mutation: false),
         Route(id: "workspace.mandates", method: "GET", path: "/v3/workspaces/{workspaceId}/mandates", mutation: false),
         Route(id: "workspace.mandateRevoke", method: "POST", path: "/v3/workspaces/{workspaceId}/mandates/{leaseId}/revoke-intent", mutation: true),
+        Route(id: "workspace.amaneAccountRegister", method: "POST", path: "/v3/workspaces/{workspaceId}/amane/accounts", mutation: true),
+        Route(id: "workspace.amaneLeaseRegister", method: "POST", path: "/v3/workspaces/{workspaceId}/amane/leases", mutation: true),
+        Route(id: "workspace.amaneJobs", method: "GET", path: "/v3/workspaces/{workspaceId}/amane/jobs", mutation: false),
+        Route(id: "workspace.amaneJobCreate", method: "POST", path: "/v3/workspaces/{workspaceId}/amane/jobs", mutation: true),
         Route(id: "approvals.list", method: "GET", path: "/v3/approvals", mutation: false),
         Route(id: "approvals.get", method: "GET", path: "/v3/approvals/{requestId}", mutation: false),
         Route(id: "approvals.sign", method: "POST", path: "/v3/approvals/{requestId}/signature", mutation: true),

@@ -574,6 +574,11 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
                   '200000000000000000',
               ),
               screening: process.env.SYNQ_SCREENING_PROVIDER,
+              // Compose forwards unset variables as empty strings.
+              amaneAgentKeyFile:
+                process.env.SYNQ_AMANE_AGENT_KEY_FILE || undefined,
+              amaneAccountCodeHash:
+                process.env.SYNQ_AMANE_ACCOUNT_CODEHASH || undefined,
             })
           : undefined;
       if (vault) closers.push(() => vault.stop());
@@ -663,6 +668,35 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       setInterval(() => {
         agentEvents.projectSplits().catch(() => undefined);
       }, 60_000).unref();
+      // Amane agent payments: contractor jobs paid inside an owner-signed lease.
+      const amaneRuntime = vault?.amaneFor(agentEvents) ?? null;
+      if (amaneRuntime) {
+        await amaneRuntime.amane.migrate();
+        await amaneRuntime.executor.migrate();
+        const { amane, executor } = amaneRuntime;
+        let running = false;
+        setInterval(() => {
+          if (running) return;
+          running = true;
+          void (async () => {
+            for (const t of await amane.waitingInvoices())
+              if (
+                workspaceInvoices &&
+                (await workspaceInvoices.settledInFull(
+                  t.workspaceId,
+                  t.invoiceId,
+                ))
+              )
+                await amane.triggerInvoicePaid(t.workspaceId, t.invoiceId);
+            for (const id of await amane.ready())
+              await executor.execute(id).catch(() => undefined);
+          })()
+            .catch(() => undefined)
+            .finally(() => {
+              running = false;
+            });
+        }, 30_000).unref();
+      }
       const leads = new WorkspaceLeads(workspaces, {
         webOrigin: process.env.SYNQ_WEB_BASE_URL ?? workspaces.origin,
         telegramBot: () => leadTelegram?.username ?? null,
@@ -738,6 +772,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         leads,
         offers,
         events: agentEvents,
+        amane: amaneRuntime?.amane,
         approvals: new AppApprovals(workspaces, {
           setups: vault
             ? { service: vault.setups, wake: vault.wake }
