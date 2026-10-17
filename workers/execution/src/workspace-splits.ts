@@ -452,6 +452,20 @@ export class WorkspaceSplitWorker {
     ).rows[0];
     if (!row || !row.invoice_id)
       throw new WorkspaceError('INVOICE_RECEIPT_REQUIRED');
+    if (!existingSplit) {
+      // A policy governs money received after its owners signed it; earlier
+      // receipts stay unsplit for the owners to handle explicitly.
+      const block = await this.chain.client.getBlock({
+        blockNumber: BigInt(row.data.blockNumber),
+      });
+      if (Number(block.timestamp) < p.validFrom) {
+        await pool.query(
+          "UPDATE synq_ws_receipts SET last_error='RECEIVED_BEFORE_POLICY',next_at=$2 WHERE key=$1 AND state='PENDING_POLICY'",
+          [receiptId, Number.MAX_SAFE_INTEGER],
+        );
+        return null;
+      }
+    }
     const invoices = new PostgresInvoiceStore(pool),
       invoice = (await invoices.get(row.invoice_id))?.invoice;
     if (!invoice || invoice.workspaceId !== workspaceId)

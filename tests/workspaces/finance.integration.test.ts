@@ -1855,6 +1855,37 @@ describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable P
       ]),
     ).rejects.toThrow(/terminal/);
   });
+  it('G6 leaves a receipt that arrived before the active policy was signed unsplit', async () => {
+    const f = await splitFixture();
+    const client = f.worker.chain.client as unknown as {
+      getBlock: (q: { blockNumber?: bigint; blockTag?: string }) => Promise<{
+        number: bigint | null;
+        hash: Hex;
+        timestamp: bigint;
+      }>;
+    };
+    const original = client.getBlock.bind(client);
+    client.getBlock = async (q) => {
+      const b = await original(q);
+      return q.blockNumber === 1000n
+        ? { ...b, timestamp: BigInt(f.policy.validFrom - 1) }
+        : b;
+    };
+    await f.worker.pump();
+    expect(await f.worker.store.byReceipt(f.receiptId)).toBeNull();
+    expect(f.fake.paid).toHaveLength(0);
+    expect(
+      (
+        await pool.query(
+          'SELECT state,last_error FROM synq_ws_receipts WHERE key=$1',
+          [f.receiptId],
+        )
+      ).rows[0],
+    ).toEqual({
+      state: 'PENDING_POLICY',
+      last_error: 'RECEIVED_BEFORE_POLICY',
+    });
+  });
   it('refuses to treat missing payable/bill sources as empty books before planning any distribution', async () => {
     const f = await splitFixture(true, false);
     await expect(f.worker.process(f.w.id, f.receiptId)).rejects.toMatchObject({
