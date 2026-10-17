@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
+  createPublicClient,
+  custom,
   erc20Abi,
   getAddress,
+  http,
+  keccak256,
+  toHex,
+  type Chain,
   numberToHex,
   type Address,
   type Hex,
@@ -102,9 +108,13 @@ function capturingProvider(input: {
   safe: Address;
   rpcUrl: string;
   guard: KitTxGuard;
+  onRefused?: (e: Error, tx: { to: Address; data: Hex }) => void;
+  /** The allowance the owners already set on chain; the kit's own approval step is answered from it. */
+  preApproved?: { token: Address; spender: Address; amount: bigint };
 }) {
   const chainId = numberToHex(5042002);
   let captured: { to: Address; data: Hex } | null = null;
+  const standIns = new Map<Hex, { to: Address; data: Hex }>();
   const forward = async (method: string, params: readonly unknown[] = []) => {
     const res = await fetch(input.rpcUrl, {
       method: 'POST',
@@ -119,7 +129,66 @@ function capturingProvider(input: {
       throw Object.assign(new Error(body.error.message), body.error);
     return body.result;
   };
+  // Reads for the kit's public client: stand-in hashes resolve to a confirmed
+  // no-op; everything else is the real chain.
+  const rpc = async (method: string, params: readonly unknown[] = []) => {
+    const h =
+      typeof params[0] === 'string'
+        ? (params[0].toLowerCase() as Hex)
+        : undefined;
+    const s = h ? standIns.get(h) : undefined;
+    if (
+      s &&
+      (method === 'eth_getTransactionReceipt' ||
+        method === 'eth_getTransactionByHash')
+    ) {
+      const block = (await forward('eth_getBlockByNumber', [
+        'latest',
+        false,
+      ])) as {
+        number: Hex;
+        hash: Hex;
+      };
+      return method === 'eth_getTransactionReceipt'
+        ? {
+            transactionHash: h,
+            blockHash: block.hash,
+            blockNumber: block.number,
+            status: '0x1',
+            logs: [],
+            gasUsed: '0x0',
+            cumulativeGasUsed: '0x0',
+            effectiveGasPrice: '0x0',
+            from: input.safe,
+            to: s.to,
+            contractAddress: null,
+            logsBloom: `0x${'00'.repeat(256)}`,
+            transactionIndex: '0x0',
+            type: '0x2',
+          }
+        : {
+            hash: h,
+            from: input.safe,
+            to: s.to,
+            input: s.data,
+            value: '0x0',
+            nonce: '0x0',
+            blockHash: block.hash,
+            blockNumber: block.number,
+            transactionIndex: '0x0',
+            gas: '0x0',
+            gasPrice: '0x0',
+            type: '0x0',
+            chainId,
+            v: '0x0',
+            r: '0x0',
+            s: '0x0',
+          };
+    }
+    return forward(method, params);
+  };
   return {
+    rpc,
     captured: () => captured,
     provider: {
       on() {},
@@ -141,12 +210,48 @@ function capturingProvider(input: {
             return null;
           case 'eth_sendTransaction': {
             const tx = params[0] as { from: Address; to: Address; data: Hex };
-            input.guard.check({
-              from: getAddress(tx.from),
-              to: tx.to,
-              data: tx.data,
-              value: 0n,
-            });
+            const pre = input.preApproved;
+            const selector = tx.data?.slice(0, 10).toLowerCase();
+            if (
+              pre &&
+              getAddress(tx.from) === getAddress(input.safe) &&
+              getAddress(tx.to) === getAddress(pre.token) &&
+              (selector === '0x095ea7b3' || selector === '0x39509351')
+            ) {
+              const spender = getAddress(`0x${tx.data.slice(34, 74)}`);
+              const amount = BigInt(`0x${tx.data.slice(74, 138)}`);
+              const onChain = BigInt(
+                (await forward('eth_call', [
+                  {
+                    to: pre.token,
+                    data: `0xdd62ed3e${input.safe.slice(2).toLowerCase().padStart(64, '0')}${spender.slice(2).toLowerCase().padStart(64, '0')}`,
+                  },
+                  'latest',
+                ])) as Hex,
+              );
+              if (
+                spender === getAddress(pre.spender) &&
+                amount <= pre.amount &&
+                onChain >= amount
+              ) {
+                const hash = keccak256(
+                  toHex(`synq-standin:${tx.data}:${standIns.size}`),
+                );
+                standIns.set(hash, { to: getAddress(tx.to), data: tx.data });
+                return hash;
+              }
+            }
+            try {
+              input.guard.check({
+                from: getAddress(tx.from),
+                to: tx.to,
+                data: tx.data,
+                value: 0n,
+              });
+            } catch (e) {
+              input.onRefused?.(e as Error, tx);
+              throw e;
+            }
             captured = { to: getAddress(tx.to), data: tx.data };
             throw Object.assign(new Captured(captured), { code: 4001 });
           }
@@ -305,7 +410,10 @@ export class WorkspaceTreasury {
     });
     const adapter = await createViemAdapterFromProvider({
       provider: cap.provider as never,
-    });
+      // The kit's built-in Arc RPC host no longer resolves; use the verified one.
+      getPublicClient: ({ chain }: { chain: Chain }) =>
+        createPublicClient({ chain, transport: http(this.rpcUrl) }),
+    } as never);
     const params = {
       from: { adapter, chain: 'Arc_Testnet' as const },
       tokenIn: terms.from,
@@ -436,19 +544,59 @@ export class WorkspaceTreasury {
     });
     const exec = steps.find((s) => s.kind === 'EXECUTE')!;
     const guard = new KitTxGuard(a.vault, steps);
+    let refused = '';
     const cap = capturingProvider({
       safe: a.vault,
       rpcUrl: this.rpcUrl,
       guard,
+      preApproved: {
+        token: exec.tokenIn,
+        spender: appKitAdapter(),
+        amount: exec.maxAmountIn,
+      },
+      onRefused: (e, tx) => {
+        refused =
+          `${(e as { code?: string }).code ?? 'REFUSED'}: ${e.message} to ${tx.to} data ${tx.data.slice(0, 140)}`.slice(
+            0,
+            300,
+          );
+      },
     });
     const adapter = await createViemAdapterFromProvider({
       provider: cap.provider as never,
-    });
+      // The kit's built-in Arc RPC host no longer resolves; use the verified one.
+      getPublicClient: ({ chain }: { chain: Chain }) =>
+        createPublicClient({
+          chain,
+          transport: custom({
+            request: ({
+              method,
+              params,
+            }: {
+              method: string;
+              params?: unknown[];
+            }) => cap.rpc(method, params ?? []),
+          }),
+        }),
+    } as never);
+    let failure = '';
     await kit
       .swap({ ...params, from: { ...params.from, adapter } })
-      .catch(() => undefined);
+      .catch((e: unknown) => {
+        failure = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+      });
     const tx = cap.captured();
-    if (!tx) throw new WorkspaceError('TREASURY_EXECUTION_NOT_PREPARED', 503);
+    if (!tx) {
+      await this.pool.query(
+        'UPDATE synq_ws_treasury_ops SET last_error=$2,updated_at=$3 WHERE id=$1',
+        [
+          id,
+          refused || failure || 'kit returned without a transaction',
+          this.now(),
+        ],
+      );
+      throw new WorkspaceError('TREASURY_EXECUTION_NOT_PREPARED', 503);
+    }
     verifyExecute({ from: a.vault, to: tx.to, data: tx.data }, exec);
     const action = await this.governance.proposeTreasury(
       workspaceId,

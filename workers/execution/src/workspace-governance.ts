@@ -567,7 +567,7 @@ export class WorkspaceGovernanceExecutor {
             ],
           });
           await sql.query(
-            "UPDATE synq_ws_treasury_ops SET state='DONE',evidence=$2,updated_at=$3 WHERE id=$1",
+            "UPDATE synq_ws_treasury_ops SET state='DONE',evidence=$2,last_error=NULL,updated_at=$3 WHERE id=$1",
             [
               a.treasuryOpId,
               {
