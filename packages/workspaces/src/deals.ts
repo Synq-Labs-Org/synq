@@ -301,15 +301,27 @@ export class WorkspaceDeals {
     raw: unknown,
   ) {
     const b = AttestationSchema.parse(raw);
-    const { role } = await this.role(workspaceId, principalId, dealId);
+    const { role, view } = await this.role(workspaceId, principalId, dealId);
+    // An acceptance is over the exact evidence the payee delivered.
+    const delivered =
+      b.kind === 'ACCEPT_RELEASE'
+        ? (view.attestations.find(
+            (a) =>
+              a.kind === 'DELIVERED' &&
+              a.milestone === b.milestone &&
+              a.evidenceHash ===
+                view.deal.milestones[b.milestone]?.evidenceHash,
+          )?.evidence ?? null)
+        : null;
     return this.view(
       await this.service.attest({
         dealId,
         milestone: b.milestone,
         kind: b.kind,
         role,
-        evidence:
-          b.kind === 'DELIVERED' && b.evidence
+        evidence: delivered
+          ? delivered
+          : b.kind === 'DELIVERED' && b.evidence
             ? { ...b.evidence, verifiedBy: null, checkedAt: 0 }
             : null,
         nonce: b.nonce as Hex,
