@@ -130,6 +130,12 @@ import { CONSENT_SCOPE, WorkspaceLeads } from '@synq/workspaces/leads';
 import { WorkspaceOffers } from '@synq/workspaces/offers';
 import { SalesAgent } from '@synq/workspaces/sales-agent';
 import { AgentEvents } from '@synq/workspaces/agent-events';
+import {
+  WorkspaceNotifications as AppNotifications,
+  deepLinks,
+  notificationEventId,
+} from '@synq/workspaces/notifications';
+import { ApnsSender } from './apns.js';
 import { chainProfile } from '@synq/chain-registry/arc';
 import { workspaceVaultRuntime } from '@synq/execution-worker/workspace-vault';
 import type { WorkspaceDealEscrow } from '@synq/execution-worker/workspace-escrow';
@@ -545,6 +551,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       | {
           username: string | null;
           send(chatId: string, text: string): Promise<void>;
+          /** Whether getMe reported guest queries for this bot. */
+          guestQueries: boolean;
         }
       | undefined;
     let leadPorts: Pick<ChannelPorts, 'leadStart' | 'leadMessage'> | undefined;
@@ -651,6 +659,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
               : undefined),
         vault?.treasury,
         vault?.contributions,
+        { guestQueries: () => leadTelegram?.guestQueries },
       );
       const devices = new WorkspaceDeviceSessions(workspaces);
       const agentEvents = new AgentEvents(workspaces, {
@@ -663,6 +672,16 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
       setInterval(() => {
         agentEvents.projectSplits().catch(() => undefined);
       }, 60_000).unref();
+      const notifications = new AppNotifications(workspaces, {
+        publish: (principalId, notificationId) =>
+          agentEvents.publish('NOTIFICATION', { principalId }, notificationId),
+      });
+      await notifications.migrate();
+      const apns = new ApnsSender();
+      // Without an APNs key nothing is sent and deliveries stay pending.
+      setInterval(() => {
+        notifications.pump(apns).catch(() => undefined);
+      }, 10_000).unref();
       const leads = new WorkspaceLeads(workspaces, {
         webOrigin: process.env.SYNQ_WEB_BASE_URL ?? workspaces.origin,
         telegramBot: () => leadTelegram?.username ?? null,
@@ -672,11 +691,31 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         },
         publish: (type, workspaceId, leadId) =>
           agentEvents.publish(type, { workspaceId }, leadId),
+        onCreated: async (workspaceId, leadId) => {
+          await notifications.notifyStaff({
+            eventId: notificationEventId('NEW_LEAD', leadId),
+            category: 'NEW_LEAD',
+            workspaceId,
+            deepLink: deepLinks.lead(workspaceId, leadId),
+          });
+        },
       });
       await leads.migrate();
       const offers = new WorkspaceOffers(workspaces, {
         publish: (workspaceId, leadId) =>
           agentEvents.publish('OFFER_UPDATED', { workspaceId }, leadId),
+        onAccepted: async (a) => {
+          await notifications.notifyStaff({
+            eventId: notificationEventId(
+              'OFFER_ACCEPTED',
+              a.offerId,
+              String(a.version),
+            ),
+            category: 'OFFER_ACCEPTED',
+            workspaceId: a.workspaceId,
+            deepLink: deepLinks.lead(a.workspaceId, a.leadId),
+          });
+        },
       });
       await offers.migrate();
       const sales = new SalesAgent(
@@ -738,6 +777,8 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         leads,
         offers,
         events: agentEvents,
+        notifications,
+        pushCapability: () => apns.capability(),
         approvals: new AppApprovals(workspaces, {
           setups: vault
             ? { service: vault.setups, wake: vault.wake }
@@ -761,6 +802,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
             Boolean(finance),
             Boolean(vault),
             vault?.screening(),
+            { guestQueries: () => leadTelegram?.guestQueries },
           ),
       });
     }
@@ -1347,6 +1389,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         send: async (chatId, text) => {
           await leadBot.send(chatId, { text });
         },
+        guestQueries: leadBot.profile?.guestQueries === true,
       };
     if (!channels?.telegram) throw new Error('TELEGRAM_NOT_CONFIGURED');
     evidence.bot = {

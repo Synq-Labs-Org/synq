@@ -30,6 +30,10 @@ export function workspaceCapabilities(
   financeReady = false,
   payoutReady = false,
   screening?: { status: string; providerId: string; reason: string },
+  telegram?: {
+    /** getMe's supports_guest_queries once the bot has connected; undefined before. */
+    guestQueries: () => boolean | undefined;
+  },
 ) {
   const blocked = (reason: string) => ({ status: 'BLOCKED' as const, reason });
   return {
@@ -84,6 +88,18 @@ export function workspaceCapabilities(
     lithic: blocked('Workspace sandbox card integration is not connected.'),
     cctp: blocked('Workspace settlement integration is not connected.'),
     gateway: blocked('Workspace settlement integration is not connected.'),
+    telegramGuestMode:
+      telegram?.guestQueries() === true
+        ? {
+            status: 'AVAILABLE',
+            reason:
+              'The connected bot reports guest queries; a guest invocation gets one reply and nothing is stored.',
+          }
+        : blocked(
+            telegram?.guestQueries() === false
+              ? 'The connected Telegram bot does not have guest mode enabled.'
+              : 'No Telegram bot is connected to report guest mode.',
+          ),
     channelBinding: telegramReady
       ? {
           status: 'AVAILABLE',
@@ -119,6 +135,7 @@ export function registerWorkspaceRoutes(
     service: WorkspaceContributions;
     available: (workspaceId: string) => Promise<bigint>;
   },
+  telegram?: { guestQueries: () => boolean | undefined },
 ) {
   const { handle, origin, token, auth, id, anonymous } = workspaceHttp(store);
   app.get('/v2/capabilities', (_req, reply) =>
@@ -129,6 +146,7 @@ export function registerWorkspaceRoutes(
         Boolean(finance),
         Boolean(payouts),
         payouts?.screening?.(),
+        telegram,
       ),
       ...(contributions
         ? {

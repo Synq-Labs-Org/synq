@@ -1470,7 +1470,7 @@
         "summary": "Redacted notification inbox.",
         "x-synq-auth": "session",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "cursor",
@@ -1523,7 +1523,7 @@
         "summary": "Mark notifications read.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -1575,7 +1575,7 @@
         "summary": "Register or update an APNs token and preferences.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "native session of that device",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -1627,7 +1627,7 @@
         "summary": "Stop pushes to a device.",
         "x-synq-auth": "mutation",
         "x-synq-roles": "principal",
-        "x-synq-status": "PLANNED",
+        "x-synq-status": "IMPLEMENTED",
         "parameters": [
           {
             "name": "deviceId",

@@ -374,7 +374,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal',
     query: PageQuery,
     response: notifications.NotificationPageSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Redacted notification inbox.',
   },
   {
@@ -385,7 +385,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'principal',
     request: notifications.MarkReadSchema,
     response: common.OkSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Mark notifications read.',
   },
   {
@@ -396,7 +396,7 @@ export const ROUTES: readonly Route[] = [
     roles: 'native session of that device',
     request: notifications.DeviceRegistrationSchema,
     response: notifications.DeviceRegisteredSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Register or update an APNs token and preferences.',
   },
   {
@@ -406,7 +406,7 @@ export const ROUTES: readonly Route[] = [
     auth: 'mutation',
     roles: 'principal',
     response: common.OkSchema,
-    status: 'PLANNED',
+    status: 'IMPLEMENTED',
     summary: 'Stop pushes to a device.',
   },
   {

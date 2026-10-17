@@ -16,6 +16,7 @@ import type { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceLeads } from '@synq/workspaces/leads';
 import type { WorkspaceOffers } from '@synq/workspaces/offers';
 import type { AgentEvents } from '@synq/workspaces/agent-events';
+import type { WorkspaceNotifications } from '@synq/workspaces/notifications';
 import type { AppApprovals } from './app-approvals.js';
 import { workspaceHttp } from './workspace-http.js';
 
@@ -47,6 +48,9 @@ export type AppRouteDeps = {
   leads?: WorkspaceLeads;
   offers?: WorkspaceOffers;
   events?: AgentEvents;
+  notifications?: WorkspaceNotifications;
+  /** Push delivery status for the business overview; absent means not configured. */
+  pushCapability?: () => { status: string; reason: string };
   /** How long one event-stream connection stays open (default 10 minutes). */
   streamWindowMs?: number;
   /** Poll interval of the event stream (default 2 seconds). */
@@ -606,6 +610,21 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
             status: 'NOT_CONFIGURED',
             reason: 'Agent run history is not configured on this server.',
           };
+      capabilities.pushNotifications = !deps.notifications
+        ? {
+            status: 'NOT_CONFIGURED',
+            reason: 'Notifications are not configured on this server.',
+          }
+        : (() => {
+            const c = deps.pushCapability?.();
+            return c && STATUSES.has(c.status)
+              ? { status: c.status, reason: c.reason.slice(0, 600) }
+              : {
+                  status: 'NOT_CONFIGURED',
+                  reason:
+                    'Push delivery is not configured; notifications appear in the app only.',
+                };
+          })();
       return {
         workspaceId: w.id,
         displayName: w.displayName,
@@ -916,6 +935,44 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
       }
       res.end();
     });
+  }
+
+  const notifications = deps.notifications;
+  if (notifications) {
+    route('notifications.list');
+    app.get('/v3/notifications', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return notifications.list(s.principalId, PageQuery.parse(req.query));
+      }),
+    );
+    route('notifications.read');
+    app.post('/v3/notifications/read', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        return notifications.markRead(s.principalId, req.body);
+      }),
+    );
+    route('devices.register');
+    app.post('/v3/devices', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        // Only a native device session can register a push token.
+        if (s.deviceSessionId === null)
+          throw new WorkspaceError('NATIVE_SESSION_REQUIRED', 403);
+        return notifications.registerDevice(s.principalId, req.body);
+      }),
+    );
+    route('devices.revoke');
+    app.post('/v3/devices/:deviceId/revoke', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        const { deviceId } = z
+          .strictObject({ deviceId: z.uuid() })
+          .parse(req.params);
+        return notifications.revokeDevice(s.principalId, deviceId);
+      }),
+    );
   }
 
   return { implemented };
