@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -7,14 +8,13 @@ import {
   createWalletClient,
   getAddress,
   http,
+  type Abi,
   type Address,
   type Hex,
   type PublicClient,
 } from 'viem';
 import { anvil } from 'viem/chains';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import escrowArtifact from '../../contracts/out/SynqMilestoneEscrow.sol/SynqMilestoneEscrow.json' with { type: 'json' };
-import tokenArtifact from '../../contracts/out/LocalSixDecimalApprovalToken.sol/LocalSixDecimalApprovalToken.json' with { type: 'json' };
 import { startAnvil } from '../../apps/demo/src/anvil.js';
 import { registerAppRoutes } from '../../apps/demo/src/app-routes.js';
 import { PostgresWorkspaceStore } from '../../packages/workspaces/src/postgres.js';
@@ -31,6 +31,26 @@ import { WorkspaceAgreements } from '../../packages/workspaces/src/agreements.js
 import { AgreementEscrow } from '../../workers/execution/src/agreement-escrow.js';
 import { testDatabaseUrl } from '../durable/pg.js';
 import { workspacePool } from './pg.js';
+
+// Compiled by `forge build` before the integration run (CI typechecks earlier).
+const escrowArtifact = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../contracts/out/SynqMilestoneEscrow.sol/SynqMilestoneEscrow.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as { abi: Abi; bytecode: { object: string } };
+const tokenArtifact = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../contracts/out/LocalSixDecimalApprovalToken.sol/LocalSixDecimalApprovalToken.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as { abi: Abi; bytecode: { object: string } };
 
 /*
  * Deal closing with an outside client: the client is the lead's bound web

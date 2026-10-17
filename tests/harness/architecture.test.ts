@@ -19,6 +19,20 @@ function workspace(files: Record<string, string>): string[] {
 const pkg = (name: string) => JSON.stringify({ name, exports: './index.ts' });
 
 describe('dependency boundary rules', () => {
+  it('refuses imports of forge build output, which CI typechecks before building', () => {
+    // Split so this file does not trip the rule it tests.
+    const out = ['contracts', 'out'].join('/');
+    const errors = workspace({
+      'tests/a.test.ts': `import token from '../${out}/T.sol/T.json' with { type: 'json' };\n`,
+      'tests/b.test.ts': `const t = await import('../${out}/T.sol/T.json');\n`,
+      'tests/c.test.ts': `const t = readFileSync(new URL('../${out}/T.sol/T.json', import.meta.url));\n`,
+    });
+    const flagged = errors.filter((e) => e.includes('forge build output'));
+    expect(flagged).toEqual([
+      'tests/a.test.ts: imports forge build output from contracts/out',
+      'tests/b.test.ts: imports forge build output from contracts/out',
+    ]);
+  });
   it('detects indirect forbidden planner signing imports and dependency cycles', () => {
     const errors = workspace({
       'packages/agent-runtime/index.ts':

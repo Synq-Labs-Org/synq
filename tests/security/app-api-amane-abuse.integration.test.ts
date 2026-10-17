@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import type { Abi } from 'viem';
 import { randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -27,7 +29,6 @@ import {
   readAccountView,
   readLeaseView,
 } from '@synq/plugin-amane';
-import token from '../../contracts/out/LocalSixDecimalToken.sol/LocalSixDecimalToken.json' with { type: 'json' };
 import { startAnvil } from '../../apps/demo/src/anvil.js';
 import { PostgresWorkspaceStore } from '../../packages/workspaces/src/postgres.js';
 import { WorkspaceAmane } from '../../packages/workspaces/src/amane.js';
@@ -35,6 +36,17 @@ import { AgentEvents } from '../../packages/workspaces/src/agent-events.js';
 import { AmanePayExecutor } from '../../workers/execution/src/amane-pay.js';
 import { testDatabaseUrl } from '../durable/pg.js';
 import { workspacePool } from '../workspaces/pg.js';
+
+// Compiled by `forge build` before the integration run (CI typechecks earlier).
+const token = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../contracts/out/LocalSixDecimalToken.sol/LocalSixDecimalToken.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as { abi: Abi; bytecode: { object: string } };
 
 /*
  * Abuse of agent payments against the pinned Amane contracts on a local Anvil

@@ -586,6 +586,7 @@ export function checkArchitecture(root) {
   }
   for (const node of graph.keys()) visit(node, []);
   errors.push(...checkWorkflowSandbox(root));
+  errors.push(...checkBuildOutputImports(root));
   return [...new Set(errors)];
 }
 
@@ -655,6 +656,27 @@ function workflowSandboxViolations(file, text) {
   };
   visit(source);
   return [...new Set(found)];
+}
+// CI typechecks before `forge build` runs, so code may read compiled contract
+// artifacts at runtime but must never import them.
+const BUILD_OUTPUT_IMPORT =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"][^'"]*\bcontracts\/out\//m;
+export function checkBuildOutputImports(root) {
+  const errors = [];
+  for (const dir of [
+    'apps',
+    'packages',
+    'plugins',
+    'workers',
+    'scripts',
+    'tests',
+  ])
+    for (const file of sourceFiles(join(root, dir))) {
+      const name = posix(relative(root, file));
+      if (BUILD_OUTPUT_IMPORT.test(readFileSync(file, 'utf8')))
+        errors.push(`${name}: imports forge build output from contracts/out`);
+    }
+  return errors;
 }
 export function checkWorkflowSandbox(root) {
   const errors = [];
