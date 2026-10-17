@@ -1,0 +1,85 @@
+{
+  "run": {
+    "runId": "00000000-0000-4000-8000-000000000004",
+    "workspaceId": "00000000-0000-4000-8000-000000000001",
+    "title": "Pay the design contractor after the client deposit",
+    "trigger": "DEPOSIT_FINALIZED",
+    "status": "RECONCILED",
+    "amount": {
+      "assetId": "arc-testnet:USDC",
+      "symbol": "USDC",
+      "chainId": 5042002,
+      "decimals": 6,
+      "units": "40000000"
+    },
+    "proofLevel": "LOCAL_FIXTURE",
+    "startedAt": "2026-10-17T10:01:00.000Z",
+    "updatedAt": "2026-10-17T10:04:00.000Z"
+  },
+  "events": [
+    {
+      "eventId": "00000000-0000-4000-8000-00000000001e",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "runId": "00000000-0000-4000-8000-000000000004",
+      "sequence": "1",
+      "correlationId": "corr-example",
+      "causationId": null,
+      "kind": "DECISION",
+      "actor": "MODEL",
+      "status": "PENDING",
+      "summary": "Proposed paying the contractor 40 USDC from the deposit.",
+      "sourceKind": "CFO_AGENT",
+      "observedAt": "2026-10-17T10:01:00.000Z",
+      "effectiveAt": null,
+      "evidenceHash": null,
+      "proofLevel": "NOT_VERIFIED",
+      "amount": {
+        "assetId": "arc-testnet:USDC",
+        "symbol": "USDC",
+        "chainId": 5042002,
+        "decimals": 6,
+        "units": "40000000"
+      },
+      "recipientHint": "0x3333…3333",
+      "txHash": null,
+      "chainId": null
+    },
+    {
+      "eventId": "00000000-0000-4000-8000-00000000001f",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "runId": "00000000-0000-4000-8000-000000000004",
+      "sequence": "2",
+      "correlationId": "corr-example",
+      "causationId": "00000000-0000-4000-8000-00000000001e",
+      "kind": "GRANT",
+      "actor": "DETERMINISTIC",
+      "status": "AUTHORIZED",
+      "summary": "Kernel allowed one payment within the lease.",
+      "sourceKind": "KERNEL",
+      "observedAt": "2026-10-17T10:02:00.000Z",
+      "effectiveAt": "2026-10-17T10:02:00.000Z",
+      "evidenceHash": "0x4b752987d6b40957ebe7c23a4f9556d1861eb2d5475b1009482ee4ca4a5309d9",
+      "proofLevel": "LOCAL_FIXTURE",
+      "amount": {
+        "assetId": "arc-testnet:USDC",
+        "symbol": "USDC",
+        "chainId": 5042002,
+        "decimals": 6,
+        "units": "40000000"
+      },
+      "recipientHint": "0x3333…3333",
+      "txHash": null,
+      "chainId": null
+    }
+  ],
+  "receipts": [
+    {
+      "chainId": 5042002,
+      "txHash": "0x96627a7be7cbb4fe72959e6945aeec1f1e44776817ea21a2b753188338a0a91d",
+      "blockNumber": "1000",
+      "finality": "FINALIZED",
+      "explorerUrl": null,
+      "ledgerEntryId": "ledger-example"
+    }
+  ]
+}

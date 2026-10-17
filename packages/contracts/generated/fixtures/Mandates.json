@@ -1,0 +1,7 @@
+{
+  "capability": {
+    "status": "NOT_CONFIGURED",
+    "reason": "No Amane lease is installed for this workspace."
+  },
+  "leases": []
+}

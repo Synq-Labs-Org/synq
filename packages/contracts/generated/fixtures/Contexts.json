@@ -1,0 +1,24 @@
+{
+  "principalId": "principal-example",
+  "walletHint": "0x1111…1111",
+  "contexts": [
+    {
+      "contextId": "personal",
+      "kind": "PERSONAL",
+      "workspaceId": null,
+      "displayName": "Personal",
+      "role": null,
+      "workspaceStatus": null,
+      "unreadCount": 1
+    },
+    {
+      "contextId": "00000000-0000-4000-8000-000000000001",
+      "kind": "BUSINESS",
+      "workspaceId": "00000000-0000-4000-8000-000000000001",
+      "displayName": "Example Studio",
+      "role": "OWNER",
+      "workspaceStatus": "ACTIVE",
+      "unreadCount": 3
+    }
+  ]
+}

@@ -61,6 +61,9 @@ importers:
       '@synq/channels':
         specifier: workspace:*
         version: link:packages/channels
+      '@synq/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
       '@synq/dealroom':
         specifier: workspace:*
         version: link:packages/dealroom
@@ -591,6 +594,15 @@ importers:
       satori:
         specifier: 0.47.1
         version: 0.47.1
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+
+  packages/contracts:
+    dependencies:
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.6.5)
       zod:
         specifier: 4.6.5
         version: 4.6.5

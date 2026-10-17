@@ -1,0 +1,17 @@
+{
+  "name": "@synq/contracts",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generated/*": "./generated/*"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "viem": "2.57.4",
+    "zod": "4.6.5"
+  }
+}
