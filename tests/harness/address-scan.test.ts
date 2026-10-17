@@ -25,6 +25,8 @@ const ALLOWED_PATHS = [
   /^tests\/arc\/fixtures\/arc-ap-payout-evidence\.json$/,
   // Standalone mm plugin pin of the registry; drift-tested by tests/metamask-plugin/network.test.ts.
   /^packages\/metamask-synq-plugin\/src\/core\/network\.json$/,
+  // The docs' Arc testnet address table; drift-tested by tests/web/docs-addresses.test.ts.
+  /^apps\/web\/content\/docs\/contracts\/00-index\.md$/,
   /^contracts\/(abi|deployments|evidence|lib|out)\//,
   /^reports\//,
   // Submission evidence documents cite deployed contracts and explorer-linked transactions.
