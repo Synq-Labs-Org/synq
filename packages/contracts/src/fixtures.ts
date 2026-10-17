@@ -221,6 +221,59 @@ export const FIXTURES: Readonly<Record<string, unknown>> = {
       },
     ],
   },
+  ClientLeadList: {
+    leads: [
+      {
+        leadId: lead,
+        businessName: 'Example Studio',
+        stage: 'OFFER_SENT',
+        lastActivityAt: at(3),
+      },
+    ],
+  },
+  ClientLeadDetail: {
+    lead: {
+      leadId: lead,
+      businessName: 'Example Studio',
+      stage: 'OFFER_SENT',
+      lastActivityAt: at(3),
+    },
+    consent: {
+      granted: true,
+      grantedAt: at(1),
+      scope: 'The business may read this private conversation.',
+    },
+    messages: [
+      {
+        messageId: uuid(20),
+        author: 'LEAD',
+        text: 'Can you do a logo and two banners by Friday?',
+        offerVersion: null,
+        createdAt: at(2),
+      },
+    ],
+    olderMessagesCursor: null,
+    offers: [
+      {
+        offerId: offer,
+        version: 1,
+        termsHash: hash('offer-1'),
+        status: 'SENT',
+        total: money('120000000'),
+        lines: [
+          {
+            description: 'Logo and two banners',
+            quantity: 1,
+            unitUnits: '120000000',
+            totalUnits: '120000000',
+          },
+        ],
+        milestones: [{ label: 'Final files', units: '120000000', dueAt: null }],
+        expiresAt: at(60 * 24),
+        createdAt: at(3),
+      },
+    ],
+  },
   AgentRunDetail: {
     run: runSummary,
     events: [

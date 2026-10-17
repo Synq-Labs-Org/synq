@@ -13,7 +13,7 @@ import type { WorkspaceContributions } from '@synq/workspaces/contributions';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
 import type { WorkspaceBooks } from '@synq/workspaces/books';
-import type { WorkspaceLeads } from '@synq/workspaces/leads';
+import type { LeadRow, WorkspaceLeads } from '@synq/workspaces/leads';
 import type { WorkspaceOffers } from '@synq/workspaces/offers';
 import type { AgentEvents } from '@synq/workspaces/agent-events';
 import type { WorkspaceAmane } from '@synq/workspaces/amane';
@@ -49,6 +49,10 @@ export type AppRouteDeps = {
   capabilities?: () => Record<string, unknown>;
   leads?: WorkspaceLeads;
   offers?: WorkspaceOffers;
+  /** The sales agent; answers web clients exactly as it answers Telegram leads. */
+  sales?: {
+    respond: (lead: LeadRow, turn: string) => Promise<unknown>;
+  };
   events?: AgentEvents;
   /** Amane agent payments; absent when no agent key and code hash are configured. */
   amane?: WorkspaceAmane;
@@ -758,6 +762,47 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
           principalId: s.principalId,
         });
         return { leadId: r.leadId, bound: r.bound };
+      }),
+    );
+    // The outside client's own view. Never a workspace route: a lead is not a member.
+    const sessionLead = (req: FastifyRequest) =>
+      z.strictObject({ leadId: z.uuid() }).parse(req.params).leadId;
+    route('leadSessions.list');
+    app.get('/v3/lead-sessions', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return leads.clientLeads(s.principalId);
+      }),
+    );
+    route('leadSessions.detail');
+    app.get('/v3/lead-sessions/:leadId', (req, reply) =>
+      handle(reply, async () => {
+        const s = await auth(req);
+        return leads.clientDetail(
+          s.principalId,
+          sessionLead(req),
+          offers ? (id) => offers.forLead(id) : undefined,
+        );
+      }),
+    );
+    route('leadSessions.message');
+    app.post('/v3/lead-sessions/:leadId/message', (req, reply) =>
+      handle(reply, async () => {
+        const s = await mutation(req);
+        await store.throttle(`lead-session-message:${s.principalId}`, 30);
+        const r = await leads.fromClient(
+          s.principalId,
+          sessionLead(req),
+          req.body,
+          String(req.headers['idempotency-key']),
+        );
+        // A repeated delivery is not answered twice; staff handling means no agent reply.
+        if (!r.message.duplicate && r.lead.handling === 'AGENT' && deps.sales)
+          await deps.sales
+            .respond(r.lead, r.message.messageId)
+            .catch(() => undefined);
+        const { duplicate: _d, ...message } = r.message;
+        return message;
       }),
     );
   }
