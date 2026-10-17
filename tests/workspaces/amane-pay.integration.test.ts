@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -27,7 +28,6 @@ import {
   readAccountView,
   readLeaseView,
 } from '@synq/plugin-amane';
-import token from '../../contracts/out/LocalSixDecimalToken.sol/LocalSixDecimalToken.json' with { type: 'json' };
 import { startAnvil } from '../../apps/demo/src/anvil.js';
 import { PostgresWorkspaceStore } from '../../packages/workspaces/src/postgres.js';
 import { WorkspaceAmane } from '../../packages/workspaces/src/amane.js';
@@ -44,6 +44,16 @@ import { workspacePool } from './pg.js';
  */
 
 const A = AMANE_ARTIFACTS;
+// Compiled by `forge build` before the integration run (CI typechecks earlier).
+const token = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../contracts/out/LocalSixDecimalToken.sol/LocalSixDecimalToken.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as { abi: unknown[]; bytecode: { object: string } };
 let node: Awaited<ReturnType<typeof startAnvil>>;
 let client: PublicClient;
 let pool: Pool;
