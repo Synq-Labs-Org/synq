@@ -233,11 +233,23 @@ export class WorkspaceNotifications {
       )
         continue;
       const p = payout.data;
+      const action =
+        p.route === 'SAFE_QUORUM'
+          ? (
+              await pool.query(
+                "SELECT signatures FROM synq_ws_safe_actions WHERE workspace_id=$1 AND data->>'payoutId'=$2 AND state='CONFIRMED'",
+                [p.workspaceId, p.id],
+              )
+            ).rows[0]
+          : undefined;
       const card = payoutReceiptCard(payout, {
         displayName: String(e.display_name),
         threshold: Number(e.threshold),
         executedAt: Number(e.executed_at),
         mode: this.mode,
+        ...(action
+          ? { approvalsCounted: Object.keys(action.signatures).length }
+          : {}),
       });
       if (
         await this.enqueue(
@@ -289,6 +301,8 @@ export function payoutReceiptCard(
     threshold: number;
     executedAt: number;
     mode: 'LIVE_ARC_TESTNET' | 'LOCAL_FIXTURE';
+    /** Safe-quorum payouts carry their owner signatures on the governance action. */
+    approvalsCounted?: number;
   },
 ) {
   const p = payout.data,
@@ -327,7 +341,7 @@ export function payoutReceiptCard(
       p.route === 'SAFE_QUORUM' ? 'SAFE_QUORUM_TRANSFER' : 'VAULT_POLICY_PAY',
     obligationRef: null,
     approvals: {
-      counted: Object.keys(payout.signatures).length,
+      counted: input.approvalsCounted ?? Object.keys(payout.signatures).length,
       required: input.threshold,
     },
     status: 'CONFIRMED',

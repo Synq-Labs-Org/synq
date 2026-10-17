@@ -323,6 +323,7 @@ if (process.env.SYNQ_DYNAMIC_SAFE_PAYOUT_LIVE !== '1') {
       threshold: a.threshold,
       executedAt: store.now(),
       mode: 'LIVE_ARC_TESTNET',
+      approvalsCounted: (await governance.record(actionId))!.signatures.length,
     });
     const pngPath = join(
       'bounty-evidence',
@@ -346,7 +347,7 @@ if (process.env.SYNQ_DYNAMIC_SAFE_PAYOUT_LIVE !== '1') {
       amountBaseUnits: String(AMOUNT),
       payoutId,
       budgetChangeHash: manifest.budgetHash,
-      approvals: Object.keys(paid.signatures).length,
+      approvals: (await governance.record(actionId))!.signatures.length,
       threshold: a.threshold,
       txHash: hash,
       blockNumber: String(receipt.blockNumber),
