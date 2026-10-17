@@ -8,6 +8,7 @@ import {
   FinanceChangeViewSchema,
   financeChangeTypedData,
   financeChangeHash,
+  describeFinanceEdit,
 } from '@synq/workspaces/finance-contracts';
 import { api, describeError } from '../../lib/api';
 
@@ -318,27 +319,7 @@ export function FinancePanel({
             Vault {change.change.vault} · revision {change.change.revision} ·
             expires {new Date(change.change.expiresAt * 1000).toISOString()}
           </p>
-          {change.change.edit.kind === 'VENDOR' ? (
-            <p>
-              Verify {change.change.edit.name} at {change.change.edit.address}.
-              Owner attestation required; changed addresses wait at least 24
-              hours.
-            </p>
-          ) : change.change.edit.kind === 'BUDGET' ? (
-            <p>
-              Per payment{' '}
-              {formatUnits(BigInt(change.change.edit.perPayment), 6)} USDC;
-              daily {formatUnits(BigInt(change.change.edit.daily), 6)} USDC;
-              reserve {formatUnits(BigInt(change.change.edit.reserve), 6)} USDC;
-              AI daily {formatUnits(BigInt(change.change.edit.aiDaily), 6)}{' '}
-              USDC.
-            </p>
-          ) : (
-            <p>
-              Revoke the budget: {change.change.edit.reason}. Payments already
-              signed by the worker still require reconciliation.
-            </p>
-          )}
+          <p>{describeFinanceEdit(change.change.edit)}</p>
           <p>
             {change.signedBy.length} owner signatures · {change.state}
           </p>

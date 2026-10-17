@@ -15,6 +15,7 @@ import './theme.css';
 import { VaultPanel } from './vault-panel';
 import { ChannelPanel } from './channel-panel';
 import { FinancePanel } from './finance-panel';
+import { BooksPanel } from './books-panel';
 import { PayoutPanel } from './payout-panel';
 import { GovernancePanel } from './governance-panel';
 import { InvoicePanel } from './invoice-panel';
@@ -408,6 +409,13 @@ export default function WorkspacesPage() {
                   key={`finance-${view.workspace.id}`}
                   workspaceId={view.workspace.id}
                   vault={view.workspace.vault}
+                  owner={isOwner}
+                />
+              )}
+              {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
+                <BooksPanel
+                  key={`books-${view.workspace.id}`}
+                  workspaceId={view.workspace.id}
                   owner={isOwner}
                 />
               )}

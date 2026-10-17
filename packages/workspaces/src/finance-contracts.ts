@@ -29,11 +29,60 @@ export const BudgetEditSchema = z
     )
       ctx.addIssue({ code: 'custom', message: 'limit exceeds daily budget' });
   });
+const IsoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)), 'invalid date');
+const Positive = UnitsSchema.refine((v) => BigInt(v) > 0n, 'must be positive');
+/** A vendor invoice the workspace owes; quorum-signed because a split may pay it. */
+export const PayableEditSchema = z
+  .strictObject({
+    kind: z.literal('PAYABLE'),
+    payableId: z.string().uuid(),
+    vendorId: z.string().uuid(),
+    number: z.string().trim().min(1).max(40),
+    amount: Positive,
+    issuedOn: IsoDate,
+    dueOn: IsoDate,
+    reference: z.string().trim().min(1).max(80).nullable(),
+    documentText: z.string().trim().min(1).max(2000),
+  })
+  .refine((v) => v.dueOn >= v.issuedOn, 'due date before issue date');
+export const ObligationEditSchema = z.strictObject({
+  kind: z.literal('OBLIGATION'),
+  reference: z.string().trim().min(1).max(80),
+  vendorId: z.string().uuid(),
+  approvedAmount: Positive,
+  status: z.enum(['APPROVED', 'DELIVERED', 'ACCEPTED', 'DISPUTED']),
+});
+export const BillEditSchema = z.strictObject({
+  kind: z.literal('BILL'),
+  billId: z.string().uuid(),
+  label: z.string().trim().min(1).max(60),
+  billKind: z.enum(['BILL', 'PAYROLL', 'RENT', 'SUBSCRIPTION']),
+  amount: Positive,
+  nextDueOn: IsoDate,
+  cadenceDays: z.number().int().min(1).max(366),
+});
 export const FinanceEditSchema = z.discriminatedUnion('kind', [
   VendorEditSchema,
   BudgetEditSchema,
   z.strictObject({
     kind: z.literal('REVOKE_BUDGET'),
+    reason: z.string().trim().min(1).max(160),
+  }),
+  PayableEditSchema,
+  z.strictObject({
+    kind: z.literal('CLOSE_PAYABLE'),
+    payableId: z.string().uuid(),
+    status: z.enum(['PAID_ELSEWHERE', 'VOID']),
+    reason: z.string().trim().min(1).max(160),
+  }),
+  ObligationEditSchema,
+  BillEditSchema,
+  z.strictObject({
+    kind: z.literal('REMOVE_BILL'),
+    billId: z.string().uuid(),
     reason: z.string().trim().min(1).max(160),
   }),
 ]);
@@ -78,14 +127,73 @@ export function financeChangeTypedData(c: FinanceChange) {
       nonce: c.nonce,
       expiresAt: BigInt(c.expiresAt),
       kind: e.kind,
-      terms:
-        e.kind === 'VENDOR'
-          ? [e.vendorId, e.name, e.address, e.verification]
-          : e.kind === 'BUDGET'
-            ? [e.perPayment, e.daily, e.reserve, e.aiDaily]
-            : [e.reason],
+      terms: financeTerms(e),
     },
   };
+}
+/** Every field of an edit, in a fixed order, as the signed `terms` tuple. */
+export function financeTerms(e: FinanceEdit): string[] {
+  switch (e.kind) {
+    case 'VENDOR':
+      return [e.vendorId, e.name, e.address, e.verification];
+    case 'BUDGET':
+      return [e.perPayment, e.daily, e.reserve, e.aiDaily];
+    case 'REVOKE_BUDGET':
+      return [e.reason];
+    case 'PAYABLE':
+      return [
+        e.payableId,
+        e.vendorId,
+        e.number,
+        e.amount,
+        e.issuedOn,
+        e.dueOn,
+        e.reference ?? '',
+        e.documentText,
+      ];
+    case 'CLOSE_PAYABLE':
+      return [e.payableId, e.status, e.reason];
+    case 'OBLIGATION':
+      return [e.reference, e.vendorId, e.approvedAmount, e.status];
+    case 'BILL':
+      return [
+        e.billId,
+        e.label,
+        e.billKind,
+        e.amount,
+        e.nextDueOn,
+        String(e.cadenceDays),
+      ];
+    case 'REMOVE_BILL':
+      return [e.billId, e.reason];
+  }
+}
+const usdc = (v: string) => {
+  const n = BigInt(v),
+    whole = n / 1_000_000n,
+    frac = (n % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${whole}${frac ? `.${frac}` : ''} USDC`;
+};
+/** Exact plain-language summary of an edit, shown to owners before they sign. */
+export function describeFinanceEdit(e: FinanceEdit): string {
+  switch (e.kind) {
+    case 'VENDOR':
+      return `Verify vendor ${e.name} at ${e.address}. A changed address waits at least 24 hours.`;
+    case 'BUDGET':
+      return `Budget: ${usdc(e.perPayment)} per payment, ${usdc(e.daily)} per day, ${usdc(e.reserve)} reserve, ${usdc(e.aiDaily)} AI daily.`;
+    case 'REVOKE_BUDGET':
+      return `Revoke the budget: ${e.reason}. Payments already signed by the worker still reconcile.`;
+    case 'PAYABLE':
+      return `Record vendor bill ${e.number} for ${usdc(e.amount)}, issued ${e.issuedOn}, due ${e.dueOn}${e.reference ? `, against ${e.reference}` : ', with no PO or milestone'}. Automatic splits may pay it to the vendor's verified address.`;
+    case 'CLOSE_PAYABLE':
+      return `Close bill ${e.payableId} as ${e.status === 'VOID' ? 'void' : 'paid elsewhere'}: ${e.reason}.`;
+    case 'OBLIGATION':
+      return `Milestone ${e.reference}: approved up to ${usdc(e.approvedAmount)}, status ${e.status.toLowerCase()}. Only accepted milestones release matching bills.`;
+    case 'BILL':
+      return `Recurring ${e.billKind.toLowerCase()} "${e.label}": ${usdc(e.amount)} every ${e.cadenceDays} days from ${e.nextDueOn}. Splits hold for it before distributing.`;
+    case 'REMOVE_BILL':
+      return `Stop recurring bill ${e.billId}: ${e.reason}.`;
+  }
 }
 export const financeChangeHash = (c: FinanceChange) =>
   hashTypedData(financeChangeTypedData(c));
@@ -197,3 +305,38 @@ export const PayoutViewSchema = z.strictObject({
   reason: z.string().nullable(),
   txHash: z.string().nullable(),
 });
+
+export const BooksViewSchema = z.strictObject({
+  payables: z.array(
+    z.strictObject({
+      id: z.string().uuid(),
+      vendorId: z.string().uuid(),
+      number: z.string(),
+      amount: UnitsSchema,
+      issuedOn: z.string(),
+      dueOn: z.string(),
+      reference: z.string().nullable(),
+      payTo: WalletSchema,
+      status: z.enum(['OPEN', 'PAID_ELSEWHERE', 'VOID', 'PAID']),
+    }),
+  ),
+  obligations: z.array(
+    z.strictObject({
+      reference: z.string(),
+      vendorId: z.string().uuid(),
+      approvedAmount: UnitsSchema,
+      status: z.enum(['APPROVED', 'DELIVERED', 'ACCEPTED', 'DISPUTED', 'PAID']),
+    }),
+  ),
+  bills: z.array(
+    z.strictObject({
+      id: z.string().uuid(),
+      label: z.string(),
+      billKind: z.enum(['BILL', 'PAYROLL', 'RENT', 'SUBSCRIPTION']),
+      amount: UnitsSchema,
+      nextDueOn: z.string(),
+      cadenceDays: z.number().int(),
+    }),
+  ),
+});
+export type BooksView = z.output<typeof BooksViewSchema>;

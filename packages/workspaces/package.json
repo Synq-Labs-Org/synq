@@ -8,6 +8,7 @@
     "./contracts": "./src/contracts.ts",
     "./finance": "./src/finance.ts",
     "./finance-contracts": "./src/finance-contracts.ts",
+    "./books": "./src/books.ts",
     "./payouts": "./src/payouts.ts",
     "./governance": "./src/governance.ts",
     "./invoices": "./src/invoices.ts",

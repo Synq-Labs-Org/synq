@@ -120,6 +120,35 @@ export class WorkspaceFinance {
     await this.owner(workspaceId, principalId);
     const edit = FinanceEditSchema.parse(raw);
     const a = await this.authority(workspaceId);
+    const pool = this.workspaces.pool;
+    if (edit.kind === 'PAYABLE' || edit.kind === 'OBLIGATION') {
+      const v = await pool.query(
+        'SELECT 1 FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+        [workspaceId, edit.vendorId],
+      );
+      if (!v.rowCount) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+    }
+    if (edit.kind === 'PAYABLE') {
+      const used = await pool.query(
+        'SELECT 1 FROM synq_ws_payables WHERE workspace_id=$1 AND id=$2',
+        [workspaceId, edit.payableId],
+      );
+      if (used.rowCount) throw new WorkspaceError('PAYABLE_EXISTS');
+    }
+    if (edit.kind === 'CLOSE_PAYABLE') {
+      const open = await pool.query(
+        "SELECT 1 FROM synq_ws_payables WHERE workspace_id=$1 AND id=$2 AND status='OPEN'",
+        [workspaceId, edit.payableId],
+      );
+      if (!open.rowCount) throw new WorkspaceError('PAYABLE_NOT_OPEN');
+    }
+    if (edit.kind === 'REMOVE_BILL') {
+      const active = await pool.query(
+        'SELECT 1 FROM synq_ws_bills WHERE workspace_id=$1 AND id=$2 AND active',
+        [workspaceId, edit.billId],
+      );
+      if (!active.rowCount) throw new WorkspaceError('BILL_NOT_ACTIVE');
+    }
     const revision = await this.workspaces.pool.query(
       'SELECT revision FROM synq_ws_finance_revision WHERE workspace_id=$1',
       [workspaceId],
@@ -250,6 +279,60 @@ export class WorkspaceFinance {
         'INSERT INTO synq_ws_budgets(workspace_id,data,change_hash) VALUES($1,$2,$3) ON CONFLICT(workspace_id) DO UPDATE SET data=EXCLUDED.data,change_hash=EXCLUDED.change_hash',
         [c.workspaceId, e, hash],
       );
+      return;
+    }
+    if (e.kind === 'PAYABLE') {
+      // The payable is owed at the vendor's verified address as of approval; a later
+      // address change makes the waterfall refuse it rather than pay the new address.
+      const v = (
+        await sql.query(
+          'SELECT address FROM synq_ws_vendors WHERE workspace_id=$1 AND id=$2',
+          [c.workspaceId, e.vendorId],
+        )
+      ).rows[0];
+      if (!v) throw new WorkspaceError('VENDOR_NOT_VERIFIED');
+      const inserted = await sql.query(
+        "INSERT INTO synq_ws_payables(workspace_id,id,data,pay_to,status,change_hash,created_at) VALUES($1,$2,$3,$4,'OPEN',$5,$6) ON CONFLICT DO NOTHING RETURNING id",
+        [
+          c.workspaceId,
+          e.payableId,
+          e,
+          String(v.address).toLowerCase(),
+          hash,
+          this.workspaces.now(),
+        ],
+      );
+      if (!inserted.rowCount) throw new WorkspaceError('PAYABLE_EXISTS');
+      return;
+    }
+    if (e.kind === 'CLOSE_PAYABLE') {
+      const closed = await sql.query(
+        "UPDATE synq_ws_payables SET status=$3,closed_by=$4 WHERE workspace_id=$1 AND id=$2 AND status='OPEN' RETURNING id",
+        [c.workspaceId, e.payableId, e.status, hash],
+      );
+      if (!closed.rowCount) throw new WorkspaceError('PAYABLE_NOT_OPEN');
+      return;
+    }
+    if (e.kind === 'OBLIGATION') {
+      await sql.query(
+        'INSERT INTO synq_ws_obligations(workspace_id,reference,data,change_hash) VALUES($1,$2,$3,$4) ON CONFLICT(workspace_id,reference) DO UPDATE SET data=EXCLUDED.data,change_hash=EXCLUDED.change_hash',
+        [c.workspaceId, e.reference, e, hash],
+      );
+      return;
+    }
+    if (e.kind === 'BILL') {
+      await sql.query(
+        'INSERT INTO synq_ws_bills(workspace_id,id,data,active,change_hash) VALUES($1,$2,$3,true,$4) ON CONFLICT(workspace_id,id) DO UPDATE SET data=EXCLUDED.data,active=true,change_hash=EXCLUDED.change_hash',
+        [c.workspaceId, e.billId, e, hash],
+      );
+      return;
+    }
+    if (e.kind === 'REMOVE_BILL') {
+      const removed = await sql.query(
+        'UPDATE synq_ws_bills SET active=false,change_hash=$3 WHERE workspace_id=$1 AND id=$2 AND active RETURNING id',
+        [c.workspaceId, e.billId, hash],
+      );
+      if (!removed.rowCount) throw new WorkspaceError('BILL_NOT_ACTIVE');
       return;
     }
     const prior = await sql.query(

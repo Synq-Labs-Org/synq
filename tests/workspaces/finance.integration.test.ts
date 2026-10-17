@@ -48,6 +48,7 @@ import { getAddress, keccak256, type Hex } from 'viem';
 import { connectChain } from '@synq/execution-worker/arc';
 import { WorkspacePayoutExecutor } from '@synq/execution-worker/workspace-payout';
 import { WorkspacePayouts } from '@synq/workspaces/payouts';
+import { WorkspaceBooks } from '@synq/workspaces/books';
 import {
   intentApprovalTypedData,
   mandateTypedData,
@@ -1487,7 +1488,10 @@ describe('G5/G6 workspace revenue policies — LOCAL_FIXTURE with Postgres', () 
   });
 });
 
-async function splitFixture(clear = true, booksAvailable = true) {
+async function splitFixture(
+  clear = true,
+  booksAvailable: boolean | 'REAL' = true,
+) {
   const f = await payoutFixture(true, '100000');
   const revenue = new WorkspaceRevenue(f.finance),
     usdc = token('arc-testnet', 'USDC');
@@ -1641,14 +1645,16 @@ async function splitFixture(clear = true, booksAvailable = true) {
     f.signer,
     f.kernelAuthority,
     clear ? f.screening : undefined,
-    booksAvailable
-      ? () => ({
-          payables: async () => [],
-          payableHistory: async () => [],
-          obligations: async () => [],
-          bills: async () => [],
-        })
-      : undefined,
+    booksAvailable === 'REAL'
+      ? (workspaceId) => new WorkspaceBooks(f.finance).reader(workspaceId)
+      : booksAvailable
+        ? () => ({
+            payables: async () => [],
+            payableHistory: async () => [],
+            obligations: async () => [],
+            bills: async () => [],
+          })
+        : undefined,
   );
   await worker.migrate();
   return {
@@ -1662,6 +1668,189 @@ async function splitFixture(clear = true, booksAvailable = true) {
   };
 }
 describe('G6 indexer-driven workspace waterfall — LOCAL_FIXTURE with durable Postgres', () => {
+  it('G6 pays a quorum-approved, milestone-accepted payable from real workspace books before any distribution', async () => {
+    const f = await splitFixture(true, 'REAL');
+    const today = new Date(f.store.now() * 1000).toISOString().slice(0, 10),
+      due = new Date((f.store.now() + 3 * 86400) * 1000)
+        .toISOString()
+        .slice(0, 10);
+    const payableId = randomUUID();
+    for (const edit of [
+      {
+        kind: 'OBLIGATION',
+        reference: 'PO-77',
+        vendorId: f.vendorId,
+        approvedAmount: '15000',
+        status: 'ACCEPTED',
+      },
+      {
+        kind: 'PAYABLE',
+        payableId,
+        vendorId: f.vendorId,
+        number: 'INV-1001',
+        amount: '15000',
+        issuedOn: today,
+        dueOn: due,
+        reference: 'PO-77',
+        documentText: 'Supplier invoice INV-1001 for accepted milestone PO-77',
+      },
+    ]) {
+      const c = await f.finance.propose(f.w.id, f.owner.principalId, edit);
+      await f.approve(c);
+      expect(
+        (await f.finance.change(f.w.id, f.owner.principalId, c.hash as Hex))
+          .state,
+      ).toBe('PENDING');
+      await f.approve(c, f.coowner);
+    }
+    const books = new WorkspaceBooks(f.finance);
+    expect(await books.reader(f.w.id).payables()).toMatchObject([
+      { vendorInvoiceId: payableId, amount: 15000n, payTo: f.payee.address },
+    ]);
+    await f.worker.pump();
+    expect((await f.worker.store.byReceipt(f.receiptId))?.state).toBe(
+      'COMPLETED',
+    );
+    // 50000 received: 15000 to the payable, 10000 floor kept, 25000 distributed.
+    expect(f.fake.paid.map((p) => p.amount).sort()).toEqual([15000n, 25000n]);
+    expect((await books.view(f.w.id, f.owner.principalId)).payables).toEqual([
+      expect.objectContaining({ id: payableId, status: 'PAID' }),
+    ]);
+    expect(await books.reader(f.w.id).payables()).toEqual([]);
+  });
+  it('G6 holds the whole receipt for an unaccepted milestone instead of distributing it', async () => {
+    const f = await splitFixture(true, 'REAL');
+    const today = new Date(f.store.now() * 1000).toISOString().slice(0, 10);
+    for (const edit of [
+      {
+        kind: 'OBLIGATION',
+        reference: 'PO-88',
+        vendorId: f.vendorId,
+        approvedAmount: '15000',
+        status: 'DELIVERED',
+      },
+      {
+        kind: 'PAYABLE',
+        payableId: randomUUID(),
+        vendorId: f.vendorId,
+        number: 'INV-2002',
+        amount: '15000',
+        issuedOn: today,
+        dueOn: today,
+        reference: 'PO-88',
+        documentText: 'Supplier invoice INV-2002 for milestone PO-88',
+      },
+    ]) {
+      const c = await f.finance.propose(f.w.id, f.owner.principalId, edit);
+      await f.approve(c);
+      await f.approve(c, f.coowner);
+    }
+    await f.worker.pump();
+    expect(f.fake.paid.map((p) => p.amount)).not.toContain(15000n);
+    const split = (await f.worker.store.byReceipt(f.receiptId))!;
+    const legs = await f.worker.store.legs(split.splitId);
+    expect(
+      legs.some(
+        (l) => l.purpose === 'CONTRACTOR_PAYABLE' && l.kind === 'TRANSFER',
+      ),
+    ).toBe(false);
+  });
+  it('G6 records bills and closes payables only through the quorum, and refuses unknown vendors and reused ids', async () => {
+    const f = await payoutFixture();
+    const payableId = randomUUID(),
+      billId = randomUUID();
+    await expect(
+      f.finance.propose(f.w.id, f.owner.principalId, {
+        kind: 'PAYABLE',
+        payableId,
+        vendorId: randomUUID(),
+        number: 'X-1',
+        amount: '100',
+        issuedOn: '2033-05-01',
+        dueOn: '2033-05-30',
+        reference: null,
+        documentText: 'Unknown vendor invoice',
+      }),
+    ).rejects.toMatchObject({ code: 'VENDOR_NOT_VERIFIED' });
+    await expect(
+      f.finance.propose(f.w.id, f.owner.principalId, {
+        kind: 'PAYABLE',
+        payableId,
+        vendorId: f.vendorId,
+        number: 'X-1',
+        amount: '100',
+        issuedOn: '2033-05-30',
+        dueOn: '2033-05-01',
+        reference: null,
+        documentText: 'Backwards dates',
+      }),
+    ).rejects.toThrow();
+    const apply = async (edit: Record<string, unknown>) => {
+      const c = await f.finance.propose(f.w.id, f.owner.principalId, edit);
+      await f.approve(c);
+      await f.approve(c, f.coowner);
+    };
+    await apply({
+      kind: 'PAYABLE',
+      payableId,
+      vendorId: f.vendorId,
+      number: 'X-1',
+      amount: '100',
+      issuedOn: '2033-05-01',
+      dueOn: '2033-05-30',
+      reference: null,
+      documentText: 'Supplier invoice X-1',
+    });
+    await expect(
+      f.finance.propose(f.w.id, f.owner.principalId, {
+        kind: 'PAYABLE',
+        payableId,
+        vendorId: f.vendorId,
+        number: 'X-2',
+        amount: '200',
+        issuedOn: '2033-05-01',
+        dueOn: '2033-05-30',
+        reference: null,
+        documentText: 'Reused id',
+      }),
+    ).rejects.toMatchObject({ code: 'PAYABLE_EXISTS' });
+    await apply({
+      kind: 'BILL',
+      billId,
+      label: 'Studio rent',
+      billKind: 'RENT',
+      amount: '3000',
+      nextDueOn: '2033-06-01',
+      cadenceDays: 30,
+    });
+    const books = new WorkspaceBooks(f.finance);
+    expect(await books.reader(f.w.id).bills()).toMatchObject([
+      { billId, kind: 'RENT', amount: 3000n, cadenceDays: 30 },
+    ]);
+    await apply({
+      kind: 'CLOSE_PAYABLE',
+      payableId,
+      status: 'VOID',
+      reason: 'Issued in error',
+    });
+    await apply({ kind: 'REMOVE_BILL', billId, reason: 'Lease ended' });
+    expect(await books.reader(f.w.id).payables()).toEqual([]);
+    expect(await books.reader(f.w.id).payableHistory()).toHaveLength(1);
+    expect(await books.reader(f.w.id).bills()).toEqual([]);
+    await expect(
+      f.finance.propose(f.w.id, f.owner.principalId, {
+        kind: 'CLOSE_PAYABLE',
+        payableId,
+        status: 'PAID_ELSEWHERE',
+        reason: 'again',
+      }),
+    ).rejects.toMatchObject({ code: 'PAYABLE_NOT_OPEN' });
+    await expect(
+      pool.query("UPDATE synq_ws_payables SET status='OPEN' WHERE id=$1", [
+        payableId,
+      ]),
+    ).rejects.toThrow(/terminal/);
+  });
   it('refuses to treat missing payable/bill sources as empty books before planning any distribution', async () => {
     const f = await splitFixture(true, false);
     await expect(f.worker.process(f.w.id, f.receiptId)).rejects.toMatchObject({

@@ -1,4 +1,5 @@
 import { WorkspaceSplitWorker } from './workspace-splits.js';
+import { WorkspaceBooks } from '@synq/workspaces/books';
 import { readFileSync, statSync } from 'node:fs';
 import {
   encodeAbiParameters,
@@ -511,6 +512,7 @@ export async function workspaceVaultRuntime(input: {
     },
     screening,
   );
+  const books = new WorkspaceBooks(finance);
   const splits = new WorkspaceSplitWorker(
     finance,
     chain,
@@ -522,6 +524,7 @@ export async function workspaceVaultRuntime(input: {
       riskRequiredAbove: 0n,
     },
     payouts.screening,
+    (workspaceId) => books.reader(workspaceId),
   );
   await splits.migrate();
   let running = false;
@@ -626,6 +629,7 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
     payouts: payouts.payouts,
     governance: governance.governance,
     screening: () => payouts.screening.status(),
+    books,
     readBalance: async (id: string) => {
       const a = await finance.authority(id);
       const amount = await chain.client.readContract({

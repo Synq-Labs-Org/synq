@@ -609,6 +609,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
         finance ? new WorkspaceRevenue(finance) : undefined,
         () => workspaceDeals,
         workspaceTeam,
+        vault?.books,
       );
     }
     const readModel = {

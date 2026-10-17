@@ -20,6 +20,7 @@ import type { WorkspacePayouts } from '@synq/workspaces/payouts';
 import type { WorkspaceGovernance } from '@synq/workspaces/governance';
 import type { WorkspaceRevenue } from '@synq/workspaces/revenue';
 import type { WorkspaceInvoices } from '@synq/workspaces/invoices';
+import type { WorkspaceBooks } from '@synq/workspaces/books';
 
 const COOKIE = '__Host-synq_workspace';
 export function workspaceCapabilities(
@@ -110,6 +111,7 @@ export function registerWorkspaceRoutes(
   revenue?: WorkspaceRevenue,
   deals?: () => WorkspaceDeals | undefined,
   team?: WorkspaceTeam,
+  books?: WorkspaceBooks,
 ) {
   const handle = async (reply: FastifyReply, run: () => Promise<unknown>) => {
     reply.header('cache-control', 'no-store');
@@ -202,11 +204,24 @@ export function registerWorkspaceRoutes(
             status: 'BLOCKED',
             reason: 'Workspace revenue service unavailable.',
           },
-      automaticSplits: {
-        status: 'BLOCKED',
-        reason:
-          'Durable receipt-driven runner is fixture-proven; workspace payable/bill sources and live screening are unavailable. Noninvoice receipts remain unapplied liabilities.',
-      },
+      automaticSplits:
+        revenue && books && payouts?.screening?.().status === 'AVAILABLE'
+          ? {
+              status: 'AVAILABLE',
+              reason:
+                'Finalized invoice receipts split under the active quorum-signed revenue policy, after holding quorum-approved payables, milestones and recurring bills. Recipients are OFAC SDN list screened (list-only). Noninvoice receipts remain unapplied liabilities.',
+            }
+          : {
+              status: 'BLOCKED',
+              reason: `Automatic splits need ${[
+                !revenue && 'the revenue service',
+                !books && 'the payables and bills books',
+                payouts?.screening?.().status !== 'AVAILABLE' &&
+                  'available recipient screening',
+              ]
+                .filter(Boolean)
+                .join(', ')}.`,
+            },
       dealDrafts: deals?.()
         ? {
             status: 'AVAILABLE',
@@ -339,6 +354,13 @@ export function registerWorkspaceRoutes(
         return finance.list(await id(req), session.principalId);
       }),
     );
+    if (books)
+      app.get('/v2/workspaces/:workspaceId/books', (req, reply) =>
+        handle(reply, async () => {
+          const session = await auth(req);
+          return books.view(await id(req), session.principalId);
+        }),
+      );
     app.post('/v2/workspaces/:workspaceId/finance/changes', (req, reply) =>
       handle(reply, async () => {
         const session = await auth(req, true);

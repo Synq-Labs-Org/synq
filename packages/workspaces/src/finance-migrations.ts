@@ -61,4 +61,13 @@ CREATE INDEX synq_ws_split_budget ON synq_ws_split_admissions(workspace_id,state
     up: `CREATE UNIQUE INDEX synq_ws_caps_action_unique ON synq_ws_safe_actions(workspace_id,(data->>'kind'),(data->>'perPaymentCap'),(data->>'windowCap'),(data->>'nonce'),(data->>'expiresAt')) WHERE data->>'kind' IN ('QUEUE_CAPS','SET_CAPS');`,
     down: `DROP INDEX synq_ws_caps_action_unique;`,
   },
+  {
+    version: 9,
+    up: `CREATE TABLE synq_ws_payables(workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),id uuid NOT NULL,data jsonb NOT NULL,pay_to text NOT NULL,status text NOT NULL CHECK(status IN ('OPEN','PAID_ELSEWHERE','VOID')),change_hash text NOT NULL,closed_by text,created_at bigint NOT NULL,PRIMARY KEY(workspace_id,id));
+CREATE FUNCTION synq_ws_payable_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.workspace_id<>OLD.workspace_id OR NEW.id<>OLD.id OR NEW.data<>OLD.data OR NEW.pay_to<>OLD.pay_to OR NEW.change_hash<>OLD.change_hash OR NEW.created_at<>OLD.created_at THEN RAISE EXCEPTION 'payable terms are immutable'; END IF; IF OLD.status<>'OPEN' AND NEW.status<>OLD.status THEN RAISE EXCEPTION 'closed payable is terminal'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER synq_ws_payable_immutable BEFORE UPDATE ON synq_ws_payables FOR EACH ROW EXECUTE FUNCTION synq_ws_payable_guard();
+CREATE TABLE synq_ws_obligations(workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),reference text NOT NULL,data jsonb NOT NULL,change_hash text NOT NULL,PRIMARY KEY(workspace_id,reference));
+CREATE TABLE synq_ws_bills(workspace_id uuid NOT NULL REFERENCES synq_workspaces(id),id uuid NOT NULL,data jsonb NOT NULL,active boolean NOT NULL,change_hash text NOT NULL,PRIMARY KEY(workspace_id,id));`,
+    down: `DROP TABLE synq_ws_bills; DROP TABLE synq_ws_obligations; DROP TABLE synq_ws_payables; DROP FUNCTION synq_ws_payable_guard();`,
+  },
 ] as const;
