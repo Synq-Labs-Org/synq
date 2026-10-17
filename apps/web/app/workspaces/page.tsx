@@ -16,6 +16,7 @@ import { VaultPanel } from './vault-panel';
 import { ChannelPanel } from './channel-panel';
 import { FinancePanel } from './finance-panel';
 import { BooksPanel } from './books-panel';
+import { GroupPanel } from './group-panel';
 import { PayoutPanel } from './payout-panel';
 import { GovernancePanel } from './governance-panel';
 import { InvoicePanel } from './invoice-panel';
@@ -412,6 +413,15 @@ export default function WorkspacesPage() {
                   owner={isOwner}
                 />
               )}
+              {view.workspace.status === 'ACTIVE' &&
+                view.workspace.vault &&
+                view.workspace.kind === 'GROUP' && (
+                  <GroupPanel
+                    key={`group-${view.workspace.id}`}
+                    workspaceId={view.workspace.id}
+                    owner={isOwner}
+                  />
+                )}
               {view.workspace.status === 'ACTIVE' && view.workspace.vault && (
                 <BooksPanel
                   key={`books-${view.workspace.id}`}

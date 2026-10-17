@@ -283,12 +283,7 @@ export function GovernancePanel({
         <section>
           <h3>Review exact governance call</h3>
           <p>
-            {selected.action.kind} ·{' '}
-            {selected.action.kind === 'PAY_VENDOR'
-              ? `direct vault transfer of ${formatUnits(BigInt(selected.action.amount), 6)} USDC to verified vendor ${selected.action.vendorAddress} for payout ${selected.action.payoutId}`
-              : 'vendorAddress' in selected.action
-                ? `recipient ${selected.action.vendorAddress}`
-                : `per-payment ${formatUnits(BigInt(selected.action.perPaymentCap), 6)} USDC · 24-hour ${formatUnits(BigInt(selected.action.windowCap), 6)} USDC`}
+            {selected.action.kind} · {describeAction(selected.action)}
           </p>
           <p>
             Safe {selected.action.safe} · policy {selected.action.policy} ·
@@ -340,4 +335,24 @@ export function GovernancePanel({
       )}
     </section>
   );
+}
+
+/** Exact terms of a vault action, shown before an owner signs it. */
+function describeAction(a: z.output<typeof SafeActionViewSchema>['action']) {
+  const usdc = (v: string) => `${formatUnits(BigInt(v), 6)} USDC`;
+  switch (a.kind) {
+    case 'PAY_VENDOR':
+      return `direct vault transfer of ${usdc(a.amount)} to verified vendor ${a.vendorAddress} for payout ${a.payoutId}`;
+    case 'REFUND_MEMBER':
+      return `group fund refund of ${usdc(a.amount)} to member wallet ${a.recipient}`;
+    case 'TREASURY_APPROVE':
+      return `allow Circle's swap adapter ${a.spender} to take exactly ${formatUnits(BigInt(a.amount), 6)} of token ${a.approveToken}`;
+    case 'TREASURY_EXECUTE':
+      return `swap up to ${formatUnits(BigInt(a.amountIn), 6)} of ${a.tokenIn} for at least ${formatUnits(BigInt(a.minOut), 6)} of ${a.tokenOut}, paid to this vault only, through ${a.target}`;
+    case 'QUEUE_CAPS':
+    case 'SET_CAPS':
+      return `per-payment ${usdc(a.perPaymentCap)} · 24-hour ${usdc(a.windowCap)}`;
+    default:
+      return `recipient ${a.vendorAddress}`;
+  }
 }
