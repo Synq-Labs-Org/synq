@@ -106,6 +106,20 @@ export function withoutAmounts(text: string) {
     .trim();
 }
 
+/**
+ * Milestone names are written by the model, so they reach the client only as
+ * plain words: no digits, amounts or addresses can ride in a label. Anything
+ * else becomes "Milestone N"; the validated amount is printed beside it.
+ */
+export function safeMilestoneLabel(label: string, index: number) {
+  const clean = label.replace(/\s+/g, ' ').trim();
+  return clean.length <= 40 &&
+    /^[A-Za-z][A-Za-z '&/-]*$/.test(clean) &&
+    withoutAmounts(clean) === clean
+    ? clean
+    : `Milestone ${index + 1}`;
+}
+
 export function describeOffer(
   o: {
     version: number;
@@ -118,7 +132,7 @@ export function describeOffer(
   const usdc = (u: string) => `${formatUnits(BigInt(u), 6)} USDC`;
   return [
     `Offer v${o.version}: ${usdc(o.total.units)} total, delivery in ${terms.deliveryDays} days${terms.rush ? ' (rush)' : ''}.`,
-    `Deposit ${usdc(terms.depositUnits)}. Milestones: ${o.milestones.map((m) => `${m.label} ${usdc(m.units)}`).join('; ')}.`,
+    `Deposit ${usdc(terms.depositUnits)}. Milestones: ${o.milestones.map((m, i) => `${safeMilestoneLabel(m.label, i)} ${usdc(m.units)}`).join('; ')}.`,
     `Valid until ${o.expiresAt.slice(0, 16).replace('T', ' ')} UTC. Reply "accept v${o.version}" to agree; you then sign the agreement and pay from your own wallet. Accepting in chat does not move any money.`,
   ].join('\n');
 }

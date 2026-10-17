@@ -1081,7 +1081,11 @@ export function registerAppRoutes(app: FastifyInstance, deps: AppRouteDeps) {
         // Only a native device session can register a push token.
         if (s.deviceSessionId === null)
           throw new WorkspaceError('NATIVE_SESSION_REQUIRED', 403);
-        return notifications.registerDevice(s.principalId, req.body);
+        return notifications.registerDevice(
+          s.principalId,
+          req.body,
+          s.deviceSessionId,
+        );
       }),
     );
     route('devices.revoke');
