@@ -1,5 +1,8 @@
 import CoreText
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // The single source of truth for how Synq looks. A theme supplies colour, type,
 // spacing, radius, line and motion tokens, the decorative glyphs and flavour copy,
@@ -82,13 +85,58 @@ public struct SynqFontSpec {
     /// Fixed size (no Dynamic Type) for dense layouts such as the keypad and tab bar.
     public var fixed = false
 
-    public var font: Font {
+    public var font: Font { font(for: .large) }
+
+    /// The font at a Dynamic Type size. Custom families scale with their text
+    /// style; the system fallback is scaled here too, because a system font
+    /// with an explicit point size would otherwise ignore Dynamic Type.
+    public func font(for dynamicType: DynamicTypeSize) -> Font {
         if let family, SynqFonts.isAvailable(family) {
             return fixed ? .custom(family, fixedSize: size) : .custom(family, size: size, relativeTo: relativeTo)
         }
-        return .system(size: size, weight: weight, design: fallback)
+        return .system(size: fixed ? size : SynqDynamicType.scaled(size, style: relativeTo, at: dynamicType),
+                       weight: weight, design: fallback)
     }
 }
+
+/// Scales a point size the way iOS scales a text style.
+public enum SynqDynamicType {
+    /// Body size (pt) at each Dynamic Type size, from Apple's typography tables.
+    static let body: [DynamicTypeSize: CGFloat] = [
+        .xSmall: 14, .small: 15, .medium: 16, .large: 17, .xLarge: 19, .xxLarge: 21, .xxxLarge: 23,
+        .accessibility1: 28, .accessibility2: 33, .accessibility3: 40, .accessibility4: 47, .accessibility5: 53,
+    ]
+
+    public static func scaled(_ size: CGFloat, style: Font.TextStyle, at dynamicType: DynamicTypeSize) -> CGFloat {
+        guard dynamicType != .large else { return size }
+        #if canImport(UIKit) && !os(watchOS)
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(dynamicType))
+        return UIFontMetrics(forTextStyle: UIFont.TextStyle(style)).scaledValue(for: size, compatibleWith: traits)
+        #else
+        return (size * (body[dynamicType] ?? 17) / 17).rounded()
+        #endif
+    }
+}
+
+#if canImport(UIKit) && !os(watchOS)
+extension UIFont.TextStyle {
+    init(_ s: Font.TextStyle) {
+        switch s {
+        case .largeTitle: self = .largeTitle
+        case .title: self = .title1
+        case .title2: self = .title2
+        case .title3: self = .title3
+        case .headline: self = .headline
+        case .subheadline: self = .subheadline
+        case .callout: self = .callout
+        case .footnote: self = .footnote
+        case .caption: self = .caption1
+        case .caption2: self = .caption2
+        default: self = .body
+        }
+    }
+}
+#endif
 
 public enum SynqTypeRole: CaseIterable {
     case wordmark, wordmarkSub, title, headline, sectionLabel, amountLarge, amountMedium, amountUnit

@@ -51,6 +51,7 @@ public struct SynqTabShell<ID: Hashable, Content: View>: View {
 /// The app's top bar: the active context (tap to switch), its kind, and icon actions.
 public struct SynqContextHeader: View {
     @Environment(\.synqTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicType
     let title: String
     let kind: String
     let network: String?
@@ -67,7 +68,39 @@ public struct SynqContextHeader: View {
     }
 
     public var body: some View {
-        HStack(alignment: .center, spacing: theme.space.s) {
+        if dynamicType.isAccessibilitySize {
+            // Large type: the context gets the full width; network and actions go below.
+            VStack(alignment: .leading, spacing: theme.space.s) {
+                switchButton
+                HStack(spacing: theme.space.s) {
+                    if let network { Text(network).synqType(.caption, .secondary).accessibilityLabel("Network: \(network)") }
+                    Spacer(minLength: 0)
+                    actionButtons
+                }
+            }
+            .padding(.horizontal, theme.space.gutter)
+            .padding(.top, theme.space.s)
+        } else {
+            HStack(alignment: .center, spacing: theme.space.s) {
+                switchButton
+                Spacer(minLength: theme.space.s)
+                if let network {
+                    Text(network).synqType(.caption, .secondary).accessibilityLabel("Network: \(network)")
+                }
+                actionButtons
+            }
+            .padding(.horizontal, theme.space.gutter)
+            .padding(.top, theme.space.s)
+        }
+    }
+
+    private var actionButtons: some View {
+        ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
+            SynqIconButton(icon: a.icon, label: a.label, action: a.action)
+        }
+    }
+
+    private var switchButton: some View {
             Button {
                 Haptics.tap()
                 onSwitch()
@@ -75,7 +108,8 @@ public struct SynqContextHeader: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(kind).synqType(.sectionLabel, .secondary)
                     HStack(spacing: theme.space.xs) {
-                        Text(title).synqType(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(title).synqType(.headline).lineLimit(dynamicType.isAccessibilitySize ? 3 : 1)
+                            .minimumScaleFactor(dynamicType.isAccessibilitySize ? 1 : 0.7)
                         SynqIconView(icon: .forward, size: 12, ink: .secondary).rotationEffect(.degrees(90))
                     }
                 }
@@ -85,16 +119,6 @@ public struct SynqContextHeader: View {
             .buttonStyle(SynqPressStyle())
             .accessibilityLabel("\(kind): \(title)")
             .accessibilityHint("Switch between Personal and your businesses")
-            Spacer(minLength: theme.space.s)
-            if let network {
-                Text(network).synqType(.caption, .secondary).accessibilityLabel("Network: \(network)")
-            }
-            ForEach(Array(actions.enumerated()), id: \.offset) { _, a in
-                SynqIconButton(icon: a.icon, label: a.label, action: a.action)
-            }
-        }
-        .padding(.horizontal, theme.space.gutter)
-        .padding(.top, theme.space.s)
     }
 }
 
@@ -103,6 +127,7 @@ public struct SynqContextHeader: View {
 /// A label and an exact value (amounts, ids, hashes).
 public struct SynqKeyValue: View {
     @Environment(\.synqTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicType
     let label: String
     let value: String
     let mono: Bool
@@ -116,10 +141,14 @@ public struct SynqKeyValue: View {
     }
 
     public var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: theme.space.m) {
+        let layout = dynamicType.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: theme.space.m))
+        layout {
             Text(label).synqType(.caption, .secondary)
-            Spacer(minLength: theme.space.s)
-            Text(value).synqType(mono ? .mono : .bodyStrong, ink).multilineTextAlignment(.trailing)
+            if !dynamicType.isAccessibilitySize { Spacer(minLength: theme.space.s) }
+            Text(value).synqType(mono ? .mono : .bodyStrong, ink)
+                .multilineTextAlignment(dynamicType.isAccessibilitySize ? .leading : .trailing)
                 .monospacedDigit().textSelection(.enabled)
         }
         .accessibilityElement(children: .combine)
@@ -129,6 +158,7 @@ public struct SynqKeyValue: View {
 /// The four availability buckets of one asset, never summed into one figure.
 public struct SynqBalanceBreakdown: View {
     @Environment(\.synqTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicType
     let symbol: String
     let network: String
     let settled: String
@@ -147,11 +177,7 @@ public struct SynqBalanceBreakdown: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: theme.space.s) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Settled · spendable").synqType(.caption, .secondary)
-                Spacer()
-                Text(network).synqType(.caption, .tertiary)
-            }
+            Text("Settled · spendable · \(network)").synqType(.caption, .secondary)
             SynqAmount(amount: settled, unit: symbol)
             SynqDivider()
             row("Reserved", reserved, "held for bills, deals or members")
@@ -164,12 +190,15 @@ public struct SynqBalanceBreakdown: View {
     }
 
     private func row(_ title: String, _ value: String, _ note: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: theme.space.s) {
+        let layout = dynamicType.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: theme.space.s))
+        return layout {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).synqType(.bodyStrong)
                 Text(note).synqType(.caption, .tertiary)
             }
-            Spacer(minLength: theme.space.s)
+            if !dynamicType.isAccessibilitySize { Spacer(minLength: theme.space.s) }
             Text("\(value) \(symbol)").synqType(.body, .secondary).monospacedDigit()
         }
     }

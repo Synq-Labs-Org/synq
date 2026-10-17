@@ -21,7 +21,7 @@ public struct HoloTheme: SynqTheme {
         line: hex(0x2C2945), lineStrong: hex(0x8B6BFF),
         approved: hex(0x4FE6A6), approvedFill: hex(0x0F2A22), approvedLine: hex(0x1F6B50),
         pending: hex(0xFFC15C), danger: hex(0xFF6B6B),
-        accent: hex(0x8B6BFF), onAccent: hex(0xFFFFFF))
+        accent: hex(0x6A47E8), onAccent: hex(0xFFFFFF))
 
     private static func r(_ size: CGFloat, _ w: Font.Weight = .regular, _ style: Font.TextStyle = .body,
                           tracking: CGFloat = 0, upper: Bool = false, fixed: Bool = false) -> SynqFontSpec {

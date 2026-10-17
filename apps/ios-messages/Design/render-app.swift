@@ -64,6 +64,41 @@ func previewApp(phase: SynqAppModel.Phase? = nil) -> SynqAppModel {
     return SynqAppModel(host: host, api: api, defaults: defaults)
 }
 
+/// The theme's semantic tokens as JSON (colours as sRGB hex), so the web hub can
+/// check its CSS custom properties against the same values.
+@MainActor
+func writeTokens(_ t: any SynqTheme, to url: URL) {
+    func hex(_ c: Color) -> String {
+        let n = NSColor(c).usingColorSpace(.sRGB)!
+        return String(format: "#%02X%02X%02X", Int(round(n.redComponent * 255)), Int(round(n.greenComponent * 255)),
+                      Int(round(n.blueComponent * 255)))
+    }
+    let c = t.colors
+    let colors: [String: String] = [
+        "background": hex(c.background), "panel": hex(c.panel), "inkPrimary": hex(c.inkPrimary),
+        "inkSecondary": hex(c.inkSecondary), "inkTertiary": hex(c.inkTertiary), "line": hex(c.line),
+        "lineStrong": hex(c.lineStrong), "approved": hex(c.approved), "approvedFill": hex(c.approvedFill),
+        "approvedLine": hex(c.approvedLine), "pending": hex(c.pending), "danger": hex(c.danger),
+        "accent": hex(c.accent), "onAccent": hex(c.onAccent),
+    ]
+    var type: [String: [String: Any]] = [:]
+    for role in SynqTypeRole.allCases {
+        let spec = t.type[role]
+        type["\(role)"] = ["family": spec.family ?? "system-\(spec.fallback)", "size": spec.size,
+                           "tracking": spec.tracking, "uppercase": spec.uppercase, "fixed": spec.fixed]
+    }
+    let doc: [String: Any] = [
+        "theme": t.id, "colorScheme": t.colorScheme == .dark ? "dark" : "light", "colors": colors, "type": type,
+        "space": ["xxs": t.space.xxs, "xs": t.space.xs, "s": t.space.s, "m": t.space.m, "l": t.space.l,
+                  "xl": t.space.xl, "xxl": t.space.xxl, "gutter": t.space.gutter],
+        "radius": ["panel": t.radius.panel, "control": t.radius.control, "badge": t.radius.badge, "key": t.radius.key,
+                   "bubble": t.radius.bubble],
+        "lines": ["hairline": t.lines.hairline, "control": t.lines.control, "ruleDash": t.lines.ruleDash],
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
+    try! data.write(to: url)
+}
+
 @MainActor
 func renderAppScreens(_ out: URL) {
     let dir = out.appendingPathComponent("4 App screens")
@@ -76,6 +111,8 @@ func renderAppScreens(_ out: URL) {
         png(AppPhone(tabs: tabs, selected: selected) { view }, width: phone.width, height: height, scale: scale,
             to: dir.appendingPathComponent(name))
     }
+
+    for t in SynqThemes.all { writeTokens(t, to: out.appendingPathComponent("tokens-\(t.id).json")) }
 
     let app = previewApp()
     let contexts = fixture("Contexts", Contexts.self)
@@ -196,4 +233,23 @@ func renderAppScreens(_ out: URL) {
     shot("app-notifications.png", NotificationsSheet(model: app, scope: personal))
     personal.preset("auth.sessions", route: "auth.sessions", RemoteState<SessionList>.notYet(routeId: "auth.sessions"))
     shot("app-account-full.png", height: 1500, scale: 2, AccountSheet(model: app, scope: personal))
+
+    // Accessibility: the smallest and largest iPhone widths, large and accessibility Dynamic Type.
+    let a11y = out.appendingPathComponent("5 App accessibility")
+    try? FileManager.default.createDirectory(at: a11y, withIntermediateDirectories: true)
+    for (w, label) in [(CGFloat(320), "320"), (375, "375"), (430, "430")] {
+        for (size, sizeName) in [(DynamicTypeSize.large, "default"), (.xxxLarge, "xxxl"), (.accessibility3, "ax3")] {
+            func a(_ name: String, height: CGFloat = 1900, _ view: some View) {
+                png(AppPhone(tabs: name.hasPrefix("business") ? businessTabs : personalTabs) { view }
+                        .environment(\.dynamicTypeSize, size),
+                    width: w, height: height, scale: 2, to: a11y.appendingPathComponent("\(name)-\(label)-\(sizeName).png"))
+            }
+            a("personal-home", VStack(spacing: 0) { header(personalCtx); PersonalHomeView(model: app, scope: personal) })
+            a("business-home", VStack(spacing: 0) { header(businessCtx); BusinessHomeView(model: app, scope: business) })
+            a("sign-in", height: 2400, SignInView(model: app, reason: .fresh))
+            a("approval", height: 2400, SheetScaffold(title: "Approval", onCancel: {}) {
+                SynqStack(spacing: \.m) { ApprovalTerms(request: signing) }
+            })
+        }
+    }
 }

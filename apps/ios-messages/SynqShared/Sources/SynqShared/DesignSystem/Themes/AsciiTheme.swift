@@ -17,7 +17,7 @@ public struct AsciiTheme: SynqTheme {
 
     public let colors = SynqColors(
         background: hex(0x000000), panel: hex(0x0B0B0B),
-        inkPrimary: hex(0xF2F2F2), inkSecondary: hex(0xA0A0A0), inkTertiary: hex(0x5A5A5A),
+        inkPrimary: hex(0xF2F2F2), inkSecondary: hex(0xA0A0A0), inkTertiary: hex(0x6E6E6E),
         line: hex(0x3A3A3A), lineStrong: hex(0xF2F2F2),
         approved: hex(0x9BE59B), approvedFill: hex(0x0E1F0E), approvedLine: hex(0x2E5E2E),
         pending: hex(0xA0A0A0), danger: hex(0xE58B8B),

@@ -8,13 +8,14 @@ import SwiftUI
 
 public struct SynqTypeModifier: ViewModifier {
     @Environment(\.synqTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicType
     public let role: SynqTypeRole
     public let ink: SynqInk
 
     public func body(content: Content) -> some View {
         let spec = theme.type[role]
         content
-            .font(spec.font)
+            .font(spec.font(for: dynamicType))
             .tracking(spec.tracking)
             .textCase(spec.uppercase ? .uppercase : nil)
             .foregroundStyle(theme.colors.ink(ink))
@@ -491,6 +492,7 @@ public struct SynqGroup<Content: View>: View {
 /// An icon, a title and a subtitle, with a trailing arrow, chevron, badge or text.
 public struct SynqRow: View {
     @Environment(\.synqTheme) private var theme
+    @Environment(\.dynamicTypeSize) private var dynamicType
     public var icon: SynqIcon? = nil
     public let title: String
     public var subtitle: String? = nil
@@ -518,9 +520,10 @@ public struct SynqRow: View {
         HStack(spacing: theme.space.m) {
             if let icon { SynqIconView(icon: icon, size: 22).frame(width: 30) }
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).synqType(.bodyStrong).lineLimit(2)
-                if let subtitle { Text(subtitle).synqType(.caption, .secondary).lineLimit(2) }
-                if let detail { Text(detail).synqType(.caption, .tertiary).lineLimit(1) }
+                // At accessibility sizes rows wrap instead of truncating.
+                Text(title).synqType(.bodyStrong).lineLimit(dynamicType.isAccessibilitySize ? nil : 2)
+                if let subtitle { Text(subtitle).synqType(.caption, .secondary).lineLimit(dynamicType.isAccessibilitySize ? nil : 2) }
+                if let detail { Text(detail).synqType(.caption, .tertiary).lineLimit(dynamicType.isAccessibilitySize ? nil : 1) }
             }
             Spacer(minLength: theme.space.s)
             trailingView
