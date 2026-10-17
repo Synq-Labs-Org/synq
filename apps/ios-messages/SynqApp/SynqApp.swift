@@ -27,8 +27,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // The app's own default look; the Messages extension keeps its own choice.
         SynqThemes.defaultId = "paper"
         let host = SynqConfig.fromBundle().webHost
-        model = SynqAppModel(host: host, links: SafariLinks(host: host), privacy: SystemNotifications(),
-                             deviceName: UIDevice.current.model)
+        // The person's own wallet through WalletConnect, when this build has a project id.
+        let wallet = WalletConnectSigner(projectId: Bundle.main.object(forInfoDictionaryKey: "ReownProjectId") as? String,
+                                         host: host)
+        model = SynqAppModel(host: host, links: SafariLinks(host: host), wallet: wallet, walletLogin: wallet,
+                             privacy: SystemNotifications(), deviceName: UIDevice.current.model)
         super.init()
     }
 

@@ -20,7 +20,7 @@ struct OnboardingView: View {
                     SynqGroup {
                         SynqRow(icon: .people, title: "Personal", subtitle: "Circles you belong to, contributions and refunds", trailing: .none)
                         SynqRow(icon: .bank, title: "Business", subtitle: "Enquiries, deals, agent activity and money", trailing: .none, divider: true)
-                        SynqRow(icon: .passkey, title: "You approve", subtitle: "Payments are signed by your own wallet, on the exact terms. Signing in, Face ID and notifications never approve anything.", trailing: .none, divider: true)
+                        SynqRow(icon: .passkey, title: "You approve", subtitle: "Your wallet signs each payment on its exact terms. Sign-in and Face ID never approve.", trailing: .none, divider: true)
                     }
                     SynqNote(text: "Synq runs on test networks. Amounts are test tokens, not real money.")
                     SynqButton(title: "Continue", trailingIcon: .forward, kind: .primary, action: onDone)
