@@ -10,6 +10,8 @@ import {
 import { WorkspaceBooks } from '@synq/workspaces/books';
 import type { WorkspaceDeals } from '@synq/workspaces/deals';
 import { WorkspaceDealEscrow } from './workspace-escrow.js';
+import { AgreementEscrow } from './agreement-escrow.js';
+import type { WorkspaceAgreements } from '@synq/workspaces/agreements';
 import { WorkspaceTreasury } from './workspace-treasury.js';
 import { WorkspaceContributions } from '@synq/workspaces/contributions';
 import { readFileSync, statSync } from 'node:fs';
@@ -725,6 +727,9 @@ WHERE (s.state='READY' OR (s.state='ACTIVE' AND o.state='SIGNED')) AND s.next_at
         },
         screening,
       ),
+    /** Escrow funding for agreements signed by outside clients; the client's wallet broadcasts. */
+    agreementEscrowFor: (agreements: WorkspaceAgreements) =>
+      AgreementEscrow.forChain(agreements, chain),
     /** USDC held by any address on Arc testnet, at the latest block. */
     readAddressBalance: async (address: Address) =>
       chain.client.readContract({

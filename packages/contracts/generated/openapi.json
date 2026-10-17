@@ -868,6 +868,445 @@
         }
       }
     },
+    "/v3/client/leads/{leadId}/wallet-link": {
+      "get": {
+        "operationId": "client.leadWalletTypedData",
+        "summary": "The statement the client wallet signs to link itself to a lead.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "wallet",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{40}$",
+              "description": "EVM address"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientWalletTypedData"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/client/leads/{leadId}/wallet": {
+      "post": {
+        "operationId": "client.leadWalletLink",
+        "summary": "Link the wallet that signs and pays, proven by its own signature.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientWallet"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientWalletLink"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/client/leads/{leadId}/agreement": {
+      "get": {
+        "operationId": "client.leadAgreement",
+        "summary": "The agreement for the accepted offer, with the typed data to sign.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadAgreement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/client/leads/{leadId}/agreement/signature": {
+      "post": {
+        "operationId": "client.leadAgreementSign",
+        "summary": "Submit the client wallet's signature over the exact agreement.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agreement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementSignatureSubmit"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/client/leads/{leadId}/agreement/escrow": {
+      "post": {
+        "operationId": "client.leadEscrowCall",
+        "summary": "The exact escrow approve and open calls the client wallet sends.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EscrowCall"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/client/leads/{leadId}/agreement/escrow/submit": {
+      "post": {
+        "operationId": "client.leadEscrowSubmit",
+        "summary": "Submit the open transaction hash; funded only once proven on chain.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "the lead's bound web identity (never a workspace member)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agreement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscrowFundingSubmit"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}/agreement": {
+      "get": {
+        "operationId": "workspace.leadAgreement",
+        "summary": "Agreement, signature and escrow status for a lead.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "OWNER, ADMIN",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadAgreement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/workspaces/{workspaceId}/leads/{leadId}/agreement/owner-signature": {
+      "post": {
+        "operationId": "workspace.leadAgreementSign",
+        "summary": "Submit the owner wallet's signature over the exact agreement.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "OWNER",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agreement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementSignatureSubmit"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v3/workspaces/{workspaceId}/offers/{offerId}/versions/{version}/validate": {
       "post": {
         "operationId": "workspace.offerValidate",
@@ -4640,6 +5079,479 @@
           "checks",
           "needsOwner",
           "offer"
+        ],
+        "additionalProperties": false
+      },
+      "AgreementStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING_SIGNATURES",
+          "SIGNED",
+          "FUNDING_PENDING",
+          "FUNDED",
+          "VOID",
+          "EXPIRED"
+        ]
+      },
+      "ClientWalletTypedData": {
+        "type": "object",
+        "properties": {
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "typedData": {
+            "$ref": "#/components/schemas/TypedData"
+          }
+        },
+        "required": [
+          "expiresAt",
+          "typedData"
+        ],
+        "additionalProperties": false
+      },
+      "ClientWalletLink": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{130}$"
+          }
+        },
+        "required": [
+          "wallet",
+          "expiresAt",
+          "signature"
+        ],
+        "additionalProperties": false
+      },
+      "ClientWallet": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "linkedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "wallet",
+          "linkedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AgreementMilestone": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "dueInDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "label",
+          "amount",
+          "dueInDays"
+        ],
+        "additionalProperties": false
+      },
+      "AgreementSignature": {
+        "type": "object",
+        "properties": {
+          "wallet": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "signedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "wallet",
+          "signedAt"
+        ],
+        "additionalProperties": false
+      },
+      "AgreementEscrow": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "PREPARED",
+              "PENDING_CONFIRMATION",
+              "FUNDED"
+            ]
+          },
+          "openTxHash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "escrowDealId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "proofLevel": {
+            "$ref": "#/components/schemas/ProofLevel"
+          }
+        },
+        "required": [
+          "state",
+          "openTxHash",
+          "escrowDealId",
+          "proofLevel"
+        ],
+        "additionalProperties": false
+      },
+      "Agreement": {
+        "type": "object",
+        "properties": {
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "leadId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "offerVersion": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "agreementHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgreementStatus"
+          },
+          "clientWallet": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "ownerWallet": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "payee": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "arbiter": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{40}$",
+                "description": "EVM address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgreementMilestone"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "signatures": {
+            "type": "object",
+            "properties": {
+              "client": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgreementSignature"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "owner": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgreementSignature"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "client",
+              "owner"
+            ],
+            "additionalProperties": false
+          },
+          "typedData": {
+            "$ref": "#/components/schemas/TypedData"
+          },
+          "escrow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgreementEscrow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "agreementId",
+          "workspaceId",
+          "leadId",
+          "offerId",
+          "offerVersion",
+          "termsHash",
+          "agreementHash",
+          "status",
+          "clientWallet",
+          "ownerWallet",
+          "payee",
+          "arbiter",
+          "total",
+          "milestones",
+          "expiresAt",
+          "signatures",
+          "typedData",
+          "escrow"
+        ],
+        "additionalProperties": false
+      },
+      "LeadAgreement": {
+        "type": "object",
+        "properties": {
+          "clientWallet": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{40}$",
+                "description": "EVM address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agreement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why no agreement exists yet, when none does"
+          }
+        },
+        "required": [
+          "clientWallet",
+          "agreement",
+          "blocked"
+        ],
+        "additionalProperties": false
+      },
+      "AgreementSignatureSubmit": {
+        "type": "object",
+        "properties": {
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "offerVersion": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{130}$"
+          }
+        },
+        "required": [
+          "agreementId",
+          "offerVersion",
+          "termsHash",
+          "signature"
+        ],
+        "additionalProperties": false
+      },
+      "EscrowTransaction": {
+        "type": "object",
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "APPROVE",
+              "OPEN"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "data": {
+            "type": "string",
+            "pattern": "^0x([0-9a-fA-F]{2})*$"
+          },
+          "value": {
+            "type": "string",
+            "const": "0"
+          }
+        },
+        "required": [
+          "step",
+          "label",
+          "to",
+          "data",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "EscrowCall": {
+        "type": "object",
+        "properties": {
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{40}$",
+            "description": "EVM address"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EscrowTransaction"
+            }
+          },
+          "refundAfter": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "agreementId",
+          "chainId",
+          "from",
+          "transactions",
+          "refundAfter"
+        ],
+        "additionalProperties": false
+      },
+      "EscrowFundingSubmit": {
+        "type": "object",
+        "properties": {
+          "openTxHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          }
+        },
+        "required": [
+          "openTxHash"
         ],
         "additionalProperties": false
       },

@@ -383,7 +383,10 @@ async function verifySubmittedCall(
 }
 
 /** Registry-token Transfer logs only (Arc's 0xffff…fffe native mirror is ignored). */
-function usdcTransfers(receipt: TransactionReceipt, tokenAddress: Address) {
+export function usdcTransfers(
+  receipt: TransactionReceipt,
+  tokenAddress: Address,
+) {
   return parseEventLogs({
     abi: erc20Abi,
     eventName: 'Transfer',
@@ -399,7 +402,7 @@ function usdcTransfers(receipt: TransactionReceipt, tokenAddress: Address) {
     }));
 }
 
-function mustTransfer(
+export function mustTransfer(
   label: string,
   got: ReturnType<typeof usdcTransfers>,
   want: { from: Address; to: Address; value: bigint },
