@@ -1230,6 +1230,101 @@ public struct LeadDetail: Codable, Sendable, Equatable {
     }
 }
 
+public struct ClientLeadSummary: Codable, Sendable, Equatable {
+    public var leadId: String
+    public var businessName: String
+    public var stage: LeadStage
+    /// UTC ISO-8601 timestamp
+    public var lastActivityAt: String
+
+    public init(leadId: String, businessName: String, stage: LeadStage, lastActivityAt: String) {
+        self.leadId = leadId
+        self.businessName = businessName
+        self.stage = stage
+        self.lastActivityAt = lastActivityAt
+    }
+}
+
+public struct ClientLeadList: Codable, Sendable, Equatable {
+    public var leads: [ClientLeadSummary]
+
+    public init(leads: [ClientLeadSummary]) {
+        self.leads = leads
+    }
+}
+
+public struct ClientOfferVersion: Codable, Sendable, Equatable {
+    public var offerId: String
+    public var version: Int
+    public var termsHash: String
+    public var status: Status
+    public var total: Money
+    public var lines: [OfferLine]
+    public var milestones: [OfferMilestone]
+    /// UTC ISO-8601 timestamp
+    public var expiresAt: String
+    /// UTC ISO-8601 timestamp
+    public var createdAt: String
+
+    public init(offerId: String, version: Int, termsHash: String, status: Status, total: Money, lines: [OfferLine], milestones: [OfferMilestone], expiresAt: String, createdAt: String) {
+        self.offerId = offerId
+        self.version = version
+        self.termsHash = termsHash
+        self.status = status
+        self.total = total
+        self.lines = lines
+        self.milestones = milestones
+        self.expiresAt = expiresAt
+        self.createdAt = createdAt
+    }
+
+    public enum Status: String, Codable, Sendable, CaseIterable, Equatable {
+        case drafted = "DRAFTED"
+        case validated = "VALIDATED"
+        case sent = "SENT"
+        case accepted = "ACCEPTED"
+        case rejected = "REJECTED"
+        case countered = "COUNTERED"
+        case expired = "EXPIRED"
+        case withdrawn = "WITHDRAWN"
+        /// A value this client version does not know yet.
+        case unknown = "__unknown__"
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Self(rawValue: raw) ?? .unknown
+        }
+    }
+}
+
+public struct ClientLeadDetail: Codable, Sendable, Equatable {
+    public var lead: ClientLeadSummary
+    public var consent: Consent
+    public var messages: [LeadMessage]
+    public var olderMessagesCursor: String?
+    public var offers: [ClientOfferVersion]
+
+    public init(lead: ClientLeadSummary, consent: Consent, messages: [LeadMessage], olderMessagesCursor: String? = nil, offers: [ClientOfferVersion]) {
+        self.lead = lead
+        self.consent = consent
+        self.messages = messages
+        self.olderMessagesCursor = olderMessagesCursor
+        self.offers = offers
+    }
+
+    public struct Consent: Codable, Sendable, Equatable {
+        public var granted: Bool
+        public var grantedAt: String?
+        public var scope: String
+
+        public init(granted: Bool, grantedAt: String? = nil, scope: String) {
+            self.granted = granted
+            self.grantedAt = grantedAt
+            self.scope = scope
+        }
+    }
+}
+
 public struct LeadMessageRequest: Codable, Sendable, Equatable {
     public var text: String
 
@@ -2012,6 +2107,9 @@ public struct Route: Sendable, Equatable {
         Route(id: "workspace.leadTakeover", method: "POST", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/takeover", mutation: true),
         Route(id: "workspace.leadInvite", method: "POST", path: "/v3/workspaces/{workspaceId}/lead-invites", mutation: true),
         Route(id: "leadInvite.redeem", method: "POST", path: "/v3/lead-invites/redeem", mutation: false),
+        Route(id: "leadSessions.list", method: "GET", path: "/v3/lead-sessions", mutation: false),
+        Route(id: "leadSessions.detail", method: "GET", path: "/v3/lead-sessions/{leadId}", mutation: false),
+        Route(id: "leadSessions.message", method: "POST", path: "/v3/lead-sessions/{leadId}/message", mutation: true),
         Route(id: "workspace.offerValidate", method: "POST", path: "/v3/workspaces/{workspaceId}/offers/{offerId}/versions/{version}/validate", mutation: true),
         Route(id: "workspace.leadOffer", method: "POST", path: "/v3/workspaces/{workspaceId}/leads/{leadId}/offers", mutation: true),
         Route(id: "workspace.commercialPolicies", method: "GET", path: "/v3/workspaces/{workspaceId}/commercial-policies", mutation: false),

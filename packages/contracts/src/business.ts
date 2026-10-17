@@ -270,6 +270,32 @@ export const LeadDetailSchema = z.strictObject({
   offers: z.array(OfferVersionSchema),
 });
 
+/*
+ * The outside client's own view of a lead (web channel). It carries no staff
+ * fields: no handling state, owner flags, unread counts or internal offer data.
+ */
+export const ClientLeadSummarySchema = z.strictObject({
+  leadId: IdSchema,
+  businessName: z.string().max(80),
+  stage: LeadStageSchema,
+  lastActivityAt: TimestampSchema,
+});
+export const ClientLeadListSchema = z.strictObject({
+  leads: z.array(ClientLeadSummarySchema),
+});
+export const ClientOfferVersionSchema = OfferVersionSchema.omit({
+  policyVersion: true,
+  previousTermsHash: true,
+  createdBy: true,
+});
+export const ClientLeadDetailSchema = z.strictObject({
+  lead: ClientLeadSummarySchema,
+  consent: LeadDetailSchema.shape.consent,
+  messages: z.array(LeadMessageSchema),
+  olderMessagesCursor: CursorSchema.nullable(),
+  offers: z.array(ClientOfferVersionSchema),
+});
+
 export const LeadMessageRequestSchema = z.strictObject({
   text: z.string().trim().min(1).max(4000),
 });

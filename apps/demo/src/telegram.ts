@@ -810,6 +810,7 @@ export async function startTelegramDemo(options: TelegramDemoOptions) {
           : undefined,
         leads,
         offers,
+        sales,
         events: agentEvents,
         amane: amaneRuntime?.amane,
         notifications,

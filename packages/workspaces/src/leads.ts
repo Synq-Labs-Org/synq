@@ -44,6 +44,14 @@ export const CONSENT_SCOPE =
 export const LEAD_TOKEN_PREFIX = 'lead_';
 const TOKEN = /^lead_[A-Za-z0-9_-]{43}$/;
 
+/** What the client view needs from an offer version (staff fields are dropped). */
+export type ClientOfferSource = {
+  status: string;
+  policyVersion: number;
+  previousTermsHash: string | null;
+  createdBy: string;
+};
+
 export type LeadChannel = 'telegram' | 'web';
 export type LeadHandling = 'AGENT' | 'HUMAN' | 'FROZEN';
 export type LeadRow = {
@@ -362,6 +370,106 @@ export class WorkspaceLeads {
     if (!message.duplicate)
       await this.publish('LEAD_MESSAGE', current.workspaceId, current.leadId);
     return { lead: (await this.row(current.leadId))!, message };
+  }
+
+  /**
+   * The web client's own leads: those bound to this principal's web identity,
+   * exactly as `redeem` stored it. A business member is never a client.
+   */
+  private async clientRows(principalId: string, leadId?: string) {
+    const r = await this.store.pool.query(
+      `SELECT l.*, w.display_name FROM synq_lead_identities i
+         JOIN synq_leads l ON l.id=i.lead_id AND l.workspace_id=i.workspace_id
+         JOIN synq_workspaces w ON w.id=l.workspace_id
+        WHERE i.channel='web' AND i.identity_digest=$1
+          AND ($2::uuid IS NULL OR l.id=$2)
+          AND NOT EXISTS (SELECT 1 FROM synq_ws_members m WHERE m.workspace_id=l.workspace_id AND m.principal_id=$3)
+        ORDER BY l.last_activity_at DESC, l.id DESC`,
+      [digest(`web:${principalId}`), leadId ?? null, principalId],
+    );
+    return r.rows.map((x) => ({
+      row: lead(x),
+      businessName: String(x.display_name),
+    }));
+  }
+
+  private clientSummary(row: LeadRow, businessName: string) {
+    return {
+      leadId: row.leadId,
+      businessName,
+      stage: row.stage,
+      lastActivityAt: iso(row.lastActivityAt),
+    };
+  }
+
+  /** The client's own conversations, newest activity first. */
+  async clientLeads(principalId: string) {
+    const rows = await this.clientRows(principalId);
+    return {
+      leads: rows.map((x) => this.clientSummary(x.row, x.businessName)),
+    };
+  }
+
+  /** One of the client's leads, or 404 for anyone else. Offers not yet sent are hidden. */
+  async clientDetail<O extends ClientOfferSource = ClientOfferSource>(
+    principalId: string,
+    leadId: string,
+    offers: (leadId: string) => Promise<O[]> = async () => [],
+  ) {
+    const found = (await this.clientRows(principalId, leadId))[0];
+    if (!found) throw new WorkspaceError('NOT_FOUND', 404);
+    const m = await this.store.pool.query(
+      'SELECT * FROM synq_lead_messages WHERE lead_id=$1 ORDER BY seq DESC LIMIT 51',
+      [leadId],
+    );
+    const visible = (await offers(leadId)).filter(
+      (o) => o.status !== 'DRAFTED' && o.status !== 'VALIDATED',
+    );
+    return {
+      lead: this.clientSummary(found.row, found.businessName),
+      consent: {
+        granted: found.row.consentAt !== null,
+        grantedAt:
+          found.row.consentAt === null ? null : iso(found.row.consentAt),
+        scope: CONSENT_SCOPE,
+      },
+      messages: m.rows.slice(0, 50).reverse().map(messageView),
+      olderMessagesCursor:
+        m.rows.length > 50
+          ? Buffer.from(String(m.rows[49].seq)).toString('base64url')
+          : null,
+      offers: visible.map(
+        ({ policyVersion: _p, previousTermsHash: _h, createdBy: _c, ...o }) =>
+          o,
+      ),
+    };
+  }
+
+  /**
+   * A message from the web client on one of their own leads. Repeats with the
+   * same idempotency key are stored once. The returned lead row lets the
+   * caller run the sales agent, which stays silent unless handling is AGENT.
+   */
+  async fromClient(
+    principalId: string,
+    leadId: string,
+    raw: unknown,
+    idempotencyKey: string,
+  ) {
+    const found = (await this.clientRows(principalId, leadId))[0];
+    if (!found) throw new WorkspaceError('NOT_FOUND', 404);
+    const text = Text.parse(z.strictObject({ text: Text }).parse(raw).text);
+    const message = await this.append(
+      leadId,
+      found.row.workspaceId,
+      'LEAD',
+      text,
+      `lead:web:${idempotencyKey}`,
+      null,
+    );
+    if (!message.duplicate)
+      await this.publish('LEAD_MESSAGE', found.row.workspaceId, leadId);
+    return { lead: (await this.row(leadId))!, message };
   }
 
   private async row(leadId: string) {

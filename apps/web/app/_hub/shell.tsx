@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { z } from 'zod';
+import { NotificationPageSchema } from '@synq/contracts';
 import { api, describeError } from '../../lib/api';
 import { HubProvider, useHub, type HubContextInfo } from './provider';
+import { useLiveRefresh, useV3 } from './hooks';
 import { SignInPanel } from './sign-in';
 import { Notice } from './ui';
 import './hub.css';
@@ -33,6 +35,31 @@ function navFor(context: HubContextInfo | null): NavItem[] {
 
 const hrefFor = (c: HubContextInfo) =>
   c.kind === 'PERSONAL' ? '/personal' : `/w/${encodeURIComponent(c.contextId)}`;
+
+function NotificationsNavItem({ active }: { active: boolean }) {
+  const state = useV3('/v3/notifications?limit=1', NotificationPageSchema);
+  useLiveRefresh(state.reload, { types: ['NOTIFICATION'], anyContext: true });
+  const unread = state.data?.unreadCount ?? 0;
+  return (
+    <li>
+      <Link
+        href="/notifications"
+        aria-current={active ? 'page' : undefined}
+        className={active ? 'on' : undefined}
+      >
+        Notifications
+        {unread > 0 && (
+          <>
+            {' '}
+            <span className="hub-status" aria-label={`${unread} unread`}>
+              {unread > 99 ? '99+' : unread}
+            </span>
+          </>
+        )}
+      </Link>
+    </li>
+  );
+}
 
 function Frame({ children }: { children: ReactNode }) {
   const hub = useHub();
@@ -150,6 +177,9 @@ function Frame({ children }: { children: ReactNode }) {
                 Approvals
               </Link>
             </li>
+            <NotificationsNavItem
+              active={pathname.startsWith('/notifications')}
+            />
           </ul>
         </nav>
         <div className="hub-foot">

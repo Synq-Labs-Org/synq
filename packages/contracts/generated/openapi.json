@@ -868,6 +868,139 @@
         }
       }
     },
+    "/v3/lead-sessions": {
+      "get": {
+        "operationId": "leadSessions.list",
+        "summary": "The client's own private conversations with businesses.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "external client who redeemed a web lead invite",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLeadList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/lead-sessions/{leadId}": {
+      "get": {
+        "operationId": "leadSessions.detail",
+        "summary": "Transcript and sent offers, without staff-only fields.",
+        "x-synq-auth": "session",
+        "x-synq-roles": "the client bound to that lead (anyone else gets 404)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLeadDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/lead-sessions/{leadId}/message": {
+      "post": {
+        "operationId": "leadSessions.message",
+        "summary": "Client message; the sales agent replies only while handling is AGENT. Moves no money.",
+        "x-synq-auth": "mutation",
+        "x-synq-roles": "the client bound to that lead (anyone else gets 404)",
+        "x-synq-status": "IMPLEMENTED",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadMessage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadMessageRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/v3/workspaces/{workspaceId}/offers/{offerId}/versions/{version}/validate": {
       "post": {
         "operationId": "workspace.offerValidate",
@@ -4104,6 +4237,193 @@
         "required": [
           "lead",
           "handlingVersion",
+          "consent",
+          "messages",
+          "olderMessagesCursor",
+          "offers"
+        ],
+        "additionalProperties": false
+      },
+      "ClientLeadSummary": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "businessName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "stage": {
+            "$ref": "#/components/schemas/LeadStage"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "leadId",
+          "businessName",
+          "stage",
+          "lastActivityAt"
+        ],
+        "additionalProperties": false
+      },
+      "ClientLeadList": {
+        "type": "object",
+        "properties": {
+          "leads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientLeadSummary"
+            }
+          }
+        },
+        "required": [
+          "leads"
+        ],
+        "additionalProperties": false
+      },
+      "ClientOfferVersion": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "termsHash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFTED",
+              "VALIDATED",
+              "SENT",
+              "ACCEPTED",
+              "REJECTED",
+              "COUNTERED",
+              "EXPIRED",
+              "WITHDRAWN"
+            ]
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferLine"
+            }
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfferMilestone"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "UTC ISO-8601 timestamp"
+          }
+        },
+        "required": [
+          "offerId",
+          "version",
+          "termsHash",
+          "status",
+          "total",
+          "lines",
+          "milestones",
+          "expiresAt",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ClientLeadDetail": {
+        "type": "object",
+        "properties": {
+          "lead": {
+            "$ref": "#/components/schemas/ClientLeadSummary"
+          },
+          "consent": {
+            "type": "object",
+            "properties": {
+              "granted": {
+                "type": "boolean"
+              },
+              "grantedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "description": "UTC ISO-8601 timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "granted",
+              "grantedAt",
+              "scope"
+            ],
+            "additionalProperties": false
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeadMessage"
+            }
+          },
+          "olderMessagesCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientOfferVersion"
+            }
+          }
+        },
+        "required": [
+          "lead",
           "consent",
           "messages",
           "olderMessagesCursor",
