@@ -2093,7 +2093,8 @@ describe('G7 workspace-selected deal parties — LOCAL_FIXTURE with Postgres', (
     expect(draft.parties.find((p) => p.role === 'ARBITER')?.wallet).toBe(
       f.owner.a.address,
     );
-    expect(draft.execution).toBe('BLOCKED_WORKSPACE_ESCROW_EXECUTOR');
+    expect(draft.execution).toBe('PARTY_WALLET_ESCROW');
+    expect(draft.escrow).toBeNull();
     const raceKey = randomUUID();
     const race = await Promise.allSettled([
       deals.draft(f.w.id, f.outsider.principalId, {
