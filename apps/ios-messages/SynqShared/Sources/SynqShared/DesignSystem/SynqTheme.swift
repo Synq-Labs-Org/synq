@@ -181,7 +181,7 @@ public enum SynqIcon: String, CaseIterable {
     case back, forward, close, more, settings, scan, copy, share, invite, plus, check, clock, warning, refresh
     case external, flight, flightLand, gift, send, grid, swap, pin, calendar, people, passkey
     case home, trips, group, ask, search, receipt, shield, vote, voted, money
-    case deal, team, split, bank, contractor, theme
+    case deal, team, split, bank, contractor, theme, bell
 }
 
 public struct SynqIcons {
@@ -201,7 +201,7 @@ public struct SynqIcons {
         .group: "person.2", .ask: "sparkle", .search: "magnifyingglass", .receipt: "doc.text", .shield: "lock.shield",
         .vote: "hand.thumbsup", .voted: "hand.thumbsup.fill", .money: "dollarsign.circle",
         .deal: "signature", .team: "person.3", .split: "chart.pie", .bank: "building.columns",
-        .contractor: "person.crop.circle.badge.checkmark", .theme: "paintpalette",
+        .contractor: "person.crop.circle.badge.checkmark", .theme: "paintpalette", .bell: "bell",
     ]
 }
 
@@ -245,7 +245,7 @@ public enum SynqTab: String, CaseIterable, Identifiable {
 // MARK: - Environment
 
 private struct ThemeKey: EnvironmentKey {
-    static let defaultValue: any SynqTheme = SynqThemes.all[0]
+    static var defaultValue: any SynqTheme { SynqThemes.named(SynqThemes.defaultId) }
 }
 
 extension EnvironmentValues {
@@ -259,11 +259,15 @@ public enum SynqThemes {
     /// Every theme the app ships; the first is the default.
     public static let all: [any SynqTheme] = [AsciiTheme(), PaperTheme(), HoloTheme()]
 
-    public static func named(_ id: String) -> any SynqTheme { all.first { $0.id == id } ?? all[0] }
+    /// The theme used until the person picks one. The Messages extension keeps the
+    /// first entry; the full-screen app sets its own before showing anything.
+    public static var defaultId: String = all[0].id
+
+    public static func named(_ id: String) -> any SynqTheme { all.first { $0.id == id } ?? all.first { $0.id == defaultId } ?? all[0] }
 
     /// The person's choice, kept on this device (Settings → Theme).
     public static let storageKey = "synq.theme"
-    public static var current: any SynqTheme { named(UserDefaults.standard.string(forKey: storageKey) ?? all[0].id) }
+    public static var current: any SynqTheme { named(UserDefaults.standard.string(forKey: storageKey) ?? defaultId) }
 }
 
 /// Applies the chosen theme to everything inside it and follows changes live.
@@ -272,7 +276,7 @@ public struct SynqThemeRoot<Content: View>: View {
         self.content = content
     }
 
-    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
+    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.defaultId
     @ViewBuilder public var content: () -> Content
 
     public var body: some View {

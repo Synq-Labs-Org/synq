@@ -72,3 +72,12 @@ public struct FundContext: Equatable, Hashable, Sendable {
         self.init(fundId: ref.fundId, key: ref.key, name: ref.name)
     }
 }
+
+public enum SynqText {
+    /// "agentLeases" or "agent_leases" → "Agent leases"; server keys are never shown raw.
+    public static func words(_ key: String) -> String {
+        let spaced = key.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "[_-]+", with: " ", options: .regularExpression).lowercased()
+        return spaced.prefix(1).uppercased() + spaced.dropFirst()
+    }
+}

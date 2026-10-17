@@ -70,3 +70,21 @@ applies at once to every screen, sheet and bubble. The first entry in
 - Japanese font subset: `python3 Design/subset-jp.py <NotoSansJP[wght].ttf>`
   (needs `pip install fonttools`) keeps kana plus every Japanese character used in
   the theme files.
+
+## Targets and building
+
+| Target | Product | What it holds |
+|---|---|---|
+| `SynqApp` | `SynqApp.app` (`com.apple.product-type.application`, `@main`) | `SynqApp/SynqApp.swift` only: app delegate (push), Safari hand-off, notification clearing. Embeds the extension. Bundle id = build setting `SYNQ_APP_BUNDLE_ID`. |
+| `SynqMessagesExtension` | `SynqMessagesExtension.appex` | `MessagesViewController.swift` only (conversation routing, MSMessage cards, Safari). |
+| `SynqMessages` | `SynqMessages.app` (iMessage-only container) | Kept unchanged for the existing App Store record path; see the coordination blocker `ios-app-store-record.md`. |
+| `SynqShared` (local package) | static library + resource bundle | Everything else, including the app's screens (`Features/App`, `Personal`, `Business`, `Agents`, `Approvals`, `Notifications`). |
+
+```
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project SynqMessages.xcodeproj -target SynqApp -sdk iphonesimulator build CODE_SIGNING_ALLOWED=NO
+sh check.sh                                  # package build + tests, previews type-check, parser checks, lints
+sh Design/render.sh <out-dir> paper          # also renders "4 App screens" from the contract fixtures (LOCAL_FIXTURE)
+```
+
+The app's default theme is Paper (`SynqThemes.defaultId`, set by the app host); the
+extension keeps ASCII as its default. Both still offer every theme.

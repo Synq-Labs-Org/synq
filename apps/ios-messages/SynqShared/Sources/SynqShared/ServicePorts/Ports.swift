@@ -128,3 +128,36 @@ public final class NoWalletSigner: WalletApprovalPort {
         throw WalletApprovalError.notConfigured(availability.reason)
     }
 }
+
+// MARK: - Wallet sign-in
+
+/// A signed `WorkspaceLogin` challenge (EIP-712, audience "native").
+public struct SignedLoginChallenge: Sendable, Equatable {
+    public let challengeId: String
+    public let signature: String
+    public init(challengeId: String, signature: String) {
+        self.challengeId = challengeId
+        self.signature = signature
+    }
+}
+
+/// Signs the sign-in challenge with the person's wallet. Kept apart from
+/// `WalletApprovalPort` on purpose: a sign-in signature proves who you are and
+/// can never be used as an approval.
+@MainActor
+public protocol WalletLoginPort: AnyObject {
+    var availability: Capability { get }
+    func signLoginChallenge(host: String) async throws -> SignedLoginChallenge
+}
+
+@MainActor
+public final class NoWalletLogin: WalletLoginPort {
+    public init() {}
+    public var availability: Capability {
+        Capability(status: .notConfigured,
+                   reason: "Wallet sign-in needs a wallet connection, which this build does not include yet.")
+    }
+    public func signLoginChallenge(host: String) async throws -> SignedLoginChallenge {
+        throw WalletApprovalError.notConfigured(availability.reason)
+    }
+}

@@ -5,7 +5,7 @@ import SwiftUI
 
 public struct ThemeSheet: View {
     public let onClose: () -> Void
-    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.all[0].id
+    @AppStorage(SynqThemes.storageKey) private var themeId = SynqThemes.defaultId
 
     public var body: some View {
         SynqThemeRoot {

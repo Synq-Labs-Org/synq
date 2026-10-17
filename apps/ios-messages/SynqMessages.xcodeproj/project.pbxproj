@@ -11,10 +11,21 @@
 		5E0000000000000000000035 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000027 /* Assets.xcassets */; };
 		5E0000000000000000000036 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5E0000000000000000000202 /* SynqShared in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000201 /* SynqShared */; };
+		5E0000000000000000000310 /* SynqApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000301 /* SynqApp.swift */; };
+		5E0000000000000000000311 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000304 /* Assets.xcassets */; };
+		5E0000000000000000000312 /* SynqShared in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0000000000000000000320 /* SynqShared */; };
+		5E0000000000000000000313 /* SynqMessagesExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5E0000000000000000000011 /* SynqMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		5E0000000000000000000051 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5E0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E0000000000000000000041;
+			remoteInfo = SynqMessagesExtension;
+		};
+		5E0000000000000000000341 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5E0000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -35,6 +46,17 @@
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000334 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5E0000000000000000000313 /* SynqMessagesExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +67,11 @@
 		5E0000000000000000000026 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5E0000000000000000000027 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5E0000000000000000000203 /* SynqShared */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = SynqShared; sourceTree = "<group>"; };
+		5E0000000000000000000300 /* SynqApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SynqApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E0000000000000000000301 /* SynqApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynqApp.swift; sourceTree = "<group>"; };
+		5E0000000000000000000302 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5E0000000000000000000303 /* SynqApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SynqApp.entitlements; sourceTree = "<group>"; };
+		5E0000000000000000000304 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -56,12 +83,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000332 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000312 /* SynqShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		5E0000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				5E0000000000000000000305 /* SynqApp */,
 				5E0000000000000000000004 /* SynqMessages */,
 				5E0000000000000000000005 /* SynqMessagesExtension */,
 				5E0000000000000000000203 /* SynqShared */,
@@ -72,6 +108,7 @@
 		5E0000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				5E0000000000000000000300 /* SynqApp.app */,
 				5E0000000000000000000010 /* SynqMessages.app */,
 				5E0000000000000000000011 /* SynqMessagesExtension.appex */,
 			);
@@ -94,6 +131,17 @@
 				5E0000000000000000000025 /* Info.plist */,
 			);
 			path = SynqMessagesExtension;
+			sourceTree = "<group>";
+		};
+		5E0000000000000000000305 /* SynqApp */ = {
+			isa = PBXGroup;
+			children = (
+				5E0000000000000000000301 /* SynqApp.swift */,
+				5E0000000000000000000304 /* Assets.xcassets */,
+				5E0000000000000000000302 /* Info.plist */,
+				5E0000000000000000000303 /* SynqApp.entitlements */,
+			);
+			path = SynqApp;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -136,6 +184,28 @@
 			productReference = 5E0000000000000000000011 /* SynqMessagesExtension.appex */;
 			productType = "com.apple.product-type.app-extension.messages";
 		};
+		5E0000000000000000000330 /* SynqApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5E0000000000000000000350 /* Build configuration list for PBXNativeTarget "SynqApp" */;
+			buildPhases = (
+				5E0000000000000000000331 /* Sources */,
+				5E0000000000000000000332 /* Frameworks */,
+				5E0000000000000000000333 /* Resources */,
+				5E0000000000000000000334 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5E0000000000000000000340 /* PBXTargetDependency */,
+			);
+			name = SynqApp;
+			packageProductDependencies = (
+				5E0000000000000000000320 /* SynqShared */,
+			);
+			productName = SynqApp;
+			productReference = 5E0000000000000000000300 /* SynqApp.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -146,6 +216,9 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					5E0000000000000000000330 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 					5E0000000000000000000040 = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -170,6 +243,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				5E0000000000000000000330 /* SynqApp */,
 				5E0000000000000000000040 /* SynqMessages */,
 				5E0000000000000000000041 /* SynqMessagesExtension */,
 			);
@@ -192,6 +266,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000333 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000311 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -203,6 +285,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E0000000000000000000331 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5E0000000000000000000310 /* SynqApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -210,6 +300,11 @@
 			isa = PBXTargetDependency;
 			target = 5E0000000000000000000041 /* SynqMessagesExtension */;
 			targetProxy = 5E0000000000000000000051 /* PBXContainerItemProxy */;
+		};
+		5E0000000000000000000340 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5E0000000000000000000041 /* SynqMessagesExtension */;
+			targetProxy = 5E0000000000000000000341 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -322,6 +417,52 @@
 			};
 			name = Release;
 		};
+		5E0000000000000000000351 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SynqApp/SynqApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = SynqApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
+				SYNQ_WEB_HOST = synqlabs.world;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5E0000000000000000000352 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SynqApp/SynqApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8NPF39H3FL;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = SynqApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(SYNQ_APP_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYNQ_APP_BUNDLE_ID = world.synqlabs.messages;
+				SYNQ_WEB_HOST = synqlabs.world;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -352,6 +493,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		5E0000000000000000000350 /* Build configuration list for PBXNativeTarget "SynqApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E0000000000000000000351 /* Debug */,
+				5E0000000000000000000352 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -363,6 +513,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		5E0000000000000000000201 /* SynqShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */;
+			productName = SynqShared;
+		};
+		5E0000000000000000000320 /* SynqShared */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5E0000000000000000000200 /* XCLocalSwiftPackageReference "SynqShared" */;
 			productName = SynqShared;

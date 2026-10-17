@@ -14,6 +14,6 @@ work="${TMPDIR:-/tmp}/synq-render.$$"
 sh Design/contracts-module.sh "$work"
 xcrun swiftc -O -parse-as-library -target arm64-apple-macos14 -I "$work" -L "$work" -lSynqContracts \
   $(find SynqShared/Sources/SynqShared -name '*.swift') \
-  Design/Samples.swift Design/render.swift -o "$work/render"
+  Design/Samples.swift Design/render.swift Design/render-app.swift -o "$work/render"
 "$work/render" "$out" "$icons" "$theme"
 rm -rf "$work"

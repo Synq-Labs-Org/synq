@@ -534,6 +534,7 @@ struct Render {
             }, width: 1100, height: 330, scale: 2, to: card("cards-invoice.png"))
             shot("screen-invoice-card.png", InvoiceLinkView(link: link, status: nil, error: nil, onCheckout: {}, onRefresh: {}))
         }
+        renderAppScreens(out)
         print("wrote \(out.path) with theme \(theme.id)")
     }
 }

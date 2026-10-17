@@ -167,6 +167,16 @@ public struct WorkspaceCapabilities: Decodable {
 public struct WorkspaceClient {
     public let host: String
     public var session: URLSession = .shared
+    /// Bearer source for the full-screen app (its device session). Without one the
+    /// client uses the extension's Keychain session, as before.
+    public var token: (@Sendable () async throws -> String)? = nil
+
+    public init(host: String, session: URLSession = .shared, token: (@Sendable () async throws -> String)? = nil) {
+        self.host = host
+        self.session = session
+        self.token = token
+    }
+
     private func call<T: Decodable>(_ path: String, body: [String: String]? = nil, authenticated: Bool = true, as type: T.Type) async throws -> T {
         var c = URLComponents(); c.scheme = "https"; c.host = host; c.path = "/api/v2\(path)"
         guard let url = c.url else { throw FundAPIError(error: "INVALID_HOST", message: "Synq's host is not configured.") }
@@ -177,15 +187,22 @@ public struct WorkspaceClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         if authenticated {
-            guard let stored = WorkspaceKeychain.load(host: host) else {
-                throw FundAPIError(error: "SESSION_EXPIRED", message: "Sign in again with a new private code from the Synq page.")
+            if let token {
+                request.setValue("Bearer \(try await token())", forHTTPHeaderField: "authorization")
+            } else {
+                guard let stored = WorkspaceKeychain.load(host: host) else {
+                    throw FundAPIError(error: "SESSION_EXPIRED", message: "Sign in again with a new private code from the Synq page.")
+                }
+                request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "authorization")
             }
-            request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "authorization")
         }
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            if status == 401 && authenticated { WorkspaceKeychain.clear(host: host) }
+            if status == 401 && authenticated && token == nil { WorkspaceKeychain.clear(host: host) }
+            if status == 401 && authenticated && token != nil {
+                throw FundAPIError(error: "SESSION_EXPIRED", message: "Your session ended. Sign in again.")
+            }
             if let error = try? JSONDecoder().decode(FundAPIError.self, from: data) { throw error }
             throw FundAPIError(error: "WORKSPACE_UNAVAILABLE", message: "Workspace sign-in is not available on this server yet.")
         }

@@ -21,7 +21,7 @@ trap 'rm -rf "$work"' EXIT
 (cd SynqShared && swift build --scratch-path "$work/spm" -q && swift test --scratch-path "$work/spm" -q)
 # Preview sources compile in one module with the shared code.
 sh Design/contracts-module.sh "$work/contracts"
-xcrun swiftc -typecheck -parse-as-library -target arm64-apple-macos14 -I "$work/contracts" $shared Design/Samples.swift Design/render.swift
+xcrun swiftc -typecheck -parse-as-library -target arm64-apple-macos14 -I "$work/contracts" $shared Design/Samples.swift Design/render.swift Design/render-app.swift
 
 m=SynqShared/Sources/SynqShared/DomainModels
 swiftc -O $m/SynqCard.swift $m/CardLink.swift $m/Fund.swift $m/QuickParse.swift $m/Business.swift \
