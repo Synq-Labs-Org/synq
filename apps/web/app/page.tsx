@@ -1,48 +1,37 @@
-'use client';
+import type { Metadata } from 'next';
+import { LandingHeader } from './_landing/header';
+import { LandingThemeScope } from './_landing/theme';
+import {
+  Closing,
+  Flows,
+  Hero,
+  Product,
+  Security,
+  Surfaces,
+} from './_landing/sections';
+import './_landing/landing.css';
 
-import { useEffect, useState } from 'react';
-import type { MeraCredential } from '@synq/identity/mera-browser';
-import { clearCredential, loadCredential } from '../lib/session';
+export const metadata: Metadata = {
+  title: 'Synq: get paid, spend safely, let agents work inside limits',
+  description:
+    'A testnet beta finance workspace on Arc. Owner wallets approve every money move; agents pay only inside limits a contract enforces.',
+};
 
-export default function Home() {
-  const [record, setRecord] = useState<MeraCredential | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setRecord(loadCredential());
-    setReady(true);
-  }, []);
-  if (!ready) return null;
+export default function LandingPage() {
   return (
-    <>
-      <h1>Your Synq passkey</h1>
-      {record ? (
-        <>
-          <p className="lead">
-            This browser holds passkey metadata only. Your account is re-derived
-            from the passkey each time you approve; there is no recovery phrase
-            to write down.
-          </p>
-          <dl className="preview">
-            <dt>Principal</dt>
-            <dd data-testid="principal-id">{record.principalId}</dd>
-            <dt>Account</dt>
-            <dd data-testid="principal-signer">{record.signer}</dd>
-          </dl>
-          <button
-            onClick={() => {
-              clearCredential();
-              setRecord(null);
-            }}
-          >
-            Forget on this device
-          </button>
-        </>
-      ) : (
-        <p className="lead">
-          <a href="/enroll">Create a passkey account</a> or{' '}
-          <a href="/recover">recover one</a>.
-        </p>
-      )}
-    </>
+    <LandingThemeScope>
+      <a className="lp-skip" href="#main">
+        Skip to content
+      </a>
+      <LandingHeader />
+      <div id="main" className="lp-main">
+        <Hero />
+        <Product />
+        <Flows />
+        <Security />
+        <Surfaces />
+        <Closing />
+      </div>
+    </LandingThemeScope>
   );
 }

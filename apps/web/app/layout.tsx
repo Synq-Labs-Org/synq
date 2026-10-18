@@ -11,7 +11,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <header className="bar">
-          <a href="/" className="brand">
+          <a href="/passkey" className="brand">
             Synq
           </a>
           <nav>
