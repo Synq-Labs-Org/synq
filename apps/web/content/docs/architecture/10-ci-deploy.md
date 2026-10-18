@@ -16,14 +16,13 @@ The `verify` workflow runs on every push (except to `deploy`) and every pull req
 | `sast`                                             | CodeQL for JavaScript and TypeScript with the `security-extended` queries; any error-level finding fails the job. Results stay inside the job                                                                                                                                                                                                                                               |
 | `contracts`                                        | `forge fmt --check`, `forge build`, `forge test` with Foundry pinned                                                                                                                                                                                                                                                                                                                        |
 | `integration` (needs `typescript` and `contracts`) | Preflight, forge build, a pinned Temporal CLI with a verified checksum, `corepack pnpm infra:up` (Postgres 17 and Redis from `infra/compose.yaml`), then `corepack pnpm test:integration` against Anvil, Postgres and Redis                                                                                                                                                                 |
-| `images` (main only)                               | Builds the **bot** and **web** images natively on arm64, matching the Graviton host, and pushes them to GitHub Container Registry tagged with the commit SHA. Registry layer caching is used. Images are public like the source; no runtime config or keys enter an image                                                                                                                   |
 | `promote` (main only, needs all jobs above)        | Fast-forwards the `deploy` branch to the green commit                                                                                                                                                                                                                                                                                                                                       |
 
 Locally the same gates are `corepack pnpm verify` (preflight, typecheck, lint, secrets, format check, build, unit tests, contract tests, integration tests).
 
 ## Deploy model
 
-Continuous delivery is pull-based. **Nothing is built on the host.**
+Continuous delivery is pull-based: the host builds the commit CI has already verified. The host is too small to run the app and build it at the same time, so **the site is down for the length of a build** (roughly 10 to 15 minutes).
 
 ```text
  push to main
@@ -32,19 +31,18 @@ Continuous delivery is pull-based. **Nothing is built on the host.**
  GitHub Actions: typescript, sast, contracts, integration  (all green)
      |
      v
- images job: build arm64 bot + web  --> container registry :<commit sha>
-     |
-     v
  promote job: fast-forward `deploy` branch
      |
      v   host polls `deploy` every 2 minutes (systemd timer)
  host-deploy.sh:
    1. fetch `deploy` with a read-only deploy key; stop if it has not moved
    2. refresh runtime config and key files from the cloud secret store
-   3. pull the images for that exact commit (a missing image leaves the running stack untouched)
-   4. docker compose up -d --wait   (health-gated restart)
-   5. keep this deploy's images and the previous one's for rollback; prune the rest
-   6. record the deployed commit
+   3. stop the bot and web (Caddy and Postgres keep running)
+   4. build the bot image, then the web image, one at a time
+      (a failed build restarts the previous images and stops)
+   5. docker compose up -d --wait   (health-gated restart)
+   6. prune old images and cap the build cache
+   7. record the deployed commit
 ```
 
 ### The host

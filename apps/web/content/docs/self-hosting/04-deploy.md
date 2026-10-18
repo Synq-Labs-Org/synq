@@ -21,13 +21,13 @@ All images start from a digest-pinned Node 22 base, run as a non-root user, keep
 
 ## The single-host stack
 
-`infra/compose.aws.yaml` is the stack used for the hosted site: Caddy (automatic TLS), the web app, the bot and Postgres 17. It expects the bot and web images to be built already (the project's CI builds them for arm64 and publishes them tagged by commit). The host:
+`infra/compose.aws.yaml` is the stack used for the hosted site: Caddy (automatic TLS), the web app, the bot and Postgres 17. It builds the bot and web images from the host's own checkout. The host:
 
 1. Holds runtime configuration in a dotenv file and key material as individual files in a secrets directory mounted read-only into the bot at `/run/secrets/synq` (the testnet operator key and, once provisioned, the workspace operator and grant keys).
-2. Sets `SYNQ_IMAGE_TAG`, `SYNQ_DOMAIN`, `SYNQ_ACME_EMAIL` and `POSTGRES_PASSWORD`.
-3. Pulls images for the commit and runs `docker compose up -d --wait`.
+2. Sets `SYNQ_DOMAIN`, `SYNQ_ACME_EMAIL` and `POSTGRES_PASSWORD`.
+3. Stops the bot and web, builds both images one at a time, and runs `docker compose up -d --wait`. On a 2 GB host the build needs the app's memory, so the site is down while it builds.
 
-The complete CI-to-host pipeline, including the polling timer, is in [CI and deploy](/docs/architecture/ci-deploy). To run it yourself you need your own domain pointing at the host, your own image registry (edit the image names in the compose file) and your own secret store; the scripts under `scripts/deploy` are written for one specific AWS account and shouldn't be reused as-is.
+The complete CI-to-host pipeline, including the polling timer, is in [CI and deploy](/docs/architecture/ci-deploy). To run it yourself you need your own domain pointing at the host, your own secret store; the scripts under `scripts/deploy` are written for one specific AWS account and shouldn't be reused as-is.
 
 ## The self-contained stack
 

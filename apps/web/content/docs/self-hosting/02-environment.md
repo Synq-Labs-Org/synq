@@ -226,7 +226,6 @@ Used by `infra/compose.aws.yaml` and `infra/compose.prod.yaml` (the compose file
 | ------------------------------------------------ | -------------------------------------------------------------------- | -------------------- | -------------- |
 | `POSTGRES_PASSWORD`                              | Database password for the stack                                      | Required             | none           |
 | `SYNQ_DOMAIN`, `SYNQ_ACME_EMAIL`                 | Public domain and the ACME contact for Caddy                         | Required (aws stack) | none           |
-| `SYNQ_IMAGE_TAG`                                 | Commit tag of the images to run                                      | Required (aws stack) | none           |
 | `SYNQ_SECRETS_DIR`                               | Host directory mounted read-only at `/run/secrets/synq` (prod stack) | Optional             | `./secrets`    |
 | `SYNQ_API_PUBLISH_PORT`, `SYNQ_WEB_PUBLISH_PORT` | Loopback ports the prod stack publishes                              | Optional             | `3200`, `3100` |
 
