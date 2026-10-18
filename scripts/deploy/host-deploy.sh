@@ -2,7 +2,7 @@
 # Runs ON the EC2 host (root), from the synq-deploy systemd timer or over SSM.
 # Pulls the `deploy` branch (main once CI is green) with the read-only deploy
 # key, refreshes config from SSM Parameter Store, and rebuilds + restarts the
-# stack only when the branch moved (or --force).
+# stack only when the branch moved (or --force). The site is down during a build.
 set -euo pipefail
 exec 9>/run/synq-deploy.lock
 flock -n 9 || { echo "another deploy is running"; exit 0; }
@@ -54,9 +54,14 @@ for k in workspace-operator workspace-grant; do
 done
 
 compose() { docker compose --env-file "$BASE/.env" -f "$REPO/infra/compose.aws.yaml" "$@"; }
-# One image at a time keeps peak memory inside a small host.
-compose build bot
-compose build web
+# A 2 GB host cannot run the app and build it at once (it swaps until it stops
+# answering), so the bot and web stop for the build and the site is down until
+# the new images start. One image at a time keeps peak memory inside the host.
+# A failed build leaves the previous images tagged, so the old stack comes back.
+restore() { echo "build failed; restarting the previous images"; compose up -d bot web || true; exit 1; }
+compose stop bot web
+compose build bot || restore
+compose build web || restore
 compose up -d --remove-orphans --wait --wait-timeout 600 || { compose ps; exit 1; }
 docker image prune -f >/dev/null
 docker builder prune -f --keep-storage 3GB >/dev/null || true
